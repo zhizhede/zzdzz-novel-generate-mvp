@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: novelgen-server
+  datasource:
+    url: ${NOVELGEN_DB_URL:jdbc:postgresql://localhost:5432/novel_gen}
+    username: ${NOVELGEN_DB_USER:postgres}
+    password: ${NOVELGEN_DB_PASS:}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+novelgen:
+  llm:
+    base-url: ${NOVELGEN_LLM_BASE_URL:https://api.minimaxi.com/v1}
+    api-key: ${NOVELGEN_LLM_API_KEY:}
+    model: ${NOVELGEN_LLM_MODEL:MiniMax-M3}
+    connect-timeout: 10s
+    read-timeout: 180s
+  style-dir: ${NOVELGEN_STYLE_DIR:docs/style}
