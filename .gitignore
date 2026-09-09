@@ -14,3 +14,13 @@ docs/style/
 # 系统文件
 Thumbs.db
 .DS_Store
+
+# 应用本地配置（含密钥）与构建产物
+src/main/resources/application-local.yaml
+target/
+web/dist/
+web/node_modules/
+*.log
+
+# IDE
+.idea/
