@@ -148,9 +148,12 @@ public class ImportRunner implements ApplicationRunner {
         if (chapterDAO.exists(novelId, no)) return;
         try {
             String content = Files.readString(file);
-            String title = Files.readAllLines(file).stream()
-                    .filter(l -> l.startsWith("## ")).findFirst()
-                    .map(l -> l.substring(3).strip()).orElse("第" + no + "章");
+            String title = "第" + no + "章";
+            for (String l : Files.readAllLines(file)) {
+                String s = l.strip();
+                if (s.startsWith("## ") && s.length() > 3) { title = s.substring(3).strip(); break; }
+                if (s.matches("第\\d章\\s*\\S+.*")) { title = s.replaceFirst("第\\d章\\s*", ""); break; }
+            }
             chapterDAO.insertPlan(novelId, no, null, null, title, null, null, "[]", "[]", 0, 0);
             ChapterDO ch = chapterDAO.find(novelId, no).orElseThrow();
             chapterDAO.saveFullText(ch.id(), content);
