@@ -39,7 +39,7 @@ ALTER TABLE chapters
     ADD COLUMN IF NOT EXISTS volume_no        INT,
     ADD COLUMN IF NOT EXISTS arc              VARCHAR(64),
     ADD COLUMN IF NOT EXISTS goal             TEXT,
-    ADD COLUMN IF NOT EXISTS hook             VARCHAR(16),
+    ADD COLUMN IF NOT EXISTS hook             VARCHAR(256),
     ADD COLUMN IF NOT EXISTS rule_refs        JSONB,
     ADD COLUMN IF NOT EXISTS foreshadow_refs  JSONB;
 CREATE INDEX IF NOT EXISTS idx_chapters_novel_no ON chapters(novel_id, volume_no, chapter_no);
