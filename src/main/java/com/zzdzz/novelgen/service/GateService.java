@@ -84,14 +84,18 @@ public class GateService {
         double digit = ((Number) metrics.get("digit_per1k")).doubleValue();
         double endPunct = ((Number) metrics.get("dialogue_end_punct_ratio")).doubleValue();
         double dlg = ((Number) metrics.get("dialogue_density_per1k")).doubleValue();
-        double endPunctMax = absMaxOf(base, "dialogue_end_punct_ratio", 0.35);
-        double digitMax = absMaxOf(base, "digit_per1k", 12.0);
-        checks.add(check("dunhao_per1k", dunhao, 0, 1.0, dunhao <= 1.0));
-        checks.add(check("exclam_per1k", exclam, 0, 2.0, exclam <= 2.0));
-        checks.add(check("digit_per1k", digit, 0, digitMax, digit <= digitMax));
-        checks.add(check("dialogue_end_punct_ratio", endPunct, 0, endPunctMax, endPunct <= endPunctMax));
+        // 场景级阈值全部读指纹基线（abs_max 优先，否则 基线*(1+容差)），多风格包可移植
+        double dunhaoMax = upperBound(base, "dunhao_per1k", 1.0);
+        double exclamMax = upperBound(base, "exclam_per1k", 2.0);
+        double digitMax = upperBound(base, "digit_per1k", 12.0);
+        double endPunctMax = upperBound(base, "dialogue_end_punct_ratio", 0.35);
+        double dlgMax = upperBound(base, "dialogue_density_per1k", 30.2);
+        checks.add(check("dunhao_per1k", dunhao, null, dunhaoMax, dunhao <= dunhaoMax));
+        checks.add(check("exclam_per1k", exclam, null, exclamMax, exclam <= exclamMax));
+        checks.add(check("digit_per1k", digit, null, digitMax, digit <= digitMax));
+        checks.add(check("dialogue_end_punct_ratio", endPunct, null, endPunctMax, endPunct <= endPunctMax));
         // 对话密度：场景级只防灌水（上界）；低界留章级——叙事型场景天然低对话，几百字样本下界误杀
-        checks.add(check("dialogue_density_per1k", dlg, null, 30.2, dlg <= 30.2));
+        checks.add(check("dialogue_density_per1k", dlg, null, dlgMax, dlg <= dlgMax));
 
         boolean passed = checks.stream().allMatch(c -> (Boolean) c.get("ok"));
         gateReportDAO.insert(chapterId, sceneId, "mechanical", 0, passed,
@@ -136,14 +140,21 @@ public class GateService {
         return checks;
     }
 
-    /** 从指纹 baseline 取某指标的 abs_max；未配置时用兜底值（场景级抽样阈值与章级同源）。 */
+    /** 指标的场景级上限：读指纹 baseline（abs_max 优先，否则 基线*(1+容差)）；未配置用兜底值。 */
     @SuppressWarnings("unchecked")
-    private static double absMaxOf(Map<String, Object> fingerprint, String key, double fallback) {
+    private static double upperBound(Map<String, Object> fingerprint, String key, double fallback) {
         Map<String, Object> baselineMap = (Map<String, Object>) fingerprint.get("baseline");
         if (baselineMap == null) return fallback;
         Map<String, Object> rule = (Map<String, Object>) baselineMap.get(key);
-        if (rule == null || !rule.containsKey("abs_max")) return fallback;
-        return ((Number) rule.get("abs_max")).doubleValue();
+        if (rule == null) return fallback;
+        if (rule.containsKey("abs_max")) {
+            return ((Number) rule.get("abs_max")).doubleValue();
+        }
+        if (rule.containsKey("value")) {
+            return ((Number) rule.get("value")).doubleValue()
+                    * (1 + ((Number) rule.getOrDefault("tolerance", 0.6)).doubleValue());
+        }
+        return fallback;
     }
 
     @SuppressWarnings("unchecked")
