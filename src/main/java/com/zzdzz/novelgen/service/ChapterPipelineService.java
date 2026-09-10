@@ -128,9 +128,21 @@ public class ChapterPipelineService {
     public record PipelineStatus(boolean running, String lastMessage) {
     }
 
+    /** 强制重出章纲：清掉旧场景与门禁报告，按当前卷纲目标/大纲/前情重新生成场景拆解（同步调用，约 1-2 分钟）。 */
+    public List<OutlineService.SceneSpec> regenerateOutline(long novelId, int chapterNo) {
+        ChapterDO ch = outlineService.loadChapter(novelId, chapterNo);
+        if (ch.fullText() != null && !ch.fullText().isBlank()) {
+            throw new IllegalStateException("第 " + chapterNo + " 章已有正文，禁止重出章纲");
+        }
+        List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
+        outlineService.generate(novelId, ch, packer.world(novelId), packer.characters(novelId),
+                packer.foreshadowDirectives(novelId, chapterNo), digests,
+                packer.prevTail(novelId, chapterNo));
+        return outlineService.loadSpecs(ch.id());
+    }
+
     /** 人工审批：仅 PENDING_APPROVAL 可过审；过审即生成 digest。 */
-    public void approve(long chapterId) {
-        ChapterDO ch = chapterDAO.findById(chapterId)
+    public void approve(long chapterId) {        ChapterDO ch = chapterDAO.findById(chapterId)
                 .orElseThrow(() -> new IllegalArgumentException("章不存在: " + chapterId));
         if (!"PENDING_APPROVAL".equals(ch.status())) {
             throw new IllegalStateException("章 " + chapterId + " 状态为 " + ch.status() + "，不在待审批");

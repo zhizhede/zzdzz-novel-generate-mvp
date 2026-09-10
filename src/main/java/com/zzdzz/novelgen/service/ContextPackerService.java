@@ -57,8 +57,14 @@ public class ContextPackerService {
         return stylePackDAO.findRulesMdByNovel(novelId);
     }
 
+    /** 世界观设定 + 全书大纲（misc/大纲 文档存在时自动拼接，进入每章生成上下文）。 */
     public String world(long novelId) {
-        return canonDocDAO.findFirstByKind(novelId, "world");
+        String world = canonDocDAO.findFirstByKind(novelId, "world");
+        String storyOutline = canonDocDAO.findContentByKindName(novelId, "misc", "大纲");
+        if (storyOutline == null || storyOutline.isBlank()) {
+            return world;
+        }
+        return world + "\n\n【全书大纲】\n" + storyOutline;
     }
 
     public String characters(long novelId) {
@@ -90,7 +96,9 @@ public class ContextPackerService {
         List<String> ctx = new ArrayList<>();
         for (int i = Math.max(0, digests.size() - 3); i < digests.size(); i++) ctx.add(digests.get(i));
 
-        String system = styleRules(novelId) + STYLE_REDLINES;
+        // 风格包自带量化红线（新风格包）时不再叠加手搓红线，避免两套阈值打架
+        String rules = styleRules(novelId);
+        String system = rules.contains("【量化风格红线】") ? rules : rules + STYLE_REDLINES;
         String user = """
                 任务：写第 %d 章场景 %d。
                 本章目标：%s

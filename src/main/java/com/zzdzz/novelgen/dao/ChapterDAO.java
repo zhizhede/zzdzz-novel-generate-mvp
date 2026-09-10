@@ -76,6 +76,22 @@ public class ChapterDAO {
                 outlineYaml, chapterId);
     }
 
+    /** 卷纲规划编辑：改标题/目标/钩子/卷归属/字数预算（不改状态与正文）。 */
+    public void updatePlan(long chapterId, Integer volumeNo, String arc, String title,
+                           String goal, String hook, int budgetMin, int budgetMax) {
+        jdbc.update("""
+                UPDATE chapters SET volume_no=?, arc=?, title=?, goal=?, hook=?,
+                       budget_min=?, budget_max=?, update_time=NOW()
+                WHERE id=? AND is_deleted=false
+                """, volumeNo, arc, title, goal, hook, budgetMin, budgetMax, chapterId);
+    }
+
+    /** 仅未动笔的规划行可删（软删）。 */
+    public void softDeletePlan(long chapterId) {
+        jdbc.update("UPDATE chapters SET is_deleted=true, delete_time=NOW() WHERE id=? AND is_deleted=false",
+                chapterId);
+    }
+
     public void updateStatus(long chapterId, String status) {
         jdbc.update("UPDATE chapters SET status=?, update_time=NOW() WHERE id=?", status, chapterId);
     }
