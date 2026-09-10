@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.zzdzz.novelgen.dao.LlmCallLogDAO;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -29,13 +29,13 @@ public class MiniMaxClient implements LlmPort {
 
     private final LlmProperties props;
     private final ObjectMapper mapper;
-    private final JdbcTemplate jdbc;
+    private final LlmCallLogDAO callLogDAO;
     private final RestClient restClient;
 
-    public MiniMaxClient(LlmProperties props, ObjectMapper mapper, JdbcTemplate jdbc) {
+    public MiniMaxClient(LlmProperties props, ObjectMapper mapper, LlmCallLogDAO callLogDAO) {
         this.props = props;
         this.mapper = mapper;
-        this.jdbc = jdbc;
+        this.callLogDAO = callLogDAO;
 
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(props.connectTimeout())
@@ -59,16 +59,18 @@ public class MiniMaxClient implements LlmPort {
 
         JsonNode response;
         try {
-            response = restClient.post()
-                    .uri("/chat/completions")
-                    .body(body)
-                    .retrieve()
-                    .body(JsonNode.class);
-        } catch (Exception e) {
-            log.error("LLM 调用失败 node={} model={}", request.node(), props.model(), e);
-            long id = insertLog(request, requestJson, null, null, 0, 0, 0,
-                    elapsed(start), "error", truncate(e.toString(), 2000));
-            throw new LlmException("LLM 调用失败（llm_call_log id=" + id + "）: " + e.getMessage(), e);
+            response = post(body);
+        } catch (Exception first) {
+            // 传输类失败（超时/网络）自动重试一次；注意重试可能造成服务端重复计费
+            log.warn("LLM 调用传输失败，重试一次: {}", first.toString());
+            try {
+                response = post(body);
+            } catch (Exception second) {
+                log.error("LLM 调用失败 node={} model={}", request.node(), props.model(), second);
+                long id = insertLog(request, requestJson, null, null, 0, 0, 0,
+                        elapsed(start), "error", truncate(second.toString(), 2000));
+                throw new LlmException("LLM 调用失败（llm_call_log id=" + id + "）: " + second.getMessage(), second);
+            }
         }
 
         String content = extractContent(response);
@@ -94,6 +96,14 @@ public class MiniMaxClient implements LlmPort {
                 usage.promptTokens(), usage.completionTokens(), latency,
                 reasoning == null ? 0 : reasoning.length(), id);
         return new ChatResult(id, content, reasoning, usage);
+    }
+
+    private JsonNode post(Map<String, Object> body) {
+        return restClient.post()
+                .uri("/chat/completions")
+                .body(body)
+                .retrieve()
+                .body(JsonNode.class);
     }
 
     private Map<String, Object> buildBody(ChatRequest request) {
@@ -136,20 +146,14 @@ public class MiniMaxClient implements LlmPort {
     private static final java.util.regex.Pattern THINK_BLOCK =
             java.util.regex.Pattern.compile("(?s)<think>(.*?)</think>");
 
-    /** RETURNING id：台账先行入库，失败也留痕，调用方据此可重放。 */
+    /** 台账先行入库（SQL 在 LlmCallLogDAO），失败也留痕，调用方据此可重放。 */
     private long insertLog(ChatRequest request, String requestJson, JsonNode response, String reasoning,
                            int promptTokens, int completionTokens, int totalTokens,
                            long latencyMs, String status, String errorMsg) {
         String responseJson = response == null ? null : serialize(response);
-        Long id = jdbc.queryForObject(
-                "INSERT INTO llm_call_log (node, novel_id, chapter_id, model, prompt_tokens, completion_tokens, "
-                + "total_tokens, latency_ms, status, error_msg, reasoning_text, request_json, response_json) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::text, ?::text, ?::jsonb, ?::jsonb) RETURNING id",
-                Long.class,
-                request.node(), request.novelId(), request.chapterId(), props.model(),
+        return callLogDAO.insert(request.node(), request.novelId(), request.chapterId(), props.model(),
                 promptTokens, completionTokens, totalTokens, latencyMs, status, errorMsg,
                 reasoning, requestJson, responseJson);
-        return id == null ? -1L : id;
     }
 
     private String serialize(Object value) {
