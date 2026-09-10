@@ -7,6 +7,7 @@ import com.zzdzz.novelgen.dao.ForeshadowDAO;
 import com.zzdzz.novelgen.dao.NovelDAO;
 import com.zzdzz.novelgen.dao.StylePackDAO;
 import com.zzdzz.novelgen.dao.UserDAO;
+import com.zzdzz.novelgen.service.DigestService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,16 +22,24 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * 一次性导入器：canon 文件包 + 风格包 → 入库。幂等，按唯一键跳过；指纹基线可重复刷新。
  * 运行：--import.enabled=true
+ * 两种模式：
+ * - 书目模式：novelDir/book.yaml 存在时，按其配置导入（title/style_pack/rules_md_file/existing_dir/digest_recent），
+ *   并把 existing/ 下「第N章.md」作为现成正文入库（APPROVED），为最近 digest_recent 章补事实账。
+ * - 遗留模式：无 book.yaml 时保持夜班守则/手搓风的原导入行为。
  */
 @Component
 @ConditionalOnProperty(name = "import.enabled", havingValue = "true")
 public class ImportRunner implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(ImportRunner.class);
+    private static final Pattern CHAPTER_FILE = Pattern.compile("第(\\d+)章");
 
     private final UserDAO userDAO;
     private final StylePackDAO stylePackDAO;
@@ -38,6 +47,7 @@ public class ImportRunner implements ApplicationRunner {
     private final CanonDocDAO canonDocDAO;
     private final ForeshadowDAO foreshadowDAO;
     private final ChapterDAO chapterDAO;
+    private final DigestService digestService;
     private final ObjectMapper mapper;
     private final String novelDir;
     private final String styleDir;
@@ -45,7 +55,7 @@ public class ImportRunner implements ApplicationRunner {
     public ImportRunner(UserDAO userDAO, StylePackDAO stylePackDAO,
                         NovelDAO novelDAO, CanonDocDAO canonDocDAO,
                         ForeshadowDAO foreshadowDAO, ChapterDAO chapterDAO,
-                        ObjectMapper mapper,
+                        DigestService digestService, ObjectMapper mapper,
                         @Value("${novelgen.novel-dir:novel/夜班守则}") String novelDir,
                         @Value("${novelgen.style-dir:docs/style}") String styleDir) {
         this.userDAO = userDAO;
@@ -54,6 +64,7 @@ public class ImportRunner implements ApplicationRunner {
         this.canonDocDAO = canonDocDAO;
         this.foreshadowDAO = foreshadowDAO;
         this.chapterDAO = chapterDAO;
+        this.digestService = digestService;
         this.mapper = mapper;
         this.novelDir = novelDir;
         this.styleDir = styleDir;
@@ -62,6 +73,97 @@ public class ImportRunner implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) throws Exception {
         long userId = seedAdmin();
+        Path bookCfg = Path.of(novelDir, "book.yaml");
+        if (Files.exists(bookCfg)) {
+            importBook(userId, bookCfg);
+        } else {
+            importLegacy(userId);
+        }
+    }
+
+    // ===== 书目模式（book.yaml 驱动，支持多书与现成正文续写） =====
+
+    @SuppressWarnings("unchecked")
+    private void importBook(long userId, Path bookCfg) throws Exception {
+        Map<String, Object> cfg = new Yaml().load(Files.readString(bookCfg));
+        String title = (String) cfg.get("title");
+        long packId = importBookStylePack(cfg);
+        Long exist = novelDAO.findIdByTitle(title);
+        long novelId = exist != null ? exist
+                : novelDAO.insert(userId, title, (String) cfg.get("description"), packId, "auto");
+        if (exist == null) {
+            log.info("书目导入：新作品 {} (novelId={})", title, novelId);
+        }
+        importCanonDocs(novelId);
+        Path storyOutline = Path.of(novelDir, "canon/大纲.md");
+        if (Files.exists(storyOutline)) {
+            importDoc(novelId, "misc", "大纲", Files.readString(storyOutline));
+        }
+        importForeshadows(novelId);
+        importOutline(novelId);
+        importExisting(novelId, cfg);
+        log.info("导入完成 novelId={} stylePackId={}", novelId, packId);
+    }
+
+    @SuppressWarnings("unchecked")
+    private long importBookStylePack(Map<String, Object> cfg) throws Exception {
+        String packName = (String) cfg.get("style_pack_name");
+        String fingerprint = Files.readString(Path.of(novelDir, "style-metrics.json"));
+        Long exist = stylePackDAO.findIdByName(packName);
+        if (exist != null) {
+            stylePackDAO.updateFingerprint(exist, fingerprint);
+            return exist;
+        }
+        String rules = Files.readString(Path.of(novelDir, (String) cfg.get("rules_md_file")));
+        return stylePackDAO.insert(packName, (String) cfg.get("style_pack_desc"), rules, fingerprint);
+    }
+
+    /** existing/ 下的现成正文：入章（APPROVED）并为最近 digest_recent 章补事实账（续写的前情来源）。 */
+    @SuppressWarnings("unchecked")
+    private void importExisting(long novelId, Map<String, Object> cfg) throws Exception {
+        String dir = (String) cfg.get("existing_dir");
+        if (dir == null || dir.isBlank()) return;
+        Path existing = Path.of(novelDir, dir);
+        if (!Files.isDirectory(existing)) return;
+        try (Stream<Path> files = Files.list(existing)) {
+            files.filter(f -> CHAPTER_FILE.matcher(f.getFileName().toString()).find())
+                    .forEach(f -> importExistingChapter(novelId, f));
+        }
+        int recent = cfg.get("digest_recent") instanceof Number n ? n.intValue() : 3;
+        List<ChapterDO> all = chapterDAO.listSummariesByNovel(novelId);
+        // 从最新章往回数，只为有正文的 recent 章补事实账（卷纲规划行没有正文，跳过）
+        int done = 0;
+        for (int i = all.size() - 1; i >= 0 && done < recent; i--) {
+            ChapterDO full = chapterDAO.find(novelId, all.get(i).chapterNo()).orElse(null);
+            if (full == null || full.fullText() == null) continue;
+            digestService.digest(novelId, full.id(), full.chapterNo(), full.fullText());
+            done++;
+        }
+    }
+
+    private void importExistingChapter(long novelId, Path file) {
+        Matcher m = CHAPTER_FILE.matcher(file.getFileName().toString());
+        if (!m.find()) return;
+        int no = Integer.parseInt(m.group(1));
+        if (chapterDAO.exists(novelId, no)) return;
+        try {
+            String content = Files.readString(file);
+            String title = Files.readAllLines(file).stream()
+                    .filter(l -> l.startsWith("## ")).findFirst()
+                    .map(l -> l.substring(3).strip()).orElse("第" + no + "章");
+            chapterDAO.insertPlan(novelId, no, null, null, title, null, null, "[]", "[]", 0, 0);
+            ChapterDO ch = chapterDAO.find(novelId, no).orElseThrow();
+            chapterDAO.saveFullText(ch.id(), content);
+            chapterDAO.updateStatus(ch.id(), "FINAL");
+            log.info("现成正文入库：第 {} 章 {}", no, title);
+        } catch (Exception e) {
+            throw new IllegalStateException("现成正文导入失败: " + file, e);
+        }
+    }
+
+    // ===== 遗留模式（夜班守则 / 手搓风） =====
+
+    private void importLegacy(long userId) throws Exception {
         long packId = importStylePack();
         long novelId = importNovel(userId, packId);
         importCanonDocs(novelId);

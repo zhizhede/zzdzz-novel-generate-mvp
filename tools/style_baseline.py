@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# 用法：python style_baseline.py [语料目录] [输出json] [语料标签]
+# 目录模式下递归收集全部 .md/.txt，剔除 # 标题行；缺省保持手搓语料行为
 CORPUS_DIR = ROOT / "docs" / "novels" / "手搓" / "人类、法师、地下城（暂定）"
 OUT = ROOT / "novel" / "夜班守则" / "style-metrics.json"
 
@@ -25,11 +27,22 @@ def load_prose(path: Path) -> str:
     return t.split("废弃")[0]
 
 
+def strip_headers(text: str) -> str:
+    return chr(10).join(l for l in text.splitlines() if not l.strip().startswith("#"))
+
+
 def load_corpus() -> str:
+    import sys
+    if len(sys.argv) > 1:
+        corpus_dir = Path(sys.argv[1])
+        parts = []
+        for f in sorted(list(corpus_dir.rglob("*.md")) + list(corpus_dir.rglob("*.txt"))):
+            parts.append(strip_headers(f.read_text(encoding="utf-8")))
+        return chr(10).join(parts)
     parts = [load_prose(p) for p in PROSE_FILES]
     for p in sorted(FLASHBACK_DIR.glob("*/*.md")):
         parts.append(p.read_text(encoding="utf-8"))
-    return "\n".join(parts)
+    return chr(10).join(parts)
 
 
 def count(text: str, needle: str) -> int:
@@ -72,19 +85,20 @@ def main() -> None:
         "dialogue_end_punct_ratio": dialogue_end_punct_ratio(lines),
     }
 
-    # 容差：语料仅 6 千字，起步放宽（±60%），随定稿章节数收紧
+    # 容差：语料起步放宽（±60%），随定稿章节数收紧
     baseline = {k: {"value": v, "tolerance": 0.6} for k, v in metrics.items() if k != "corpus_cjk"}
-    # 零基线指标（顿号/感叹号）用绝对上限而非比例容差
-    baseline["dunhao_per1k"]["abs_max"] = 1.0
-    baseline["exclam_per1k"]["abs_max"] = 2.0
-    # 题材校准（2026-09-10）：夜班题材高频出现时间/价格/招牌数字，破折号是分镜主要标点，
-    # 按第一章实测放宽绝对上限；风格相对偏离仍由其余指标盯住
-    baseline["dash_per1k"]["abs_max"] = 6.0
-    baseline["digit_per1k"]["abs_max"] = 12.0
+    # 稀疏/题材型指标给绝对上限：max(经验默认值, 基线*1.8)，允许题材合理上浮
+    baseline["dunhao_per1k"]["abs_max"] = round(max(1.0, metrics["dunhao_per1k"] * 1.8), 2)
+    baseline["exclam_per1k"]["abs_max"] = round(max(2.0, metrics["exclam_per1k"] * 1.8), 2)
+    baseline["dash_per1k"]["abs_max"] = round(max(6.0, metrics["dash_per1k"] * 1.8), 2)
+    baseline["digit_per1k"]["abs_max"] = round(max(12.0, metrics["digit_per1k"] * 1.8), 2)
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(
-        {"source": "docs/novels/手搓 (corpus ignored, metrics only)",
+    import sys
+    label = sys.argv[3] if len(sys.argv) > 3 else "docs/novels/手搓 (corpus ignored, metrics only)"
+    out = Path(sys.argv[2]) if len(sys.argv) > 2 else OUT
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(
+        {"source": label,
          "computed_at": "2026-09-10", "metrics": metrics, "baseline": baseline},
         ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(metrics, ensure_ascii=False, indent=2))

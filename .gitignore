@@ -24,3 +24,4 @@ web/node_modules/
 
 # IDE
 .idea/
+__pycache__/
