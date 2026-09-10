@@ -19,12 +19,13 @@
 | 1 | 语言 Java 21 / Spring Boot 3.5.x / Maven；**MVP 不上 Spring AI**，自写 `LlmPort` + `MiniMaxClient`（RestClient + Jackson） | Q18=a；Spring AI 换 M4 adapter 接入（PgVectorStore/EmbeddingModel/tool calling 触发点） |
 | 2 | 前端 Vue3 + Element Plus，前后端分离，单仓库 `web/` + `src/`（与 zzdzz-blog 同构） | Q13=a |
 | 3 | PostgreSQL 16 第一天就用（本地复用 docker 容器 `pg-vector`，建库 `novel_gen`）；pgvector 到 M4 确认扩展 | Q3 演进定案 |
-| 4 | 存储惯例（沿用 zzdzz-blog 实际代码）：`created_at/updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`；**所有表统一带 `deleted_at TIMESTAMPTZ` 软删除列**（含日志表，无例外）；软删唯一冲突用 partial unique index `WHERE deleted_at IS NULL` | 用户约束 |
+| 4 | 存储惯例（2026-09-10 修订）：时间列 `create_time/update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()`；**所有表统一软删除双列：`is_deleted BOOLEAN NOT NULL DEFAULT FALSE`（显式标记，查询与索引一律用它）+ `delete_time TIMESTAMPTZ`**（含日志表，无例外）；软删唯一冲突用 partial unique index `WHERE is_deleted = FALSE`；开发期迁移文件直接改写，不堆修正迁移 | 用户约束 |
 | 5 | 包名 `com.zzdzz.novelgen`，artifact `novelgen-server` | 默认确认 |
 | 6 | **新 JDK 一律装在 `D:\Program\Java\jdk-<版本号>` 目录**（不改动系统 JAVA_HOME） | 用户约束 |
 | 7 | 部署 = 101.126.22.219（8核16G，宝塔面板，SSH key 见 zzdzz-blog/keys/）：宝塔 Java 项目跑 jar（端口 **8090**，避开 blog 8080）+ Nginx 反代新站点 + 同机 PG 新库；**生成进度走 SSE，nginx 照抄 blog 的 SSE 专用 location 配置**（gzip off / proxy_buffering off） | Q16 |
 | 8 | MVP 全程免费（Q15=a），但 **`llm_call_log` 从 M0 内建**：每次 AI 调用记录 节点名/模型/prompt+completion tokens/耗时/成败/关联章节；章详情页显汇总 + 独立"调用记录"页 | Q15 |
 | 9 | **生成结果整块展示，思考过程与正文分区**（2026-09-10）：推理模型的 think 内容不入正文、单独存 `llm_call_log.reasoning_text`；UI 上"AI 思考过程"折叠区 + 正文区分开展示；流式调用不做 usage 特殊处理 | 用户定案 |
+| 10 | **代码开发采用 MVC 分层**（2026-09-10）：入口(controller/runner) → service → repository 单向依赖，SQL 只准在 repository，DO 不出 service 层；规约见 `docs/code-standards.md`，既有管线代码按其 §8 渐进迁移 | 用户定案 |
 
 ## 三、范围裁剪（MVP 不做）
 
@@ -37,7 +38,7 @@
 - MVP 判定 = 机械门禁 + 风格指标数值回归（AI 评审 M2 才上，先攒"纯规则能拦多少"的对照数据）
 - 章节字数 = 弹性制：场景数 × 场景预算，单章软上限 4500 字（回答了蒸馏报告"待确认③"）
 - 断点重跑 = 场景级缓存，已过门禁场景不重新生成
-- 首个切片 = 手写章纲 YAML 直接进"上下文打包→单场景生成→机械门禁"最短路径，先验证风格成立
+- 首个切片（2026-09-10 修订）：章纲由 AI 生成（结构化输出，人可编辑后视为批准），卷纲仍由人提供；手写章纲 YAML 保留为兜底。后续"上下文打包→单场景生成→机械门禁→审批"路径不变，先验证风格成立的优先级不变
 
 ## 五、里程碑（含 M0）
 
@@ -58,6 +59,6 @@
 ## 七、硬约束（长期有效）
 
 1. **未经用户明确允许，禁止任何 `git commit` / `git push`**
-2. 数据库所有表带软删除列 `deleted_at`
+2. 数据库所有表带软删除标记 `is_deleted` + `delete_time`，索引与查询一律用 `is_deleted`
 3. 新 JDK 安装目录 = `D:\Program\Java\jdk-<版本号>`
 4. 手稿原文、风格资产、API key 永不入库（`.gitignore` 已覆盖）
