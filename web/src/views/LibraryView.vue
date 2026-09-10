@@ -86,6 +86,19 @@
               <el-table-column prop="abs_max" label="天花板" width="100" />
             </el-table>
           </el-tab-pane>
+          <el-tab-pane label="门禁配置（可编辑）" name="gate">
+            <div style="max-width: 720px">
+              <div style="font-size: 13px; margin-bottom: 6px">AI 腔黑名单（每行一个，正文中出现即判未过）</div>
+              <el-input v-model="bannedText" type="textarea" :rows="8" placeholder="心中暗想" />
+              <div style="display: flex; gap: 12px; align-items: center; margin: 10px 0">
+                <span style="font-size: 13px">章长容差（±）</span>
+                <el-input-number v-model="lenTol" :min="0" :max="0.5" :step="0.05" size="small" />
+                <span style="color: #999; font-size: 12px">预算 2400-3200、容差 0.15 → 实际允许 2040-3680 字</span>
+              </div>
+              <el-button type="primary" @click="saveGateConfig">保存门禁配置</el-button>
+              <span style="color: #999; font-size: 12px; margin-left: 10px">落库于 style_packs.gate_config，下一次门禁检测即生效</span>
+            </div>
+          </el-tab-pane>
         </el-tabs>
       </el-tab-pane>
     </el-tabs>
@@ -147,6 +160,8 @@ const foreshadows = ref([])
 const digests = ref([])
 const styleRules = ref('')
 const styleFingerprint = ref('')
+const bannedText = ref('')
+const lenTol = ref(0.15)
 const styleTab = ref('rules')
 const editing = ref(null)
 const canonEditor = ref(false)
@@ -171,6 +186,13 @@ async function loadAll() {
   const s = await api.get(`/api/novels/${novelId.value}/style`)
   styleRules.value = s.rulesMd
   styleFingerprint.value = s.fingerprintJson
+  try {
+    const cfg = JSON.parse(s.gateConfigJson || '{}')
+    bannedText.value = (cfg.banned_phrases || []).join('\n')
+    lenTol.value = typeof cfg.chapter_length_tolerance === 'number' ? cfg.chapter_length_tolerance : 0.15
+  } catch {
+    bannedText.value = ''
+  }
 }
 
 async function openCanon(row) {
@@ -244,6 +266,17 @@ async function saveDigest() {
     ElMessage.success('已修正（影响后续章节前情窗口）')
     digestEditor.value = false
     await loadAll()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function saveGateConfig() {
+  try {
+    const phrases = bannedText.value.split('\n').map((s) => s.trim()).filter(Boolean)
+    const cfg = { banned_phrases: phrases, chapter_length_tolerance: lenTol.value, no_straight_quote: true }
+    await api.put(`/api/novels/${novelId.value}/gate-config`, { gateConfig: JSON.stringify(cfg) })
+    ElMessage.success('门禁配置已落库（下一次门禁检测即生效）')
   } catch (e) {
     ElMessage.error(e.message)
   }

@@ -27,9 +27,10 @@
           <el-button v-if="detail.status === 'PENDING_APPROVAL'" type="success" size="small" @click="approve">通过审批</el-button>
           <el-button v-if="detail.status === 'FAILED'" type="warning" size="small" @click="rerunChapter">重新生成本章</el-button>
           <el-button v-if="detail.fullText" size="small" plain @click="copyText">复制正文</el-button>
+          <el-button v-if="detail.fullText" size="small" type="primary" plain @click="reader = true">阅读模式</el-button>
         </div>
 
-        <el-tabs>
+        <el-tabs v-model="activeTab">
           <el-tab-pane label="正文">
             <div style="white-space: pre-wrap; line-height: 1.9">{{ detail.fullText || '（尚未生成）' }}</div>
           </el-tab-pane>
@@ -57,6 +58,16 @@
         </el-tabs>
       </template>
     </el-drawer>
+
+    <!-- 阅读模式：全屏沉浸 -->
+    <el-dialog v-model="reader" :title="detail ? `第${detail.chapterNo}章 ${detail.title}` : ''" fullscreen
+      style="background: #faf6ef">
+      <div style="max-width: 720px; margin: 0 auto; padding: 24px 0 60px">
+        <div v-if="detail" style="white-space: pre-wrap; font-size: 17px; line-height: 2.1;
+          font-family: 'Source Han Serif SC', 'Noto Serif SC', serif; color: #2c2c2c">{{ detail.fullText }}</div>
+        <div style="text-align: center; color: #bbb; margin-top: 32px">— 完 —</div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -73,6 +84,8 @@ const novels = ref([])
 const novelId = ref(null)
 const detail = ref(null)
 const drawer = ref(false)
+const reader = ref(false)
+const activeTab = ref('text')
 
 async function loadChapters() {
   chapters.value = await api.get(`/api/novels/${novelId.value}/chapters`)
@@ -95,6 +108,7 @@ async function copyText() {
 
 async function open(row) {
   detail.value = await api.get(`/api/chapters/${row.id}`)
+  activeTab.value = detail.value.fullText ? 'text' : 'scenes'
   drawer.value = true
 }
 

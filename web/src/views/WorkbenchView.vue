@@ -17,6 +17,7 @@
         <el-button type="primary" size="small" :loading="running" @click="run">启动生成</el-button>
         <el-tag :type="running ? 'warning' : 'info'" size="small">{{ running ? '运行中' : '空闲' }}</el-tag>
         <span style="color:#999;font-size:12px">{{ lastMessage }}</span>
+        <router-link to="/chapters" style="font-size: 12px; margin-left: auto">去章节页阅读 →</router-link>
       </div>
     </el-card>
 
