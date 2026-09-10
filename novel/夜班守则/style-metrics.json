@@ -1,0 +1,69 @@
+{
+  "source": "docs/novels/手搓 (corpus ignored, metrics only)",
+  "computed_at": "2026-09-10",
+  "metrics": {
+    "corpus_cjk": 5926,
+    "line_avg_len": 21.8,
+    "dialogue_density_per1k": 18.9,
+    "dunhao_per1k": 0.51,
+    "dash_per1k": 2.53,
+    "ellipsis_per1k": 5.74,
+    "exclam_per1k": 1.86,
+    "digit_per1k": 2.53,
+    "tic_laizhe_per1k": 0.67,
+    "tic_shunbian_per1k": 0.51,
+    "tic_haiyou_per1k": 2.36,
+    "dialogue_end_punct_ratio": 0.147
+  },
+  "baseline": {
+    "line_avg_len": {
+      "value": 21.8,
+      "tolerance": 0.6
+    },
+    "dialogue_density_per1k": {
+      "value": 18.9,
+      "tolerance": 0.6
+    },
+    "dunhao_per1k": {
+      "value": 0.51,
+      "tolerance": 0.6,
+      "abs_max": 1.0
+    },
+    "dash_per1k": {
+      "value": 2.53,
+      "tolerance": 0.6,
+      "abs_max": 10.0
+    },
+    "ellipsis_per1k": {
+      "value": 5.74,
+      "tolerance": 0.6
+    },
+    "exclam_per1k": {
+      "value": 1.86,
+      "tolerance": 0.6,
+      "abs_max": 2.0
+    },
+    "digit_per1k": {
+      "value": 2.53,
+      "tolerance": 0.6,
+      "abs_max": 12.0
+    },
+    "tic_laizhe_per1k": {
+      "value": 0.67,
+      "tolerance": 0.6
+    },
+    "tic_shunbian_per1k": {
+      "value": 0.51,
+      "tolerance": 0.6
+    },
+    "tic_haiyou_per1k": {
+      "value": 2.36,
+      "tolerance": 0.6
+    },
+    "dialogue_end_punct_ratio": {
+      "value": 0.147,
+      "tolerance": 0.6,
+      "abs_max": 0.45
+    }
+  }
+}

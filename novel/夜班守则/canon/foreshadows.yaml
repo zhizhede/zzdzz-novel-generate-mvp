@@ -1,0 +1,45 @@
+# 《夜班守则》 · 伏笔账本
+# 状态: planned(待埋) / planted(已埋) / recovered(已回收)
+# 管线用途：章纲生成时注入"本章需埋/需收"，门禁与评审对照检查，防伏笔悬空
+
+- id: F1
+  content: 苏晚从不与夜班打招呼，交接只靠留言——因为监控里她从未在夜里离开过店
+  planted_in: 7
+  recovered_in: 14
+  status: planned
+
+- id: F2
+  content: 守则末页的缺角撕痕——被撕掉的是第零条（欢迎光临的真义）
+  planted_in: 1
+  recovered_in: 20
+  status: planned
+
+- id: F3
+  content: 冰柜最里层的商品只补不取——那是给「外面」的供货口
+  planted_in: 3
+  recovered_in: 17
+  status: planned
+
+- id: F4
+  content: 监控里店长永远背对镜头——第二十四章转身，没有脸只有工牌；店长是第一个夜班员
+  planted_in: 5
+  recovered_in: 26
+  status: planned
+
+- id: F5
+  content: 温故留言条的日期是"明天"——他卡在交接的那个明天里，无法进入今天
+  planted_in: 2
+  recovered_in: 22
+  status: planned
+
+- id: F6
+  content: 整点收音机总会多报一条新闻——多出来的那条是"多出来的人"的讣告，名单上有温故
+  planted_in: 6
+  recovered_in: 18
+  status: planned
+
+- id: F7
+  content: 会员卡积分规则怪异——积分即记忆/寿命，可被"兑换"
+  planted_in: 12
+  recovered_in: 27
+  status: planned
