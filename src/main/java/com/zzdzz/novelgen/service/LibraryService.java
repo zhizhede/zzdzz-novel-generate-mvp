@@ -11,6 +11,7 @@ import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** 素材库：正典文档（增删改查）、伏笔账本（人工修正）、事实账（查看修正）、风格包（规则正文修订）。 */
@@ -24,13 +25,16 @@ public class LibraryService {
     private final ForeshadowDAO foreshadowDAO;
     private final StylePackDAO stylePackDAO;
     private final DigestDAO digestDAO;
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
     public LibraryService(CanonDocDAO canonDocDAO, ForeshadowDAO foreshadowDAO,
-                          StylePackDAO stylePackDAO, DigestDAO digestDAO) {
+                          StylePackDAO stylePackDAO, DigestDAO digestDAO,
+                          com.fasterxml.jackson.databind.ObjectMapper mapper) {
         this.canonDocDAO = canonDocDAO;
         this.foreshadowDAO = foreshadowDAO;
         this.stylePackDAO = stylePackDAO;
         this.digestDAO = digestDAO;
+        this.mapper = mapper;
     }
 
     // ===== 正典文档 =====
@@ -100,7 +104,19 @@ public class LibraryService {
 
     public StylePackVO styleByNovel(long novelId) {
         return new StylePackVO(stylePackDAO.findRulesMdByNovel(novelId),
-                stylePackDAO.findFingerprintByNovel(novelId));
+                stylePackDAO.findFingerprintByNovel(novelId),
+                stylePackDAO.findGateConfigByNovel(novelId));
+    }
+
+    /** 门禁配置更新（黑名单/章长容差），JSON 由前端组装、后端校验可解析。 */
+    public void updateGateConfig(long novelId, String gateConfigJson) {
+        requireText(gateConfigJson, "门禁配置不能为空");
+        try {
+            mapper.readValue(gateConfigJson, Map.class);
+        } catch (Exception e) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "门禁配置必须是合法 JSON");
+        }
+        stylePackDAO.updateGateConfigByNovel(novelId, gateConfigJson);
     }
 
     public void updateStyleRules(long novelId, String rulesMd) {
@@ -113,6 +129,6 @@ public class LibraryService {
     }
 
     /** 风格包视图（内部模型）。 */
-    public record StylePackVO(String rulesMd, String fingerprintJson) {
+    public record StylePackVO(String rulesMd, String fingerprintJson, String gateConfigJson) {
     }
 }

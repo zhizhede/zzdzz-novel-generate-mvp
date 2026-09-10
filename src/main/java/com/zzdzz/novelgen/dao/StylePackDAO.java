@@ -41,6 +41,22 @@ public class StylePackDAO {
                 """, rulesMd, novelId);
     }
 
+    /** 门禁配置（黑名单/章长容差等），无配置返回 null（GateService 用代码兜底）。 */
+    public String findGateConfigByNovel(long novelId) {
+        List<String> rows = jdbc.query("""
+                SELECT sp.gate_config::text FROM style_packs sp
+                JOIN novels n ON n.style_pack_id = sp.id WHERE n.id = ?
+                """, (rs, i) -> rs.getString(1), novelId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    public void updateGateConfigByNovel(long novelId, String gateConfigJson) {
+        jdbc.update("""
+                UPDATE style_packs sp SET gate_config=?::jsonb, update_time=NOW()
+                FROM novels n WHERE n.style_pack_id = sp.id AND n.id = ?
+                """, gateConfigJson, novelId);
+    }
+
     public String findRulesMdByNovel(long novelId) {
         return jdbc.queryForObject("""
                 SELECT sp.rules_md FROM style_packs sp

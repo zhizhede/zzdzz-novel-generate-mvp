@@ -99,4 +99,10 @@ public class LibraryController {
         libraryService.updateStyleRules(novelId, body.get("rulesMd"));
         return Result.ok();
     }
+
+    @PutMapping("/novels/{novelId}/gate-config")
+    public Result<Void> updateGateConfig(@PathVariable long novelId, @RequestBody Map<String, String> body) {
+        libraryService.updateGateConfig(novelId, body.get("gateConfig"));
+        return Result.ok();
+    }
 }

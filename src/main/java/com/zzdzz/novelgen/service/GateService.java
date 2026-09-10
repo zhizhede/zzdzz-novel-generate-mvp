@@ -18,8 +18,8 @@ import java.util.regex.Pattern;
 @Service
 public class GateService {
 
-    /** AI 腔黑名单（起步版，随实绩滚动） */
-    private static final List<String> BANNED = List.of(
+    /** AI 腔黑名单兜底：风格包未配置 gate_config 时使用；正式值随包落库（V4 起）。 */
+    private static final List<String> BANNED_FALLBACK = List.of(
             "心中暗想", "不由得", "仿佛在诉说", "在空气中弥漫", "空气仿佛凝固",
             "嘴角勾起一抹", "眼底闪过一丝", "一丝不易察觉");
 
@@ -41,8 +41,10 @@ public class GateService {
         List<Map<String, Object>> checks = new ArrayList<>();
 
         int words = ((Number) metrics.get("cjk")).intValue();
-        boolean lenOk = words >= budgetMin * 0.85 && words <= budgetMax * 1.15;
-        checks.add(check("chapter_length", words, budgetMin * 0.85, budgetMax * 1.15, lenOk));
+        Map<String, Object> gateCfg = gateConfig(novelId);
+        double lenTol = configDouble(gateCfg, "chapter_length_tolerance", 0.15);
+        boolean lenOk = words >= budgetMin * (1 - lenTol) && words <= budgetMax * (1 + lenTol);
+        checks.add(check("chapter_length", words, budgetMin * (1 - lenTol), budgetMax * (1 + lenTol), lenOk));
 
         checks.addAll(fingerprintChecks(base, metrics));
 
@@ -50,7 +52,7 @@ public class GateService {
         checks.add(check("no_straight_quote", text.contains("\"") ? 1 : 0, 0, 0, noStraightQuote));
 
         List<String> hits = new ArrayList<>();
-        for (String phrase : BANNED) {
+        for (String phrase : bannedPhrases(gateCfg)) {
             if (text.contains(phrase)) hits.add(phrase);
         }
         checks.add(check("banned_phrases", hits.size(), 0, 0, hits.isEmpty()));
@@ -74,7 +76,7 @@ public class GateService {
 
         checks.add(check("no_straight_quote", text.contains("\"") ? 1 : 0, 0, 0, !text.contains("\"")));
         List<String> hits = new ArrayList<>();
-        for (String phrase : BANNED) {
+        for (String phrase : bannedPhrases(gateConfig(novelId))) {
             if (text.contains(phrase)) hits.add(phrase);
         }
         checks.add(check("banned_phrases", hits.size(), 0, 0, hits.isEmpty()));
@@ -138,6 +140,28 @@ public class GateService {
             checks.add(check(key, value, rule.get("value"), rule.get("abs_max"), ok));
         }
         return checks;
+    }
+
+    /** 门禁配置（黑名单等）：读风格包 gate_config；无则用代码兜底。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> gateConfig(long novelId) {
+        String json = stylePackDAO.findGateConfigByNovel(novelId);
+        if (json == null || json.isBlank()) return Map.of();
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> bannedPhrases(Map<String, Object> gateCfg) {
+        Object v = gateCfg.get("banned_phrases");
+        return v instanceof List ? (List<String>) v : BANNED_FALLBACK;
+    }
+
+    private static double configDouble(Map<String, Object> cfg, String key, double fallback) {
+        return cfg.get(key) instanceof Number n ? n.doubleValue() : fallback;
     }
 
     /** 指标的场景级上限：读指纹 baseline（abs_max 优先，否则 基线*(1+容差)）；未配置用兜底值。 */
