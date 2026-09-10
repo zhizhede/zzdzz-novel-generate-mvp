@@ -42,6 +42,22 @@ public class ForeshadowDAO {
                 novelId, code, content, plantedIn, recoveredIn);
     }
 
+    /** 素材库人工修正：内容/埋设回收章/状态。 */
+    public void update(long id, String content, Integer plantedIn, Integer recoveredIn, String status) {
+        jdbc.update("""
+                UPDATE foreshadows SET content=?, planted_in=?, recovered_in=?, status=?, update_time=NOW()
+                WHERE id=? AND is_deleted=false
+                """, content, plantedIn, recoveredIn, status, id);
+    }
+
+    public ForeshadowDO findById(long id) {
+        List<ForeshadowDO> rows = jdbc.query("""
+                SELECT id, novel_id, code, content, planted_in, recovered_in, status, is_deleted
+                FROM foreshadows WHERE id=? AND is_deleted=false
+                """, MAPPER, id);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     /** 本章需埋设或需回收的伏笔指令 */
     public List<String> findDirectives(long novelId, int chapterNo) {
         return jdbc.queryForList("""

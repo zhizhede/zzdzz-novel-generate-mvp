@@ -33,6 +33,14 @@ public class StylePackDAO {
                 fingerprint, id);
     }
 
+    /** 素材库人工修订：直改风格包规则正文（指纹不动，阈值仍由 fingerprint 驱动）。 */
+    public void updateRulesMdByNovel(long novelId, String rulesMd) {
+        jdbc.update("""
+                UPDATE style_packs sp SET rules_md=?, update_time=NOW()
+                FROM novels n WHERE n.style_pack_id = sp.id AND n.id = ?
+                """, rulesMd, novelId);
+    }
+
     public String findRulesMdByNovel(long novelId) {
         return jdbc.queryForObject("""
                 SELECT sp.rules_md FROM style_packs sp

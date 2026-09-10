@@ -48,6 +48,22 @@ public class CanonDocDAO {
                 """, MAPPER, novelId);
     }
 
+    public Long findId(long novelId, String kind, String name) {
+        List<Long> rows = jdbc.query(
+                "SELECT id FROM canon_docs WHERE novel_id=? AND kind=? AND name=? AND is_deleted=false",
+                (rs, i) -> rs.getLong(1), novelId, kind, name);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /** 指定 kind+name 的文档内容（如 misc/大纲），无则 null。 */
+    public String findContentByKindName(long novelId, String kind, String name) {
+        List<String> rows = jdbc.query("""
+                SELECT content FROM canon_docs
+                WHERE novel_id=? AND kind=? AND name=? AND is_deleted=false LIMIT 1
+                """, (rs, i) -> rs.getString(1), novelId, kind, name);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     public CanonDocDO findById(long id) {
         List<CanonDocDO> rows = jdbc.query("""
                 SELECT id, novel_id, kind, name, content, sort_no, is_deleted
@@ -59,5 +75,10 @@ public class CanonDocDAO {
     public void updateContent(long id, String content) {
         jdbc.update("UPDATE canon_docs SET content=?, update_time=NOW() WHERE id=? AND is_deleted=false",
                 content, id);
+    }
+
+    public void softDelete(long id) {
+        jdbc.update("UPDATE canon_docs SET is_deleted=true, delete_time=NOW() WHERE id=? AND is_deleted=false",
+                id);
     }
 }
