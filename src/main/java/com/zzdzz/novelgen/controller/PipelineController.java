@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.PipelineRunDTO;
 import com.zzdzz.novelgen.model.vo.PipelineStatusVO;
 import com.zzdzz.novelgen.service.ChapterPipelineService;
+import com.zzdzz.novelgen.service.PipelineSseService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,9 +19,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class PipelineController {
 
     private final ChapterPipelineService pipelineService;
+    private final PipelineSseService sseService;
 
-    public PipelineController(ChapterPipelineService pipelineService) {
+    public PipelineController(ChapterPipelineService pipelineService, PipelineSseService sseService) {
         this.pipelineService = pipelineService;
+        this.sseService = sseService;
     }
 
     @PostMapping("/run")
@@ -39,5 +42,11 @@ public class PipelineController {
     public Result<PipelineStatusVO> status() {
         var s = pipelineService.status();
         return Result.ok(new PipelineStatusVO(s.running(), s.lastMessage()));
+    }
+
+    /** 管线进度 SSE 流：进程事件 + 场景文本块级推送（前端 EventSource 订阅）。 */
+    @GetMapping(value = "/stream", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter stream() {
+        return sseService.register();
     }
 }
