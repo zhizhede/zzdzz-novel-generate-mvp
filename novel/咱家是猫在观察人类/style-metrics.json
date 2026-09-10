@@ -1,0 +1,68 @@
+{
+  "source": "咱家是猫，在观察人类 (28章全文)",
+  "computed_at": "2026-09-11",
+  "metrics": {
+    "corpus_cjk": 141195,
+    "line_avg_len": 38.5,
+    "dialogue_density_per1k": 12.51,
+    "dunhao_per1k": 3.73,
+    "dash_per1k": 10.56,
+    "ellipsis_per1k": 0.91,
+    "exclam_per1k": 1.13,
+    "digit_per1k": 0.2,
+    "tic_laizhe_per1k": 0.0,
+    "tic_shunbian_per1k": 0.04,
+    "tic_haiyou_per1k": 0.42,
+    "dialogue_end_punct_ratio": 0.912
+  },
+  "baseline": {
+    "line_avg_len": {
+      "value": 38.5,
+      "tolerance": 0.6
+    },
+    "dialogue_density_per1k": {
+      "value": 12.51,
+      "tolerance": 0.6
+    },
+    "dunhao_per1k": {
+      "value": 3.73,
+      "tolerance": 0.6,
+      "abs_max": 6.71
+    },
+    "dash_per1k": {
+      "value": 10.56,
+      "tolerance": 0.6,
+      "abs_max": 19.01
+    },
+    "ellipsis_per1k": {
+      "value": 0.91,
+      "tolerance": 0.6
+    },
+    "exclam_per1k": {
+      "value": 1.13,
+      "tolerance": 0.6,
+      "abs_max": 2.03
+    },
+    "digit_per1k": {
+      "value": 0.2,
+      "tolerance": 0.6,
+      "abs_max": 12.0
+    },
+    "tic_laizhe_per1k": {
+      "value": 0.0,
+      "tolerance": 0.6
+    },
+    "tic_shunbian_per1k": {
+      "value": 0.04,
+      "tolerance": 0.6
+    },
+    "tic_haiyou_per1k": {
+      "value": 0.42,
+      "tolerance": 0.6
+    },
+    "dialogue_end_punct_ratio": {
+      "value": 0.912,
+      "tolerance": 0.6
+    }
+  }
+}

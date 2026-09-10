@@ -1,0 +1,68 @@
+# 《夜班守则》 · 全本卷纲
+# 这是作品级规划（人写）。每章的"场景级章纲"由 AI 依据本文件+前情生成，人工可改。
+# schema 对齐管线章纲节点输入：volumes[].chapters[] → {no,title,goal,hook,rule_refs,foreshadow_refs}
+
+novel: 夜班守则
+genre: 规则怪谈
+total_chapters: 30
+chapter_default:
+  budget_min: 2400
+  budget_max: 3200
+  scene_count: 2-3
+  hook_cycle: [悬念, 危机, 信息, 爽点]
+  emotion_cycle: [冷, 热]
+
+volumes:
+  - num: 1
+    title: 入职
+    range: [1, 8]
+    goal: 建立店、守则、生存日常；主角从被动守则到第一次主动利用规则
+    chapters:
+      - {num: 1, title: 深夜入职, goal: 面试即上岗的便利店夜班；交接只靠留言；拿到缺角的守则；第一条规则当晚生效, hook: 悬念, rule_refs: [1], foreshadow_refs: [F2]}
+      - {num: 2, title: 看日期, goal: 两点后的顾客绕货架而行；员工柜里出现前任留言条，日期是明天, hook: 信息, rule_refs: [1, 2], foreshadow_refs: [F5]}
+      - {num: 3, title: 只补不取, goal: 冰柜最里层的货永远不少；买关东煮的老伯付了找不开的钱, hook: 悬念, rule_refs: [3, 9], foreshadow_refs: [F3]}
+      - {num: 4, title: 星期几, goal: 自称店长的来电；主角用第四条规则反问脱险——第一次尝到守规则的甜头, hook: 爽点, rule_refs: [4]}
+      - {num: 5, title: 多一个人, goal: 调监控找涨薪邮件来源，发现监控里员工永远多一个；数影子的守则救命, hook: 危机, rule_refs: [5], foreshadow_refs: [F4]}
+      - {num: 6, title: 不要应答, goal: 整点收音机多报一条新闻；夜里广播念到"江述"，他咬住没应, hook: 危机, rule_refs: [6], foreshadow_refs: [F6]}
+      - {num: 7, title: 转移话题, goal: 苏晚第一次问夜班细节；第七条生效；常客备忘录的字迹对不上, hook: 信息, rule_refs: [7], foreshadow_refs: [F1]}
+      - {num: 8, title: 以守则为准, goal: 群发"店长通知"要求违规上货，守则第八条成为武器——第一次主动利用规则反杀, hook: 爽点, rule_refs: [3, 8]}
+
+  - num: 2
+    title: 常客
+    range: [9, 16]
+    goal: 常客怪谈单元展开；苏晚疑云；中点转折——守则会害死人，规则不是护身符是锁链
+    chapters:
+      - {num: 9, title: 只收硬币, goal: 凌晨三点后的顾客与硬币；老伯每周来一次，买同一种关东煮, hook: 信息, rule_refs: [9]}
+      - {num: 10, title: 归还原位, goal: 员工柜里出现温故的私人物品，拼出前任夜班员的人生, hook: 信息, rule_refs: [2, 10], foreshadow_refs: [F5]}
+      - {num: 11, title: 看他的鞋, goal: 雨夜外卖员敲响没有外卖业务的店；鞋是干的, hook: 危机, rule_refs: [11]}
+      - {num: 12, title: 立即施救, goal: 受伤的顾客闯进店，救人是守则也是陷阱——第一次为救人破例流程, hook: 危机, rule_refs: [12, 13]}
+      - {num: 13, title: 正常得过分, goal: 白天观察苏晚：微笑循环键、从不下班；再问夜班，他再转移话题，她的反应不对, hook: 悬念, rule_refs: [7], foreshadow_refs: [F1]}
+      - {num: 14, title: 没有离开过, goal: 监控回放确认：苏晚从未在夜里走出店门——第一章就不打招呼的原因, hook: 信息, foreshadow_refs: [F1]}
+      - {num: 15, title: 以守则为准的代价, goal: 守则与救人冲突，死守规则差点害死人——中点转折：规则是锁链, hook: 危机, rule_refs: [12]}
+      - {num: 16, title: 对面的公交站, goal: 三天没客人后整条街"醒"了；马路对面多了不该存在的公交站——「外面」露头, hook: 悬念, foreshadow_refs: [F3]}
+
+  - num: 3
+    title: 温故
+    range: [17, 24]
+    goal: 揭示店的存在意义与守则来历；温故显形结盟；店长正面出现，主角跌入低谷
+    chapters:
+      - {num: 17, title: 供货, goal: 冰柜最里层=「外面」的补给；店是喂「外面」的柜台, hook: 信息, rule_refs: [3], foreshadow_refs: [F3]}
+      - {num: 18, title: 讣告, goal: 多报的新闻是"多出来的人"的讣告；名单上有温故的名字, hook: 悬念, rule_refs: [6], foreshadow_refs: [F6]}
+      - {num: 19, title: 不肯出来, goal: 温故显形却拒绝离开员工柜——"出来，就要接第零条", hook: 信息}
+      - {num: 20, title: 缺角的一页, goal: 守则末页撕痕=第零条；守则是历任夜班员用命改写过的幸存者手册, hook: 信息, foreshadow_refs: [F2]}
+      - {num: 21, title: 总部来电, goal: 「公司」第一次直接来电；星期几的陷阱被反向利用, hook: 爽点, rule_refs: [4]}
+      - {num: 22, title: 卡在明天, goal: 温故的时间状态揭晓：他停在交接的那个"明天"；他知道第零条写的是什么, hook: 信息, foreshadow_refs: [F5]}
+      - {num: 23, title: 模板人, goal: 苏晚真相：被替换的"合格员工"；她倒戈，因为温故——倒戈代价是暴露, hook: 危机, foreshadow_refs: [F1]}
+      - {num: 24, title: 转身, goal: 店长在监控里转过身来——没有脸，只有工牌；硬刚失败，温故的后手救命, hook: 危机, foreshadow_refs: [F4]}
+
+  - num: 4
+    title: 第零条
+    range: [25, 30]
+    goal: 从守规则到改写规则；揭开「欢迎光临」真义；结算与续作钩子
+    chapters:
+      - {num: 25, title: 重写守则, goal: 主角理解守则=生存经验+公司枷锁；三人分工重写守则, hook: 信息}
+      - {num: 26, title: 工牌上的名字, goal: 店长=第一个夜班员，规则的具象；他与温故是同源的两种结局, hook: 信息, foreshadow_refs: [F4]}
+      - {num: 27, title: 积分清零, goal: 会员卡积分=记忆/寿命；主角差点被"兑换"，苏晚出手, hook: 危机, foreshadow_refs: [F7]}
+      - {num: 28, title: 第零条, goal: 「欢迎光临」是对"货"说的——开店的就是货本身；天亮前的问候是喂养仪式, hook: 悬念}
+      - {num: 29, title: 改写第零条, goal: 终局：不逃了——改写第零条，让店为活着的人服务；把「外面」喂回它自己的世界, hook: 爽点, rule_refs: [13]}
+      - {num: 30, title: 新守则, goal: 第一个普通的早晨，苏晚第一次说"辛苦了"；城市另一角，又一家店的灯亮了——续作钩子, hook: 悬念}

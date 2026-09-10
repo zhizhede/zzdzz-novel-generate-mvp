@@ -1,4 +1,4 @@
-package com.zzdzz.novelgen.smoke;
+package com.zzdzz.novelgen.runner;
 
 import com.zzdzz.novelgen.llm.LlmPort;
 import org.slf4j.Logger;
