@@ -1,6 +1,8 @@
 package com.zzdzz.novelgen.dao;
 
+import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -9,10 +11,23 @@ import java.util.List;
 @Repository
 public class ForeshadowDAO {
 
+    private static final RowMapper<ForeshadowDO> MAPPER = (rs, i) -> new ForeshadowDO(
+            rs.getLong("id"), rs.getLong("novel_id"), rs.getString("code"), rs.getString("content"),
+            (Integer) rs.getObject("planted_in"), (Integer) rs.getObject("recovered_in"),
+            rs.getString("status"), rs.getBoolean("is_deleted"));
+
     private final JdbcTemplate jdbc;
 
     public ForeshadowDAO(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+    }
+
+    /** 素材库：全部伏笔及状态。 */
+    public List<ForeshadowDO> listByNovel(long novelId) {
+        return jdbc.query("""
+                SELECT id, novel_id, code, content, planted_in, recovered_in, status, is_deleted
+                FROM foreshadows WHERE novel_id=? AND is_deleted=false ORDER BY code
+                """, MAPPER, novelId);
     }
 
     public boolean exists(long novelId, String code) {
