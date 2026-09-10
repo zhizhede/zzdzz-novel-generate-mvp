@@ -40,6 +40,16 @@ public class GateReportDAO {
                 + "ORDER BY id DESC LIMIT 1", String.class, chapterId);
     }
 
+    /** 指定场景最新失败报告：场景重写意见必须对号入座。 */
+    public String findLatestSceneFailureJson(long chapterId, long sceneId) {
+        List<String> rows = jdbc.query("""
+                SELECT result::text FROM gate_reports
+                WHERE chapter_id=? AND scene_id=? AND gate_type='mechanical' AND passed=false
+                ORDER BY id DESC LIMIT 1
+                """, (rs, i) -> rs.getString(1), chapterId, sceneId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     /** 章级最新报告行（passed/create_time 是列值，result 是 JSON 文本，供 service 组装 VO）。 */
     public record LatestChapterReport(boolean passed, java.time.OffsetDateTime createTime, String resultJson) {
     }

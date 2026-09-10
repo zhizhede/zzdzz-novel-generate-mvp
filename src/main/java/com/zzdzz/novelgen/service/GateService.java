@@ -90,8 +90,8 @@ public class GateService {
         checks.add(check("exclam_per1k", exclam, 0, 2.0, exclam <= 2.0));
         checks.add(check("digit_per1k", digit, 0, digitMax, digit <= digitMax));
         checks.add(check("dialogue_end_punct_ratio", endPunct, 0, endPunctMax, endPunct <= endPunctMax));
-        // 对话密度是手搓风最大的杠杆，场景级就要盯（宽界：基线 ±60%）
-        checks.add(check("dialogue_density_per1k", dlg, 7.6, 30.2, dlg >= 7.6 && dlg <= 30.2));
+        // 对话密度：场景级只防灌水（上界）；低界留章级——叙事型场景天然低对话，几百字样本下界误杀
+        checks.add(check("dialogue_density_per1k", dlg, null, 30.2, dlg <= 30.2));
 
         boolean passed = checks.stream().allMatch(c -> (Boolean) c.get("ok"));
         gateReportDAO.insert(chapterId, sceneId, "mechanical", 0, passed,
@@ -101,6 +101,11 @@ public class GateService {
 
     public String failureSummary(long chapterId) {
         return gateReportDAO.findLatestFailureJson(chapterId);
+    }
+
+    /** 场景级失败意见：只取该场景自己的最新失败报告。 */
+    public String failureSummary(long chapterId, long sceneId) {
+        return gateReportDAO.findLatestSceneFailureJson(chapterId, sceneId);
     }
 
     /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance。 */
