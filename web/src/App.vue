@@ -8,6 +8,7 @@
       <el-menu :default-active="$route.path" router>
         <el-menu-item index="/">工作台</el-menu-item>
         <el-menu-item index="/chapters">章节</el-menu-item>
+        <el-menu-item index="/planning">规划</el-menu-item>
         <el-menu-item index="/library">素材库</el-menu-item>
         <el-menu-item index="/logs">调用台账</el-menu-item>
       </el-menu>

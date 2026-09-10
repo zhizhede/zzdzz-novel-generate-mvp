@@ -3,7 +3,7 @@
     <h2>小说生成平台</h2>
     <el-form @submit.prevent>
       <el-form-item><el-input v-model="username" placeholder="用户名" /></el-form-item>
-      <el-form-item><el-input v-model="password" type="password" placeholder="密码" show-password /></el-form-item>
+      <el-form-item><el-input v-model="password" type="password" placeholder="密码" show-password @keyup.enter="login" /></el-form-item>
       <el-button type="primary" style="width: 100%" :loading="loading" @click="login">登录</el-button>
     </el-form>
   </div>

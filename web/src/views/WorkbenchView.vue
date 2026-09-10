@@ -4,7 +4,10 @@
 
     <el-card shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
-        <span>作品：<b>{{ novel?.title || '-' }}</b>（共 {{ novel?.chapterCount || 0 }} 章）</span>
+        <el-select v-model="novelId" style="width: 240px" @change="onNovelChange">
+          <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
+        </el-select>
+        <span>共 {{ novel?.chapterCount || 0 }} 章</span>
         <span>审批模式：
           <el-switch v-model="manual" active-text="人工" inactive-text="自动" @change="switchMode" />
         </span>
@@ -44,8 +47,11 @@
 import { onMounted, onUnmounted, ref, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 
 const novel = ref(null)
+const novels = ref([])
+const novelId = ref(null)
 const manual = ref(false)
 const from = ref(2)
 const to = ref(2)
@@ -130,10 +136,17 @@ async function pollStatus() {
   } catch { /* 忽略轮询错误 */ }
 }
 
+function onNovelChange() {
+  novel.value = novels.value.find((n) => n.id === novelId.value) || null
+  setSelectedNovelId(novelId.value)
+  manual.value = novel.value?.approvalMode === 'manual'
+}
+
 onMounted(async () => {
-  const novels = await api.get('/api/novels')
-  novel.value = novels[0] || null
-  if (novel.value) manual.value = novel.value.approvalMode === 'manual'
+  novels.value = await api.get('/api/novels')
+  novelId.value = getSelectedNovelId() ?? novels.value[0]?.id
+  if (!novels.value.some((n) => n.id === novelId.value)) novelId.value = novels.value[0]?.id
+  onNovelChange()
   connect()
   pollStatus()
   poll = setInterval(pollStatus, 3000)

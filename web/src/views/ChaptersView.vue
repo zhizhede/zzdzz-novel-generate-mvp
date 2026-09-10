@@ -1,6 +1,11 @@
 <template>
   <div>
-    <h3>章节</h3>
+    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 6px">
+      <h3 style="margin: 0">章节</h3>
+      <el-select v-model="novelId" style="width: 260px" @change="() => { setSelectedNovelId(novelId); loadChapters() }">
+        <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
+      </el-select>
+    </div>
     <el-table :data="chapters" border size="small" @row-click="open" style="cursor: pointer">
       <el-table-column prop="chapterNo" label="章" width="60" />
       <el-table-column prop="title" label="标题" min-width="160" />
@@ -20,6 +25,8 @@
             LLM：{{ detail.llmTotals.calls }} 次调用 / {{ detail.llmTotals.totalTokens }} tokens / 平均 {{ detail.llmTotals.avgLatencyMs }}ms
           </span>
           <el-button v-if="detail.status === 'PENDING_APPROVAL'" type="success" size="small" @click="approve">通过审批</el-button>
+          <el-button v-if="detail.status === 'FAILED'" type="warning" size="small" @click="rerunChapter">重新生成本章</el-button>
+          <el-button v-if="detail.fullText" size="small" plain @click="copyText">复制正文</el-button>
         </div>
 
         <el-tabs>
@@ -57,12 +64,34 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 
 const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', GATE_MECHANICAL: '' }
 
 const chapters = ref([])
+const novels = ref([])
+const novelId = ref(null)
 const detail = ref(null)
 const drawer = ref(false)
+
+async function loadChapters() {
+  chapters.value = await api.get(`/api/novels/${novelId.value}/chapters`)
+}
+
+async function rerunChapter() {
+  const novel = novels.value.find((n) => n.id === novelId.value)
+  try {
+    await api.post('/api/pipeline/run', { novel: novel.title, from: detail.value.chapterNo, to: detail.value.chapterNo })
+    ElMessage.success('已加入生成，进度见工作台')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function copyText() {
+  await navigator.clipboard.writeText(detail.value.fullText || '')
+  ElMessage.success('正文已复制')
+}
 
 async function open(row) {
   detail.value = await api.get(`/api/chapters/${row.id}`)
@@ -80,7 +109,9 @@ async function approve() {
 }
 
 onMounted(async () => {
-  const novels = await api.get('/api/novels')
-  chapters.value = await api.get(`/api/novels/${novels[0].id}/chapters`)
+  novels.value = await api.get('/api/novels')
+  novelId.value = getSelectedNovelId() ?? novels.value[0]?.id
+  if (!novels.value.some((n) => n.id === novelId.value)) novelId.value = novels.value[0]?.id
+  await loadChapters()
 })
 </script>

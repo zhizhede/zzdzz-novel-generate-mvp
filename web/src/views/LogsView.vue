@@ -1,6 +1,14 @@
 <template>
   <div>
     <h3>调用台账</h3>
+    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+      <span style="font-size: 13px; color: #666">筛选：</span>
+      <el-select v-model="novelId" placeholder="全部作品" clearable size="small" style="width: 220px" @change="load">
+        <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
+      </el-select>
+      <el-input-number v-model="chapterId" :min="1" size="small" placeholder="章ID" controls-position="right" style="width: 130px" />
+      <el-button size="small" @click="load">查询</el-button>
+    </div>
     <el-card shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; gap: 24px; font-size: 14px">
         <span>调用：<b>{{ totals.calls }}</b> 次</span>
@@ -58,12 +66,23 @@ const size = 20
 const totals = ref({})
 const detail = ref(null)
 const drawer = ref(false)
+const novels = ref([])
+const novelId = ref(null)
+const chapterId = ref(null)
+
+function filterQuery() {
+  const q = new URLSearchParams()
+  if (novelId.value != null) q.set('novelId', novelId.value)
+  if (chapterId.value != null) q.set('chapterId', chapterId.value)
+  return q.toString()
+}
 
 async function load() {
-  const p = await api.get(`/api/llm-logs?page=${page.value}&size=${size}`)
+  const f = filterQuery()
+  const p = await api.get(`/api/llm-logs?page=${page.value}&size=${size}${f ? '&' + f : ''}`)
   items.value = p.items
   total.value = p.total
-  totals.value = await api.get('/api/llm-logs/totals')
+  totals.value = await api.get(`/api/llm-logs/totals${f ? '?' + f : ''}`)
 }
 
 async function open(row) {
@@ -71,5 +90,8 @@ async function open(row) {
   drawer.value = true
 }
 
-onMounted(load)
+onMounted(async () => {
+  novels.value = await api.get('/api/novels')
+  await load()
+})
 </script>
