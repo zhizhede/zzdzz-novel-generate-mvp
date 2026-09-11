@@ -28,13 +28,14 @@
           <el-button v-if="detail.status === 'FAILED'" type="warning" size="small" @click="rerunChapter">重新生成本章</el-button>
           <el-button v-if="detail.fullText" size="small" plain @click="copyText">复制正文</el-button>
           <el-button v-if="detail.fullText" size="small" type="primary" plain @click="reader = true">阅读模式</el-button>
+          <el-button v-if="detail.fullText" size="small" type="warning" plain :loading="reviewing" @click="runReview">AI 审校</el-button>
         </div>
 
         <el-tabs v-model="activeTab">
-          <el-tab-pane label="正文">
+          <el-tab-pane label="正文" name="text">
             <div style="white-space: pre-wrap; line-height: 1.9">{{ detail.fullText || '（尚未生成）' }}</div>
           </el-tab-pane>
-          <el-tab-pane :label="`场景（${detail.scenes.length}）`">
+          <el-tab-pane :label="`场景（${detail.scenes.length}）`" name="scenes">
             <div v-for="s in detail.scenes" :key="s.id" style="margin-bottom: 14px">
               <div style="font-size: 12px; color: #999; margin-bottom: 4px">
                 场景 {{ s.sceneNo }}｜{{ s.gateStatus }}｜改写 {{ s.revisionRound }} 次｜目标：{{ s.goal }}
@@ -42,7 +43,7 @@
               <div style="white-space: pre-wrap; border-left: 3px solid #eee; padding-left: 10px">{{ s.draftText }}</div>
             </div>
           </el-tab-pane>
-          <el-tab-pane :label="`门禁（${detail.gateReport ? (detail.gateReport.passed ? '通过' : '未过') : '无'}）`">
+          <el-tab-pane :label="`门禁（${detail.gateReport ? (detail.gateReport.passed ? '通过' : '未过') : '无'}）`" name="gates">
             <el-table v-if="detail.gateReport" :data="detail.gateReport.checks" border size="small">
               <el-table-column prop="check" label="指标" width="200" />
               <el-table-column prop="value" label="实测" width="100" />
@@ -54,6 +55,34 @@
                 </template>
               </el-table-column>
             </el-table>
+          </el-tab-pane>
+          <el-tab-pane :label="`审校（${reviewLabel}）`" name="review">
+            <div v-if="!detail.review" style="color: #999; font-size: 13px">
+              尚未审校。点击上方「AI 审校」对当前正文跑一次语义审校（连续性/逻辑/错字/格式）。
+            </div>
+            <template v-else>
+              <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center">
+                <el-tag size="small" :type="VERDICT_COLOR[detail.review.verdict] || 'info'">
+                  {{ VERDICT_TEXT[detail.review.verdict] || detail.review.verdict }}
+                </el-tag>
+                <span style="font-size: 12px; color: #999">{{ detail.review.createTime }}</span>
+              </div>
+              <div style="font-size: 13px; margin-bottom: 12px">{{ detail.review.summary }}</div>
+              <el-table v-if="detail.review.issues.length" :data="detail.review.issues" border size="small">
+                <el-table-column prop="type" label="类型" width="110" />
+                <el-table-column label="严重度" width="90">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.severity === 'blocker' ? 'danger' : 'warning'">
+                      {{ row.severity === 'blocker' ? '严重' : '轻微' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="quote" label="原句" min-width="180" />
+                <el-table-column prop="explanation" label="问题" min-width="160" />
+                <el-table-column prop="suggestion" label="建议" min-width="160" />
+              </el-table>
+              <div v-else style="color: #999; font-size: 13px">无问题条目。</div>
+            </template>
           </el-tab-pane>
         </el-tabs>
       </template>
@@ -72,12 +101,14 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 
-const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', GATE_MECHANICAL: '' }
+const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', GATE_MECHANICAL: '', GATE_AI_REVIEW: 'warning' }
+const VERDICT_TEXT = { pass: '通过', minor: '轻微', blocker: '严重', skipped: '跳过' }
+const VERDICT_COLOR = { pass: 'success', minor: 'warning', blocker: 'danger', skipped: 'info' }
 
 const chapters = ref([])
 const novels = ref([])
@@ -86,6 +117,12 @@ const detail = ref(null)
 const drawer = ref(false)
 const reader = ref(false)
 const activeTab = ref('text')
+const reviewing = ref(false)
+
+const reviewLabel = computed(() => {
+  const r = detail.value?.review
+  return r ? (VERDICT_TEXT[r.verdict] || r.verdict) : '未审'
+})
 
 async function loadChapters() {
   chapters.value = await api.get(`/api/novels/${novelId.value}/chapters`)
@@ -98,6 +135,20 @@ async function rerunChapter() {
     ElMessage.success('已加入生成，进度见工作台')
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+async function runReview() {
+  reviewing.value = true
+  try {
+    await api.post(`/api/chapters/${detail.value.id}/review`)
+    detail.value = await api.get(`/api/chapters/${detail.value.id}`)
+    activeTab.value = 'review'
+    ElMessage.success('审校完成')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    reviewing.value = false
   }
 }
 

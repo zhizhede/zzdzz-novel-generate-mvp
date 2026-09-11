@@ -67,7 +67,7 @@ let poll = null
 const COLORS = {
   run: '#909399', chapter: '#409eff', outline: '#67c23a', scene: '#303133',
   gate: '#e6a23c', assemble: '#909399', chapter_gate: '#67c23a',
-  revise: '#e6a23c', digest: '#67c23a', approve: '#e6a23c'
+  revise: '#e6a23c', review: '#e6a23c', digest: '#67c23a', approve: '#e6a23c'
 }
 
 function log(event, data) {
@@ -82,8 +82,13 @@ function log(event, data) {
   else if (event === 'assemble') text += `拼章完成（${d.chars} 字符），章级门禁检测中`
   else if (event === 'chapter_gate') text += `章级门禁${d.passed ? '通过' : '未过'}`
   else if (event === 'revise') text += `修订轮 ${d.phase}${d.chars ? '（' + d.chars + ' 字符）' : ''}`
+  else if (event === 'review') {
+    if (d.phase === 'start') text += 'AI 语义审校中'
+    else if (d.phase === 'done') text += `审校完成：${d.verdict}${d.blocked ? '，转人工审批' : ''}`
+    else text += `审校异常，跳过（${d.message || 'fail-open'}）`
+  }
   else if (event === 'digest') text += `事实账落库`
-  else if (event === 'approve') text += `待人工审批`
+  else if (event === 'approve') text += `待人工审批${d.reason === 'review_blocker' ? '（审校硬伤未清）' : ''}`
   logs.value.push({ text, color: COLORS[event] || '#303133' })
   scrollLog()
   if (event === 'run') running.value = d.phase === 'start'
@@ -104,7 +109,7 @@ function scrollLog() {
 
 function connect() {
   es = new EventSource('/api/pipeline/stream')
-  for (const ev of ['run', 'chapter', 'outline', 'scene', 'gate', 'assemble', 'chapter_gate', 'revise', 'digest', 'approve']) {
+  for (const ev of ['run', 'chapter', 'outline', 'scene', 'gate', 'assemble', 'chapter_gate', 'revise', 'review', 'digest', 'approve']) {
     es.addEventListener(ev, (e) => log(ev, e.data))
   }
   es.onerror = () => { /* 断线后 EventSource 自动重连 */ }
