@@ -67,15 +67,31 @@ public class ChapterPipelineService {
                 stage, String.valueOf(data.getOrDefault("phase", "")), data);
     }
 
-    /** 连跑 [from, to] 章；返回通过章数。任一章失败/异常即停止（状态保留，断点重跑）。 */
+    /** 进度回调：队列服务据此回写任务进度；shouldStop 支持运行中协作取消（章与章之间检查）。 */
+    public interface ProgressSink {
+        void onProgress(int doneChapters, int nextChapter, String message);
+
+        boolean shouldStop();
+    }
+
+    /** 兼容旧入口：按作品标题连跑，无进度回调。 */
     public int runChapters(String novelTitle, int from, int to) {
         Long novelId = novelDAO.findIdByTitle(novelTitle);
         if (novelId == null) throw new IllegalStateException("作品不存在: " + novelTitle);
+        return runChapters(novelId, novelTitle, from, to, null);
+    }
+
+    /** 连跑 [from, to] 章；返回通过章数。任一章失败/异常即停止（状态保留，断点重跑）。 */
+    public int runChapters(long novelId, String novelTitle, int from, int to, ProgressSink sink) {
         String mode = novelDAO.findApprovalMode(novelId);
         log.info("连跑开始 {} 第 {}–{} 章（审批模式 {}）", novelTitle, from, to, mode);
 
         int okChapters = 0;
         for (int no = from; no <= to; no++) {
+            if (sink != null && sink.shouldStop()) {
+                log.warn("连跑被取消（已完成 {} 章）", okChapters);
+                break;
+            }
             long t0 = System.currentTimeMillis();
             try {
                 if (runChapter(novelId, no, mode)) {
@@ -90,53 +106,15 @@ public class ChapterPipelineService {
                 chapterDAO.updateStatusByNo(novelId, no, "FAILED");
                 break;
             }
+            if (sink != null) {
+                sink.onProgress(okChapters, Math.min(no + 1, to), "第 " + no + " 章完成");
+            }
         }
         log.info("连跑结束：{}/{} 章通过", okChapters, to - from + 1);
         return okChapters;
     }
 
-    // ===== Web 触发：单线程后台执行 + 状态查询 =====
-
-    private final java.util.concurrent.atomic.AtomicBoolean running =
-            new java.util.concurrent.atomic.AtomicBoolean(false);
-    private volatile String lastMessage = "尚未运行";
-    private final java.util.concurrent.ExecutorService pipelineExecutor =
-            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
-                Thread t = new Thread(r, "pipeline-runner");
-                t.setDaemon(true);
-                return t;
-            });
-
-    /** 异步连跑；已有任务在跑时返回 false（由调用方转 409）。 */
-    public boolean tryRunAsync(String novelTitle, int from, int to) {
-        if (!running.compareAndSet(false, true)) {
-            return false;
-        }
-        lastMessage = "运行中：" + novelTitle + " 第 " + from + "–" + to + " 章";
-        Long novelId = novelDAO.findIdByTitle(novelTitle);
-        emit(novelId, "run", Map.of("phase", "start", "novel", novelTitle, "from", from, "to", to));
-        pipelineExecutor.submit(() -> {
-            try {
-                int ok = runChapters(novelTitle, from, to);
-                lastMessage = "完成：通过 " + ok + " 章";
-                emit(novelId, "run", Map.of("phase", "done", "passed", ok, "total", to - from + 1));
-            } catch (Exception e) {
-                lastMessage = "异常：" + e.getMessage();
-                emit(novelId, "run", Map.of("phase", "error", "message", String.valueOf(e.getMessage())));
-            } finally {
-                running.set(false);
-            }
-        });
-        return true;
-    }
-
-    public PipelineStatus status() {
-        return new PipelineStatus(running.get(), lastMessage);
-    }
-
-    /** 管线运行状态（内部模型）。 */
-    public record PipelineStatus(boolean running, String lastMessage) {
-    }
+    // ===== Web 触发已迁移至 GenerationQueueService（DB 队列 + 单 worker 异步执行） =====
 
     /** 强制重出章纲：清掉旧场景与门禁报告，按当前卷纲目标/大纲/前情重新生成场景拆解（同步调用，约 1-2 分钟）。 */
     public List<OutlineService.SceneSpec> regenerateOutline(long novelId, int chapterNo) {
@@ -159,11 +137,6 @@ public class ChapterPipelineService {
         }
         digestService.digest(ch.novelId(), ch.id(), ch.chapterNo(), ch.fullText());
         chapterDAO.updateStatus(ch.id(), "APPROVED");
-    }
-
-    @jakarta.annotation.PreDestroy
-    void shutdown() {
-        pipelineExecutor.shutdownNow();
     }
 
     /** 模型偶发把章题当正文首行（无 # 前缀，cleanDraft 剥不掉）：拼章与修订后各剥一次。 */
