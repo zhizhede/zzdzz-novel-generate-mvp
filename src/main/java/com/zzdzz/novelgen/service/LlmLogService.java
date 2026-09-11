@@ -5,24 +5,29 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.dao.LlmCallLogDAO;
+import com.zzdzz.novelgen.dao.PipelineEventDAO;
 import com.zzdzz.novelgen.model.entity.LlmCallLogDO;
 import com.zzdzz.novelgen.model.vo.LlmLogDetailVO;
 import com.zzdzz.novelgen.model.vo.LlmLogVO;
 import com.zzdzz.novelgen.model.vo.LlmTotalsVO;
 import com.zzdzz.novelgen.model.vo.PageVO;
+import com.zzdzz.novelgen.model.vo.PipelineEventVO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/** LLM 调用台账查询：分页列表 + think/正文分区详情。 */
+/** LLM 调用台账查询：分页列表 + think/正文分区详情 + 管线事件流水。 */
 @Service
 public class LlmLogService {
 
     private final LlmCallLogDAO llmCallLogDAO;
+    private final PipelineEventDAO pipelineEventDAO;
     private final ObjectMapper mapper;
 
-    public LlmLogService(LlmCallLogDAO llmCallLogDAO, ObjectMapper mapper) {
+    public LlmLogService(LlmCallLogDAO llmCallLogDAO, PipelineEventDAO pipelineEventDAO,
+                         ObjectMapper mapper) {
         this.llmCallLogDAO = llmCallLogDAO;
+        this.pipelineEventDAO = pipelineEventDAO;
         this.mapper = mapper;
     }
 
@@ -43,6 +48,14 @@ public class LlmLogService {
         LlmCallLogDAO.Totals t = llmCallLogDAO.totalsBy(novelId, chapterId);
         return new LlmTotalsVO(t.calls(), t.promptTokens(), t.completionTokens(),
                 t.totalTokens(), t.avgLatencyMs());
+    }
+
+    /** 事件流水：按作品（可选章号）倒序取最近 N 条，时间在 UI 反转展示。 */
+    public List<PipelineEventVO> events(Long novelId, Integer chapterNo, int limit) {
+        return pipelineEventDAO.list(novelId, chapterNo, Math.min(Math.max(1, limit), 500)).stream()
+                .map(e -> new PipelineEventVO(e.id(), novelId, e.chapterNo(), e.stage(), e.phase(),
+                        e.payloadJson(), e.createTime()))
+                .toList();
     }
 
     public LlmLogDetailVO detail(long id) {

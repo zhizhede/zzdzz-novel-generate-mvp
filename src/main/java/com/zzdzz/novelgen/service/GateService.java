@@ -114,6 +114,41 @@ public class GateService {
         return gateReportDAO.findLatestSceneFailureJson(chapterId, sceneId);
     }
 
+    /** 失败指标人话摘要（事件流水用）：「dialogue_density_per1k=3.92（基线12.51）」。无失败返回空串。 */
+    public String failedChecksText(long chapterId) {
+        return failedChecksText(gateReportDAO.findLatestFailureJson(chapterId));
+    }
+
+    public String failedChecksText(long chapterId, long sceneId) {
+        return failedChecksText(gateReportDAO.findLatestSceneFailureJson(chapterId, sceneId));
+    }
+
+    @SuppressWarnings("unchecked")
+    private String failedChecksText(String failureJson) {
+        if (failureJson == null) {
+            return "";
+        }
+        try {
+            Map<String, Object> result = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(failureJson, Map.class);
+            StringBuilder sb = new StringBuilder();
+            for (Object o : (List<?>) result.getOrDefault("checks", List.of())) {
+                Map<String, Object> c = (Map<String, Object>) o;
+                if (Boolean.TRUE.equals(c.get("ok"))) {
+                    continue;
+                }
+                if (sb.length() > 0) {
+                    sb.append("；");
+                }
+                sb.append(c.get("check")).append('=').append(c.get("value"))
+                        .append("（基线").append(c.get("baseline")).append('）');
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance。 */
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> fingerprintChecks(Map<String, Object> base,
