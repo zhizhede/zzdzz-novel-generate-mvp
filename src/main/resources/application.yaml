@@ -13,6 +13,10 @@ spring:
     locations: classpath:db/migration
 
 novelgen:
+  auth:
+    # 开发兜底密钥；本地/生产用 application-local.yaml 或环境变量覆盖（HS256 需 ≥32 字节）
+    jwt-secret: ${NOVELGEN_AUTH_JWT_SECRET:dev-only-secret-please-override-in-local-yaml-0123456789}
+    ttl-days: 7
   llm:
     base-url: ${NOVELGEN_LLM_BASE_URL:https://api.minimaxi.com/v1}
     api-key: ${NOVELGEN_LLM_API_KEY:}

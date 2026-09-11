@@ -5,13 +5,12 @@ import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.dao.UserDAO;
 import com.zzdzz.novelgen.model.dto.LoginDTO;
 import com.zzdzz.novelgen.model.entity.UserDO;
-import com.zzdzz.novelgen.model.vo.LoginVO;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
-/** 登录鉴权：会话型（HttpSession），密码哈希 = sha256(username:password)，与种子 SQL 口径一致。 */
+/** 登录鉴权：无状态 JWT（签发在 AuthController），密码哈希 = sha256(username:password)，与种子 SQL 口径一致。 */
 @Service
 public class AuthService {
 
@@ -21,7 +20,11 @@ public class AuthService {
         this.userDAO = userDAO;
     }
 
-    public LoginVO login(LoginDTO dto, jakarta.servlet.http.HttpSession session) {
+    /** 认证通过的用户（id/username/role），供签发 JWT。 */
+    public record LoginUser(long id, String username, String role) {
+    }
+
+    public LoginUser authenticate(LoginDTO dto) {
         if (dto == null || isBlank(dto.username()) || isBlank(dto.password())) {
             throw new BizException(ErrorCode.PARAM_ERROR, "用户名和密码不能为空");
         }
@@ -30,10 +33,7 @@ public class AuthService {
         if (user == null || !hash.equals(user.passwordHash())) {
             throw new BizException(ErrorCode.LOGIN_FAILED, "用户名或密码错误");
         }
-        session.setAttribute(com.zzdzz.novelgen.common.web.AuthInterceptor.SESSION_USER_ID, user.id());
-        session.setAttribute(com.zzdzz.novelgen.common.web.AuthInterceptor.SESSION_USERNAME, user.username());
-        session.setAttribute(com.zzdzz.novelgen.common.web.AuthInterceptor.SESSION_ROLE, user.role());
-        return new LoginVO(user.username(), user.role());
+        return new LoginUser(user.id(), user.username(), user.role());
     }
 
     private static boolean isBlank(String s) {
