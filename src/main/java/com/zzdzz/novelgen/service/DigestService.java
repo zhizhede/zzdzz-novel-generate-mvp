@@ -8,6 +8,7 @@ import com.zzdzz.novelgen.dao.DigestDAO;
 import com.zzdzz.novelgen.dao.ForeshadowDAO;
 import com.zzdzz.novelgen.dao.WorldStateDAO;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -63,11 +64,14 @@ public class DigestService {
                         你是事实账记录员。把章节压缩成供后续章节续写使用的事实账，只输出 JSON：
                         {"summary_md":"300字以内的md：谁做了什么/信息揭示/情绪落点/章末钩子",
                          "facts":["一条一句的硬事实（人名、物件、承诺、时间线变化）"],
-                         %s}
+                         %s,
+                         "new_threads":[{"name":"三到六字短名","content":"一句话：这条新长线是什么、为何值得跨章追踪"}]}
                         字符串值内部禁止使用英文双引号，引用一律用「」。
                         summary_md 不要包含任何标题行，直接从摘要正文开始。
+                        new_threads 只提议真正的长线（需要多章才能回收的谜、承诺、关系变化），本章内已解决的不提；
+                        与已有伏笔账本同义的不提；最多 2 条；没有就给空数组。
                         """.strip().formatted(STATE_SPEC)),
-                        LlmPort.Message.user(fullText)), 0.3));
+                        LlmPort.Message.user(digestUserPrompt(novelId, chapterId, fullText))), 0.3));
         String candidate = lenientJson(r.content());
         JsonNode node;
         try {
@@ -88,10 +92,54 @@ public class DigestService {
             worldStateDAO.upsert(novelId, chapterNo, state);
             log.info("第 {} 章世界状态快照落库", chapterNo);
         }
+        proposeThreads(novelId, chapterNo, node.path("new_threads"));
         foreshadowDAO.markPlanted(novelId, chapterNo);
         foreshadowDAO.markRecovered(novelId, chapterNo);
         chapterDAO.updateStatus(chapterId, "DIGESTED");
         log.info("第 {} 章事实账落库（{} tokens）", chapterNo, r.usage().totalTokens());
+    }
+
+    /** digest 用户提示：时间锚点 + 已有伏笔账本（防同义重复提议）+ 本章全文。 */
+    private String digestUserPrompt(long novelId, long chapterId, String fullText) {
+        StringBuilder sb = new StringBuilder();
+        chapterDAO.findById(chapterId).ifPresent(ch -> {
+            if (ch.timeNote() != null && !ch.timeNote().isBlank()) {
+                sb.append("【时间锚点】本章距上一章：").append(ch.timeNote())
+                        .append("（state.time 必须体现该推进）\n\n");
+            }
+        });
+        List<ForeshadowDO> existing = foreshadowDAO.listByNovel(novelId);
+        if (!existing.isEmpty()) {
+            sb.append("【已有伏笔账本（同义勿重复提议）】\n");
+            for (ForeshadowDO f : existing) {
+                sb.append(f.code()).append('（').append(f.status()).append('）').append(f.content()).append('\n');
+            }
+            sb.append('\n');
+        }
+        sb.append("【本章全文】\n").append(fullText);
+        return sb.toString();
+    }
+
+    /** 自动提议落库：status='proposed'，等素材库人工采纳（→planned）或忽略（→dropped）。 */
+    private void proposeThreads(long novelId, int chapterNo, JsonNode threads) {
+        if (!threads.isArray() || threads.isEmpty()) {
+            return;
+        }
+        int added = 0;
+        for (JsonNode t : threads) {
+            String name = t.path("name").asText("").strip();
+            String content = t.path("content").asText("").strip();
+            if (name.isBlank() || content.isBlank()) continue;
+            String full = name + "：" + content;
+            if (foreshadowDAO.contentExists(novelId, full) || foreshadowDAO.contentExists(novelId, content)) {
+                continue;
+            }
+            foreshadowDAO.insertProposal(novelId, foreshadowDAO.nextCode(novelId), full, chapterNo);
+            added++;
+        }
+        if (added > 0) {
+            log.info("第 {} 章自动提议 {} 条新伏笔（PROPOSED，待人工采纳）", chapterNo, added);
+        }
     }
 
     /** 存量回填：只产出世界状态快照，不动事实账（轻量调用，逐章触发）。 */

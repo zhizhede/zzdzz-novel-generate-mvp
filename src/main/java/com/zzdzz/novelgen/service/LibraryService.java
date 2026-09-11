@@ -20,7 +20,7 @@ import java.util.Set;
 public class LibraryService {
 
     private static final Set<String> CANON_KINDS = Set.of("world", "character", "misc");
-    private static final Set<String> FORESHADOW_STATUSES = Set.of("planned", "planted", "recovered", "dropped");
+    private static final Set<String> FORESHADOW_STATUSES = Set.of("proposed", "planned", "planted", "recovered", "dropped");
 
     private final CanonDocDAO canonDocDAO;
     private final ForeshadowDAO foreshadowDAO;

@@ -14,7 +14,7 @@ public class ForeshadowDAO {
     private static final RowMapper<ForeshadowDO> MAPPER = (rs, i) -> new ForeshadowDO(
             rs.getLong("id"), rs.getLong("novel_id"), rs.getString("code"), rs.getString("content"),
             (Integer) rs.getObject("planted_in"), (Integer) rs.getObject("recovered_in"),
-            rs.getString("status"), rs.getBoolean("is_deleted"));
+            (Integer) rs.getObject("proposed_in"), rs.getString("status"), rs.getBoolean("is_deleted"));
 
     private final JdbcTemplate jdbc;
 
@@ -25,7 +25,7 @@ public class ForeshadowDAO {
     /** 素材库：全部伏笔及状态。 */
     public List<ForeshadowDO> listByNovel(long novelId) {
         return jdbc.query("""
-                SELECT id, novel_id, code, content, planted_in, recovered_in, status, is_deleted
+                SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
                 FROM foreshadows WHERE novel_id=? AND is_deleted=false ORDER BY code
                 """, MAPPER, novelId);
     }
@@ -52,10 +52,34 @@ public class ForeshadowDAO {
 
     public ForeshadowDO findById(long id) {
         List<ForeshadowDO> rows = jdbc.query("""
-                SELECT id, novel_id, code, content, planted_in, recovered_in, status, is_deleted
+                SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
                 FROM foreshadows WHERE id=? AND is_deleted=false
                 """, MAPPER, id);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /** digest 自动提议：status='proposed'，planted/recovered 留空待人工采纳后编排。 */
+    public void insertProposal(long novelId, String code, String content, int proposedIn) {
+        jdbc.update("""
+                INSERT INTO foreshadows (novel_id, code, content, proposed_in, status)
+                VALUES (?, ?, ?, ?, 'proposed')
+                """, novelId, code, content, proposedIn);
+    }
+
+    public boolean contentExists(long novelId, String content) {
+        Long count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM foreshadows WHERE novel_id=? AND content=? AND is_deleted=false",
+                Long.class, novelId, content);
+        return count != null && count > 0;
+    }
+
+    /** 下一个可用编号：沿用 F1、F2… 序列。 */
+    public String nextCode(long novelId) {
+        Integer max = jdbc.queryForObject("""
+                SELECT COALESCE(MAX(SUBSTRING(code FROM 2)::INT), 0) FROM foreshadows
+                WHERE novel_id=? AND is_deleted=false AND code ~ '^F[0-9]+$'
+                """, Integer.class, novelId);
+        return "F" + ((max == null ? 0 : max) + 1);
     }
 
     /** 本章需埋设或需回收的伏笔指令 */

@@ -34,21 +34,31 @@
 
       <!-- 伏笔 -->
       <el-tab-pane :label="`伏笔账本（${foreshadows.length}）`">
-        <el-table :data="foreshadows" border size="small" style="max-width: 860px">
+        <div v-if="foreshadows.some((f) => f.status === 'proposed')" style="margin-bottom: 8px; font-size: 12px; color: #e6a23c">
+          有 AI 自动提议的新伏笔待处理——采纳后进入埋设编排，忽略则弃用
+        </div>
+        <el-table :data="foreshadows" border size="small" style="max-width: 900px">
           <el-table-column prop="code" label="编号" width="70" />
           <el-table-column prop="content" label="内容" min-width="280" show-overflow-tooltip />
           <el-table-column prop="plantedIn" label="埋设章" width="80" />
           <el-table-column prop="recoveredIn" label="回收章" width="80" />
+          <el-table-column prop="proposedIn" label="提议章" width="80">
+            <template #default="{ row }">{{ row.proposedIn || '-' }}</template>
+          </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
-              <el-tag size="small" :type="{ planned: 'info', planted: 'warning', recovered: 'success', dropped: 'danger' }[row.status]">
-                {{ { planned: '计划', planted: '已埋', recovered: '已收', dropped: '弃用' }[row.status] }}
+              <el-tag size="small" :type="{ proposed: 'warning', planned: 'info', planted: 'warning', recovered: 'success', dropped: 'danger' }[row.status]">
+                {{ { proposed: '待采纳', planned: '计划', planted: '已埋', recovered: '已收', dropped: '弃用' }[row.status] }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="80">
+          <el-table-column label="操作" width="200">
             <template #default="{ row }">
-              <el-button size="small" @click="openForeshadow(row)">修正</el-button>
+              <template v-if="row.status === 'proposed'">
+                <el-button size="small" type="success" plain @click="setForeshadowStatus(row, 'planned')">采纳</el-button>
+                <el-button size="small" type="info" plain @click="setForeshadowStatus(row, 'dropped')">忽略</el-button>
+              </template>
+              <el-button v-else size="small" @click="openForeshadow(row)">修正</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -300,6 +310,21 @@ async function removeCanon(row) {
 function openForeshadow(row) {
   editing.value = { ...row }
   foreshadowEditor.value = true
+}
+
+async function setForeshadowStatus(row, status) {
+  try {
+    await api.put(`/api/foreshadows/${row.id}`, {
+      content: row.content,
+      plantedIn: row.plantedIn,
+      recoveredIn: row.recoveredIn,
+      status
+    })
+    ElMessage.success(status === 'planned' ? '已采纳，进入埋设编排' : '已忽略')
+    await loadAll()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 async function saveForeshadow() {
