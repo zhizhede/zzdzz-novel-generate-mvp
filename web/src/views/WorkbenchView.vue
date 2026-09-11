@@ -21,6 +21,39 @@
       </div>
     </el-card>
 
+    <el-card shadow="never" style="margin-bottom: 12px" header="生成队列（异步执行，逐章回写进度）">
+      <el-table v-if="queue.length" :data="queue" border size="small">
+        <el-table-column prop="id" label="#" width="50" />
+        <el-table-column prop="novelTitle" label="作品" width="150" show-overflow-tooltip />
+        <el-table-column label="范围" width="80">
+          <template #default="{ row }">{{ row.fromChapter }}-{{ row.toChapter }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :type="TASK_COLOR[row.status] || 'info'">{{ TASK_TEXT[row.status] || row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="进度" min-width="170">
+          <template #default="{ row }">
+            <el-progress :percentage="Math.round(row.doneChapters / row.totalChapters * 100)"
+              :stroke-width="10" :format="() => `${row.doneChapters}/${row.totalChapters}`" />
+          </template>
+        </el-table-column>
+        <el-table-column label="当前章" width="70">
+          <template #default="{ row }">{{ row.status === 'RUNNING' ? (row.currentChapter ?? '-') : '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="lastMessage" label="消息" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="createTime" label="提交时间" width="110" />
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }">
+            <el-button v-if="row.status === 'QUEUED' || row.status === 'RUNNING'" size="small" type="danger"
+              plain @click="cancelTask(row)">取消</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else description="队列为空：点「启动生成」加入队列" :image-size="50" />
+    </el-card>
+
     <el-row :gutter="12">
       <el-col :span="10">
         <el-card shadow="never" header="生成进程（实时）">
@@ -58,6 +91,9 @@ const from = ref(2)
 const to = ref(2)
 const running = ref(false)
 const lastMessage = ref('')
+const queue = ref([])
+const TASK_TEXT = { QUEUED: '排队中', RUNNING: '生成中', DONE: '完成', STOPPED: '已停止', CANCELED: '已取消' }
+const TASK_COLOR = { QUEUED: 'info', RUNNING: 'warning', DONE: 'success', STOPPED: 'danger', CANCELED: 'info' }
 const logs = ref([])
 const scenes = ref([])
 const logBox = ref(null)
@@ -74,7 +110,14 @@ function log(event, data) {
   const d = typeof data === 'string' ? JSON.parse(data) : data
   let text = `[${event}] `
   if (d.chapterNo !== undefined) text += `第${d.chapterNo}章 `
-  if (event === 'run') text += d.phase === 'start' ? `连跑 ${d.from}-${d.to} 开始` : `连跑结束（通过 ${d.passed ?? 0} 章）${d.message || ''}`
+  if (event === 'run') {
+    if (d.phase === 'queued') text += `任务 #${d.taskId} 入队：${d.novel} 第 ${d.from}-${d.to} 章`
+    else if (d.phase === 'start') text += `任务 #${d.taskId} 开始执行`
+    else if (d.phase === 'done') text += `任务 #${d.taskId} 全部完成`
+    else if (d.phase === 'stopped') text += `任务 #${d.taskId} 停止：${d.message || ''}`
+    else if (d.phase === 'canceled') text += `任务 #${d.taskId} 已取消`
+    else text += `任务异常：${d.message || ''}`
+  }
   else if (event === 'chapter') text += d.phase === 'start' ? `《${d.title}》开始` : d.phase === 'done' ? `完成（${d.chars} 字符）` : `失败：${d.reason}`
   else if (event === 'outline') text += `章纲 ${d.phase}${d.sceneCount ? '，' + d.sceneCount + ' 个场景' : ''}`
   else if (event === 'scene') text += `场景 ${d.sceneNo} ${d.phase}`
@@ -128,7 +171,24 @@ async function run() {
   try {
     await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value })
     scenes.value = []
-    ElMessage.success('已启动，实时进度见下方')
+    ElMessage.success('已加入生成队列，进度见上方队列面板')
+    await loadQueue()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function loadQueue() {
+  try {
+    queue.value = await api.get('/api/pipeline/queue')
+  } catch { /* 忽略轮询错误 */ }
+}
+
+async function cancelTask(row) {
+  try {
+    await api.post(`/api/pipeline/queue/${row.id}/cancel`)
+    ElMessage.success(row.status === 'RUNNING' ? '取消请求已受理，当前章完成后生效' : '已取消排队任务')
+    await loadQueue()
   } catch (e) {
     ElMessage.error(e.message)
   }
@@ -139,6 +199,7 @@ async function pollStatus() {
     const s = await api.get('/api/pipeline/status')
     running.value = s.running
     lastMessage.value = s.lastMessage
+    await loadQueue()
   } catch { /* 忽略轮询错误 */ }
 }
 
