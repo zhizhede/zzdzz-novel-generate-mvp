@@ -63,4 +63,18 @@ public class GateReportDAO {
                 rs.getObject(2, java.time.OffsetDateTime.class), rs.getString(3)), chapterId);
         return rows.isEmpty() ? null : rows.get(0);
     }
+
+    /** 章级最新 AI 审校报告（gate_type='ai_review'，与机械门禁查询互不干扰）。 */
+    public record LatestReview(boolean passed, java.time.OffsetDateTime createTime, String resultJson) {
+    }
+
+    public LatestReview findLatestChapterReview(long chapterId) {
+        List<LatestReview> rows = jdbc.query("""
+                SELECT passed, create_time, result::text FROM gate_reports
+                WHERE chapter_id=? AND scene_id IS NULL AND gate_type='ai_review'
+                ORDER BY id DESC LIMIT 1
+                """, (rs, i) -> new LatestReview(rs.getBoolean(1),
+                rs.getObject(2, java.time.OffsetDateTime.class), rs.getString(3)), chapterId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
 }

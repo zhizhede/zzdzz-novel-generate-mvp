@@ -13,6 +13,7 @@ import com.zzdzz.novelgen.model.vo.ChapterDetailVO;
 import com.zzdzz.novelgen.model.vo.ChapterListItemVO;
 import com.zzdzz.novelgen.model.vo.GateReportVO;
 import com.zzdzz.novelgen.model.vo.LlmTotalsVO;
+import com.zzdzz.novelgen.model.vo.ReviewVO;
 import com.zzdzz.novelgen.model.vo.SceneVO;
 import org.springframework.stereotype.Service;
 
@@ -54,7 +55,8 @@ public class ChapterQueryService {
                 .toList();
         return new ChapterDetailVO(ch.id(), ch.chapterNo(), ch.title(), ch.status(), ch.round(),
                 ch.budgetMin(), ch.budgetMax(), ch.fullText(), scenes,
-                latestGateReport(chapterId), toTotalsVO(llmCallLogDAO.totalsBy(null, chapterId)));
+                latestGateReport(chapterId), latestReview(chapterId),
+                toTotalsVO(llmCallLogDAO.totalsBy(null, chapterId)));
     }
 
     private GateReportVO latestGateReport(long chapterId) {
@@ -71,6 +73,29 @@ public class ChapterQueryService {
                     checks);
         } catch (Exception e) {
             throw new IllegalStateException("门禁报告不可解析", e);
+        }
+    }
+
+    /** 最新 AI 审校报告 → VO（skipped 的报告也如实透出）。审校未跑过返回 null。 */
+    public ReviewVO latestReview(long chapterId) {
+        GateReportDAO.LatestReview row = gateReportDAO.findLatestChapterReview(chapterId);
+        if (row == null) return null;
+        String time = row.createTime().format(
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        try {
+            JsonNode node = mapper.readTree(row.resultJson());
+            if (node.has("skipped")) {
+                return new ReviewVO(true, "skipped", time, "审校输出解析失败，本轮跳过", List.of());
+            }
+            List<java.util.Map<String, Object>> issues = mapper.convertValue(
+                    node.path("issues"),
+                    new com.fasterxml.jackson.core.type.TypeReference<List<java.util.Map<String, Object>>>() {
+                    });
+            String verdict = node.path("verdict").asText("");
+            return new ReviewVO(!"blocker".equals(verdict), verdict, time,
+                    node.path("summary").asText(""), issues);
+        } catch (Exception e) {
+            throw new IllegalStateException("审校报告不可解析", e);
         }
     }
 

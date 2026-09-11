@@ -3,8 +3,10 @@ package com.zzdzz.novelgen.controller;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.vo.ChapterDetailVO;
 import com.zzdzz.novelgen.model.vo.ChapterListItemVO;
+import com.zzdzz.novelgen.model.vo.ReviewVO;
 import com.zzdzz.novelgen.service.ChapterQueryService;
 import com.zzdzz.novelgen.service.ChapterPipelineService;
+import com.zzdzz.novelgen.service.ReviewService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,18 +15,21 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** 章查询与人工审批。 */
+/** 章查询、AI 审校触发与人工审批。 */
 @RestController
 @RequestMapping("/api")
 public class ChapterController {
 
     private final ChapterQueryService chapterQueryService;
     private final ChapterPipelineService pipelineService;
+    private final ReviewService reviewService;
 
     public ChapterController(ChapterQueryService chapterQueryService,
-                             ChapterPipelineService pipelineService) {
+                             ChapterPipelineService pipelineService,
+                             ReviewService reviewService) {
         this.chapterQueryService = chapterQueryService;
         this.pipelineService = pipelineService;
+        this.reviewService = reviewService;
     }
 
     @GetMapping("/novels/{novelId}/chapters")
@@ -41,5 +46,12 @@ public class ChapterController {
     public Result<Void> approve(@PathVariable long id) {
         pipelineService.approve(id);
         return Result.ok();
+    }
+
+    /** 对已有正文的章立即跑一次 AI 审校（回溯/人工触发），只落报告不动正文与状态。 */
+    @PostMapping("/chapters/{id}/review")
+    public Result<ReviewVO> review(@PathVariable long id) {
+        reviewService.reviewExisting(id);
+        return Result.ok(chapterQueryService.latestReview(id));
     }
 }

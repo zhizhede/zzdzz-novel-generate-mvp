@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
 
 /**
  * 单章管线编排：AI 章纲 → 逐场景生成（场景门禁，失败带意见重写 1 次）→ 拼章 → 章级门禁
- * → 审批（auto 直过 / manual 停在 PENDING_APPROVAL）→ digest。
+ * → AI 语义审校（BLOCKER 带清单修订一轮+复审，复审不过转人工）→ 审批（auto 直过 / manual 停在 PENDING_APPROVAL）→ digest。
  * 场景级缓存：已物化章纲/已过门禁场景的章可断点续跑。
  */
 @Service
@@ -33,6 +33,7 @@ public class ChapterPipelineService {
     private final SceneService sceneService;
     private final GateService gateService;
     private final DigestService digestService;
+    private final ReviewService reviewService;
     private final LlmPort llm;
     private final PipelineSseService sse;
 
@@ -40,7 +41,7 @@ public class ChapterPipelineService {
                                   SceneDAO sceneDAO, OutlineService outlineService,
                                   ContextPackerService packer, SceneService sceneService,
                                   GateService gateService, DigestService digestService,
-                                  LlmPort llm, PipelineSseService sse) {
+                                  ReviewService reviewService, LlmPort llm, PipelineSseService sse) {
         this.novelDAO = novelDAO;
         this.chapterDAO = chapterDAO;
         this.sceneDAO = sceneDAO;
@@ -49,6 +50,7 @@ public class ChapterPipelineService {
         this.sceneService = sceneService;
         this.gateService = gateService;
         this.digestService = digestService;
+        this.reviewService = reviewService;
         this.llm = llm;
         this.sse = sse;
     }
@@ -156,6 +158,19 @@ public class ChapterPipelineService {
         pipelineExecutor.shutdownNow();
     }
 
+    /** 模型偶发把章题当正文首行（无 # 前缀，cleanDraft 剥不掉）：拼章与修订后各剥一次。 */
+    static String stripTitleLine(String fullText, String title) {
+        if (fullText == null || fullText.isBlank() || title == null || title.isBlank()) {
+            return fullText;
+        }
+        String[] parts = fullText.split("\n", 2);
+        String first = parts[0].strip();
+        if (first.equals(title) || first.replaceAll("[。．.!！?？]", "").equals(title)) {
+            return parts.length > 1 ? parts[1].strip() : "";
+        }
+        return fullText;
+    }
+
     /** 章级机械门禁未过时的修订轮：外科手术式——只修被点名的指标，不动情节与分行节奏。 */
     private String reviseChapter(long novelId, ChapterDO ch, String fullText) {
         String feedback = gateService.failureSummary(ch.id());
@@ -245,7 +260,7 @@ public class ChapterPipelineService {
         // 3) 拼章 + 章级门禁（未过带意见修订一轮，复检通过才放行）
         StringJoiner joiner = new StringJoiner("\n\n");
         sceneDAO.findPassedDrafts(ch.id()).forEach(joiner::add);
-        String fullText = joiner.toString();
+        String fullText = stripTitleLine(joiner.toString(), ch.title());
         chapterDAO.saveFullText(ch.id(), fullText);
         chapterDAO.updateStatus(ch.id(), "GATE_MECHANICAL");
         emit("assemble", Map.of("chapterNo", chapterNo, "chars", fullText.length()));
@@ -270,7 +285,7 @@ public class ChapterPipelineService {
                     chapterDAO.updateStatus(ch.id(), "FAILED");
                     return false;
                 }
-                fullText = revised;
+                fullText = stripTitleLine(revised, ch.title());
                 emit("revise", Map.of("chapterNo", chapterNo, "phase", "done", "chars", fullText.length()));
                 chapterDAO.saveFullText(ch.id(), fullText);
                 if (!gateService.checkChapter(novelId, ch.id(), chapterNo, fullText, ch.budgetMin(), ch.budgetMax())) {
@@ -282,6 +297,34 @@ public class ChapterPipelineService {
             }
         }
         emit("chapter_gate", Map.of("chapterNo", chapterNo, "passed", true));
+
+        // 3.5) AI 语义审校（连续性/逻辑/错字）；BLOCKER 带清单修订一轮并复审。
+        // 审校调用异常同样 fail-open——机械门禁已过的正文不能因审校故障而废。
+        chapterDAO.updateStatus(ch.id(), "GATE_AI_REVIEW");
+        emit("review", Map.of("chapterNo", chapterNo, "phase", "start"));
+        ReviewService.Outcome review;
+        try {
+            review = reviewService.reviewAndFix(novelId, ch, fullText);
+        } catch (Exception e) {
+            log.warn("第 {} 章审校调用异常，fail-open 放行：{}", chapterNo, e.getMessage());
+            emit("review", Map.of("chapterNo", chapterNo, "phase", "error",
+                    "message", String.valueOf(e.getMessage())));
+            review = new ReviewService.Outcome(null, "skipped", false);
+        }
+        if (review.revised() != null) {
+            fullText = review.revised();
+            chapterDAO.saveFullText(ch.id(), fullText);
+            emit("revise", Map.of("chapterNo", chapterNo, "phase", "review_fix", "chars", fullText.length()));
+        }
+        emit("review", Map.of("chapterNo", chapterNo, "phase", "done",
+                "verdict", review.verdict(), "blocked", review.blocked()));
+        if (review.blocked()) {
+            // auto 模式也不过稿：审校硬伤未清，转人工看报告定夺
+            log.warn("第 {} 章审校复审仍 BLOCKER，转人工审批", chapterNo);
+            chapterDAO.updateStatus(ch.id(), "PENDING_APPROVAL");
+            emit("approve", Map.of("chapterNo", chapterNo, "phase", "pending", "reason", "review_blocker"));
+            return true;
+        }
 
         // 4) 审批（auto 直过；manual 停在 PENDING_APPROVAL 等人）
         if ("manual".equals(approvalMode)) {
