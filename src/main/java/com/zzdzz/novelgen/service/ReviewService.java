@@ -133,6 +133,8 @@ public class ReviewService {
         StringBuilder sb = new StringBuilder();
         sb.append("【世界设定与大纲】\n").append(packer.world(novelId)).append("\n\n");
         sb.append("【人物卡】\n").append(packer.characters(novelId)).append("\n\n");
+        String ws = packer.worldState(novelId, ch.chapterNo());
+        sb.append("【世界状态（上一章结束时）】\n").append(ws == null ? "（无）" : ws).append("\n\n");
         sb.append("【近章事实账】\n");
         if (digests.isEmpty()) sb.append("（无）\n");
         digests.forEach(d -> sb.append("---\n").append(d).append('\n'));

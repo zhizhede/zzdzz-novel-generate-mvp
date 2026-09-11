@@ -2,8 +2,10 @@ package com.zzdzz.novelgen.controller;
 
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.dao.DigestDAO;
+import com.zzdzz.novelgen.dao.WorldStateDAO;
 import com.zzdzz.novelgen.model.entity.CanonDocDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.LibraryService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,20 +14,23 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
 
-/** 素材库：正典文档（增删改）/ 伏笔账本（修正）/ 事实账（修正）/ 风格包（规则正文修订）。 */
+/** 素材库：正典文档（增删改）/ 伏笔账本（修正）/ 事实账（修正）/ 风格包（规则正文修订）/ 世界状态账（查看纠偏回填）。 */
 @RestController
 @RequestMapping("/api")
 public class LibraryController {
 
     private final LibraryService libraryService;
+    private final DigestService digestService;
 
-    public LibraryController(LibraryService libraryService) {
+    public LibraryController(LibraryService libraryService, DigestService digestService) {
         this.libraryService = libraryService;
+        this.digestService = digestService;
     }
 
     // ===== 正典 =====
@@ -103,6 +108,29 @@ public class LibraryController {
     @PutMapping("/novels/{novelId}/gate-config")
     public Result<Void> updateGateConfig(@PathVariable long novelId, @RequestBody Map<String, String> body) {
         libraryService.updateGateConfig(novelId, body.get("gateConfig"));
+        return Result.ok();
+    }
+
+    // ===== 世界状态账 =====
+
+    @GetMapping("/novels/{novelId}/world-states")
+    public Result<List<WorldStateDAO.StateRow>> worldStates(@PathVariable long novelId,
+                                                            @RequestParam(defaultValue = "50") int limit) {
+        return Result.ok(libraryService.listWorldStates(novelId, limit));
+    }
+
+    /** 人工纠偏某章快照：body.state 为 JSON 字符串。 */
+    @PutMapping("/novels/{novelId}/world-states/{chapterNo}")
+    public Result<Void> saveWorldState(@PathVariable long novelId, @PathVariable int chapterNo,
+                                       @RequestBody Map<String, String> body) {
+        libraryService.saveWorldState(novelId, chapterNo, body.get("state"));
+        return Result.ok();
+    }
+
+    /** 存量回填：对已有正文但无快照的章做一次轻量状态抽取（同步，约 30-60 秒/章）。 */
+    @PostMapping("/novels/{novelId}/world-states/backfill/{chapterNo}")
+    public Result<Void> backfillWorldState(@PathVariable long novelId, @PathVariable int chapterNo) {
+        digestService.backfillState(novelId, chapterNo);
         return Result.ok();
     }
 }

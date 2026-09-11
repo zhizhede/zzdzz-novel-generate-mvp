@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.dao.CanonDocDAO;
 import com.zzdzz.novelgen.dao.DigestDAO;
 import com.zzdzz.novelgen.dao.ForeshadowDAO;
 import com.zzdzz.novelgen.dao.StylePackDAO;
+import com.zzdzz.novelgen.dao.WorldStateDAO;
 import com.zzdzz.novelgen.model.entity.CanonDocDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.springframework.stereotype.Service;
@@ -25,15 +26,18 @@ public class LibraryService {
     private final ForeshadowDAO foreshadowDAO;
     private final StylePackDAO stylePackDAO;
     private final DigestDAO digestDAO;
+    private final WorldStateDAO worldStateDAO;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
     public LibraryService(CanonDocDAO canonDocDAO, ForeshadowDAO foreshadowDAO,
                           StylePackDAO stylePackDAO, DigestDAO digestDAO,
+                          WorldStateDAO worldStateDAO,
                           com.fasterxml.jackson.databind.ObjectMapper mapper) {
         this.canonDocDAO = canonDocDAO;
         this.foreshadowDAO = foreshadowDAO;
         this.stylePackDAO = stylePackDAO;
         this.digestDAO = digestDAO;
+        this.worldStateDAO = worldStateDAO;
         this.mapper = mapper;
     }
 
@@ -98,6 +102,27 @@ public class LibraryService {
     public void updateDigest(long id, String contentMd, String factsJson) {
         requireText(contentMd, "摘要不能为空");
         digestDAO.updateContent(id, contentMd, factsJson == null || factsJson.isBlank() ? "[]" : factsJson);
+    }
+
+    // ===== 世界状态账 =====
+
+    public List<WorldStateDAO.StateRow> listWorldStates(long novelId, int limit) {
+        return worldStateDAO.listByNovel(novelId, limit);
+    }
+
+    /** 人工纠偏某章快照：必须是可解析 JSON 对象。 */
+    public void saveWorldState(long novelId, int chapterNo, String stateJson) {
+        requireText(stateJson, "状态不能为空");
+        try {
+            if (!mapper.readTree(stateJson).isObject()) {
+                throw new IllegalArgumentException("不是 JSON 对象");
+            }
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "状态必须是合法 JSON 对象");
+        }
+        worldStateDAO.updateByChapter(novelId, chapterNo, stateJson);
     }
 
     // ===== 风格包 =====

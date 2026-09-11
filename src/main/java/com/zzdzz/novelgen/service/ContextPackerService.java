@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.dao.ChapterDAO;
 import com.zzdzz.novelgen.dao.DigestDAO;
 import com.zzdzz.novelgen.dao.ForeshadowDAO;
 import com.zzdzz.novelgen.dao.StylePackDAO;
+import com.zzdzz.novelgen.dao.WorldStateDAO;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -38,17 +39,20 @@ public class ContextPackerService {
     private final DigestDAO digestDAO;
     private final ForeshadowDAO foreshadowDAO;
     private final ChapterDAO chapterDAO;
+    private final WorldStateDAO worldStateDAO;
 
     public ContextPackerService(StylePackDAO stylePackDAO,
                                 CanonDocDAO canonDocDAO,
                                 DigestDAO digestDAO,
                                 ForeshadowDAO foreshadowDAO,
-                                ChapterDAO chapterDAO) {
+                                ChapterDAO chapterDAO,
+                                WorldStateDAO worldStateDAO) {
         this.stylePackDAO = stylePackDAO;
         this.canonDocDAO = canonDocDAO;
         this.digestDAO = digestDAO;
         this.foreshadowDAO = foreshadowDAO;
         this.chapterDAO = chapterDAO;
+        this.worldStateDAO = worldStateDAO;
     }
 
     public record Pack(String system, String user) {}
@@ -90,6 +94,40 @@ public class ContextPackerService {
         return foreshadowDAO.findDirectives(novelId, chapterNo);
     }
 
+    /** 世界状态快照（上一章结束时）格式化为紧凑清单；无则 null。写错时素材库可人工纠偏。 */
+    public String worldState(long novelId, int chapterNo) {
+        String json = worldStateDAO.findLatestBefore(novelId, chapterNo);
+        if (json == null) return null;
+        try {
+            com.fasterxml.jackson.databind.JsonNode n =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+            StringBuilder sb = new StringBuilder();
+            if (n.hasNonNull("time") && !n.get("time").asText().isBlank()) {
+                sb.append("时间：").append(n.get("time").asText()).append('\n');
+            }
+            appendEntries(sb, "位置", n.get("locations"));
+            appendEntries(sb, "随身物品", n.get("possessions"));
+            appendEntries(sb, "新承诺", n.get("new_promises"));
+            appendEntries(sb, "未解", n.get("unresolved"));
+            return sb.isEmpty() ? null : sb.toString().strip();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void appendEntries(StringBuilder sb, String label, com.fasterxml.jackson.databind.JsonNode node) {
+        if (node == null || !node.isContainerNode() || node.isEmpty()) return;
+        sb.append(label).append('：');
+        if (node.isArray()) {
+            for (com.fasterxml.jackson.databind.JsonNode item : node) sb.append(item.asText()).append('；');
+        } else {
+            node.fields().forEachRemaining(e -> sb.append(e.getKey()).append('=')
+                    .append(e.getValue().asText()).append('；'));
+        }
+        sb.setLength(sb.length() - 1);
+        sb.append('\n');
+    }
+
     public Pack packScene(long novelId, int chapterNo, ChapterDO ch, OutlineService.SceneSpec spec,
                           List<String> digests, String prevTail, List<String> foreshadows,
                           String prevSceneText) {
@@ -120,6 +158,9 @@ public class ContextPackerService {
                 【前情摘要】
                 %s
 
+                【世界状态（上一章结束时，必须遵守——物品归属与位置不得凭空变化）】
+                %s
+
                 【上一场景已写内容（紧接其后继续写，禁止重复其中任何情节与时间点）】
                 %s
                 """.formatted(chapterNo, spec.sceneNo(), ch.title(), spec.goal(),
@@ -127,6 +168,7 @@ public class ContextPackerService {
                 world(novelId), characters(novelId),
                 foreshadows.isEmpty() ? "（本章无）" : String.join("\n", foreshadows),
                 ctx.isEmpty() ? "（本章是第一章，无前情）" : String.join("\n---\n", ctx),
+                worldState(novelId, chapterNo) == null ? "（无记录）" : worldState(novelId, chapterNo),
                 prevSceneText == null ? (prevTail == null ? "（无）" : prevTail) : prevSceneText);
         return new Pack(system, user);
     }
