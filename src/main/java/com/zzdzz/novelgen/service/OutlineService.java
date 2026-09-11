@@ -111,7 +111,8 @@ public class OutlineService {
         for (int i = 0; i < tries; i++) {
             LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                     "outline", null, null,
-                    List.of(LlmPort.Message.system("你是网文章纲规划器，只输出合法 JSON，不要任何解释或 markdown 代码块。"),
+                    List.of(LlmPort.Message.system("你是网文章纲规划器，只输出合法 JSON，不要任何解释或 markdown 代码块。"
+                            + "字符串值内部禁止英文双引号，引用一律用「」。"),
                             LlmPort.Message.user(user + feedback)),
                     0.3));
             String reason = null;
@@ -141,13 +142,51 @@ public class OutlineService {
         throw new IllegalStateException("章纲生成失败", last);
     }
 
-    /** LLM JSON 容错解析：截取首尾大括号 + 允许字符串内的裸控制字符（换行/Tab） */
+    /** LLM JSON 容错解析：截取首尾大括号 + 允许字符串内的裸控制字符；失败再试修复字符串值内未转义英文引号 */
     private JsonNode lenientRead(String content) throws Exception {
         String s = content.strip();
         int start = s.indexOf('{');
         int end = s.lastIndexOf('}');
         if (start < 0 || end <= start) throw new IllegalStateException("输出中没有 JSON 对象");
-        return lenientMapper.readTree(s.substring(start, end + 1));
+        String json = s.substring(start, end + 1);
+        try {
+            return lenientMapper.readTree(json);
+        } catch (Exception first) {
+            return lenientMapper.readTree(repairStraightQuotes(json));
+        }
+    }
+
+    /**
+     * 修复字符串值内部的未转义英文双引号（模型高频毛病，症状是「expecting comma to separate Array
+     * entries」处撞上中文）：处于字符串内时，若一个引号的后继非空字符是 , } ] : 则视为收口引号，否则替换为「。
+     */
+    private static String repairStraightQuotes(String json) {
+        StringBuilder sb = new StringBuilder(json.length() + 16);
+        boolean inStr = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (!inStr) {
+                if (c == '"') inStr = true;
+                sb.append(c);
+                continue;
+            }
+            if (c == '"') {
+                int j = i + 1;
+                while (j < json.length() && Character.isWhitespace(json.charAt(j))) j++;
+                char next = j < json.length() ? json.charAt(j) : '\0';
+                if (next == ',' || next == '}' || next == ']' || next == ':') {
+                    inStr = false;
+                    sb.append('"');
+                } else {
+                    sb.append('「');
+                }
+            } else if (c == '\\' && i + 1 < json.length()) {
+                sb.append(c).append(json.charAt(++i));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /** 模型可能漏字段：MissingNode/Null 的 toString 是空串，对 ::jsonb 是非法输入，兜底为 [] */

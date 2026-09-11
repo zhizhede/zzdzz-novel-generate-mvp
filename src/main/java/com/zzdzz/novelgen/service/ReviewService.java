@@ -98,7 +98,12 @@ public class ReviewService {
                     "ai_review", novelId, ch.id(), msgs, 0.2));
             lastRaw = r.content();
             try {
-                JsonNode node = mapper.readTree(lenientJson(r.content()));
+                JsonNode node;
+                try {
+                    node = mapper.readTree(lenientJson(r.content()));
+                } catch (Exception first) {
+                    node = mapper.readTree(repairStraightQuotes(lenientJson(r.content())));
+                }
                 String verdict = node.path("verdict").asText("");
                 if (!List.of("pass", "minor", "blocker").contains(verdict)) {
                     throw new IllegalStateException("verdict 非法: " + verdict);
@@ -178,5 +183,38 @@ public class ReviewService {
         int start = raw.indexOf('{');
         int end = raw.lastIndexOf('}');
         return (start >= 0 && end > start) ? raw.substring(start, end + 1) : raw;
+    }
+
+    /**
+     * 修复字符串值内部的未转义英文双引号（症状：「expecting comma to separate Array entries」处撞上中文）：
+     * 处于字符串内时，若一个引号的后继非空字符是 , } ] : 则视为收口引号，否则替换为「。
+     */
+    private static String repairStraightQuotes(String json) {
+        StringBuilder sb = new StringBuilder(json.length() + 16);
+        boolean inStr = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (!inStr) {
+                if (c == '"') inStr = true;
+                sb.append(c);
+                continue;
+            }
+            if (c == '"') {
+                int j = i + 1;
+                while (j < json.length() && Character.isWhitespace(json.charAt(j))) j++;
+                char next = j < json.length() ? json.charAt(j) : '\0';
+                if (next == ',' || next == '}' || next == ']' || next == ':') {
+                    inStr = false;
+                    sb.append('"');
+                } else {
+                    sb.append('「');
+                }
+            } else if (c == '\\' && i + 1 < json.length()) {
+                sb.append(c).append(json.charAt(++i));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 }
