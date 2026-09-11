@@ -46,6 +46,7 @@ public class DigestService {
                         {"summary_md":"300字以内的md：谁做了什么/信息揭示/情绪落点/章末钩子",
                          "facts":["一条一句的硬事实（人名、物件、承诺、时间线变化）"]}
                         字符串值内部禁止使用英文双引号，引用一律用「」。
+                        summary_md 不要包含任何标题行，直接从摘要正文开始。
                         """.strip()),
                         LlmPort.Message.user(fullText)), 0.3));
         String candidate = lenientJson(r.content());
@@ -59,7 +60,10 @@ public class DigestService {
                 throw new IllegalStateException("digest JSON 解析失败: " + r.content(), e);
             }
         }
-        digestDAO.insert(chapterId, node.path("summary_md").asText(""), node.path("facts").toString());
+        // 模型偶发无视指令在摘要前加「## 事实账」标题行：入库前剥掉
+        String summary = node.path("summary_md").asText("")
+                .replaceAll("(?m)^#{1,6}[^\\n]*\\n?", "").strip();
+        digestDAO.insert(chapterId, summary, node.path("facts").toString());
         foreshadowDAO.markPlanted(novelId, chapterNo);
         foreshadowDAO.markRecovered(novelId, chapterNo);
         chapterDAO.updateStatus(chapterId, "DIGESTED");
