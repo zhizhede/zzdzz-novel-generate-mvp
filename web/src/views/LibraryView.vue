@@ -68,6 +68,27 @@
         </el-table>
       </el-tab-pane>
 
+      <!-- 世界状态账 -->
+      <el-tab-pane :label="`世界状态（${worldStates.length}）`">
+        <div style="color: #999; font-size: 12px; margin-bottom: 8px">
+          每章一份结构化快照（时间/位置/随身物/新承诺/未解），随事实账自动产出并注入后续生成上下文——写错时在此人工纠偏
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+          <el-select v-model="wsChapter" placeholder="选择章号" size="small" style="width: 160px" @change="loadWsForEdit">
+            <el-option v-for="w in worldStates" :key="w.chapterNo" :value="w.chapterNo" :label="`第${w.chapterNo}章`" />
+          </el-select>
+          <el-button size="small" @click="backfillWs" :loading="wsBackfilling">对本章重新抽取</el-button>
+          <span style="color: #999; font-size: 12px">回填 = 轻量 LLM 调用重做快照，不动事实账</span>
+        </div>
+        <div style="max-width: 860px">
+          <el-input v-model="wsText" type="textarea" :rows="18" placeholder="选择章号后加载快照 JSON" />
+          <div style="margin-top: 8px">
+            <el-button type="primary" @click="saveWs">保存纠偏</el-button>
+            <span style="color: #999; font-size: 12px; margin-left: 10px">必须是合法 JSON 对象；下一次场景生成即注入</span>
+          </div>
+        </div>
+      </el-tab-pane>
+
       <!-- 风格包 -->
       <el-tab-pane label="风格包">
         <el-tabs v-model="styleTab">
@@ -158,6 +179,10 @@ const novelId = ref(null)
 const canon = ref([])
 const foreshadows = ref([])
 const digests = ref([])
+const worldStates = ref([])
+const wsChapter = ref(null)
+const wsText = ref('')
+const wsBackfilling = ref(false)
 const styleRules = ref('')
 const styleFingerprint = ref('')
 const bannedText = ref('')
@@ -169,8 +194,44 @@ const foreshadowEditor = ref(false)
 const digestEditor = ref(false)
 const newCanon = ref({ kind: 'character', name: '', content: '（待填写）' })
 
-const fingerprintRows = computed(() => {
+function loadWsForEdit() {
+  const row = worldStates.value.find((w) => w.chapterNo === wsChapter.value)
+  if (!row) { wsText.value = ''; return }
+  try { wsText.value = JSON.stringify(JSON.parse(row.stateJson), null, 2) } catch { wsText.value = row.stateJson }
+}
+
+async function saveWs() {
   try {
+    JSON.parse(wsText.value)
+  } catch {
+    ElMessage.error('不是合法 JSON')
+    return
+  }
+  try {
+    await api.put(`/api/novels/${novelId.value}/world-states/${wsChapter.value}`, { state: wsText.value })
+    ElMessage.success('已保存，下次场景生成即注入')
+    worldStates.value = await api.get(`/api/novels/${novelId.value}/world-states`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function backfillWs() {
+  if (wsChapter.value == null) return
+  wsBackfilling.value = true
+  try {
+    await api.post(`/api/novels/${novelId.value}/world-states/backfill/${wsChapter.value}`)
+    ElMessage.success('已重新抽取')
+    worldStates.value = await api.get(`/api/novels/${novelId.value}/world-states`)
+    loadWsForEdit()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    wsBackfilling.value = false
+  }
+}
+
+const fingerprintRows = computed(() => {  try {
     const baseline = JSON.parse(styleFingerprint.value || '{}').baseline || {}
     return Object.entries(baseline).map(([metric, r]) => ({ metric, ...r }))
   } catch {
@@ -183,6 +244,11 @@ async function loadAll() {
   canon.value = await api.get(`/api/novels/${novelId.value}/canon`)
   foreshadows.value = await api.get(`/api/novels/${novelId.value}/foreshadows`)
   digests.value = await api.get(`/api/novels/${novelId.value}/digests`)
+  worldStates.value = await api.get(`/api/novels/${novelId.value}/world-states`)
+  if (wsChapter.value == null && worldStates.value.length) {
+    wsChapter.value = worldStates.value[0].chapterNo
+    loadWsForEdit()
+  }
   const s = await api.get(`/api/novels/${novelId.value}/style`)
   styleRules.value = s.rulesMd
   styleFingerprint.value = s.fingerprintJson
