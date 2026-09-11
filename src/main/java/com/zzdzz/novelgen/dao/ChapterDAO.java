@@ -16,7 +16,7 @@ public class ChapterDAO {
             rs.getLong("id"), rs.getLong("novel_id"), rs.getInt("chapter_no"),
             (Integer) rs.getObject("volume_no"), rs.getString("arc"), rs.getString("title"),
             rs.getString("pov"), rs.getString("outline_yaml"), rs.getString("full_text"),
-            rs.getString("goal"), rs.getString("hook"),
+            rs.getString("goal"), rs.getString("hook"), rs.getString("time_note"),
             rs.getString("rule_refs"), rs.getString("foreshadow_refs"),
             rs.getInt("budget_min"), rs.getInt("budget_max"), rs.getString("status"),
             rs.getInt("round"), rs.getBoolean("is_deleted"));
@@ -44,7 +44,7 @@ public class ChapterDAO {
     public List<ChapterDO> listSummariesByNovel(long novelId) {
         return jdbc.query("""
                 SELECT id, novel_id, chapter_no, volume_no, arc, title, pov, outline_yaml,
-                       NULL AS full_text, goal, hook, rule_refs, foreshadow_refs,
+                       NULL AS full_text, goal, hook, time_note, rule_refs, foreshadow_refs,
                        budget_min, budget_max, status, round, is_deleted
                 FROM chapters WHERE novel_id=? AND is_deleted=false ORDER BY chapter_no
                 """, MAPPER, novelId);
@@ -58,13 +58,13 @@ public class ChapterDAO {
     }
 
     public void insertPlan(long novelId, int chapterNo, Integer volumeNo, String arc, String title,
-                           String goal, String hook, String ruleRefs, String foreshadowRefs,
+                           String goal, String hook, String timeNote, String ruleRefs, String foreshadowRefs,
                            int budgetMin, int budgetMax) {
         jdbc.update("""
-                INSERT INTO chapters (novel_id, chapter_no, volume_no, arc, title, goal, hook,
+                INSERT INTO chapters (novel_id, chapter_no, volume_no, arc, title, goal, hook, time_note,
                                       rule_refs, foreshadow_refs, budget_min, budget_max, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, 'NEW')
-                """, novelId, chapterNo, volumeNo, arc, title, goal, hook,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, 'NEW')
+                """, novelId, chapterNo, volumeNo, arc, title, goal, hook, timeNote,
                 ruleRefs, foreshadowRefs, budgetMin, budgetMax);
     }
 
@@ -78,12 +78,12 @@ public class ChapterDAO {
 
     /** 卷纲规划编辑：改标题/目标/钩子/卷归属/字数预算（不改状态与正文）。 */
     public void updatePlan(long chapterId, Integer volumeNo, String arc, String title,
-                           String goal, String hook, int budgetMin, int budgetMax) {
+                           String goal, String hook, String timeNote, int budgetMin, int budgetMax) {
         jdbc.update("""
-                UPDATE chapters SET volume_no=?, arc=?, title=?, goal=?, hook=?,
+                UPDATE chapters SET volume_no=?, arc=?, title=?, goal=?, hook=?, time_note=?,
                        budget_min=?, budget_max=?, update_time=NOW()
                 WHERE id=? AND is_deleted=false
-                """, volumeNo, arc, title, goal, hook, budgetMin, budgetMax, chapterId);
+                """, volumeNo, arc, title, goal, hook, timeNote, budgetMin, budgetMax, chapterId);
     }
 
     /** 仅未动笔的规划行可删（软删）。 */

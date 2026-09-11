@@ -32,6 +32,9 @@
             <el-table-column prop="title" label="标题" width="160" />
             <el-table-column prop="goal" label="目标" min-width="220" show-overflow-tooltip />
             <el-table-column prop="hook" label="钩子" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="timeNote" label="时间跨度" width="130" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.timeNote || '紧接' }}</template>
+            </el-table-column>
             <el-table-column label="状态" width="130">
               <template #default="{ row }">
                 <el-tag size="small" :type="row.hasText ? 'success' : 'info'">
@@ -85,6 +88,7 @@
         <el-input v-model="editing.title" placeholder="章节标题" style="margin-bottom: 10px" />
         <el-input v-model="editing.goal" type="textarea" :rows="3" placeholder="本章目标（AI 章纲的种子）" style="margin-bottom: 10px" />
         <el-input v-model="editing.hook" type="textarea" :rows="2" placeholder="章末钩子" style="margin-bottom: 10px" />
+        <el-input v-model="editing.timeNote" placeholder="时间跨度（距上一章，如：新年祭后第三日；留空=紧接上一章）" style="margin-bottom: 10px" />
         <div style="display: flex; gap: 10px; align-items: center">
           <span>字数预算</span>
           <el-input-number v-model="editing.budgetMin" :min="500" size="small" />
@@ -139,7 +143,7 @@ function openAdd() {
   const lastVol = volumes.value[volumes.value.length - 1]
   editing.value = {
     chapterNo: maxNo + 1, volNo: lastVol ? lastVol.volNo : 1, arc: lastVol ? lastVol.arc : '',
-    title: '', goal: '', hook: '', budgetMin: 1800, budgetMax: 2800
+    title: '', goal: '', hook: '', timeNote: '', budgetMin: 1800, budgetMax: 2800
   }
   planEditor.value = true
 }
@@ -152,7 +156,7 @@ function openEdit(row) {
 async function savePlan() {
   try {
     if (editing.value.id) {
-      await api.put(`/api/planning/chapters/${editing.value.id}/plan`, editing.value)
+      await api.put(`/api/novels/${novelId.value}/planning/chapters/${editing.value.id}/plan`, editing.value)
     } else {
       await api.post(`/api/novels/${novelId.value}/planning/chapters`, editing.value)
     }
@@ -167,7 +171,7 @@ async function savePlan() {
 async function removePlan(row) {
   try {
     await ElMessageBox.confirm(`删除第 ${row.chapterNo} 章「${row.title}」的规划？`, '确认', { type: 'warning' })
-    await api.delete(`/api/planning/chapters/${row.id}/plan`)
+    await api.delete(`/api/novels/${novelId.value}/planning/chapters/${row.id}/plan`)
     await loadAll()
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message)

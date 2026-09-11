@@ -86,6 +86,7 @@ public class PlanningService {
         m.put("title", c.title());
         m.put("goal", c.goal());
         m.put("hook", c.hook());
+        m.put("timeNote", c.timeNote());
         m.put("status", c.status());
         m.put("hasText", c.fullText() != null && !c.fullText().isBlank());
         m.put("budgetMin", c.budgetMin());
@@ -95,7 +96,7 @@ public class PlanningService {
     }
 
     public void updatePlan(long chapterId, Integer volNo, String arc, String title,
-                           String goal, String hook, Integer budgetMin, Integer budgetMax) {
+                           String goal, String hook, String timeNote, Integer budgetMin, Integer budgetMax) {
         ChapterDO ch = chapterDAO.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         chapterDAO.updatePlan(chapterId,
@@ -104,16 +105,17 @@ public class PlanningService {
                 title != null ? title : ch.title(),
                 goal != null ? goal : ch.goal(),
                 hook != null ? hook : ch.hook(),
+                timeNote != null ? timeNote : ch.timeNote(),
                 budgetMin != null ? budgetMin : ch.budgetMin(),
                 budgetMax != null ? budgetMax : ch.budgetMax());
     }
 
     public void addPlan(long novelId, int chapterNo, int volNo, String arc, String title,
-                        String goal, String hook, int budgetMin, int budgetMax) {
+                        String goal, String hook, String timeNote, int budgetMin, int budgetMax) {
         if (chapterDAO.exists(novelId, chapterNo)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "章号已存在: " + chapterNo);
         }
-        chapterDAO.insertPlan(novelId, chapterNo, volNo, arc, title, goal, hook, "[]", "[]",
+        chapterDAO.insertPlan(novelId, chapterNo, volNo, arc, title, goal, hook, timeNote, "[]", "[]",
                 budgetMin, budgetMax);
     }
 

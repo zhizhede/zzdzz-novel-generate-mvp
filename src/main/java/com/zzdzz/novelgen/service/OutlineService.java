@@ -53,6 +53,7 @@ public class OutlineService {
                 任务：为第 %d 章《%s》编写场景级章纲。
                 本章卷纲目标：%s
                 章末钩子类型：%s
+                本章距上一章的时间跨度：%s（场景与对白须体现该推进，不可凭空另设时间线）
                 本章涉及的守则：%s
                 伏笔任务：%s
                 全章字数预算：%d–%d 字，必须拆成 2-3 个场景，每个场景 800–1200 字。
@@ -72,6 +73,7 @@ public class OutlineService {
                 只输出 JSON，格式：
                 {"scenes":[{"no":1,"goal":"本场景目标","present":["出场人物"],"must_reveal":["必须让读者知道的信息"],"must_not":["禁止出现的内容"],"words":900}]}
                 """.formatted(ch.chapterNo(), ch.title(), ch.goal(), ch.hook(),
+                Objects.toString(ch.timeNote(), "紧接上一章，无跳跃"),
                 Objects.toString(ch.ruleRefs(), "[]"), Objects.toString(ch.foreshadowRefs(), "[]"),
                 ch.budgetMin(), ch.budgetMax(), world, characters,
                 digests == null || digests.isEmpty() ? "（本章是第一章，无前情）" : String.join("\n---\n", digests),

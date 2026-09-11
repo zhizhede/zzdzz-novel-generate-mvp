@@ -154,7 +154,7 @@ public class ImportRunner implements ApplicationRunner {
                 if (s.startsWith("## ") && s.length() > 3) { title = s.substring(3).strip(); break; }
                 if (s.matches("第\\d章\\s*\\S+.*")) { title = s.replaceFirst("第\\d章\\s*", ""); break; }
             }
-            chapterDAO.insertPlan(novelId, no, null, null, title, null, null, "[]", "[]", 0, 0);
+            chapterDAO.insertPlan(novelId, no, null, null, title, null, null, null, "[]", "[]", 0, 0);
             ChapterDO ch = chapterDAO.find(novelId, no).orElseThrow();
             chapterDAO.saveFullText(ch.id(), content);
             chapterDAO.updateStatus(ch.id(), "FINAL");
@@ -240,7 +240,7 @@ public class ImportRunner implements ApplicationRunner {
                 int no = ((Number) ch.get("num")).intValue();
                 if (chapterDAO.exists(novelId, no)) continue;
                 chapterDAO.insertPlan(novelId, no, volNo, arc, (String) ch.get("title"),
-                        (String) ch.get("goal"), (String) ch.get("hook"),
+                        (String) ch.get("goal"), (String) ch.get("hook"), (String) ch.get("time_note"),
                         mapper.writeValueAsString(ch.get("rule_refs")),
                         mapper.writeValueAsString(ch.get("foreshadow_refs")), bMin, bMax);
                 added++;

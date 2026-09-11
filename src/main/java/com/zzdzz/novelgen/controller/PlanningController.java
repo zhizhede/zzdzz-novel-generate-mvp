@@ -56,6 +56,7 @@ public class PlanningController {
                 (String) body.get("title"),
                 (String) body.get("goal"),
                 (String) body.get("hook"),
+                (String) body.get("timeNote"),
                 body.get("budgetMin") != null ? ((Number) body.get("budgetMin")).intValue() : 1800,
                 body.get("budgetMax") != null ? ((Number) body.get("budgetMax")).intValue() : 2800);
         return Result.ok();
@@ -69,6 +70,7 @@ public class PlanningController {
                 (String) body.get("title"),
                 (String) body.get("goal"),
                 (String) body.get("hook"),
+                (String) body.get("timeNote"),
                 body.get("budgetMin") instanceof Number n ? n.intValue() : null,
                 body.get("budgetMax") instanceof Number n ? n.intValue() : null);
         return Result.ok();
