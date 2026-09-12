@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.LibraryService;
 import com.zzdzz.novelgen.service.LlmNodeConfigService;
 import com.zzdzz.novelgen.service.MaterialCardService;
+import com.zzdzz.novelgen.service.TuningService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
 
-/** 素材库：正典文档（增删改）/ 素材卡（增删改）/ 伏笔账本（修正）/ 事实账（修正）/ 风格包（规则正文修订）/ 世界状态账（查看纠偏回填）。 */
+/** 素材库：正典文档（增删改）/ 素材卡（增删改）/ 伏笔账本（修正）/ 事实账（修正）/ 风格包（规则正文修订）/ 世界状态账（查看纠偏回填）/ 调参（平台级行为参数）。 */
 @RestController
 @RequestMapping("/api")
 public class LibraryController {
@@ -32,13 +33,29 @@ public class LibraryController {
     private final DigestService digestService;
     private final MaterialCardService cardService;
     private final LlmNodeConfigService nodeConfigService;
+    private final TuningService tuningService;
 
     public LibraryController(LibraryService libraryService, DigestService digestService,
-                             MaterialCardService cardService, LlmNodeConfigService nodeConfigService) {
+                             MaterialCardService cardService, LlmNodeConfigService nodeConfigService,
+                             TuningService tuningService) {
         this.libraryService = libraryService;
         this.digestService = digestService;
         this.cardService = cardService;
         this.nodeConfigService = nodeConfigService;
+        this.tuningService = tuningService;
+    }
+
+    // ===== 调参（平台级行为参数，改后 30s 内生效） =====
+
+    @GetMapping("/tuning")
+    public Result<List<com.zzdzz.novelgen.model.entity.TuningDO>> tuning() {
+        return Result.ok(tuningService.list());
+    }
+
+    @PutMapping("/tuning/{key}")
+    public Result<Void> updateTuning(@PathVariable String key, @RequestBody Map<String, Object> body) {
+        tuningService.update(key, String.valueOf(body.get("value")));
+        return Result.ok();
     }
 
     // ===== 模型路由（平台级，所有作品共用） =====

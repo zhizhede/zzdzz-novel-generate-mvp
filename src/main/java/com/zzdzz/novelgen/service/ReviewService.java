@@ -2,15 +2,18 @@ package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.dao.ChapterDAO;
 import com.zzdzz.novelgen.dao.GateReportDAO;
+import com.zzdzz.novelgen.llm.LlmJson;
+import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +27,7 @@ public class ReviewService {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewService.class);
 
+    /** 读者评审提示词模板：%s=注水率判 blocker 阈值（tuning: reader_fat_ratio_block）。 */
     private static final String READER_SYSTEM = """
             你是一个没耐心的网文读者，刷手机时点开了这一章。你只关心「想不想继续读」，只回答下列问题：
             1. hook 前 3 行：会不会继续往下读？（环境/氛围/抒情式开场、或与上章结尾接不上=不会）
@@ -34,7 +38,7 @@ public class ReviewService {
             {"verdict":"pass|blocker","hook":"pass|fail","stakes":"pass|fail","continuity":"pass|fail","fat_ratio":0.4,"skip_quotes":["可整段删除的原句"],"issues":["具体问题（引用原句）"]}
             规则：
             - 引用原文一律用「」；字符串值内部禁止英文双引号。
-            - hook/stakes/continuity 任一 fail，或 fat_ratio 大于 0.33 → verdict=blocker；否则 pass。
+            - hook/stakes/continuity 任一 fail，或 fat_ratio 大于 %s → verdict=blocker；否则 pass。
             - 你只管「想不想往下读」，错别字与设定连续性是另一位审校的事，不要报。
             - 不要输出思考过程，只输出 JSON。
             """.strip();
@@ -54,19 +58,24 @@ public class ReviewService {
             - 不要输出思考过程，只输出 JSON。
             """.strip();
 
-    private final LlmPort llm;
+    private final LlmPort llmPort;      // 文本修订轮（reader_fix / ai_review_revise）
+    private final LlmJson llmJson;      // JSON 评审轮（reader_review / ai_review）
     private final ContextPackerService packer;
     private final GateReportDAO gateReportDAO;
     private final ChapterDAO chapterDAO;
     private final ObjectMapper mapper;
+    private final TuningService tuning;
 
-    public ReviewService(LlmPort llm, ContextPackerService packer,
-                         GateReportDAO gateReportDAO, ChapterDAO chapterDAO, ObjectMapper mapper) {
-        this.llm = llm;
+    public ReviewService(LlmPort llmPort, LlmJson llmJson, ContextPackerService packer,
+                         GateReportDAO gateReportDAO, ChapterDAO chapterDAO, ObjectMapper mapper,
+                         TuningService tuning) {
+        this.llmPort = llmPort;
+        this.llmJson = llmJson;
         this.packer = packer;
         this.gateReportDAO = gateReportDAO;
         this.chapterDAO = chapterDAO;
         this.mapper = mapper;
+        this.tuning = tuning;
     }
 
     /** 审校结论：revised 为修订后全文（null=未改），blocked=复审仍 BLOCKER。 */
@@ -117,39 +126,31 @@ public class ReviewService {
         String user = "【上一章结尾（衔接定位基准）】\n" + (prevTail == null || prevTail.isBlank() ? "（无）" : prevTail)
                 + "\n\n【本章目标】" + ch.goal()
                 + "\n\n【第 " + ch.chapterNo() + " 章全文（评审对象）】\n" + text + "\n\n只输出 JSON。";
-        String feedback = null;
-        for (int attempt = 0; attempt < 2; attempt++) {
-            List<LlmPort.Message> msgs = new ArrayList<>();
-            msgs.add(LlmPort.Message.system(READER_SYSTEM));
-            if (feedback != null) msgs.add(LlmPort.Message.user(feedback));
-            msgs.add(LlmPort.Message.user(user));
-            LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
-                    "reader_review", novelId, ch.id(), msgs, 0.2));
-            try {
-                JsonNode node;
-                try {
-                    node = mapper.readTree(lenientJson(r.content()));
-                } catch (Exception first) {
-                    node = mapper.readTree(repairStraightQuotes(lenientJson(r.content())));
-                }
-                String verdict = node.path("verdict").asText("");
-                if (!List.of("pass", "blocker").contains(verdict)) {
-                    throw new IllegalStateException("verdict 非法: " + verdict);
-                }
-                gateReportDAO.insert(ch.id(), null, "reader_review", round,
-                        !"blocker".equals(verdict), node);
-                log.info("第 {} 章读者评审 round={}：{}（fat_ratio={}）", ch.chapterNo(), round,
-                        verdict, node.path("fat_ratio").asText());
-                return node;
-            } catch (Exception e) {
-                feedback = "【上一次输出不合规：" + e.getMessage() + "。请重新输出，只输出合法 JSON，"
-                        + "verdict 必须是 pass|blocker。】";
-            }
+        try {
+            JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
+                            LlmNode.READER_REVIEW, novelId, ch.id(),
+                            List.of(LlmPort.Message.system(
+                                            READER_SYSTEM.formatted(tuning.d("reader_fat_ratio_block", 0.33))),
+                                    LlmPort.Message.user(user)),
+                            0.2),
+                    n -> {
+                        String verdict = n.path("verdict").asText("");
+                        if (!List.of("pass", "blocker").contains(verdict)) {
+                            throw new LlmJson.Bad("verdict 非法: " + verdict);
+                        }
+                        return n;
+                    }, 2);
+            gateReportDAO.insert(ch.id(), null, "reader_review", round,
+                    !"blocker".equals(node.path("verdict").asText()), node);
+            log.info("第 {} 章读者评审 round={}：{}（fat_ratio={}）", ch.chapterNo(), round,
+                    node.path("verdict").asText(), node.path("fat_ratio").asText());
+            return node;
+        } catch (IllegalStateException e) {
+            log.warn("第 {} 章读者评审输出两次解析失败，本轮跳过（fail-open）", ch.chapterNo());
+            gateReportDAO.insert(ch.id(), null, "reader_review", round, true,
+                    Map.of("skipped", true, "reason", "parse_failed"));
+            return mapper.createObjectNode().put("verdict", "pass").put("summary", "解析失败跳过");
         }
-        log.warn("第 {} 章读者评审输出两次解析失败，本轮跳过（fail-open）", ch.chapterNo());
-        gateReportDAO.insert(ch.id(), null, "reader_review", round, true,
-                Map.of("skipped", true, "reason", "parse_failed"));
-        return mapper.createObjectNode().put("verdict", "pass").put("summary", "解析失败跳过");
     }
 
     /** 读者评审重写轮：保留情节/信息/对白立场，删纯装饰描写；修订稿异常时保留原文（返回 null）。 */
@@ -179,15 +180,17 @@ public class ReviewService {
                 【第 %d 章全文（在此版本上修改）】
                 %s
                 """.formatted(ch.chapterNo(), fb, ch.chapterNo(), fullText);
-        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
-                "reader_fix", novelId, ch.id(),
+        LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
+                LlmNode.READER_FIX, novelId, ch.id(),
                 List.of(LlmPort.Message.system("你是网文编辑，任务是让这一章「每一行都值得读」：删注水、保情节、补张力。"),
                         LlmPort.Message.user(user)),
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
                 SceneService.cleanDraft(r.content()), ch.title());
-        if (cleaned.isBlank() || cleaned.length() < fullText.length() * 0.5
-                || cleaned.length() > fullText.length() * 1.15) {
+        double lenMin = tuning.d("reader_fix_len_min", 0.5);
+        double lenMax = tuning.d("reader_fix_len_max", 1.15);
+        if (cleaned.isBlank() || cleaned.length() < fullText.length() * lenMin
+                || cleaned.length() > fullText.length() * lenMax) {
             log.warn("第 {} 章读者重写稿长度异常（{} 字符），保留原文", ch.chapterNo(), cleaned.length());
             return null;
         }
@@ -196,9 +199,9 @@ public class ReviewService {
 
     /** 回溯/UI 用：对已有正文的章跑一次审校，只落报告，不动正文与状态。 */
     public void reviewExisting(long chapterId) {        ChapterDO ch = chapterDAO.findById(chapterId)
-                .orElseThrow(() -> new IllegalArgumentException("章不存在: " + chapterId));
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (ch.fullText() == null || ch.fullText().isBlank()) {
-            throw new IllegalArgumentException("该章无正文，无法审校");
+            throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法审校");
         }
         reviewOnce(ch.novelId(), ch, ch.fullText(), 1);
     }
@@ -206,44 +209,32 @@ public class ReviewService {
     /** 单轮审校：解析失败重试 1 次（原因喂回），仍失败 fail-open 落 skipped 报告。 */
     private JsonNode reviewOnce(long novelId, ChapterDO ch, String text, int round) {
         String user = userPrompt(novelId, ch, text);
-        String feedback = null;
-        String lastRaw = "";
-        for (int attempt = 0; attempt < 2; attempt++) {
-            List<LlmPort.Message> msgs = new ArrayList<>();
-            msgs.add(LlmPort.Message.system(SYSTEM));
-            if (feedback != null) msgs.add(LlmPort.Message.user(feedback));
-            msgs.add(LlmPort.Message.user(user));
-            LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
-                    "ai_review", novelId, ch.id(), msgs, 0.2));
-            lastRaw = r.content();
-            try {
-                JsonNode node;
-                try {
-                    node = mapper.readTree(lenientJson(r.content()));
-                } catch (Exception first) {
-                    node = mapper.readTree(repairStraightQuotes(lenientJson(r.content())));
-                }
-                String verdict = node.path("verdict").asText("");
-                if (!List.of("pass", "minor", "blocker").contains(verdict)) {
-                    throw new IllegalStateException("verdict 非法: " + verdict);
-                }
-                gateReportDAO.insert(ch.id(), null, "ai_review", round,
-                        !"blocker".equals(verdict), node);
-                log.info("第 {} 章审校 round={}：{}（{} 条问题）", ch.chapterNo(), round,
-                        verdict, node.path("issues").size());
-                return node;
-            } catch (Exception e) {
-                feedback = "【上一次输出不合规：" + e.getMessage() + "。请重新输出，只输出合法 JSON，"
-                        + "verdict 必须是 pass|minor|blocker。】";
-            }
+        try {
+            JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
+                            LlmNode.AI_REVIEW, novelId, ch.id(),
+                            List.of(LlmPort.Message.system(SYSTEM),
+                                    LlmPort.Message.user(user)),
+                            0.2),
+                    n -> {
+                        String verdict = n.path("verdict").asText("");
+                        if (!List.of("pass", "minor", "blocker").contains(verdict)) {
+                            throw new LlmJson.Bad("verdict 非法: " + verdict);
+                        }
+                        return n;
+                    }, 2);
+            gateReportDAO.insert(ch.id(), null, "ai_review", round,
+                    !"blocker".equals(node.path("verdict").asText()), node);
+            log.info("第 {} 章审校 round={}：{}（{} 条问题）", ch.chapterNo(), round,
+                    node.path("verdict").asText(), node.path("issues").size());
+            return node;
+        } catch (IllegalStateException e) {
+            log.warn("第 {} 章审校输出两次解析失败，本轮跳过（fail-open）：{}", ch.chapterNo(), e.getMessage());
+            gateReportDAO.insert(ch.id(), null, "ai_review", round, true,
+                    Map.of("skipped", true, "reason", "parse_failed"));
+            return mapper.createObjectNode()
+                    .put("verdict", "skipped")
+                    .put("summary", "审校输出解析失败，本轮跳过");
         }
-        log.warn("第 {} 章审校输出两次解析失败，本轮跳过（fail-open）：{}", ch.chapterNo(),
-                lastRaw.substring(0, Math.min(120, lastRaw.length())));
-        gateReportDAO.insert(ch.id(), null, "ai_review", round, true,
-                Map.of("skipped", true, "reason", "parse_failed"));
-        return mapper.createObjectNode()
-                .put("verdict", "skipped")
-                .put("summary", "审校输出解析失败，本轮跳过");
     }
 
     private String userPrompt(long novelId, ChapterDO ch, String text) {
@@ -285,57 +276,18 @@ public class ReviewService {
                 【第 %d 章全文（在此版本上修改）】
                 %s
                 """.formatted(ch.chapterNo(), fb, ch.chapterNo(), fullText);
-        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
-                "ai_review_revise", novelId, ch.id(),
+        LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
+                LlmNode.AI_REVIEW_REVISE, novelId, ch.id(),
                 List.of(LlmPort.Message.system("你是执行审校修订的网文编辑，只做被点名的最小修改。"),
                         LlmPort.Message.user(user)),
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
                 SceneService.cleanDraft(r.content()), ch.title());
-        if (cleaned.isBlank() || cleaned.length() < fullText.length() * 0.6) {
+        double floor = tuning.d("ai_review_fix_floor", 0.6);
+        if (cleaned.isBlank() || cleaned.length() < fullText.length() * floor) {
             log.warn("第 {} 章审校修订稿长度异常（{} 字符），保留原文", ch.chapterNo(), cleaned.length());
             return null;
         }
         return cleaned;
-    }
-
-    /** 模型偶发输出 ```json 围栏或前后缀话术：截取首个 { 到末个 } 再解析。 */
-    private static String lenientJson(String raw) {
-        int start = raw.indexOf('{');
-        int end = raw.lastIndexOf('}');
-        return (start >= 0 && end > start) ? raw.substring(start, end + 1) : raw;
-    }
-
-    /**
-     * 修复字符串值内部的未转义英文双引号（症状：「expecting comma to separate Array entries」处撞上中文）：
-     * 处于字符串内时，若一个引号的后继非空字符是 , } ] : 则视为收口引号，否则替换为「。
-     */
-    private static String repairStraightQuotes(String json) {
-        StringBuilder sb = new StringBuilder(json.length() + 16);
-        boolean inStr = false;
-        for (int i = 0; i < json.length(); i++) {
-            char c = json.charAt(i);
-            if (!inStr) {
-                if (c == '"') inStr = true;
-                sb.append(c);
-                continue;
-            }
-            if (c == '"') {
-                int j = i + 1;
-                while (j < json.length() && Character.isWhitespace(json.charAt(j))) j++;
-                char next = j < json.length() ? json.charAt(j) : '\0';
-                if (next == ',' || next == '}' || next == ']' || next == ':') {
-                    inStr = false;
-                    sb.append('"');
-                } else {
-                    sb.append('「');
-                }
-            } else if (c == '\\' && i + 1 < json.length()) {
-                sb.append(c).append(json.charAt(++i));
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
     }
 }

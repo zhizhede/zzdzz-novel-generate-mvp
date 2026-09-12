@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.dao.ForeshadowDAO;
 import com.zzdzz.novelgen.dao.NovelDAO;
 import com.zzdzz.novelgen.dao.PipelineEventDAO;
 import com.zzdzz.novelgen.llm.LlmJson;
+import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
@@ -58,14 +59,14 @@ public class VolumePlanService {
     private final ForeshadowDAO foreshadowDAO;
     private final NovelDAO novelDAO;
     private final CanonDocDAO canonDocDAO;
-    private final PipelineSseService sse;
-    private final PipelineEventDAO eventDAO;
+    private final StageLog stageLog;
+    private final TuningService tuning;
     private final ObjectMapper mapper;
     private final TransactionTemplate tx;
 
     public VolumePlanService(LlmPort llm, LlmJson llmJson, ContextPackerService packer,
                              ChapterDAO chapterDAO, ForeshadowDAO foreshadowDAO, NovelDAO novelDAO,
-                             CanonDocDAO canonDocDAO, PipelineSseService sse, PipelineEventDAO eventDAO,
+                             CanonDocDAO canonDocDAO, StageLog stageLog, TuningService tuning,
                              ObjectMapper mapper, PlatformTransactionManager txManager) {
         this.llm = llm;
         this.llmJson = llmJson;
@@ -74,8 +75,8 @@ public class VolumePlanService {
         this.foreshadowDAO = foreshadowDAO;
         this.novelDAO = novelDAO;
         this.canonDocDAO = canonDocDAO;
-        this.sse = sse;
-        this.eventDAO = eventDAO;
+        this.stageLog = stageLog;
+        this.tuning = tuning;
         this.mapper = mapper;
         this.tx = new TransactionTemplate(txManager);
     }
@@ -95,16 +96,16 @@ public class VolumePlanService {
         if (toNo != null && toNo < fromNo) {
             throw new BizException(ErrorCode.PARAM_ERROR, "结束章必须不小于起始章");
         }
-        emit(novelId, null, "volume_plan", Map.of("phase", "start",
-                "volNo", volNo, "from", fromNo, "to", Objects.toString(toNo, "auto")));
+        stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.START,
+                Map.of("volNo", volNo, "from", fromNo, "to", Objects.toString(toNo, "auto")));
         PlanDraft draft = generateWithReview(novelId, volNo, fromNo, toNo, seedOutline);
         String planMode = novelDAO.findPlanMode(novelId);
         AdoptResult result = "auto".equals(planMode) ? adopt(novelId, volNo, draft) : null;
-        emit(novelId, null, "volume_plan", Map.of(
-                "phase", result != null ? "adopted" : "draft",
-                "volNo", volNo, "arc", Objects.toString(draft.arc(), ""),
-                "chapters", draft.rows().size(),
-                "adoptedForeshadows", result == null ? List.of() : result.adoptedForeshadows()));
+        stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN,
+                result != null ? StageLog.Phase.ADOPTED : StageLog.Phase.DRAFT,
+                Map.of("volNo", volNo, "arc", Objects.toString(draft.arc(), ""),
+                        "chapters", draft.rows().size(),
+                        "adoptedForeshadows", result == null ? List.of() : result.adoptedForeshadows()));
         return new PlanOutcome(planMode, result != null, draft, result);
     }
 
@@ -122,11 +123,12 @@ public class VolumePlanService {
         return adopt(novelId, volNo, draft);
     }
 
-    /** 生成+校验+审校闭环：结构校验与 AI 审校的失败原因统一喂回下一轮重写。 */
+    /** 生成+校验+审校闭环：结构校验与 AI 审校的失败原因统一喂回下一轮重写。轮数走 tuning。 */
     private PlanDraft generateWithReview(long novelId, int volNo, int fromNo, Integer toNo, String seedOutline) {
         String context = packer.packVolumePlan(novelId, fromNo, seedOutline);
         String feedback = "";
-        for (int round = 1; round <= 3; round++) {
+        int maxRounds = tuning.i("volume_plan_review_rounds", 3);
+        for (int round = 1; round <= maxRounds; round++) {
             PlanDraft draft = askPlan(novelId, volNo, fromNo, toNo, context, feedback);
             String structural = structuralCheck(draft, fromNo, toNo);
             if (structural != null) {
@@ -143,7 +145,8 @@ public class VolumePlanService {
             log.info("卷纲规划通过：第 {} 卷 {} 共 {} 章", volNo, draft.arc(), draft.rows().size());
             return draft;
         }
-        throw new IllegalStateException("卷纲规划 3 轮未过结构校验/AI 审校，放弃落库（llm_call_log node=volume_plan 可回放）");
+        throw new BizException(ErrorCode.LLM_OUTPUT_INVALID,
+                "卷纲规划 3 轮未过结构校验/AI 审校，放弃落库（llm_call_log node=volume_plan 可回放）");
     }
 
     private PlanDraft askPlan(long novelId, int volNo, int fromNo, Integer toNo, String context, String feedback) {
@@ -166,7 +169,7 @@ public class VolumePlanService {
 
                 %s
                 """.formatted(volNo, fromNo, span, fromNo, fromNo, context);
-        return llmJson.ask(new LlmPort.ChatRequest("volume_plan", novelId, null,
+        return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
                         List.of(LlmPort.Message.system("你是网文主编，负责整卷卷纲规划。只输出合法 JSON，不要任何解释或 markdown 代码块。"
                                         + "字符串值内部禁止英文双引号，引用一律用「」。"),
                                 LlmPort.Message.user(user)),
@@ -266,7 +269,7 @@ public class VolumePlanService {
                 """.formatted(plan, packer.characters(novelId),
                 packer.packLedgers(novelId, draft.rows().get(0).chapterNo()));
         try {
-            return llmJson.ask(new LlmPort.ChatRequest("volume_plan_review", novelId, null,
+            return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN_REVIEW, novelId, null,
                             List.of(LlmPort.Message.system("你是网文规划审校员，在卷纲落库前把关。只输出合法 JSON。"
                                             + "字符串值内部禁止英文双引号，引用一律用「」。"),
                                     LlmPort.Message.user(user)),
@@ -286,7 +289,8 @@ public class VolumePlanService {
                     }, 2);
         } catch (Exception e) {
             log.warn("卷纲审校调用异常，fail-open 放行：{}", e.getMessage());
-            emit(novelId, null, "volume_plan_review", Map.of("phase", "error", "message", String.valueOf(e.getMessage())));
+            stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.ERROR,
+                    Map.of("message", String.valueOf(e.getMessage())));
             return null;
         }
     }
@@ -432,7 +436,7 @@ public class VolumePlanService {
                 Objects.toString(ch.goal(), ""), Objects.toString(ch.hook(), ""),
                 chapterNo - 1, chapterNo + 1, packer.characters(novelId),
                 packer.packLedgers(novelId, chapterNo));
-        Replan replan = llmJson.ask(new LlmPort.ChatRequest("chapter_replan", novelId, ch.id(),
+        Replan replan = llmJson.ask(new LlmPort.ChatRequest(LlmNode.CHAPTER_REPLAN, novelId, ch.id(),
                         List.of(LlmPort.Message.system("你是网文主编，只输出合法 JSON，字符串内禁英文双引号，引用一律用「」。"),
                                 LlmPort.Message.user(user)),
                         0.6),
@@ -451,14 +455,9 @@ public class VolumePlanService {
                 ch.budgetMin(), ch.budgetMax());
         // 清场景与门禁报告：章纲将按新目标重出（runChapter 见场景数为 0 自动重生成）
         chapterDAO.resetForReoutline(ch.id(), null);
-        emit(novelId, chapterNo, "volume_plan", Map.of("phase", "chapter_replan",
-                "chapterNo", chapterNo, "goal", replan.goal()));
+        stageLog.emit(novelId, chapterNo, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.CHAPTER_REPLAN,
+                Map.of("goal", replan.goal()));
         log.info("第 {} 章卷纲已重写：{}", chapterNo, replan.goal());
         return chapterDAO.findById(ch.id()).orElseThrow();
-    }
-
-    private void emit(long novelId, Integer chapterNo, String stage, Map<String, Object> data) {
-        sse.send(stage, data);
-        eventDAO.insert(novelId, chapterNo, stage, String.valueOf(data.getOrDefault("phase", "")), data);
     }
 }

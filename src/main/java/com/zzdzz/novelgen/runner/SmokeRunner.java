@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.runner;
 
+import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,7 +45,7 @@ public class SmokeRunner implements ApplicationRunner {
                 + "要求 300–500 字，只输出正文，不要任何解释。";
 
         LlmPort.ChatResult result = llm.chat(new LlmPort.ChatRequest(
-                "smoke", null, null,
+                LlmNode.SMOKE, null, null,
                 List.of(LlmPort.Message.system(system), LlmPort.Message.user(user)),
                 0.9));
 
