@@ -41,8 +41,7 @@ public class ChapterDAO {
     }
 
     /** 列表页摘要：full_text 不取（DO 中置 null）。 */
-    public List<ChapterDO> listSummariesByNovel(long novelId) {
-        return jdbc.query("""
+    public List<ChapterDO> listSummariesByNovel(long novelId) {        return jdbc.query("""
                 SELECT id, novel_id, chapter_no, volume_no, arc, title, pov, outline_yaml,
                        NULL AS full_text, goal, hook, time_note, rule_refs, foreshadow_refs,
                        budget_min, budget_max, status, round, is_deleted
@@ -50,9 +49,20 @@ public class ChapterDAO {
                 """, MAPPER, novelId);
     }
 
+    /** 卷级复盘用：一卷各章的事实行（规划 + 实际产出）。 */
+    public java.util.List<java.util.Map<String, Object>> listVolumeFacts(long novelId, int volNo) {
+        return jdbc.queryForList("""
+                SELECT chapter_no, title, goal, hook, status, budget_min, budget_max,
+                       COALESCE(LENGTH(full_text), 0) AS text_len,
+                       COALESCE(foreshadow_refs::text, '[]') AS refs
+                FROM chapters
+                WHERE novel_id = ? AND volume_no = ? AND is_deleted = false
+                ORDER BY chapter_no
+                """, novelId, volNo);
+    }
+
     /** 已有正文的最末章号（无任何正文时为 null）：卷纲规划必须接续其后来。 */
-    public Integer maxChapterWithText(long novelId) {
-        List<Integer> rows = jdbc.query("""
+    public Integer maxChapterWithText(long novelId) {        List<Integer> rows = jdbc.query("""
                 SELECT MAX(chapter_no) FROM chapters
                 WHERE novel_id=? AND is_deleted=false AND full_text IS NOT NULL AND full_text <> ''
                 """, (rs, i) -> (Integer) rs.getObject(1), novelId);

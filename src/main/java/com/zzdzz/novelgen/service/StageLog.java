@@ -34,7 +34,8 @@ public class StageLog {
         DIGEST("digest", "事实账"),
         HEAL("heal", "自愈"),
         VOLUME_PLAN("volume_plan", "卷纲规划"),
-        VOLUME_PLAN_REVIEW("volume_plan_review", "卷纲审校");
+        VOLUME_PLAN_REVIEW("volume_plan_review", "卷纲审校"),
+        VOLUME_RETRO("volume_retro", "卷级复盘");
 
         private final String wire;
         private final String label;

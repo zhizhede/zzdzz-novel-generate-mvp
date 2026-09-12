@@ -21,6 +21,7 @@ public final class LlmNode {
     // ===== 管线：卷规划 =====
     public static final String VOLUME_PLAN = "volume_plan";         // 卷纲整卷规划
     public static final String VOLUME_PLAN_REVIEW = "volume_plan_review"; // AI 规划审校
+    public static final String VOLUME_REVIEW = "volume_review";     // 卷级复盘（漂移分析）
     public static final String CHAPTER_REPLAN = "chapter_replan";   // 单章卷纲重写/自愈换目标
 
     // ===== 工具 =====
