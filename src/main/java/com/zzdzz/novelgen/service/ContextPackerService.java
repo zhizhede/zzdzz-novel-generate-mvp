@@ -225,6 +225,16 @@ public class ContextPackerService {
         return sb.toString().strip();
     }
 
+    /** 对白推进范例：本作真实章节中对白最密集的连续 10 行（情节靠人物说话的活样本）。 */
+    public String dialogueExcerpt(long novelId) {
+        ChapterDAO.Opening ex = chapterDAO.findDialogueExcerpt(novelId, 21, 10);
+        if (ex == null) {
+            return null;
+        }
+        return "【对白推进范例（本作真实章节——情节靠人物说话，学这个节奏与密度，禁止照抄内容）】\n第"
+                + ex.chapterNo() + "章：\n" + ex.firstLines();
+    }
+
     /** 本章第一场景的开篇约束块：承接红线（接上章但不复述）+ 张力切入 + 手稿范例。非首场景返回空串。 */
     public String openingSection(long novelId, int sceneNo) {
         if (sceneNo != 1) {
@@ -254,6 +264,12 @@ public class ContextPackerService {
         // 风格包自带量化红线（新风格包）时不再叠加手搓红线，避免两套阈值打架
         String rules = styleRules(novelId);
         String system = rules.contains("【量化风格红线】") ? rules : rules + STYLE_REDLINES;
+        // 写作工艺块：首场景=开篇红线+手稿开篇范例；所有场景=对白推进范例
+        String craft = openingSection(novelId, spec.sceneNo());
+        String dex = dialogueExcerpt(novelId);
+        if (dex != null) {
+            craft = (craft.isEmpty() ? "" : craft + "\n\n") + dex;
+        }
         // 设定卡匹配文本：本章目标/钩子 + 场景目标 + 前文 + 事实账近况（命中才注入对应卡，省上下文）
         String matchText = String.join("\n",
                 String.valueOf(ch.title()), String.valueOf(ch.goal()), String.valueOf(ch.hook()),
@@ -295,7 +311,7 @@ public class ContextPackerService {
                 %s
                 """.formatted(chapterNo, spec.sceneNo(), ch.title(), spec.goal(),
                 spec.present(), spec.mustReveal(), spec.mustNot(), spec.words(),
-                openingSection(novelId, spec.sceneNo()),
+                craft,
                 world(novelId),
                 charactersForScene(novelId, matchText),
                 foreshadows.isEmpty() ? "（本章无）" : String.join("\n", foreshadows),

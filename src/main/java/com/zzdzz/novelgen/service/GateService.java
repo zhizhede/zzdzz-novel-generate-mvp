@@ -166,7 +166,7 @@ public class GateService {
         }
     }
 
-    /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance。 */
+    /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance；abs_min 显式下界（对话密度防叙述铺场）。 */
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> fingerprintChecks(Map<String, Object> base,
                                                         Map<String, Object> metrics) {
@@ -180,14 +180,16 @@ public class GateService {
             double value = ((Number) e.getValue()).doubleValue();
             double v = ((Number) rule.get("value")).doubleValue();
             double tol = ((Number) rule.get("tolerance")).doubleValue();
+            double upper = rule.containsKey("abs_max")
+                    ? ((Number) rule.get("abs_max")).doubleValue() : v * (1 + tol);
             boolean ok;
-            if (rule.containsKey("abs_max")) {
-                ok = value <= ((Number) rule.get("abs_max")).doubleValue();
+            if (rule.containsKey("abs_min")) {
+                ok = value >= ((Number) rule.get("abs_min")).doubleValue() && value <= upper;
             } else if (v < 3.0) {
                 // 稀疏指纹（来着/顺便等）下界归零：几千字里出现 0 次属正常，只防滥用
-                ok = value <= v * (1 + tol);
+                ok = value <= upper;
             } else {
-                ok = value >= v * (1 - tol) && value <= v * (1 + tol);
+                ok = value >= v * (1 - tol) && value <= upper;
             }
             checks.add(check(key, value, rule.get("value"), rule.get("abs_max"), ok));
         }

@@ -131,6 +131,34 @@ public class ChapterDAO {
                 novelId, maxChapterNo);
     }
 
+    /** 对白推进范例：1..maxChapterNo 中「最密集的连续 lines 行对白段」（至少六成行带对白才算范例）。 */
+    public Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines) {
+        record Row(int no, String text) {}
+        List<Row> rows = jdbc.query("""
+                SELECT chapter_no, full_text FROM chapters
+                WHERE novel_id=? AND chapter_no<=? AND is_deleted=false
+                  AND full_text IS NOT NULL AND full_text<>''
+                ORDER BY chapter_no
+                """, (rs, i) -> new Row(rs.getInt("chapter_no"), rs.getString("full_text")),
+                novelId, maxChapterNo);
+        Opening best = null;
+        long bestScore = -1;
+        for (Row r : rows) {
+            List<String> ls = new java.util.ArrayList<>();
+            for (String l : r.text().split("\n")) {
+                if (!l.strip().isEmpty()) ls.add(l.strip());
+            }
+            for (int s = 0; s + lines <= ls.size(); s++) {
+                long score = ls.subList(s, s + lines).stream().filter(l -> l.contains("「")).count();
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = new Opening(r.no(), String.join("\n", ls.subList(s, s + lines)));
+                }
+            }
+        }
+        return bestScore >= Math.max(3, lines * 0.6) ? best : null;
+    }
+
     private static String firstLines(String fullText) {
         List<String> out = new java.util.ArrayList<>();
         for (String l : fullText.split("\n")) {
