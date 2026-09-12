@@ -8,6 +8,7 @@ import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.LibraryService;
+import com.zzdzz.novelgen.service.LlmNodeConfigService;
 import com.zzdzz.novelgen.service.MaterialCardService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,12 +31,69 @@ public class LibraryController {
     private final LibraryService libraryService;
     private final DigestService digestService;
     private final MaterialCardService cardService;
+    private final LlmNodeConfigService nodeConfigService;
 
     public LibraryController(LibraryService libraryService, DigestService digestService,
-                             MaterialCardService cardService) {
+                             MaterialCardService cardService, LlmNodeConfigService nodeConfigService) {
         this.libraryService = libraryService;
         this.digestService = digestService;
         this.cardService = cardService;
+        this.nodeConfigService = nodeConfigService;
+    }
+
+    // ===== 模型路由（平台级，所有作品共用） =====
+
+    @GetMapping("/llm-nodes")
+    public Result<List<LlmNodeConfigService.NodeVO>> llmNodes() {
+        return Result.ok(nodeConfigService.list());
+    }
+
+    @PostMapping("/llm-nodes")
+    public Result<Void> createLlmNode(@RequestBody Map<String, Object> body) {
+        nodeConfigService.create((String) body.get("node"), (String) body.get("model"),
+                body.get("temperature") instanceof Number n ? n.doubleValue() : null,
+                body.get("maxTokens") instanceof Number n ? n.intValue() : null,
+                (String) body.get("extraJson"),
+                body.get("enabled") instanceof Boolean b ? b : null,
+                (String) body.get("remark"));
+        return Result.ok();
+    }
+
+    @PutMapping("/llm-nodes/{id}")
+    public Result<Void> updateLlmNode(@PathVariable long id, @RequestBody Map<String, Object> body) {
+        nodeConfigService.update(id, (String) body.get("model"),
+                body.get("temperature") instanceof Number n ? n.doubleValue() : null,
+                body.get("maxTokens") instanceof Number n ? n.intValue() : null,
+                (String) body.get("extraJson"),
+                body.get("enabled") instanceof Boolean b ? b : null,
+                (String) body.get("remark"));
+        return Result.ok();
+    }
+
+    @DeleteMapping("/llm-nodes/{id}")
+    public Result<Void> deleteLlmNode(@PathVariable long id) {
+        nodeConfigService.delete(id);
+        return Result.ok();
+    }
+
+    @GetMapping("/llm-prices")
+    public Result<List<com.zzdzz.novelgen.model.entity.LlmModelPriceDO>> llmPrices() {
+        return Result.ok(nodeConfigService.prices());
+    }
+
+    @PutMapping("/llm-prices/{id}")
+    public Result<Void> updateLlmPrice(@PathVariable long id, @RequestBody Map<String, Object> body) {
+        nodeConfigService.updatePrice(id,
+                decimal(body.get("idleInputHit")), decimal(body.get("idleInputMiss")), decimal(body.get("idleOutput")),
+                decimal(body.get("peakInputHit")), decimal(body.get("peakInputMiss")), decimal(body.get("peakOutput")),
+                body.get("peakStartHour") instanceof Number n ? n.intValue() : 14,
+                body.get("peakEndHour") instanceof Number n ? n.intValue() : 18,
+                (String) body.get("remark"));
+        return Result.ok();
+    }
+
+    private static java.math.BigDecimal decimal(Object value) {
+        return value instanceof Number n ? java.math.BigDecimal.valueOf(n.doubleValue()) : null;
     }
 
     // ===== 素材卡 =====

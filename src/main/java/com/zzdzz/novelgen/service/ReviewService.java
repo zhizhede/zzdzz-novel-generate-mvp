@@ -24,6 +24,21 @@ public class ReviewService {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewService.class);
 
+    private static final String READER_SYSTEM = """
+            你是一个没耐心的网文读者，刷手机时点开了这一章。你只关心「想不想继续读」，只回答下列问题：
+            1. hook 前 3 行：会不会继续往下读？（环境/氛围/抒情式开场、或与上章结尾接不上=不会）
+            2. stakes 这场戏：谁想要什么？什么在阻止？（说不出来=没有戏剧张力）
+            3. continuity 读完前 10 行，能否定位上一章结束时的情境（时间/地点/在场人物）？（定位不到=衔接断裂）
+            4. fat 与剧情无关、删掉后读者不会少知道任何事的纯装饰描写（给微动作写人物志、连篇比喻、静态观察），占比大约多少？
+            只输出 JSON：
+            {"verdict":"pass|blocker","hook":"pass|fail","stakes":"pass|fail","continuity":"pass|fail","fat_ratio":0.4,"skip_quotes":["可整段删除的原句"],"issues":["具体问题（引用原句）"]}
+            规则：
+            - 引用原文一律用「」；字符串值内部禁止英文双引号。
+            - hook/stakes/continuity 任一 fail，或 fat_ratio 大于 0.33 → verdict=blocker；否则 pass。
+            - 你只管「想不想往下读」，错别字与设定连续性是另一位审校的事，不要报。
+            - 不要输出思考过程，只输出 JSON。
+            """.strip();
+
     private static final String SYSTEM = """
             你是资深网文审校编辑，在机械门禁之后做语义审校。只查以下四类问题：
             1. continuity 连续性：与给定上下文（世界设定、人物卡、近章事实账、上一章结尾）矛盾——时间线、称呼、物件、地点、人物状态。
@@ -74,9 +89,113 @@ public class ReviewService {
         return new Outcome(revised, blocked ? "blocker" : v2, blocked);
     }
 
+    /**
+     * 读者评审闭环（反无聊闸门）：钩子/戏剧张力/章间衔接/注水率。
+     * BLOCKER 带清单重写一轮并复审；复审仍 BLOCKER 交人工（auto 不过稿）。
+     * 报告落 gate_reports（gate_type='reader_review'），解析失败 fail-open。
+     */
+    public Outcome readerReviewAndFix(long novelId, ChapterDO ch, String fullText) {
+        JsonNode r1 = readerOnce(novelId, ch, fullText, 1);
+        if (!"blocker".equals(r1.path("verdict").asText())) {
+            return new Outcome(null, r1.path("verdict").asText("pass"), false);
+        }
+        log.warn("第 {} 章读者评审判 BLOCKER（hook={} stakes={} continuity={} fat_ratio={}），重写一轮",
+                ch.chapterNo(), r1.path("hook").asText(), r1.path("stakes").asText(),
+                r1.path("continuity").asText(), r1.path("fat_ratio").asText());
+        String revised = readerFix(novelId, ch, fullText, r1);
+        if (revised == null) {
+            return new Outcome(null, "blocker", true);
+        }
+        JsonNode r2 = readerOnce(novelId, ch, revised, 2);
+        boolean blocked = "blocker".equals(r2.path("verdict").asText());
+        return new Outcome(revised, blocked ? "blocker" : "pass", blocked);
+    }
+
+    /** 单轮读者评审：解析失败重试 1 次，仍失败 fail-open 落 skipped 报告。 */
+    private JsonNode readerOnce(long novelId, ChapterDO ch, String text, int round) {
+        String prevTail = packer.prevTail(novelId, ch.chapterNo());
+        String user = "【上一章结尾（衔接定位基准）】\n" + (prevTail == null || prevTail.isBlank() ? "（无）" : prevTail)
+                + "\n\n【本章目标】" + ch.goal()
+                + "\n\n【第 " + ch.chapterNo() + " 章全文（评审对象）】\n" + text + "\n\n只输出 JSON。";
+        String feedback = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            List<LlmPort.Message> msgs = new ArrayList<>();
+            msgs.add(LlmPort.Message.system(READER_SYSTEM));
+            if (feedback != null) msgs.add(LlmPort.Message.user(feedback));
+            msgs.add(LlmPort.Message.user(user));
+            LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
+                    "reader_review", novelId, ch.id(), msgs, 0.2));
+            try {
+                JsonNode node;
+                try {
+                    node = mapper.readTree(lenientJson(r.content()));
+                } catch (Exception first) {
+                    node = mapper.readTree(repairStraightQuotes(lenientJson(r.content())));
+                }
+                String verdict = node.path("verdict").asText("");
+                if (!List.of("pass", "blocker").contains(verdict)) {
+                    throw new IllegalStateException("verdict 非法: " + verdict);
+                }
+                gateReportDAO.insert(ch.id(), null, "reader_review", round,
+                        !"blocker".equals(verdict), node);
+                log.info("第 {} 章读者评审 round={}：{}（fat_ratio={}）", ch.chapterNo(), round,
+                        verdict, node.path("fat_ratio").asText());
+                return node;
+            } catch (Exception e) {
+                feedback = "【上一次输出不合规：" + e.getMessage() + "。请重新输出，只输出合法 JSON，"
+                        + "verdict 必须是 pass|blocker。】";
+            }
+        }
+        log.warn("第 {} 章读者评审输出两次解析失败，本轮跳过（fail-open）", ch.chapterNo());
+        gateReportDAO.insert(ch.id(), null, "reader_review", round, true,
+                Map.of("skipped", true, "reason", "parse_failed"));
+        return mapper.createObjectNode().put("verdict", "pass").put("summary", "解析失败跳过");
+    }
+
+    /** 读者评审重写轮：保留情节/信息/对白立场，删纯装饰描写；修订稿异常时保留原文（返回 null）。 */
+    private String readerFix(long novelId, ChapterDO ch, String fullText, JsonNode review) {
+        StringBuilder fb = new StringBuilder();
+        for (JsonNode q : review.path("skip_quotes")) {
+            fb.append("- 可整段删除：").append(q.asText()).append('\n');
+        }
+        for (JsonNode i : review.path("issues")) {
+            fb.append("- ").append(i.asText()).append('\n');
+        }
+        if (review.path("hook").asText().equals("fail")) {
+            fb.append("- 开头未过钩：前三行必须从上一章结尾的张力里直接推进，禁止环境/氛围铺陈。\n");
+        }
+        if (review.path("continuity").asText().equals("fail")) {
+            fb.append("- 衔接断裂：读者无法定位上一章结束时的情境，开头须回到上一章结尾的时间/地点/在场人物。\n");
+        }
+        if (fb.isEmpty()) {
+            fb.append("- 读者判定注水或无张力：删掉所有纯装饰描写，让每一段都推进事件或揭示信息。\n");
+        }
+        String user = """
+                任务：修订第 %d 章全文。没耐心的网文读者给出以下弃书理由：
+                %s
+                要求：情节、信息与对白立场全部保留；删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；
+                分行节奏与风格特征保持本书原貌；直接输出修订后的完整正文，不要输出思考过程。
+
+                【第 %d 章全文（在此版本上修改）】
+                %s
+                """.formatted(ch.chapterNo(), fb, ch.chapterNo(), fullText);
+        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
+                "reader_fix", novelId, ch.id(),
+                List.of(LlmPort.Message.system("你是网文编辑，任务是让这一章「每一行都值得读」：删注水、保情节、补张力。"),
+                        LlmPort.Message.user(user)),
+                0.5));
+        String cleaned = ChapterPipelineService.stripTitleLine(
+                SceneService.cleanDraft(r.content()), ch.title());
+        if (cleaned.isBlank() || cleaned.length() < fullText.length() * 0.5
+                || cleaned.length() > fullText.length() * 1.15) {
+            log.warn("第 {} 章读者重写稿长度异常（{} 字符），保留原文", ch.chapterNo(), cleaned.length());
+            return null;
+        }
+        return cleaned;
+    }
+
     /** 回溯/UI 用：对已有正文的章跑一次审校，只落报告，不动正文与状态。 */
-    public void reviewExisting(long chapterId) {
-        ChapterDO ch = chapterDAO.findById(chapterId)
+    public void reviewExisting(long chapterId) {        ChapterDO ch = chapterDAO.findById(chapterId)
                 .orElseThrow(() -> new IllegalArgumentException("章不存在: " + chapterId));
         if (ch.fullText() == null || ch.fullText().isBlank()) {
             throw new IllegalArgumentException("该章无正文，无法审校");

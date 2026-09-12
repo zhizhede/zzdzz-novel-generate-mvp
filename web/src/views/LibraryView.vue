@@ -138,6 +138,75 @@
         </div>
       </el-tab-pane>
 
+      <!-- 模型路由 -->
+      <el-tab-pane :label="`模型路由（${llmNodes.length}）`">
+        <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
+          <el-tag :type="inPeak ? 'danger' : 'success'" size="small">
+            当前{{ inPeak ? '高峰时段（计费 ×2）' : '空闲时段' }}
+          </el-tag>
+          <span style="color: #999; font-size: 12px">
+            平台级配置，所有作品共用；覆盖项留空 = 走全局默认，改完下次调用即生效。近 7 天成本按价目表折算（元）。
+          </span>
+        </div>
+
+        <el-table :data="llmPrices" border size="small" style="max-width: 1020px; margin-bottom: 6px">
+          <el-table-column prop="model" label="模型" width="130" />
+          <el-table-column label="空闲价（命中/未命中/输出）" min-width="200">
+            <template #default="{ row }">{{ row.idleInputHit }} / {{ row.idleInputMiss }} / {{ row.idleOutput }} {{ row.currency }}/百万</template>
+          </el-table-column>
+          <el-table-column label="高峰价（命中/未命中/输出）" min-width="200">
+            <template #default="{ row }">{{ row.peakInputHit }} / {{ row.peakInputMiss }} / {{ row.peakOutput }} {{ row.currency }}/百万</template>
+          </el-table-column>
+          <el-table-column label="高峰时段" width="110">
+            <template #default="{ row }">{{ row.peakStartHour }}:00 – {{ row.peakEndHour }}:00</template>
+          </el-table-column>
+          <el-table-column label="操作" width="90">
+            <template #default="{ row }">
+              <el-button size="small" @click="openPrice(row)">改价</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-table :data="llmNodes" border size="small" style="max-width: 1020px">
+          <el-table-column prop="node" label="节点" width="160" />
+          <el-table-column prop="remark" label="说明" min-width="200" show-overflow-tooltip />
+          <el-table-column label="模型（留空=默认）" width="140">
+            <template #default="{ row }">
+              <span v-if="row.configured">{{ row.model || '（默认）' }}</span>
+              <el-tag v-else size="small" type="info">未建行</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="近7天" width="180">
+            <template #default="{ row }">
+              <span v-if="row.stat">{{ row.stat.calls }} 次 / {{ (row.stat.totalTokens / 10000).toFixed(1) }}万 tok / 均 {{ Math.round(row.stat.avgLatencyMs / 1000) }}s</span>
+              <span v-else style="color: #bbb">无调用</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="近7天成本" width="150">
+            <template #default="{ row }">
+              <span v-if="row.stat && row.stat.cost != null">
+                ¥{{ row.stat.cost.toFixed(2) }}<span v-if="row.stat.peakCost" style="color: #f56c6c">（高峰 ¥{{ row.stat.peakCost.toFixed(2) }}）</span>
+              </span>
+              <span v-else-if="row.stat" style="color: #bbb">无价目</span>
+              <span v-else style="color: #bbb">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="启用" width="70">
+            <template #default="{ row }">
+              <el-tag v-if="row.configured" size="small" :type="row.enabled ? 'success' : 'info'">
+                {{ row.enabled ? '是' : '否' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="130">
+            <template #default="{ row }">
+              <el-button v-if="row.configured" size="small" @click="openNode(row)">编辑</el-button>
+              <el-button v-else size="small" type="primary" plain @click="openNode(row)">建行</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <!-- 风格包 -->
       <el-tab-pane label="风格包">
         <el-tabs v-model="styleTab">
@@ -172,6 +241,59 @@
         </el-tabs>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 价目编辑 -->
+    <el-dialog v-model="priceEditor" :title="`改价：${priceForm.model}（元/百万 tokens）`" width="560px">
+      <div style="font-size: 13px; margin-bottom: 6px">空闲时段</div>
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+        <span style="font-size: 13px">输入命中</span>
+        <el-input-number v-model="priceForm.idleInputHit" :min="0" :step="0.01" size="small" style="width: 110px" />
+        <span style="font-size: 13px">未命中</span>
+        <el-input-number v-model="priceForm.idleInputMiss" :min="0" :step="0.1" size="small" style="width: 110px" />
+        <span style="font-size: 13px">输出</span>
+        <el-input-number v-model="priceForm.idleOutput" :min="0" :step="0.5" size="small" style="width: 110px" />
+      </div>
+      <div style="font-size: 13px; margin-bottom: 6px">高峰时段</div>
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+        <span style="font-size: 13px">输入命中</span>
+        <el-input-number v-model="priceForm.peakInputHit" :min="0" :step="0.01" size="small" style="width: 110px" />
+        <span style="font-size: 13px">未命中</span>
+        <el-input-number v-model="priceForm.peakInputMiss" :min="0" :step="0.1" size="small" style="width: 110px" />
+        <span style="font-size: 13px">输出</span>
+        <el-input-number v-model="priceForm.peakOutput" :min="0" :step="0.5" size="small" style="width: 110px" />
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center">
+        <span style="font-size: 13px">高峰时段</span>
+        <el-input-number v-model="priceForm.peakStartHour" :min="0" :max="23" size="small" style="width: 90px" />
+        <span>:00 –</span>
+        <el-input-number v-model="priceForm.peakEndHour" :min="0" :max="23" size="small" style="width: 90px" />
+        <span>:00</span>
+      </div>
+      <template #footer>
+        <el-button @click="priceEditor = false">取消</el-button>
+        <el-button type="primary" @click="savePrice">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 模型路由编辑 -->
+    <el-dialog v-model="nodeEditor" :title="nodeForm.id ? `编辑节点：${nodeForm.node}` : `新建节点路由：${nodeForm.node}`" width="560px">
+      <el-input v-model="nodeForm.model" placeholder="模型名（留空 = 全局默认 MiniMax-M3）" style="margin-bottom: 10px" />
+      <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 10px">
+        <span style="font-size: 13px">温度（留空=调用方默认）</span>
+        <el-input-number v-model="nodeForm.temperature" :min="0" :max="2" :step="0.1" size="small" style="width: 110px" />
+        <span style="font-size: 13px">max_tokens</span>
+        <el-input-number v-model="nodeForm.maxTokens" :min="0" :step="1000" size="small" style="width: 130px" />
+      </div>
+      <el-input v-model="nodeForm.extraJson" type="textarea" :rows="3" placeholder='extra 请求参数（JSON 对象，如 {"thinking":{"type":"disabled"}}；留空不传）' style="margin-bottom: 10px" />
+      <div style="display: flex; gap: 14px; align-items: center">
+        <el-switch v-model="nodeForm.enabled" active-text="启用" />
+        <el-input v-model="nodeForm.remark" placeholder="备注（节点用途）" size="small" style="flex: 1" />
+      </div>
+      <template #footer>
+        <el-button @click="nodeEditor = false">取消</el-button>
+        <el-button type="primary" @click="saveNode">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 素材卡编辑 -->
     <el-dialog v-model="cardEditor" :title="cardForm.id ? '编辑素材卡' : '新增素材卡'" width="640px">
@@ -274,6 +396,71 @@ const cards = ref([])
 const cardEditor = ref(false)
 const cardForm = ref({})
 const kindLabel = { character: '角色', item: '物品', location: '地点', phenomenon: '现象', landmark: '地标', disaster: '灾害', org: '组织', misc: '其他' }
+const llmNodes = ref([])
+const nodeEditor = ref(false)
+const nodeForm = ref({})
+const llmPrices = ref([])
+const priceEditor = ref(false)
+const priceForm = ref({})
+
+const inPeak = computed(() => {
+  const p = llmPrices.value[0]
+  if (!p) return false
+  const h = new Date().getHours()
+  return h >= p.peakStartHour && h < p.peakEndHour
+})
+
+function openPrice(row) {
+  priceForm.value = { ...row }
+  priceEditor.value = true
+}
+
+async function savePrice() {
+  try {
+    await api.put(`/api/llm-prices/${priceForm.value.id}`, priceForm.value)
+    ElMessage.success('价目已更新')
+    priceEditor.value = false
+    llmPrices.value = await api.get('/api/llm-prices')
+    llmNodes.value = await api.get('/api/llm-nodes')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+function openNode(row) {
+  nodeForm.value = {
+    id: row.id, node: row.node, model: row.model || '',
+    temperature: row.temperature ?? null, maxTokens: row.maxTokens ?? null,
+    extraJson: row.extraJson || '', enabled: row.enabled !== false, remark: row.remark || ''
+  }
+  nodeEditor.value = true
+}
+
+async function saveNode() {
+  if (nodeForm.value.extraJson) {
+    try { JSON.parse(nodeForm.value.extraJson) } catch {
+      ElMessage.error('extra 参数不是合法 JSON')
+      return
+    }
+  }
+  try {
+    const body = {
+      model: nodeForm.value.model || null,
+      temperature: nodeForm.value.temperature,
+      maxTokens: nodeForm.value.maxTokens || null,
+      extraJson: nodeForm.value.extraJson || null,
+      enabled: nodeForm.value.enabled,
+      remark: nodeForm.value.remark
+    }
+    if (nodeForm.value.id) await api.put(`/api/llm-nodes/${nodeForm.value.id}`, body)
+    else await api.post('/api/llm-nodes', { node: nodeForm.value.node, ...body })
+    ElMessage.success('已保存，下一次调用即生效')
+    nodeEditor.value = false
+    llmNodes.value = await api.get('/api/llm-nodes')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
 
 function openCard(row) {
   cardForm.value = row
@@ -364,6 +551,8 @@ async function loadAll() {
   if (!novelId.value) return
   canon.value = await api.get(`/api/novels/${novelId.value}/canon`)
   cards.value = await api.get(`/api/novels/${novelId.value}/cards`)
+  llmNodes.value = await api.get('/api/llm-nodes')
+  llmPrices.value = await api.get('/api/llm-prices')
   foreshadows.value = await api.get(`/api/novels/${novelId.value}/foreshadows`)
   digests.value = await api.get(`/api/novels/${novelId.value}/digests`)
   worldStates.value = await api.get(`/api/novels/${novelId.value}/world-states`)

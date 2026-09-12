@@ -200,17 +200,24 @@ public class ChapterPipelineService {
     /** 章级机械门禁未过时的修订轮：外科手术式——只修被点名的指标，不动情节与分行节奏。 */
     private String reviseChapter(long novelId, ChapterDO ch, String fullText) {
         String feedback = gateService.failureSummary(ch.id());
+        int curWords = ((Number) GateService.computeMetrics(fullText).get("cjk")).intValue();
+        int cap = (int) (ch.budgetMax() * 1.05);
+        // 严重超长时 ±10% 的温和约束数学上救不回来，改为给明确压缩目标
+        String lengthRule = curWords > cap
+                ? "当前正文约 %d 字，超出预算上限：请把篇幅压缩到 %d–%d 字（删冗余描写与重复信息，情节与对白全保留）"
+                        .formatted(curWords, ch.budgetMin(), cap)
+                : "总字数变化控制在 ±10%% 内，且不得超过 %d 字".formatted(cap);
         String user = """
                 任务：修订第 %d 章全文。门禁检测出以下问题：
                 %s
                 要求：只针对被点名的问题做最小修改（例如破折号超标：把「——」改写为逗号、句号、拆句或直接删除）；
                 除被点名的指标外，其余风格特征必须原样保留——破折号「——」与省略号「……」的数量不得增加，分行节奏不得重排；
-                严禁改动情节、人物与对话内容；总字数变化控制在 ±10%% 内，且不得超过 %d 字。
+                严禁改动情节、人物与对话内容；%s。
                 直接输出修订后的完整正文，不要输出思考过程。
 
                 【第 %d 章全文（在此版本上修改）】
                 %s
-                """.formatted(ch.chapterNo(), feedback, (int) (ch.budgetMax() * 1.1), ch.chapterNo(), fullText);
+                """.formatted(ch.chapterNo(), feedback, lengthRule, ch.chapterNo(), fullText);
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 "chapter_revise", novelId, ch.id(),
                 List.of(LlmPort.Message.system("你是执行门禁修订的网文编辑，只做被点名的最小修改。"),
@@ -259,7 +266,7 @@ public class ChapterPipelineService {
             String draft = sceneService.generate(novelId, ch.id(), chapterNo, pack, spec.sceneNo());
             emit(novelId, "scene", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(),
                     "phase", "draft", "text", String.valueOf(draft)));
-            boolean ok = gateService.checkScene(novelId, ch.id(), sceneId, spec.sceneNo(), draft);
+            boolean ok = gateService.checkScene(novelId, ch.id(), sceneId, spec.sceneNo(), draft, spec.words());
             // 带意见重写，最多 2 轮（密度类指标一轮修订常按下葫芦浮起瓢）
             for (int round = 1; round <= 2 && !ok; round++) {
                 log.warn("场景 {} 门禁未过，带意见重写（第 {} 轮）", spec.sceneNo(), round);
@@ -270,7 +277,7 @@ public class ChapterPipelineService {
                         draft, gateService.failureSummary(ch.id(), sceneId), pack);
                 emit(novelId, "scene", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(),
                         "phase", "draft", "text", String.valueOf(draft)));
-                ok = gateService.checkScene(novelId, ch.id(), sceneId, spec.sceneNo(), draft);
+                ok = gateService.checkScene(novelId, ch.id(), sceneId, spec.sceneNo(), draft, spec.words());
             }
             emit(novelId, "gate", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(), "passed", ok,
                     "reason", ok ? "" : gateService.failedChecksText(ch.id(), sceneId)));
@@ -312,7 +319,7 @@ public class ChapterPipelineService {
                     log.warn("第 {} 章章级门禁未过，带意见修订（第 {}/2 轮）", chapterNo, round);
                     emit(novelId, "revise", Map.of("chapterNo", chapterNo, "phase", "start", "round", round));
                     String revised = reviseChapter(novelId, ch, fullText);
-                    if (revised == null || revised.length() < fullText.length() * 0.6
+                    if (revised == null || revised.length() < fullText.length() * 0.5
                             || revised.length() > fullText.length() * 1.15) {
                         log.error("第 {} 章修订稿长度异常（{} 字符），弃用本轮", chapterNo,
                                 revised == null ? 0 : revised.length());
@@ -342,6 +349,32 @@ public class ChapterPipelineService {
             }
         }
         emit(novelId, "chapter_gate", Map.of("chapterNo", chapterNo, "passed", true));
+
+        // 3.4) 读者评审（反无聊闸门）：钩子/戏剧张力/章间衔接/注水率；BLOCKER 带清单重写一轮+复审。
+        chapterDAO.updateStatus(ch.id(), "GATE_AI_REVIEW");
+        emit(novelId, "reader", Map.of("chapterNo", chapterNo, "phase", "start"));
+        ReviewService.Outcome reader;
+        try {
+            reader = reviewService.readerReviewAndFix(novelId, ch, fullText);
+        } catch (Exception e) {
+            log.warn("第 {} 章读者评审异常，fail-open 放行：{}", chapterNo, e.getMessage());
+            emit(novelId, "reader", Map.of("chapterNo", chapterNo, "phase", "error",
+                    "message", String.valueOf(e.getMessage())));
+            reader = new ReviewService.Outcome(null, "skipped", false);
+        }
+        if (reader.revised() != null) {
+            fullText = reader.revised();
+            chapterDAO.saveFullText(ch.id(), fullText);
+            emit(novelId, "revise", Map.of("chapterNo", chapterNo, "phase", "reader_fix", "chars", fullText.length()));
+        }
+        emit(novelId, "reader", Map.of("chapterNo", chapterNo, "phase", "done",
+                "verdict", reader.verdict(), "blocked", reader.blocked()));
+        if (reader.blocked()) {
+            log.warn("第 {} 章读者评审复审仍 BLOCKER，转人工审批", chapterNo);
+            chapterDAO.updateStatus(ch.id(), "PENDING_APPROVAL");
+            emit(novelId, "approve", Map.of("chapterNo", chapterNo, "phase", "pending", "reason", "reader_blocker"));
+            return true;
+        }
 
         // 3.5) AI 语义审校（连续性/逻辑/错字）；BLOCKER 带清单修订一轮并复审。
         // 审校调用异常同样 fail-open——机械门禁已过的正文不能因审校故障而废。

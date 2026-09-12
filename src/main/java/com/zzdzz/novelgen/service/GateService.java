@@ -1,6 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzdzz.novelgen.dao.ChapterDAO;
 import com.zzdzz.novelgen.dao.GateReportDAO;
 import com.zzdzz.novelgen.dao.StylePackDAO;
 import org.springframework.stereotype.Service;
@@ -27,10 +28,12 @@ public class GateService {
 
     private final StylePackDAO stylePackDAO;
     private final GateReportDAO gateReportDAO;
+    private final ChapterDAO chapterDAO;
 
-    public GateService(StylePackDAO stylePackDAO, GateReportDAO gateReportDAO) {
+    public GateService(StylePackDAO stylePackDAO, GateReportDAO gateReportDAO, ChapterDAO chapterDAO) {
         this.stylePackDAO = stylePackDAO;
         this.gateReportDAO = gateReportDAO;
+        this.chapterDAO = chapterDAO;
     }
 
     @SuppressWarnings("unchecked")
@@ -45,6 +48,15 @@ public class GateService {
         double lenTol = configDouble(gateCfg, "chapter_length_tolerance", 0.15);
         boolean lenOk = words >= budgetMin * (1 - lenTol) && words <= budgetMax * (1 + lenTol);
         checks.add(check("chapter_length", words, budgetMin * (1 - lenTol), budgetMax * (1 + lenTol), lenOk));
+
+        // 开篇复写检查：本章前 3 行不得与上一章末 3 行重复（场景续写惯性把衔接写成复写的实锤 bug）
+        String prevText = chapterNo > 1 ? chapterDAO.findFullText(novelId, chapterNo - 1) : null;
+        int overlap = prevText == null ? 0 : openingOverlap(text, prevText);
+        checks.add(check("opening_overlap", overlap, 0, 0, overlap == 0));
+
+        // 比喻密度：人类手稿 2.4-7/千字，AI 生成可冲到 15/千字（描写铺场的量化信号），天花板 8
+        double simile = ((Number) metrics.get("simile_per1k")).doubleValue();
+        checks.add(check("simile_per1k", simile, null, 8.0, simile <= 8.0));
 
         checks.addAll(fingerprintChecks(base, metrics));
 
@@ -69,10 +81,15 @@ public class GateService {
      * 破折号等稀疏统计留到章级判定——几百字样本上单场景方差过大。
      */
     @SuppressWarnings("unchecked")
-    public boolean checkScene(long novelId, long chapterId, long sceneId, int sceneNo, String text) {
+    public boolean checkScene(long novelId, long chapterId, long sceneId, int sceneNo, String text, int wordsBudget) {
         Map<String, Object> base = fingerprint(novelId);
         Map<String, Object> metrics = computeMetrics(text);
         List<Map<String, Object>> checks = new ArrayList<>();
+
+        // 场景长度：0.4×-1.6× 预算带。场景超长若放行，章级修订受 ±10% 约束救不回来（43 章实锤）
+        int cjk = ((Number) metrics.get("cjk")).intValue();
+        boolean lenOk = cjk >= wordsBudget * 0.4 && cjk <= wordsBudget * 1.6;
+        checks.add(check("scene_length", cjk, (int) (wordsBudget * 0.4), (int) (wordsBudget * 1.6), lenOk));
 
         checks.add(check("no_straight_quote", text.contains("\"") ? 1 : 0, 0, 0, !text.contains("\"")));
         List<String> hits = new ArrayList<>();
@@ -149,7 +166,7 @@ public class GateService {
         }
     }
 
-    /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance。 */
+    /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance；abs_min 显式下界（对话密度防叙述铺场）。 */
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> fingerprintChecks(Map<String, Object> base,
                                                         Map<String, Object> metrics) {
@@ -163,14 +180,16 @@ public class GateService {
             double value = ((Number) e.getValue()).doubleValue();
             double v = ((Number) rule.get("value")).doubleValue();
             double tol = ((Number) rule.get("tolerance")).doubleValue();
+            double upper = rule.containsKey("abs_max")
+                    ? ((Number) rule.get("abs_max")).doubleValue() : v * (1 + tol);
             boolean ok;
-            if (rule.containsKey("abs_max")) {
-                ok = value <= ((Number) rule.get("abs_max")).doubleValue();
+            if (rule.containsKey("abs_min")) {
+                ok = value >= ((Number) rule.get("abs_min")).doubleValue() && value <= upper;
             } else if (v < 3.0) {
                 // 稀疏指纹（来着/顺便等）下界归零：几千字里出现 0 次属正常，只防滥用
-                ok = value <= v * (1 + tol);
+                ok = value <= upper;
             } else {
-                ok = value >= v * (1 - tol) && value <= v * (1 + tol);
+                ok = value >= v * (1 - tol) && value <= upper;
             }
             checks.add(check(key, value, rule.get("value"), rule.get("abs_max"), ok));
         }
@@ -238,6 +257,29 @@ public class GateService {
 
     // ===== 纯函数指标计算（静态，供单测） =====
 
+    /** 开篇复写行数：本章前 3 个非空行中，有多少行逐行出现在上一章末 3 个非空行里。 */
+    public static int openingOverlap(String currentText, String previousText) {
+        List<String> prev = nonEmptyLines(previousText);
+        java.util.Set<String> tail = new java.util.HashSet<>();
+        for (int i = Math.max(0, prev.size() - 3); i < prev.size(); i++) {
+            tail.add(prev.get(i));
+        }
+        int n = 0;
+        List<String> cur = nonEmptyLines(currentText);
+        for (int i = 0; i < Math.min(3, cur.size()); i++) {
+            if (tail.contains(cur.get(i))) n++;
+        }
+        return n;
+    }
+
+    private static List<String> nonEmptyLines(String text) {
+        List<String> out = new ArrayList<>();
+        for (String l : text.split("\n")) {
+            if (!l.strip().isEmpty()) out.add(l.strip());
+        }
+        return out;
+    }
+
     public static Map<String, Object> computeMetrics(String text) {
         String[] lines = text.split("\n");
         List<String> nonEmpty = new ArrayList<>();
@@ -258,6 +300,8 @@ public class GateService {
         m.put("tic_shunbian_per1k", round(count(text, "顺便") * per1k));
         m.put("tic_haiyou_per1k", round(count(text, "还有") * per1k));
         m.put("dialogue_end_punct_ratio", dialogueEndPunctRatio(nonEmpty));
+        m.put("simile_per1k", round((count(text, "像") + count(text, "仿佛") + count(text, "如同")
+                + count(text, "好似")) * per1k));
         return m;
     }
 

@@ -116,6 +116,58 @@ public class ChapterDAO {
         jdbc.update("UPDATE chapters SET full_text=?, update_time=NOW() WHERE id=?", fullText, chapterId);
     }
 
+    /** 开篇样本行（非表行）：章节号 + 该章前 3 个非空行（人类手稿审美基准，注入第一场景用）。 */
+    public record Opening(int chapterNo, String firstLines) {
+    }
+
+    /** 1..maxChapterNo 章的开篇样本（有正文的章）。 */
+    public List<Opening> findOpeningLines(long novelId, int maxChapterNo) {
+        return jdbc.query("""
+                SELECT chapter_no, full_text FROM chapters
+                WHERE novel_id=? AND chapter_no<=? AND is_deleted=false
+                  AND full_text IS NOT NULL AND full_text<>''
+                ORDER BY chapter_no
+                """, (rs, i) -> new Opening(rs.getInt("chapter_no"), firstLines(rs.getString("full_text"))),
+                novelId, maxChapterNo);
+    }
+
+    /** 对白推进范例：1..maxChapterNo 中「最密集的连续 lines 行对白段」（至少六成行带对白才算范例）。 */
+    public Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines) {
+        record Row(int no, String text) {}
+        List<Row> rows = jdbc.query("""
+                SELECT chapter_no, full_text FROM chapters
+                WHERE novel_id=? AND chapter_no<=? AND is_deleted=false
+                  AND full_text IS NOT NULL AND full_text<>''
+                ORDER BY chapter_no
+                """, (rs, i) -> new Row(rs.getInt("chapter_no"), rs.getString("full_text")),
+                novelId, maxChapterNo);
+        Opening best = null;
+        long bestScore = -1;
+        for (Row r : rows) {
+            List<String> ls = new java.util.ArrayList<>();
+            for (String l : r.text().split("\n")) {
+                if (!l.strip().isEmpty()) ls.add(l.strip());
+            }
+            for (int s = 0; s + lines <= ls.size(); s++) {
+                long score = ls.subList(s, s + lines).stream().filter(l -> l.contains("「")).count();
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = new Opening(r.no(), String.join("\n", ls.subList(s, s + lines)));
+                }
+            }
+        }
+        return bestScore >= Math.max(3, lines * 0.6) ? best : null;
+    }
+
+    private static String firstLines(String fullText) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String l : fullText.split("\n")) {
+            if (!l.strip().isEmpty()) out.add(l.strip());
+            if (out.size() == 3) break;
+        }
+        return String.join("\n", out);
+    }
+
     /** 无该章（如第 1 章无“上一章”）时返回 null，由调用方决定降级文案。 */
     public String findFullText(long novelId, int chapterNo) {
         List<String> rows = jdbc.query("""
