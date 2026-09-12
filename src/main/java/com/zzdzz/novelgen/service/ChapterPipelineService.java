@@ -175,7 +175,7 @@ public class ChapterPipelineService {
         List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
         outlineService.generate(novelId, ch, packer.world(novelId), packer.characters(novelId),
                 packer.foreshadowDirectives(novelId, chapterNo), digests,
-                packer.prevTail(novelId, chapterNo));
+                packer.prevTail(novelId, chapterNo), packer.prevChapterBrief(novelId, chapterNo));
         return outlineService.loadSpecs(ch.id());
     }
 
@@ -297,7 +297,7 @@ public class ChapterPipelineService {
         List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
         outlineService.generate(novelId, ch, packer.world(novelId), packer.characters(novelId),
                 packer.foreshadowDirectives(novelId, chapterNo), digests,
-                packer.prevTail(novelId, chapterNo));
+                packer.prevTail(novelId, chapterNo), packer.prevChapterBrief(novelId, chapterNo));
         stageLog.emit(novelId, chapterNo, OUTLINE, DONE,
                 Map.of("sceneCount", outlineService.loadSpecs(ch.id()).size()));
     }

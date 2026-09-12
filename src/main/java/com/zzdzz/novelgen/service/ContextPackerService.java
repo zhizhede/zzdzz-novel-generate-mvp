@@ -120,6 +120,23 @@ public class ContextPackerService {
         return foreshadowDAO.findDirectives(novelId, chapterNo);
     }
 
+    /**
+     * 上一章事件后果简报（承接注入）：上一章目标 + 章末钩子 + 实际收束。
+     * 实际收束优先取 digest 摘要（含信息揭示/情绪落点/钩子兑现），未出摘要（如上一章停在待审批）回退原文末段。
+     * 首章或上一章缺失返回 null——章纲、场景上下文、读者评审三处共用。
+     */
+    public String prevChapterBrief(long novelId, int chapterNo) {
+        if (chapterNo <= 1) return null;
+        ChapterDO prev = chapterDAO.find(novelId, chapterNo - 1).orElse(null);
+        if (prev == null) return null;
+        List<String> summaries = digestDAO.findRecent(novelId, chapterNo - 1, 1);
+        String outcome = summaries.isEmpty() ? prevTail(novelId, chapterNo)
+                : summaries.get(summaries.size() - 1);
+        return "上一章目标：" + Objects.toString(prev.goal(), "（无）")
+                + "\n上一章章末钩子：" + Objects.toString(prev.hook(), "（无）")
+                + "\n上一章实际收束：" + (outcome == null || outcome.isBlank() ? "（无）" : outcome.strip());
+    }
+
     /** 世界状态快照（上一章结束时）格式化为紧凑清单；无则 null。写错时素材库可人工纠偏。 */
     public String worldState(long novelId, int chapterNo) {
         String json = worldStateDAO.findLatestBefore(novelId, chapterNo);
@@ -273,10 +290,12 @@ public class ContextPackerService {
         if (dex != null) {
             craft = (craft.isEmpty() ? "" : craft + "\n\n") + dex;
         }
-        // 设定卡匹配文本：本章目标/钩子 + 场景目标 + 前文 + 事实账近况（命中才注入对应卡，省上下文）
+        // 设定卡匹配文本：本章目标/钩子 + 场景目标 + 前文 + 事实账近况 + 上一章后果（命中才注入对应卡，省上下文）
+        String prevBrief = prevChapterBrief(novelId, chapterNo);
         String matchText = String.join("\n",
                 String.valueOf(ch.title()), String.valueOf(ch.goal()), String.valueOf(ch.hook()),
                 spec.goal(), prevSceneText == null ? String.valueOf(prevTail) : prevSceneText,
+                prevBrief == null ? "" : prevBrief,
                 String.join("\n", ctx));
         // 提示词中的比喻密度红线走 tuning（与门禁 simile 上限是两道闸：一个管写、一个管验收）
         String simileRedline = java.math.BigDecimal
@@ -313,6 +332,9 @@ public class ContextPackerService {
                 【世界状态（上一章结束时，必须遵守——物品归属与位置不得凭空变化）】
                 %s
 
+                【上一章事件后果（本章开场必须与之对接：兑现、交代或明确推进，禁止无视另起炉灶）】
+                %s
+
                 【上一场景已写内容（紧接其后继续写；禁止复述其中任何句子——你的第一行必须是全新的句子；禁止重复情节与时间点）】
                 %s
                 """.formatted(chapterNo, spec.sceneNo(), ch.title(), spec.goal(),
@@ -324,6 +346,7 @@ public class ContextPackerService {
                 foreshadows.isEmpty() ? "（本章无）" : String.join("\n", foreshadows),
                 ctx.isEmpty() ? "（本章是第一章，无前情）" : String.join("\n---\n", ctx),
                 worldState(novelId, chapterNo) == null ? "（无记录）" : worldState(novelId, chapterNo),
+                prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，无上一章后果）" : prevBrief,
                 prevSceneText == null ? (prevTail == null ? "（无）" : prevTail) : prevSceneText);
         return new Pack(system, user);
     }
