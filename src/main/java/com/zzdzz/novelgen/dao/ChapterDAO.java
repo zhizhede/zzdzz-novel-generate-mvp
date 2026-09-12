@@ -105,6 +105,12 @@ public class ChapterDAO {
         jdbc.update("UPDATE chapters SET status=?, update_time=NOW() WHERE id=?", status, chapterId);
     }
 
+    /** 条件状态推进（原子）：仅当当前状态等于 expect 才更新，返回是否生效——防并发重复审批等竞态。 */
+    public boolean updateStatusIf(long chapterId, String expect, String to) {
+        return jdbc.update("UPDATE chapters SET status=?, update_time=NOW() WHERE id=? AND status=?",
+                to, chapterId, expect) > 0;
+    }
+
     public void updateStatusByNo(long novelId, int chapterNo, String status) {
         jdbc.update("""
                 UPDATE chapters SET status=?, update_time=NOW()

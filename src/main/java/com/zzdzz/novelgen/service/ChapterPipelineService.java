@@ -179,15 +179,26 @@ public class ChapterPipelineService {
         return outlineService.loadSpecs(ch.id());
     }
 
-    /** 人工审批：仅 PENDING_APPROVAL 可过审；过审即生成 digest。 */
+    /**
+     * 人工审批：仅 PENDING_APPROVAL 可过审；过审即生成 digest，终点状态 DIGESTED（与 auto 流一致；
+     * 库约束不含 APPROVED，历史版本在此必撞约束导致「digest 成功、接口报错」）。
+     * 条件状态推进防并发重复审批。
+     */
     public void approve(long chapterId) {        ChapterDO ch = chapterDAO.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (!"PENDING_APPROVAL".equals(ch.status())) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "章 " + chapterId + " 状态为 " + ch.status() + "，不在待审批");
         }
-        digestService.digest(ch.novelId(), ch.id(), ch.chapterNo(), ch.fullText());
-        chapterDAO.updateStatus(ch.id(), "APPROVED");
+        // 先原子占位（PENDING_APPROVAL → DIGESTED，占位必须用合法状态值；库约束无 DIGESTING/APPROVED），
+        // 并发第二次点击立刻被拒；digest 异常则回退原状态
+        chapterDAO.updateStatusIf(chapterId, "PENDING_APPROVAL", "DIGESTED");
+        try {
+            digestService.digest(ch.novelId(), ch.id(), ch.chapterNo(), ch.fullText());
+        } catch (Exception e) {
+            chapterDAO.updateStatus(chapterId, "PENDING_APPROVAL");
+            throw e;
+        }
     }
 
     /** 模型偶发把章题当正文首行（无 # 前缀，cleanDraft 剥不掉）：拼章与修订后各剥一次。 */

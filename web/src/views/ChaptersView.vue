@@ -22,9 +22,9 @@
         <div style="margin-bottom: 8px; display: flex; gap: 12px; align-items: center">
           <el-tag size="small">{{ detail.status }}</el-tag>
           <span style="font-size: 12px; color: #999">
-            LLM：{{ detail.llmTotals.calls }} 次调用 / {{ detail.llmTotals.totalTokens }} tokens / 平均 {{ detail.llmTotals.avgLatencyMs }}ms
+            LLM：{{ detail.llmTotals?.calls ?? 0 }} 次调用 / {{ detail.llmTotals?.totalTokens ?? 0 }} tokens / 平均 {{ detail.llmTotals?.avgLatencyMs ?? 0 }}ms
           </span>
-          <el-button v-if="detail.status === 'PENDING_APPROVAL'" type="success" size="small" @click="approve">通过审批</el-button>
+          <el-button v-if="detail.status === 'PENDING_APPROVAL'" type="success" size="small" :loading="approving" @click="approve">通过审批</el-button>
           <el-button v-if="detail.status === 'FAILED'" type="warning" size="small" @click="rerunChapter">重新生成本章</el-button>
           <el-button v-if="detail.fullText" size="small" plain @click="copyText">复制正文</el-button>
           <el-button v-if="detail.fullText" size="small" type="primary" plain @click="reader = true">阅读模式</el-button>
@@ -35,16 +35,16 @@
           <el-tab-pane label="正文" name="text">
             <div style="white-space: pre-wrap; line-height: 1.9">{{ detail.fullText || '（尚未生成）' }}</div>
           </el-tab-pane>
-          <el-tab-pane :label="`场景（${detail.scenes.length}）`" name="scenes">
-            <div v-for="s in detail.scenes" :key="s.id" style="margin-bottom: 14px">
+          <el-tab-pane :label="`场景（${detail.scenes?.length ?? 0}）`" name="scenes">
+            <div v-for="s in (detail.scenes || [])" :key="s.id" style="margin-bottom: 14px">
               <div style="font-size: 12px; color: #999; margin-bottom: 4px">
-                场景 {{ s.sceneNo }}｜{{ s.gateStatus }}｜改写 {{ s.revisionRound }} 次｜目标：{{ s.goal }}
+                场景 {{ s.sceneNo }}｜{{ s.gateStatus }}｜改写 {{ s.revisionRound ?? 0 }} 次｜目标：{{ s.goal }}
               </div>
               <div style="white-space: pre-wrap; border-left: 3px solid #eee; padding-left: 10px">{{ s.draftText }}</div>
             </div>
           </el-tab-pane>
           <el-tab-pane :label="`门禁（${detail.gateReport ? (detail.gateReport.passed ? '通过' : '未过') : '无'}）`" name="gates">
-            <el-table v-if="detail.gateReport" :data="detail.gateReport.checks" border size="small">
+            <el-table v-if="detail.gateReport" :data="detail.gateReport.checks || []" border size="small">
               <el-table-column prop="check" label="指标" width="200" />
               <el-table-column prop="value" label="实测" width="100" />
               <el-table-column prop="baseline" label="基线" width="100" />
@@ -68,7 +68,7 @@
                 <span style="font-size: 12px; color: #999">{{ detail.review.createTime }}</span>
               </div>
               <div style="font-size: 13px; margin-bottom: 12px">{{ detail.review.summary }}</div>
-              <el-table v-if="detail.review.issues.length" :data="detail.review.issues" border size="small">
+              <el-table v-if="detail.review.issues?.length" :data="detail.review.issues" border size="small">
                 <el-table-column prop="type" label="类型" width="110" />
                 <el-table-column label="严重度" width="90">
                   <template #default="{ row }">
@@ -118,6 +118,7 @@ const drawer = ref(false)
 const reader = ref(false)
 const activeTab = ref('text')
 const reviewing = ref(false)
+const approving = ref(false)
 
 const reviewLabel = computed(() => {
   const r = detail.value?.review
@@ -125,7 +126,11 @@ const reviewLabel = computed(() => {
 })
 
 async function loadChapters() {
-  chapters.value = await api.get(`/api/novels/${novelId.value}/chapters`)
+  try {
+    chapters.value = await api.get(`/api/novels/${novelId.value}/chapters`)
+  } catch (e) {
+    ElMessage.error('章节列表加载失败：' + e.message)
+  }
 }
 
 async function rerunChapter() {
@@ -158,18 +163,28 @@ async function copyText() {
 }
 
 async function open(row) {
-  detail.value = await api.get(`/api/chapters/${row.id}`)
+  try {
+    detail.value = await api.get(`/api/chapters/${row.id}`)
+  } catch (e) {
+    ElMessage.error('章节详情加载失败：' + e.message)
+    return
+  }
   activeTab.value = detail.value.fullText ? 'text' : 'scenes'
   drawer.value = true
 }
 
 async function approve() {
+  approving.value = true
   try {
+    // 审批会同步跑 digest（一次 LLM 调用，可能 1-2 分钟），按钮转圈防重复提交
     await api.post(`/api/chapters/${detail.value.id}/approve`)
     ElMessage.success('已过审并生成事实账')
     detail.value = await api.get(`/api/chapters/${detail.value.id}`)
+    await loadChapters()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    approving.value = false
   }
 }
 
