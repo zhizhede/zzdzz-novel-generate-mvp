@@ -21,6 +21,8 @@ import java.util.Map;
 /**
  * MiniMax OpenAI 兼容协议实现。除返回结果外，把请求/响应全量写入 llm_call_log，
  * 失败也落一行 error——这是断点重放与成本审计的依据。
+ * 模型/参数按节点路由：llm_node_config 有 enabled 行则覆盖（model/temperature/max_tokens/extra_json），
+ * 留空项走调用方或全局默认；配置查询失败不拦截调用。
  */
 @Component
 public class MiniMaxClient implements LlmPort {
@@ -30,12 +32,15 @@ public class MiniMaxClient implements LlmPort {
     private final LlmProperties props;
     private final ObjectMapper mapper;
     private final LlmCallLogDAO callLogDAO;
+    private final com.zzdzz.novelgen.dao.LlmNodeConfigDAO nodeConfigDAO;
     private final RestClient restClient;
 
-    public MiniMaxClient(LlmProperties props, ObjectMapper mapper, LlmCallLogDAO callLogDAO) {
+    public MiniMaxClient(LlmProperties props, ObjectMapper mapper, LlmCallLogDAO callLogDAO,
+                         com.zzdzz.novelgen.dao.LlmNodeConfigDAO nodeConfigDAO) {
         this.props = props;
         this.mapper = mapper;
         this.callLogDAO = callLogDAO;
+        this.nodeConfigDAO = nodeConfigDAO;
 
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(props.connectTimeout())
@@ -54,7 +59,10 @@ public class MiniMaxClient implements LlmPort {
     @Override
     public ChatResult chat(ChatRequest request) {
         long start = System.currentTimeMillis();
-        Map<String, Object> body = buildBody(request);
+        com.zzdzz.novelgen.model.entity.LlmNodeConfigDO cfg = resolveConfig(request.node());
+        String model = cfg != null && cfg.model() != null && !cfg.model().isBlank()
+                ? cfg.model() : props.model();
+        Map<String, Object> body = buildBody(request, cfg, model);
         String requestJson = serialize(body);
 
         JsonNode response;
@@ -66,8 +74,8 @@ public class MiniMaxClient implements LlmPort {
             try {
                 response = post(body);
             } catch (Exception second) {
-                log.error("LLM 调用失败 node={} model={}", request.node(), props.model(), second);
-                long id = insertLog(request, requestJson, null, null, 0, 0, 0,
+                log.error("LLM 调用失败 node={} model={}", request.node(), model, second);
+                long id = insertLog(request, model, requestJson, null, null, 0, 0, 0, 0,
                         elapsed(start), "error", truncate(second.toString(), 2000));
                 throw new LlmException("LLM 调用失败（llm_call_log id=" + id + "）: " + second.getMessage(), second);
             }
@@ -76,7 +84,7 @@ public class MiniMaxClient implements LlmPort {
         String content = extractContent(response);
         if (content == null || content.isBlank()) {
             String msg = "响应缺少 content: " + truncate(serialize(response), 1000);
-            insertLog(request, requestJson, response, null, 0, 0, 0, elapsed(start), "error", msg);
+            insertLog(request, model, requestJson, response, null, 0, 0, 0, 0, elapsed(start), "error", msg);
             throw new LlmException(msg);
         }
         String reasoning = extractReasoning(response);
@@ -86,16 +94,27 @@ public class MiniMaxClient implements LlmPort {
                 usageNode.path("prompt_tokens").asInt(0),
                 usageNode.path("completion_tokens").asInt(0),
                 usageNode.path("total_tokens").asInt(0));
+        int cachedTokens = usageNode.path("prompt_tokens_details").path("cached_tokens").asInt(0);
         long latency = elapsed(start);
-        long id = insertLog(request, requestJson, response, reasoning,
-                usage.promptTokens(), usage.completionTokens(), usage.totalTokens(),
+        long id = insertLog(request, model, requestJson, response, reasoning,
+                usage.promptTokens(), cachedTokens, usage.completionTokens(), usage.totalTokens(),
                 latency, "ok", null);
 
         log.info("LLM 调用完成 node={} model={} tokens={}={}+{} latency={}ms reasoning={}字 logId={}",
-                request.node(), props.model(), usage.totalTokens(),
+                request.node(), model, usage.totalTokens(),
                 usage.promptTokens(), usage.completionTokens(), latency,
                 reasoning == null ? 0 : reasoning.length(), id);
         return new ChatResult(id, content, reasoning, usage);
+    }
+
+    /** 节点路由配置：查询失败不拦截调用（走全局默认）。 */
+    private com.zzdzz.novelgen.model.entity.LlmNodeConfigDO resolveConfig(String node) {
+        try {
+            return nodeConfigDAO.findEnabled(node);
+        } catch (Exception e) {
+            log.warn("节点路由配置查询失败，走全局默认：node={}（{}）", node, e.getMessage());
+            return null;
+        }
     }
 
     private JsonNode post(Map<String, Object> body) {
@@ -106,16 +125,30 @@ public class MiniMaxClient implements LlmPort {
                 .body(JsonNode.class);
     }
 
-    private Map<String, Object> buildBody(ChatRequest request) {
+    private Map<String, Object> buildBody(ChatRequest request,
+                                          com.zzdzz.novelgen.model.entity.LlmNodeConfigDO cfg, String model) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", props.model());
+        body.put("model", model);
         List<Map<String, String>> messages = new ArrayList<>();
         for (Message m : request.messages()) {
             messages.add(Map.of("role", m.role(), "content", m.content()));
         }
         body.put("messages", messages);
-        if (request.temperature() != null) {
-            body.put("temperature", request.temperature());
+        Double temp = cfg != null && cfg.temperature() != null ? cfg.temperature() : request.temperature();
+        if (temp != null) {
+            body.put("temperature", temp);
+        }
+        if (cfg != null && cfg.maxTokens() != null) {
+            body.put("max_tokens", cfg.maxTokens());
+        }
+        if (cfg != null && cfg.extraJson() != null && !cfg.extraJson().isBlank()) {
+            try {
+                JsonNode extra = mapper.readTree(cfg.extraJson());
+                extra.fields().forEachRemaining(e ->
+                        body.put(e.getKey(), mapper.convertValue(e.getValue(), Object.class)));
+            } catch (Exception e) {
+                log.warn("节点 extra_json 解析失败，忽略：{}", e.getMessage());
+            }
         }
         return body;
     }
@@ -147,12 +180,12 @@ public class MiniMaxClient implements LlmPort {
             java.util.regex.Pattern.compile("(?s)<think>(.*?)</think>");
 
     /** 台账先行入库（SQL 在 LlmCallLogDAO），失败也留痕，调用方据此可重放。 */
-    private long insertLog(ChatRequest request, String requestJson, JsonNode response, String reasoning,
-                           int promptTokens, int completionTokens, int totalTokens,
+    private long insertLog(ChatRequest request, String model, String requestJson, JsonNode response, String reasoning,
+                           int promptTokens, int cachedTokens, int completionTokens, int totalTokens,
                            long latencyMs, String status, String errorMsg) {
         String responseJson = response == null ? null : serialize(response);
-        return callLogDAO.insert(request.node(), request.novelId(), request.chapterId(), props.model(),
-                promptTokens, completionTokens, totalTokens, latencyMs, status, errorMsg,
+        return callLogDAO.insert(request.node(), request.novelId(), request.chapterId(), model,
+                promptTokens, cachedTokens, completionTokens, totalTokens, latencyMs, status, errorMsg,
                 reasoning, requestJson, responseJson);
     }
 
