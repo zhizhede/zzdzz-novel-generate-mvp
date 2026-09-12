@@ -34,11 +34,12 @@ public class ReviewService {
             2. stakes 这场戏：谁想要什么？什么在阻止？（说不出来=没有戏剧张力）
             3. continuity 读完前 10 行，能否定位上一章结束时的情境（时间/地点/在场人物）？（定位不到=衔接断裂）
             4. fat 与剧情无关、删掉后读者不会少知道任何事的纯装饰描写（给微动作写人物志、连篇比喻、静态观察），占比大约多少？
+            5. consequence 上下文给出了【上一章事件后果】（上一章的目标、章末钩子与实际收束）。本章是否与之对接——给出兑现、交代或明确推进？（完全无视另起炉灶=fail）
             只输出 JSON：
-            {"verdict":"pass|blocker","hook":"pass|fail","stakes":"pass|fail","continuity":"pass|fail","fat_ratio":0.4,"skip_quotes":["可整段删除的原句"],"issues":["具体问题（引用原句）"]}
+            {"verdict":"pass|blocker","hook":"pass|fail","stakes":"pass|fail","continuity":"pass|fail","consequence":"pass|fail","fat_ratio":0.4,"skip_quotes":["可整段删除的原句"],"issues":["具体问题（引用原句）"]}
             规则：
             - 引用原文一律用「」；字符串值内部禁止英文双引号。
-            - hook/stakes/continuity 任一 fail，或 fat_ratio 大于 %s → verdict=blocker；否则 pass。
+            - hook/stakes/continuity/consequence 任一 fail，或 fat_ratio 大于 %s → verdict=blocker；否则 pass。
             - 你只管「想不想往下读」，错别字与设定连续性是另一位审校的事，不要报。
             - 不要输出思考过程，只输出 JSON。
             """.strip();
@@ -108,9 +109,9 @@ public class ReviewService {
         if (!"blocker".equals(r1.path("verdict").asText())) {
             return new Outcome(null, r1.path("verdict").asText("pass"), false);
         }
-        log.warn("第 {} 章读者评审判 BLOCKER（hook={} stakes={} continuity={} fat_ratio={}），重写一轮",
+        log.warn("第 {} 章读者评审判 BLOCKER（hook={} stakes={} continuity={} consequence={} fat_ratio={}），重写一轮",
                 ch.chapterNo(), r1.path("hook").asText(), r1.path("stakes").asText(),
-                r1.path("continuity").asText(), r1.path("fat_ratio").asText());
+                r1.path("continuity").asText(), r1.path("consequence").asText(), r1.path("fat_ratio").asText());
         String revised = readerFix(novelId, ch, fullText, r1);
         if (revised == null) {
             return new Outcome(null, "blocker", true);
@@ -123,7 +124,9 @@ public class ReviewService {
     /** 单轮读者评审：解析失败重试 1 次，仍失败 fail-open 落 skipped 报告。 */
     private JsonNode readerOnce(long novelId, ChapterDO ch, String text, int round) {
         String prevTail = packer.prevTail(novelId, ch.chapterNo());
+        String prevBrief = packer.prevChapterBrief(novelId, ch.chapterNo());
         String user = "【上一章结尾（衔接定位基准）】\n" + (prevTail == null || prevTail.isBlank() ? "（无）" : prevTail)
+                + "\n\n【上一章事件后果】\n" + (prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，consequence 直接 pass）" : prevBrief)
                 + "\n\n【本章目标】" + ch.goal()
                 + "\n\n【第 " + ch.chapterNo() + " 章全文（评审对象）】\n" + text + "\n\n只输出 JSON。";
         try {
@@ -167,6 +170,9 @@ public class ReviewService {
         }
         if (review.path("continuity").asText().equals("fail")) {
             fb.append("- 衔接断裂：读者无法定位上一章结束时的情境，开头须回到上一章结尾的时间/地点/在场人物。\n");
+        }
+        if (review.path("consequence").asText().equals("fail")) {
+            fb.append("- 事件后果断裂：本章无视了上一章结尾的未竟事件/钩子，开场必须先与之对接（兑现、交代或明确推进），再展开新内容。\n");
         }
         if (fb.isEmpty()) {
             fb.append("- 读者判定注水或无张力：删掉所有纯装饰描写，让每一段都推进事件或揭示信息。\n");

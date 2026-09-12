@@ -46,7 +46,8 @@ public class OutlineService {
     }
 
     public void generate(long novelId, ChapterDO ch, String world, String characters,
-                         List<String> directives, List<String> digests, String prevTail) {
+                         List<String> directives, List<String> digests, String prevTail,
+                         String prevBrief) {
         String user = """
                 任务：为第 %d 章《%s》编写场景级章纲。
                 本章卷纲目标：%s
@@ -64,6 +65,9 @@ public class OutlineService {
                 【前情摘要】
                 %s
 
+                【上一章事件后果（第一场景必须与之对接：兑现、交代或明确推进，禁止无视另起炉灶）】
+                %s
+
                 【上一章结尾原文（衔接其节奏）】
                 %s
 
@@ -74,6 +78,7 @@ public class OutlineService {
                 Objects.toString(ch.ruleRefs(), "[]"), Objects.toString(ch.foreshadowRefs(), "[]"),
                 ch.budgetMin(), ch.budgetMax(), world, characters,
                 digests == null || digests.isEmpty() ? "（本章是第一章，无前情）" : String.join("\n---\n", digests),
+                prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，无上一章后果）" : prevBrief,
                 prevTail == null ? "（无）" : prevTail);
 
         JsonNode scenes = askScenes(user, 2);
