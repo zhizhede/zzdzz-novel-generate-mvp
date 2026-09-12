@@ -11,6 +11,7 @@ import com.zzdzz.novelgen.service.LibraryService;
 import com.zzdzz.novelgen.service.LlmNodeConfigService;
 import com.zzdzz.novelgen.service.MaterialCardService;
 import com.zzdzz.novelgen.service.TuningService;
+import com.zzdzz.novelgen.service.EmbeddingService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,15 +35,17 @@ public class LibraryController {
     private final MaterialCardService cardService;
     private final LlmNodeConfigService nodeConfigService;
     private final TuningService tuningService;
+    private final EmbeddingService embeddingService;
 
     public LibraryController(LibraryService libraryService, DigestService digestService,
                              MaterialCardService cardService, LlmNodeConfigService nodeConfigService,
-                             TuningService tuningService) {
+                             TuningService tuningService, EmbeddingService embeddingService) {
         this.libraryService = libraryService;
         this.digestService = digestService;
         this.cardService = cardService;
         this.nodeConfigService = nodeConfigService;
         this.tuningService = tuningService;
+        this.embeddingService = embeddingService;
     }
 
     // ===== 调参（平台级行为参数，改后 30s 内生效） =====
@@ -111,6 +114,21 @@ public class LibraryController {
 
     private static java.math.BigDecimal decimal(Object value) {
         return value instanceof Number n ? java.math.BigDecimal.valueOf(n.doubleValue()) : null;
+    }
+
+    // ===== 向量索引（RAG 语义检索） =====
+
+    @GetMapping("/novels/{novelId}/embeddings/status")
+    public Result<Map<String, Object>> embeddingStatus(@PathVariable long novelId) {
+        return Result.ok(Map.of("indexed", embeddingService.countByNovel(novelId),
+                "enabled", embeddingService.enabled()));
+    }
+
+    /** 手动回填：补嵌缺失的事实账摘要与素材卡（惰性索引也会在生成时自动补）。 */
+    @PostMapping("/novels/{novelId}/embeddings/backfill")
+    public Result<Map<String, Object>> embeddingBackfill(@PathVariable long novelId) {
+        int added = embeddingService.backfillNovel(novelId);
+        return Result.ok(Map.of("added", added, "indexed", embeddingService.countByNovel(novelId)));
     }
 
     // ===== 素材卡 =====

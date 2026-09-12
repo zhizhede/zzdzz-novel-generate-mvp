@@ -49,6 +49,19 @@ public class MaterialCardService {
         this.tuning = tuning;
     }
 
+    /** 向量化文本（RAG 索引用）：类型标签 + 名 + 别名 + 摘要 + 正文。 */
+    public String embeddingText(MaterialCardDO card) {
+        StringBuilder sb = new StringBuilder("素材卡·")
+                .append(KIND_LABELS.getOrDefault(card.kind(), card.kind()))
+                .append("：").append(card.name());
+        if (card.aliases() != null && !card.aliases().isEmpty()) {
+            sb.append("（别名：").append(String.join("、", card.aliases())).append('）');
+        }
+        if (card.summary() != null && !card.summary().isBlank()) sb.append('\n').append(card.summary());
+        if (card.contentMd() != null && !card.contentMd().isBlank()) sb.append('\n').append(card.contentMd());
+        return sb.toString();
+    }
+
     // ===== CRUD =====
 
     public List<MaterialCardDO> list(long novelId, String kind) {

@@ -24,6 +24,7 @@ public final class LlmNode {
     public static final String CHAPTER_REPLAN = "chapter_replan";   // 单章卷纲重写/自愈换目标
 
     // ===== 工具 =====
+    public static final String EMBEDDING = "embedding";             // embo-01 向量化（RAG 语义检索）
     public static final String SMOKE = "smoke";                     // 冒烟连通性测试
 
     private LlmNode() {}
