@@ -1,5 +1,7 @@
 package com.zzdzz.novelgen.service;
 
+import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.dao.GenerationTaskDAO;
 import com.zzdzz.novelgen.dao.NovelDAO;
 import com.zzdzz.novelgen.model.vo.GenerationTaskVO;
@@ -64,7 +66,7 @@ public class GenerationQueueService {
     public long submit(String novelTitle, int from, int to, Long userId) {
         Long novelId = novelDAO.findIdByTitle(novelTitle);
         if (novelId == null) {
-            throw new IllegalArgumentException("作品不存在: " + novelTitle);
+            throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelTitle);
         }
         long id = taskDAO.insert(novelId, from, to, userId);
         emitTask(novelId, id, novelTitle, from, to, StageLog.Phase.QUEUED, null);

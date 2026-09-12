@@ -2,6 +2,8 @@ package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -40,7 +42,7 @@ public class OutlineService {
 
     public ChapterDO loadChapter(long novelId, int chapterNo) {
         return chapterDAO.find(novelId, chapterNo)
-                .orElseThrow(() -> new IllegalStateException("章不存在: " + chapterNo));
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
     }
 
     public void generate(long novelId, ChapterDO ch, String world, String characters,

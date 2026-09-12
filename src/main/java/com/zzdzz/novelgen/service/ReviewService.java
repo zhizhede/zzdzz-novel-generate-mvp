@@ -2,6 +2,8 @@ package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.dao.ChapterDAO;
 import com.zzdzz.novelgen.dao.GateReportDAO;
 import com.zzdzz.novelgen.llm.LlmJson;
@@ -197,9 +199,9 @@ public class ReviewService {
 
     /** 回溯/UI 用：对已有正文的章跑一次审校，只落报告，不动正文与状态。 */
     public void reviewExisting(long chapterId) {        ChapterDO ch = chapterDAO.findById(chapterId)
-                .orElseThrow(() -> new IllegalArgumentException("章不存在: " + chapterId));
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (ch.fullText() == null || ch.fullText().isBlank()) {
-            throw new IllegalArgumentException("该章无正文，无法审校");
+            throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法审校");
         }
         reviewOnce(ch.novelId(), ch, ch.fullText(), 1);
     }

@@ -1,5 +1,7 @@
 package com.zzdzz.novelgen.service;
 
+import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
@@ -75,7 +77,7 @@ public class ChapterPipelineService {
     /** 兼容旧入口：按作品标题连跑，无进度回调。 */
     public int runChapters(String novelTitle, int from, int to) {
         Long novelId = novelDAO.findIdByTitle(novelTitle);
-        if (novelId == null) throw new IllegalStateException("作品不存在: " + novelTitle);
+        if (novelId == null) throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelTitle);
         return runChapters(novelId, novelTitle, from, to, null);
     }
 
@@ -168,7 +170,7 @@ public class ChapterPipelineService {
     public List<OutlineService.SceneSpec> regenerateOutline(long novelId, int chapterNo) {
         ChapterDO ch = outlineService.loadChapter(novelId, chapterNo);
         if (ch.fullText() != null && !ch.fullText().isBlank()) {
-            throw new IllegalStateException("第 " + chapterNo + " 章已有正文，禁止重出章纲");
+            throw new BizException(ErrorCode.STATE_CONFLICT, "第 " + chapterNo + " 章已有正文，禁止重出章纲");
         }
         List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
         outlineService.generate(novelId, ch, packer.world(novelId), packer.characters(novelId),
@@ -179,9 +181,10 @@ public class ChapterPipelineService {
 
     /** 人工审批：仅 PENDING_APPROVAL 可过审；过审即生成 digest。 */
     public void approve(long chapterId) {        ChapterDO ch = chapterDAO.findById(chapterId)
-                .orElseThrow(() -> new IllegalArgumentException("章不存在: " + chapterId));
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (!"PENDING_APPROVAL".equals(ch.status())) {
-            throw new IllegalStateException("章 " + chapterId + " 状态为 " + ch.status() + "，不在待审批");
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "章 " + chapterId + " 状态为 " + ch.status() + "，不在待审批");
         }
         digestService.digest(ch.novelId(), ch.id(), ch.chapterNo(), ch.fullText());
         chapterDAO.updateStatus(ch.id(), "APPROVED");

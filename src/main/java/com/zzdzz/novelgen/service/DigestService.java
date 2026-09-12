@@ -1,6 +1,8 @@
 package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -141,9 +143,9 @@ public class DigestService {
     /** 存量回填：只产出世界状态快照，不动事实账（轻量调用，逐章触发）。 */
     public void backfillState(long novelId, int chapterNo) {
         ChapterDO ch = chapterDAO.find(novelId, chapterNo)
-                .orElseThrow(() -> new IllegalArgumentException("章不存在: " + chapterNo));
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
         if (ch.fullText() == null || ch.fullText().isBlank()) {
-            throw new IllegalArgumentException("该章无正文，无法回填状态");
+            throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法回填状态");
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.WORLD_STATE, novelId, ch.id(),

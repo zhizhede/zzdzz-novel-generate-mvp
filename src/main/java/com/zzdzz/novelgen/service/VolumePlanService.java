@@ -145,7 +145,8 @@ public class VolumePlanService {
             log.info("卷纲规划通过：第 {} 卷 {} 共 {} 章", volNo, draft.arc(), draft.rows().size());
             return draft;
         }
-        throw new IllegalStateException("卷纲规划 3 轮未过结构校验/AI 审校，放弃落库（llm_call_log node=volume_plan 可回放）");
+        throw new BizException(ErrorCode.LLM_OUTPUT_INVALID,
+                "卷纲规划 3 轮未过结构校验/AI 审校，放弃落库（llm_call_log node=volume_plan 可回放）");
     }
 
     private PlanDraft askPlan(long novelId, int volNo, int fromNo, Integer toNo, String context, String feedback) {
