@@ -41,6 +41,7 @@ public class ContextPackerService {
     private final WorldStateDAO worldStateDAO;
     private final MaterialCardService cardService;
     private final TuningService tuning;
+    private final EmbeddingService embeddingService;
 
     public ContextPackerService(StylePackDAO stylePackDAO,
                                 CanonDocDAO canonDocDAO,
@@ -49,7 +50,8 @@ public class ContextPackerService {
                                 ChapterDAO chapterDAO,
                                 WorldStateDAO worldStateDAO,
                                 MaterialCardService cardService,
-                                TuningService tuning) {
+                                TuningService tuning,
+                                EmbeddingService embeddingService) {
         this.stylePackDAO = stylePackDAO;
         this.canonDocDAO = canonDocDAO;
         this.digestDAO = digestDAO;
@@ -58,6 +60,7 @@ public class ContextPackerService {
         this.worldStateDAO = worldStateDAO;
         this.cardService = cardService;
         this.tuning = tuning;
+        this.embeddingService = embeddingService;
     }
 
     public record Pack(String system, String user) {}
@@ -300,6 +303,10 @@ public class ContextPackerService {
         // 提示词中的比喻密度红线走 tuning（与门禁 simile 上限是两道闸：一个管写、一个管验收）
         String simileRedline = java.math.BigDecimal
                 .valueOf(tuning.d("prompt_simile_per1k", 3.0)).stripTrailingZeros().toPlainString();
+        // RAG 语义召回：本章目标+钩子+场景目标 作查询，近三章事实账已在摘要里故不重复召回
+        String ragSection = embeddingService.searchSection(novelId, chapterNo,
+                Objects.toString(ch.goal(), "") + "\n" + Objects.toString(ch.hook(), "") + "\n" + spec.goal(),
+                chapterNo - 3);
         String user = """
                 任务：写第 %d 章场景 %d。
                 本章目标：%s
@@ -329,6 +336,9 @@ public class ContextPackerService {
                 【前情摘要】
                 %s
 
+                【相关前史（语义检索召回，带出处；与本章情节相关才用，禁止硬凑）】
+                %s
+
                 【世界状态（上一章结束时，必须遵守——物品归属与位置不得凭空变化）】
                 %s
 
@@ -345,6 +355,7 @@ public class ContextPackerService {
                 charactersForScene(novelId, matchText),
                 foreshadows.isEmpty() ? "（本章无）" : String.join("\n", foreshadows),
                 ctx.isEmpty() ? "（本章是第一章，无前情）" : String.join("\n---\n", ctx),
+                ragSection == null ? "（无相关命中）" : ragSection,
                 worldState(novelId, chapterNo) == null ? "（无记录）" : worldState(novelId, chapterNo),
                 prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，无上一章后果）" : prevBrief,
                 prevSceneText == null ? (prevTail == null ? "（无）" : prevTail) : prevSceneText);

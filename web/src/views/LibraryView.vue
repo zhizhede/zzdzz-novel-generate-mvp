@@ -11,6 +11,12 @@
     <el-tabs>
       <!-- 素材卡 -->
       <el-tab-pane :label="`素材卡（${cards.length}）`">
+        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px">
+          <span style="font-size: 12px; color: #999">
+            向量索引（RAG 语义检索）：已建 <b>{{ embIndexed }}</b> 条{{ embEnabled ? '' : '（开关已关）' }}，生成时自动补嵌缺失项
+          </span>
+          <el-button size="small" :loading="embBackfilling" @click="backfillEmbeddings">手动回填</el-button>
+        </div>
         <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center">
           <el-button type="primary" size="small" @click="openCard(null)">新增素材卡</el-button>
           <span style="color: #999; font-size: 12px">
@@ -425,6 +431,22 @@ const llmPrices = ref([])
 const priceEditor = ref(false)
 const priceForm = ref({})
 const tunings = ref([])
+const embIndexed = ref(0)
+const embEnabled = ref(true)
+const embBackfilling = ref(false)
+
+async function backfillEmbeddings() {
+  embBackfilling.value = true
+  try {
+    const r = await api.post(`/api/novels/${novelId.value}/embeddings/backfill`)
+    ElMessage.success(`回填完成：新增 ${r.added} 条，共 ${r.indexed} 条`)
+    embIndexed.value = r.indexed
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    embBackfilling.value = false
+  }
+}
 
 const inPeak = computed(() => {
   const p = llmPrices.value[0]
@@ -587,6 +609,13 @@ async function loadAll() {
   llmNodes.value = await api.get('/api/llm-nodes')
   llmPrices.value = await api.get('/api/llm-prices')
   tunings.value = (await api.get('/api/tuning')).map(t => ({ ...t, editValue: t.value }))
+  try {
+    const es = await api.get(`/api/novels/${novelId.value}/embeddings/status`)
+    embIndexed.value = es.indexed
+    embEnabled.value = es.enabled !== false
+  } catch {
+    embIndexed.value = 0
+  }
   foreshadows.value = await api.get(`/api/novels/${novelId.value}/foreshadows`)
   digests.value = await api.get(`/api/novels/${novelId.value}/digests`)
   worldStates.value = await api.get(`/api/novels/${novelId.value}/world-states`)
