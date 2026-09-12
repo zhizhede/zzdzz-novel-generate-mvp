@@ -1,0 +1,350 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "zzdzz-novel-generate-mvp 高层运行时架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1240,
+      500
+    ],
+    "output": "runtime-architecture.html"
+  },
+  "components": [
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "JWT 认证",
+      "sublabel": "HttpOnly Cookie",
+      "pos": [
+        55,
+        40
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "tag": "无服务端会话"
+    },
+    {
+      "id": "spa",
+      "type": "frontend",
+      "label": "浏览器 SPA",
+      "sublabel": "Vue3 + Element Plus :5173",
+      "pos": [
+        50,
+        330
+      ],
+      "size": [
+        165,
+        60
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST/SSE 接入层",
+      "sublabel": "Spring Boot :8090",
+      "pos": [
+        295,
+        205
+      ],
+      "size": [
+        175,
+        64
+      ],
+      "tag": "统一 Result/错误码"
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "生成队列",
+      "sublabel": "DB 承载 · 单 worker",
+      "pos": [
+        540,
+        205
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "协作取消"
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "单章管线编排器",
+      "sublabel": "七步 Step · 自愈梯子",
+      "pos": [
+        765,
+        200
+      ],
+      "size": [
+        185,
+        70
+      ],
+      "tag": "章纲→场景→门禁→评审→审批→digest"
+    },
+    {
+      "id": "packer",
+      "type": "backend",
+      "label": "上下文打包器",
+      "sublabel": "四层记忆注入",
+      "pos": [
+        765,
+        35
+      ],
+      "size": [
+        175,
+        60
+      ]
+    },
+    {
+      "id": "llmgw",
+      "type": "backend",
+      "label": "LLM 网关",
+      "sublabel": "LlmPort · 节点路由",
+      "pos": [
+        1010,
+        205
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "tag": "峰谷计费"
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "PostgreSQL 16",
+      "sublabel": "docker pg-vector :5432",
+      "pos": [
+        765,
+        370
+      ],
+      "size": [
+        185,
+        60
+      ],
+      "tag": "V15 · Flyway"
+    },
+    {
+      "id": "gates",
+      "type": "backend",
+      "label": "质量闸门组",
+      "sublabel": "机械门禁·读者评审·AI审校",
+      "pos": [
+        450,
+        380
+      ],
+      "size": [
+        185,
+        60
+      ],
+      "tag": "带意见重写"
+    },
+    {
+      "id": "minimax",
+      "type": "external",
+      "label": "MiniMax 开放平台",
+      "sublabel": "M3 对话 · embo-01 向量",
+      "pos": [
+        1000,
+        380
+      ],
+      "size": [
+        190,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Spring Boot 单体（controller → service → dao）",
+      "wraps": [
+        "api",
+        "queue",
+        "pipeline",
+        "packer",
+        "gates",
+        "llmgw"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "信任边界 A：JWT 会话",
+      "wraps": [
+        "api"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "信任边界 B：API Key（仅 application-local.yaml）",
+      "wraps": [
+        "minimax"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "spa-api",
+      "from": "spa",
+      "to": "api",
+      "label": "REST / SSE 订阅",
+      "variant": "emphasis"
+    },
+    {
+      "id": "auth-api",
+      "from": "auth",
+      "to": "api",
+      "label": "校验 JWT",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "api-queue",
+      "from": "api",
+      "to": "queue",
+      "label": "提交入队",
+      "variant": "emphasis"
+    },
+    {
+      "id": "queue-pipeline",
+      "from": "queue",
+      "to": "pipeline",
+      "label": "逐章领取",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pipeline-packer",
+      "from": "pipeline",
+      "to": "packer",
+      "label": "组装提示包",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "packer-llmgw",
+      "from": "packer",
+      "to": "llmgw",
+      "label": "生成调用",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "llmgw-minimax",
+      "from": "llmgw",
+      "to": "minimax",
+      "label": "OpenAI 兼容 /chat/completions",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        1160,
+        340
+      ]
+    },
+    {
+      "id": "pipeline-gates",
+      "from": "pipeline",
+      "to": "gates",
+      "label": "逐步骤过闸",
+      "variant": "emphasis",
+      "fromSide": "left",
+      "toSide": "top"
+    },
+    {
+      "id": "gates-pipeline",
+      "from": "gates",
+      "to": "pipeline",
+      "label": "BLOCKER 重写",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "pipeline-db",
+      "from": "pipeline",
+      "to": "db",
+      "label": "正文·状态·事件流水",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        920,
+        352
+      ]
+    },
+    {
+      "id": "packer-db",
+      "from": "packer",
+      "to": "db",
+      "label": "四层记忆读取",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          975,
+          65
+        ],
+        [
+          975,
+          330
+        ],
+        [
+          857.5,
+          330
+        ]
+      ],
+      "labelAt": [
+        975,
+        284
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "主路径（一条）",
+      "items": [
+        "提交生成 → DB 队列 → 单 worker 逐章执行",
+        "章纲 → 场景生成 → 场景门禁 → 拼章 → 章级门禁 → 读者评审 → AI 审校 → 审批 → digest",
+        "结果与进度经 pipeline_events 落库，SSE 实时推回浏览器"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "四层记忆与三道闸",
+      "items": [
+        "记忆：素材卡（设定）· 事实账（事件，滚动 3 条）· 世界状态（时点）· 伏笔台账（长线）",
+        "闸门：机械门禁（指纹/黑名单）→ 读者评审（注水率）→ AI 审校（BLOCKER 修一轮）；读者评审与 AI 审校同样经 LLM 网关调用模型",
+        "失败自愈：重试 N1 次 → 换目标重写卷纲再试 N2 次（Tuning 可调）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "信任边界",
+      "items": [
+        "边界 A：浏览器 ↔ 后端，JWT HttpOnly Cookie，重启不掉线",
+        "边界 B：后端 ↔ MiniMax，API Key 仅存 application-local.yaml（gitignore），永不入库",
+        "PostgreSQL 在本机 docker（pg-vector），仅后端可达；REST 读取章节/台账也由接入层直查数据库；embedding 模型 embo-01 已备价目，RAG 未上线"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "横切能力（见说明，不加连线）",
+      "items": [
+        "按节点模型路由与峰谷计费：14 个 LLM 节点独立路由，llm_call_log 全量台账（含 cached_tokens）",
+        "StageLog 事件门面：15 类事件枚举收口，SSE + 流水双通道",
+        "Tuning 调参中心：16 个行为参数在线可调（30s 生效）；错误码按阿里手册 A/B/C/D/E 五位分级"
+      ]
+    }
+  ]
+}
