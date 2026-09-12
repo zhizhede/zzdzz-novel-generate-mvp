@@ -53,6 +53,17 @@ public class NovelDAO {
                 mode, novelId);
     }
 
+    /** 卷纲规划模式：auto=AI 审校通过直接落库；manual=出草稿待人工采纳。 */
+    public String findPlanMode(long novelId) {
+        return jdbc.queryForObject(
+                "SELECT plan_mode FROM novels WHERE id=?", String.class, novelId);
+    }
+
+    public void updatePlanMode(long novelId, String mode) {
+        jdbc.update("UPDATE novels SET plan_mode=?, update_time=NOW() WHERE id=? AND is_deleted=false",
+                mode, novelId);
+    }
+
     public int chapterCount(long novelId) {
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM chapters WHERE novel_id=? AND is_deleted=false",

@@ -35,6 +35,7 @@ public class ChapterPipelineService {
     private final GateService gateService;
     private final DigestService digestService;
     private final ReviewService reviewService;
+    private final VolumePlanService volumePlanService;
     private final LlmPort llm;
     private final PipelineSseService sse;
     private final PipelineEventDAO eventDAO;
@@ -43,7 +44,8 @@ public class ChapterPipelineService {
                                   SceneDAO sceneDAO, OutlineService outlineService,
                                   ContextPackerService packer, SceneService sceneService,
                                   GateService gateService, DigestService digestService,
-                                  ReviewService reviewService, LlmPort llm, PipelineSseService sse,
+                                  ReviewService reviewService, VolumePlanService volumePlanService,
+                                  LlmPort llm, PipelineSseService sse,
                                   PipelineEventDAO eventDAO) {
         this.novelDAO = novelDAO;
         this.chapterDAO = chapterDAO;
@@ -54,6 +56,7 @@ public class ChapterPipelineService {
         this.gateService = gateService;
         this.digestService = digestService;
         this.reviewService = reviewService;
+        this.volumePlanService = volumePlanService;
         this.llm = llm;
         this.sse = sse;
         this.eventDAO = eventDAO;
@@ -94,11 +97,11 @@ public class ChapterPipelineService {
             }
             long t0 = System.currentTimeMillis();
             try {
-                if (runChapter(novelId, no, mode)) {
+                if (runChapterWithHeal(novelId, no, mode)) {
                     okChapters++;
                     log.info("=== 第 {} 章完成，耗时 {}s ===", no, (System.currentTimeMillis() - t0) / 1000);
                 } else {
-                    log.error("=== 第 {} 章失败，停止连跑（已完成 {} 章）===", no, okChapters);
+                    log.error("=== 第 {} 章自愈后仍失败，停止连跑（已完成 {} 章）===", no, okChapters);
                     break;
                 }
             } catch (Exception e) {
@@ -112,6 +115,48 @@ public class ChapterPipelineService {
         }
         log.info("连跑结束：{}/{} 章通过", okChapters, to - from + 1);
         return okChapters;
+    }
+
+    /**
+     * 失败自愈梯子：直跑 → 重试 1 次（瞬态故障）→ 规划 Agent 换目标重写该章卷纲再试 1 次 → 放弃转人工。
+     * 生成异常与门禁未过同等对待；每次尝试共享场景级断点缓存。
+     */
+    private boolean runChapterWithHeal(long novelId, int chapterNo, String approvalMode) {
+        if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
+        emit(novelId, "heal", Map.of("phase", "retry", "chapterNo", chapterNo,
+                "message", "第一次失败，自动重试"));
+        log.warn("第 {} 章失败，自愈：直接重试一次", chapterNo);
+        if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
+        String reason = failureReason(novelId, chapterNo);
+        emit(novelId, "heal", Map.of("phase", "replan", "chapterNo", chapterNo,
+                "message", "重试仍败，重写卷纲目标后再试", "reason", reason));
+        log.warn("第 {} 章重试仍败，自愈：重写卷纲目标后再试一次（原因：{}）", chapterNo, reason);
+        volumePlanService.replanChapter(novelId, chapterNo, reason);
+        return attemptChapter(novelId, chapterNo, approvalMode);
+    }
+
+    private boolean attemptChapter(long novelId, int chapterNo, String approvalMode) {
+        try {
+            return runChapter(novelId, chapterNo, approvalMode);
+        } catch (Exception e) {
+            log.error("第 {} 章尝试异常：{}", chapterNo, e.getMessage());
+            chapterDAO.updateStatusByNo(novelId, chapterNo, "FAILED");
+            return false;
+        }
+    }
+
+    /** 自愈用失败原因：优先取最近一次门禁失败清单，取不到给兜底文案。 */
+    private String failureReason(long novelId, int chapterNo) {
+        try {
+            ChapterDO ch = chapterDAO.find(novelId, chapterNo).orElse(null);
+            if (ch != null) {
+                String s = gateService.failedChecksText(ch.id());
+                if (s != null && !s.isBlank()) return s;
+            }
+        } catch (Exception ignore) {
+            // 门禁报告缺失不影响自愈流程
+        }
+        return "生成异常或审校未过（详见 gate_reports / llm_call_log）";
     }
 
     // ===== Web 触发已迁移至 GenerationQueueService（DB 队列 + 单 worker 异步执行） =====

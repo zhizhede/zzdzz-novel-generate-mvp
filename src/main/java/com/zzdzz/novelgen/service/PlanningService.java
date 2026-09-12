@@ -4,6 +4,7 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.dao.CanonDocDAO;
 import com.zzdzz.novelgen.dao.ChapterDAO;
+import com.zzdzz.novelgen.dao.NovelDAO;
 import com.zzdzz.novelgen.dao.SceneDAO;
 import com.zzdzz.novelgen.model.entity.CanonDocDO;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
@@ -17,7 +18,8 @@ import java.util.Map;
 
 /**
  * 规划三件套的系统管理：大纲（canon misc/大纲，进出生成上下文）、
- * 卷纲（chapters 规划行：逐章 goal/hook/预算，可增删改）、章纲（AI 场景拆解：可查看/强制重出）。
+ * 卷纲（chapters 规划行：逐章 goal/hook/预算，可增删改）、章纲（AI 场景拆解：可查看/强制重出）、
+ * 以及 AI 卷纲规划（委托 VolumePlanService，含模式切换）。
  */
 @Service
 public class PlanningService {
@@ -29,15 +31,20 @@ public class PlanningService {
     private final ChapterDAO chapterDAO;
     private final SceneDAO sceneDAO;
     private final ChapterPipelineService pipelineService;
+    private final VolumePlanService volumePlanService;
+    private final NovelDAO novelDAO;
     private final ObjectMapper mapper;
 
     public PlanningService(CanonDocDAO canonDocDAO, ChapterDAO chapterDAO,
                            SceneDAO sceneDAO, ChapterPipelineService pipelineService,
+                           VolumePlanService volumePlanService, NovelDAO novelDAO,
                            ObjectMapper mapper) {
         this.canonDocDAO = canonDocDAO;
         this.chapterDAO = chapterDAO;
         this.sceneDAO = sceneDAO;
         this.pipelineService = pipelineService;
+        this.volumePlanService = volumePlanService;
+        this.novelDAO = novelDAO;
         this.mapper = mapper;
     }
 
@@ -126,6 +133,98 @@ public class PlanningService {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + ch.chapterNo() + " 章已有正文，禁止删除");
         }
         chapterDAO.softDeletePlan(chapterId);
+    }
+
+    // ===== AI 卷纲规划 =====
+
+    /** 规划模式（卷纲）：auto=AI 审校通过直接落库；manual=出草稿待采纳。 */
+    public Map<String, String> modes(long novelId) {
+        return Map.of("planMode", novelDAO.findPlanMode(novelId),
+                "approvalMode", novelDAO.findApprovalMode(novelId));
+    }
+
+    public void setPlanMode(long novelId, String mode) {
+        if (!"auto".equals(mode) && !"manual".equals(mode)) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "规划模式只支持 auto / manual");
+        }
+        novelDAO.updatePlanMode(novelId, mode);
+    }
+
+    /** AI 规划一卷（同步，约 2-10 分钟）。 */
+    public Map<String, Object> autoPlan(long novelId, int volNo, int from, Integer to, String seedOutline) {
+        VolumePlanService.PlanOutcome o = volumePlanService.planVolume(novelId, volNo, from, to, seedOutline);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("planMode", o.planMode());
+        m.put("adopted", o.adopted());
+        m.put("arc", o.draft().arc());
+        m.put("brief", o.draft().brief());
+        m.put("rows", o.draft().rows().stream().map(PlanningService::rowMap).toList());
+        if (o.result() != null) {
+            m.put("adoptedChapters", o.result().chapters());
+            m.put("adoptedForeshadows", o.result().adoptedForeshadows());
+            m.put("warnings", o.result().warnings());
+        }
+        return m;
+    }
+
+    /** manual 模式采纳（可先人工修改）：结构校验后落库，不再过 AI 审校。 */
+    public Map<String, Object> adoptDraft(long novelId, int volNo, String arc, String brief,
+                                          List<Map<String, Object>> rawRows) {
+        List<VolumePlanService.PlanRow> rows = new ArrayList<>();
+        for (Map<String, Object> r : rawRows) {
+            List<VolumePlanService.FsRef> refs = new ArrayList<>();
+            for (String code : toStrList(r.get("foreshadows"))) {
+                refs.add(new VolumePlanService.FsRef(code, null, null));
+            }
+            rows.add(new VolumePlanService.PlanRow(
+                    ((Number) r.get("no")).intValue(),
+                    (String) r.get("title"),
+                    (String) r.get("goal"),
+                    (String) r.get("hook"),
+                    (String) r.get("timeNote"),
+                    refs,
+                    ((Number) r.get("budgetMin")).intValue(),
+                    ((Number) r.get("budgetMax")).intValue()));
+        }
+        VolumePlanService.AdoptResult result = volumePlanService.adoptDraft(novelId, volNo,
+                new VolumePlanService.PlanDraft(arc, brief == null ? "" : brief, rows));
+        return Map.of("adoptedChapters", result.chapters(),
+                "adoptedForeshadows", result.adoptedForeshadows(),
+                "warnings", result.warnings());
+    }
+
+    /** 单章卷纲重写（人工纠偏 / 管线自愈共用）：返回重写后的规划行。 */
+    public Map<String, Object> replanChapter(long novelId, int chapterNo, String reason) {
+        ChapterDO ch = volumePlanService.replanChapter(novelId, chapterNo,
+                reason == null || reason.isBlank() ? "人工触发重写" : reason);
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("chapterNo", ch.chapterNo());
+        m.put("title", ch.title());
+        m.put("goal", ch.goal());
+        m.put("hook", ch.hook());
+        m.put("timeNote", ch.timeNote());
+        return m;
+    }
+
+    private static Map<String, Object> rowMap(VolumePlanService.PlanRow r) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("no", r.chapterNo());
+        m.put("title", r.title());
+        m.put("goal", r.goal());
+        m.put("hook", r.hook());
+        m.put("timeNote", r.timeNote());
+        m.put("foreshadows", r.foreshadows().stream()
+                .map(f -> f.code() == null || f.code().isBlank() ? "新埋：" + f.content() : f.code())
+                .toList());
+        m.put("budgetMin", r.budgetMin());
+        m.put("budgetMax", r.budgetMax());
+        return m;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> toStrList(Object value) {
+        if (!(value instanceof List<?> list)) return List.of();
+        return list.stream().map(String::valueOf).filter(s -> !s.isBlank()).toList();
     }
 
     // ===== 章纲 =====

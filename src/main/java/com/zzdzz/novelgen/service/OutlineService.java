@@ -61,7 +61,6 @@ public class OutlineService {
                 【世界观（必须遵守，不得发明矛盾设定）】
                 %s
 
-                【人物卡】
                 %s
 
                 【前情摘要】

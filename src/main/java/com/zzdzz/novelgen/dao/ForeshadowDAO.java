@@ -50,6 +50,14 @@ public class ForeshadowDAO {
                 """, content, plantedIn, recoveredIn, status, id);
     }
 
+    public ForeshadowDO findByCode(long novelId, String code) {
+        List<ForeshadowDO> rows = jdbc.query("""
+                SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
+                FROM foreshadows WHERE novel_id=? AND code=? AND is_deleted=false
+                """, MAPPER, novelId, code);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     public ForeshadowDO findById(long id) {
         List<ForeshadowDO> rows = jdbc.query("""
                 SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
@@ -82,6 +90,14 @@ public class ForeshadowDAO {
         return "F" + ((max == null ? 0 : max) + 1);
     }
 
+    /** 规划 Agent 新伏笔建账：status='planned'，planted_in=排期埋设章。 */
+    public void insertPlanned(long novelId, String code, String content, int plantedIn) {
+        jdbc.update("""
+                INSERT INTO foreshadows (novel_id, code, content, planted_in, status)
+                VALUES (?, ?, ?, ?, 'planned')
+                """, novelId, code, content, plantedIn);
+    }
+
     /** 本章需埋设或需回收的伏笔指令 */
     public List<String> findDirectives(long novelId, int chapterNo) {
         return jdbc.queryForList("""
@@ -90,6 +106,22 @@ public class ForeshadowDAO {
                 WHERE novel_id=? AND is_deleted=false
                   AND ((planted_in = ? AND status = 'planned') OR (recovered_in = ? AND status = 'planted'))
                 """, String.class, chapterNo, novelId, chapterNo, chapterNo);
+    }
+
+    /** 规划采纳：proposed → planned，埋设章为规划中首次引用它的章（仅 proposed 可升，幂等）。 */
+    public void promoteProposal(long id, int plantedIn) {
+        jdbc.update("""
+                UPDATE foreshadows SET status='planned', planted_in=?, update_time=NOW()
+                WHERE id=? AND status='proposed' AND is_deleted=false
+                """, plantedIn, id);
+    }
+
+    /** 规划排期回收：planted 且未定回收章的补上 recovered_in（digest 按章号自动推进状态）。 */
+    public void scheduleRecovery(long id, int recoveredIn) {
+        jdbc.update("""
+                UPDATE foreshadows SET recovered_in=?, update_time=NOW()
+                WHERE id=? AND status='planted' AND recovered_in IS NULL AND is_deleted=false
+                """, recoveredIn, id);
     }
 
     public void markPlanted(long novelId, int chapterNo) {

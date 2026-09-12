@@ -1,6 +1,7 @@
 package com.zzdzz.novelgen.controller;
 
 import com.zzdzz.novelgen.common.web.Result;
+import com.zzdzz.novelgen.model.dto.PlanModeDTO;
 import com.zzdzz.novelgen.service.OutlineService;
 import com.zzdzz.novelgen.service.PlanningService;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -15,7 +16,9 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
 
-/** 规划三件套：大纲（增改查，进生成上下文）/ 卷纲（规划行增删改）/ 章纲（查看 + 强制重出）。 */
+/**
+ * 规划：大纲（增改查，进生成上下文）/ 卷纲（规划行增删改 + AI 规划一卷）/ 章纲（查看 + 强制重出）/ 规划模式。
+ */
 @RestController
 @RequestMapping("/api/novels/{novelId}/planning")
 public class PlanningController {
@@ -80,6 +83,50 @@ public class PlanningController {
     public Result<Void> deletePlan(@PathVariable long chapterId) {
         planningService.deletePlan(chapterId);
         return Result.ok();
+    }
+
+    // ===== AI 卷纲规划 =====
+
+    @GetMapping("/mode")
+    public Result<Map<String, String>> modes(@PathVariable long novelId) {
+        return Result.ok(planningService.modes(novelId));
+    }
+
+    @PutMapping("/plan-mode")
+    public Result<Void> setPlanMode(@PathVariable long novelId, @RequestBody PlanModeDTO dto) {
+        planningService.setPlanMode(novelId, dto.mode());
+        return Result.ok();
+    }
+
+    /** AI 规划一卷（同步，约 2-10 分钟）：auto 模式 AI 审校通过直接落库；manual 模式返回草稿。 */
+    @PostMapping("/volume/auto-plan")
+    public Result<Map<String, Object>> autoPlan(@PathVariable long novelId,
+                                                @RequestBody Map<String, Object> body) {
+        return Result.ok(planningService.autoPlan(novelId,
+                ((Number) body.get("volNo")).intValue(),
+                ((Number) body.get("from")).intValue(),
+                body.get("to") instanceof Number n ? n.intValue() : null,
+                (String) body.get("seedOutline")));
+    }
+
+    /** manual 模式采纳草稿（可先人工修改）：结构校验后直接落库，不再过 AI 审校。 */
+    @PostMapping("/volume/adopt")
+    @SuppressWarnings("unchecked")
+    public Result<Map<String, Object>> adoptDraft(@PathVariable long novelId,
+                                                  @RequestBody Map<String, Object> body) {
+        return Result.ok(planningService.adoptDraft(novelId,
+                ((Number) body.get("volNo")).intValue(),
+                (String) body.get("arc"),
+                (String) body.get("brief"),
+                (List<Map<String, Object>>) body.get("rows")));
+    }
+
+    /** 单章卷纲重写（人工纠偏；管线失败自愈走同一服务方法）。 */
+    @PostMapping("/chapters/{chapterNo}/replan")
+    public Result<Map<String, Object>> replan(@PathVariable long novelId, @PathVariable int chapterNo,
+                                              @RequestBody(required = false) Map<String, String> body) {
+        return Result.ok(planningService.replanChapter(novelId, chapterNo,
+                body == null ? null : body.get("reason")));
     }
 
     // ===== 章纲 =====

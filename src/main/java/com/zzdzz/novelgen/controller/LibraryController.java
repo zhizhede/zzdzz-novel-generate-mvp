@@ -5,8 +5,10 @@ import com.zzdzz.novelgen.dao.DigestDAO;
 import com.zzdzz.novelgen.dao.WorldStateDAO;
 import com.zzdzz.novelgen.model.entity.CanonDocDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.LibraryService;
+import com.zzdzz.novelgen.service.MaterialCardService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,17 +22,62 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 import java.util.Map;
 
-/** 素材库：正典文档（增删改）/ 伏笔账本（修正）/ 事实账（修正）/ 风格包（规则正文修订）/ 世界状态账（查看纠偏回填）。 */
+/** 素材库：正典文档（增删改）/ 素材卡（增删改）/ 伏笔账本（修正）/ 事实账（修正）/ 风格包（规则正文修订）/ 世界状态账（查看纠偏回填）。 */
 @RestController
 @RequestMapping("/api")
 public class LibraryController {
 
     private final LibraryService libraryService;
     private final DigestService digestService;
+    private final MaterialCardService cardService;
 
-    public LibraryController(LibraryService libraryService, DigestService digestService) {
+    public LibraryController(LibraryService libraryService, DigestService digestService,
+                             MaterialCardService cardService) {
         this.libraryService = libraryService;
         this.digestService = digestService;
+        this.cardService = cardService;
+    }
+
+    // ===== 素材卡 =====
+
+    @GetMapping("/novels/{novelId}/cards")
+    public Result<List<MaterialCardDO>> cards(@PathVariable long novelId,
+                                              @RequestParam(required = false) String kind) {
+        return Result.ok(cardService.list(novelId, kind));
+    }
+
+    @GetMapping("/cards/{id}")
+    public Result<MaterialCardDO> card(@PathVariable long id) {
+        return Result.ok(cardService.get(id));
+    }
+
+    @PostMapping("/novels/{novelId}/cards")
+    public Result<Void> createCard(@PathVariable long novelId, @RequestBody Map<String, Object> body) {
+        cardService.create(novelId, (String) body.get("kind"), (String) body.get("name"),
+                strList(body.get("aliases")), (String) body.get("summary"), (String) body.get("contentMd"),
+                body.get("pinned") instanceof Boolean b ? b : null, (String) body.get("status"),
+                body.get("sourceChapter") instanceof Number n ? n.intValue() : null);
+        return Result.ok();
+    }
+
+    @PutMapping("/cards/{id}")
+    public Result<Void> updateCard(@PathVariable long id, @RequestBody Map<String, Object> body) {
+        cardService.update(id, (String) body.get("name"), strList(body.get("aliases")),
+                (String) body.get("summary"), (String) body.get("contentMd"),
+                body.get("pinned") instanceof Boolean b ? b : null, (String) body.get("status"),
+                body.get("sourceChapter") instanceof Number n ? n.intValue() : null);
+        return Result.ok();
+    }
+
+    @DeleteMapping("/cards/{id}")
+    public Result<Void> deleteCard(@PathVariable long id) {
+        cardService.delete(id);
+        return Result.ok();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> strList(Object value) {
+        return value instanceof List<?> l ? (List<String>) l : List.of();
     }
 
     // ===== 正典 =====

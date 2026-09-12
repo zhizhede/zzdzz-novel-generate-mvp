@@ -9,6 +9,45 @@
     </div>
 
     <el-tabs>
+      <!-- 素材卡 -->
+      <el-tab-pane :label="`素材卡（${cards.length}）`">
+        <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center">
+          <el-button type="primary" size="small" @click="openCard(null)">新增素材卡</el-button>
+          <span style="color: #999; font-size: 12px">
+            设定层实体（角色/物品/地点/现象/地标/灾害/组织）；生成时按「常驻 + 本场景别名命中」自动取值注入
+          </span>
+        </div>
+        <el-table :data="cards" border size="small" style="max-width: 980px">
+          <el-table-column label="类型" width="80">
+            <template #default="{ row }">{{ kindLabel[row.kind] || row.kind }}</template>
+          </el-table-column>
+          <el-table-column prop="name" label="名称" width="120" />
+          <el-table-column label="别名" min-width="130">
+            <template #default="{ row }">{{ (row.aliases || []).join('、') || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="summary" label="摘要" min-width="240" show-overflow-tooltip />
+          <el-table-column label="常驻" width="70">
+            <template #default="{ row }">
+              <el-tag v-if="row.pinned" size="small" type="success">常驻</el-tag>
+              <span v-else style="color: #bbb">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="80">
+            <template #default="{ row }">
+              <el-tag size="small" :type="{ active: 'info', retired: 'warning', dead: 'danger', merged: 'info' }[row.status]">
+                {{ { active: '在场', retired: '退场', dead: '死亡', merged: '合并' }[row.status] }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150">
+            <template #default="{ row }">
+              <el-button size="small" @click="openCard(row)">编辑</el-button>
+              <el-button size="small" type="danger" plain @click="removeCard(row)">删</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <!-- 正典 -->
       <el-tab-pane :label="`正典文档（${canon.length}）`">
         <div style="display: flex; gap: 8px; margin-bottom: 10px">
@@ -134,6 +173,34 @@
       </el-tab-pane>
     </el-tabs>
 
+    <!-- 素材卡编辑 -->
+    <el-dialog v-model="cardEditor" :title="cardForm.id ? '编辑素材卡' : '新增素材卡'" width="640px">
+      <div style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center">
+        <el-select v-model="cardForm.kind" style="width: 110px" size="small">
+          <el-option v-for="(label, k) in kindLabel" :key="k" :value="k" :label="label" />
+        </el-select>
+        <el-input v-model="cardForm.name" placeholder="名称" style="width: 170px" size="small" />
+        <el-input v-model="cardForm.aliasesText" placeholder="别名（逗号分隔，场景匹配用）" size="small" style="flex: 1" />
+      </div>
+      <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 10px">
+        <el-switch v-model="cardForm.pinned" active-text="常驻（每场景必注入全文）" />
+        <el-select v-model="cardForm.status" size="small" style="width: 100px">
+          <el-option value="active" label="在场" />
+          <el-option value="retired" label="退场" />
+          <el-option value="dead" label="死亡" />
+          <el-option value="merged" label="合并" />
+        </el-select>
+        <span style="font-size: 13px">首现章</span>
+        <el-input-number v-model="cardForm.sourceChapter" :min="1" size="small" style="width: 100px" />
+      </div>
+      <el-input v-model="cardForm.summary" type="textarea" :rows="2" placeholder="摘要（2-3 句；匹配命中时注入的就是它）" style="margin-bottom: 10px" />
+      <el-input v-model="cardForm.contentMd" type="textarea" :rows="8" placeholder="全文（常驻卡注入全文；其余卡只注入摘要）" />
+      <template #footer>
+        <el-button @click="cardEditor = false">取消</el-button>
+        <el-button type="primary" @click="saveCard">保存</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 正典编辑 -->
     <el-drawer v-model="canonEditor" :title="editing ? `${editing.kind} / ${editing.name}` : ''" size="50%">
       <el-input v-if="editing" v-model="editing.content" type="textarea" :rows="24" />
@@ -203,6 +270,50 @@ const canonEditor = ref(false)
 const foreshadowEditor = ref(false)
 const digestEditor = ref(false)
 const newCanon = ref({ kind: 'character', name: '', content: '（待填写）' })
+const cards = ref([])
+const cardEditor = ref(false)
+const cardForm = ref({})
+const kindLabel = { character: '角色', item: '物品', location: '地点', phenomenon: '现象', landmark: '地标', disaster: '灾害', org: '组织', misc: '其他' }
+
+function openCard(row) {
+  cardForm.value = row
+    ? { ...row, aliasesText: (row.aliases || []).join(',') }
+    : { kind: 'character', name: '', aliasesText: '', summary: '', contentMd: '', pinned: false, status: 'active', sourceChapter: null }
+  cardEditor.value = true
+}
+
+async function saveCard() {
+  const f = cardForm.value
+  const body = {
+    kind: f.kind,
+    name: f.name,
+    aliases: (f.aliasesText || '').split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+    summary: f.summary,
+    contentMd: f.contentMd,
+    pinned: !!f.pinned,
+    status: f.status,
+    sourceChapter: f.sourceChapter || null
+  }
+  try {
+    if (f.id) await api.put(`/api/cards/${f.id}`, body)
+    else await api.post(`/api/novels/${novelId.value}/cards`, body)
+    ElMessage.success('已保存')
+    cardEditor.value = false
+    await loadAll()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function removeCard(row) {
+  try {
+    await ElMessageBox.confirm(`删除素材卡「${row.name}」？`, '确认', { type: 'warning' })
+    await api.delete(`/api/cards/${row.id}`)
+    await loadAll()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message)
+  }
+}
 
 function loadWsForEdit() {
   const row = worldStates.value.find((w) => w.chapterNo === wsChapter.value)
@@ -252,6 +363,7 @@ const fingerprintRows = computed(() => {  try {
 async function loadAll() {
   if (!novelId.value) return
   canon.value = await api.get(`/api/novels/${novelId.value}/canon`)
+  cards.value = await api.get(`/api/novels/${novelId.value}/cards`)
   foreshadows.value = await api.get(`/api/novels/${novelId.value}/foreshadows`)
   digests.value = await api.get(`/api/novels/${novelId.value}/digests`)
   worldStates.value = await api.get(`/api/novels/${novelId.value}/world-states`)

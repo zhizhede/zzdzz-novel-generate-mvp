@@ -50,6 +50,15 @@ public class ChapterDAO {
                 """, MAPPER, novelId);
     }
 
+    /** 已有正文的最末章号（无任何正文时为 null）：卷纲规划必须接续其后来。 */
+    public Integer maxChapterWithText(long novelId) {
+        List<Integer> rows = jdbc.query("""
+                SELECT MAX(chapter_no) FROM chapters
+                WHERE novel_id=? AND is_deleted=false AND full_text IS NOT NULL AND full_text <> ''
+                """, (rs, i) -> (Integer) rs.getObject(1), novelId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     public boolean exists(long novelId, int chapterNo) {
         Long count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM chapters WHERE novel_id=? AND chapter_no=? AND is_deleted=false",
