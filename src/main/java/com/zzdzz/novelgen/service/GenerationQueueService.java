@@ -2,7 +2,6 @@ package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.dao.GenerationTaskDAO;
 import com.zzdzz.novelgen.dao.NovelDAO;
-import com.zzdzz.novelgen.dao.PipelineEventDAO;
 import com.zzdzz.novelgen.model.vo.GenerationTaskVO;
 import com.zzdzz.novelgen.model.vo.PipelineStatusVO;
 import jakarta.annotation.PreDestroy;
@@ -32,8 +31,7 @@ public class GenerationQueueService {
     private final GenerationTaskDAO taskDAO;
     private final NovelDAO novelDAO;
     private final ChapterPipelineService pipeline;
-    private final PipelineSseService sse;
-    private final PipelineEventDAO eventDAO;
+    private final StageLog stageLog;
 
     /** 运行中取消请求（taskId 集合），worker 在章间检查。 */
     private final Set<Long> cancelRequested = ConcurrentHashMap.newKeySet();
@@ -45,13 +43,11 @@ public class GenerationQueueService {
     });
 
     public GenerationQueueService(GenerationTaskDAO taskDAO, NovelDAO novelDAO,
-                                  ChapterPipelineService pipeline, PipelineSseService sse,
-                                  PipelineEventDAO eventDAO) {
+                                  ChapterPipelineService pipeline, StageLog stageLog) {
         this.taskDAO = taskDAO;
         this.novelDAO = novelDAO;
         this.pipeline = pipeline;
-        this.sse = sse;
-        this.eventDAO = eventDAO;
+        this.stageLog = stageLog;
         worker.scheduleWithFixedDelay(this::pump, 2, 2, TimeUnit.SECONDS);
     }
 
@@ -71,7 +67,7 @@ public class GenerationQueueService {
             throw new IllegalArgumentException("作品不存在: " + novelTitle);
         }
         long id = taskDAO.insert(novelId, from, to, userId);
-        emitTask(novelId, id, novelTitle, from, to, "queued", null);
+        emitTask(novelId, id, novelTitle, from, to, StageLog.Phase.QUEUED, null);
         log.info("任务 #{} 入队：{} 第 {}-{} 章", id, novelTitle, from, to);
         return id;
     }
@@ -123,7 +119,7 @@ public class GenerationQueueService {
         log.info("任务 #{} 开始执行：{} 第 {}-{} 章", task.id(), task.novelTitle(),
                 task.fromChapter(), task.toChapter());
         emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
-                "start", null);
+                StageLog.Phase.START, null);
         int total = task.toChapter() - task.fromChapter() + 1;
         int passed = pipeline.runChapters(task.novelId(), task.novelTitle(),
                 task.fromChapter(), task.toChapter(), new ChapterPipelineService.ProgressSink() {
@@ -137,32 +133,31 @@ public class GenerationQueueService {
                         return cancelRequested.contains(task.id());
                     }
                 });
-        String endPhase;
+        StageLog.Phase endPhase;
         if (cancelRequested.remove(task.id())) {
             taskDAO.updateStatus(task.id(), "CANCELED", "运行中取消（已完成 " + passed + " 章）");
-            endPhase = "canceled";
+            endPhase = StageLog.Phase.CANCELED;
         } else if (passed >= total) {
             taskDAO.updateStatus(task.id(), "DONE", "全部完成（" + passed + " 章）");
-            endPhase = "done";
+            endPhase = StageLog.Phase.DONE;
         } else {
             taskDAO.updateStatus(task.id(), "STOPPED", "第 " + (task.fromChapter() + passed)
                     + " 章失败停止，可断点重跑");
-            endPhase = "stopped";
+            endPhase = StageLog.Phase.STOPPED;
         }
         emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
                 endPhase, "完成 " + passed + "/" + total + " 章");
-        log.info("任务 #{} 结束：{}（{}/{} 章通过）", task.id(), endPhase, passed, total);
+        log.info("任务 #{} 结束：{}（{}/{} 章通过）", task.id(), endPhase.wire(), passed, total);
     }
 
     /** 队列级事件：入事件流水并推 SSE（工作台日志面板直接可见）。 */
     private void emitTask(Long novelId, long taskId, String novelTitle, int from, int to,
-                          String phase, String message) {
+                          StageLog.Phase phase, String message) {
         Map<String, Object> data = message == null
-                ? Map.of("phase", phase, "taskId", taskId, "novel", novelTitle, "from", from, "to", to)
-                : Map.of("phase", phase, "taskId", taskId, "novel", novelTitle, "from", from, "to", to,
+                ? Map.of("taskId", taskId, "novel", novelTitle, "from", from, "to", to)
+                : Map.of("taskId", taskId, "novel", novelTitle, "from", from, "to", to,
                         "message", message);
-        sse.send("run", data);
-        eventDAO.insert(novelId, null, "run", phase, data);
+        stageLog.emit(novelId, StageLog.Stage.RUN, phase, data);
     }
 
     @PreDestroy

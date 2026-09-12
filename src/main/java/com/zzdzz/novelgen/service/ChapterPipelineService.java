@@ -6,7 +6,6 @@ import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.SceneDO;
 import com.zzdzz.novelgen.dao.ChapterDAO;
 import com.zzdzz.novelgen.dao.NovelDAO;
-import com.zzdzz.novelgen.dao.PipelineEventDAO;
 import com.zzdzz.novelgen.dao.SceneDAO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +15,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
 import java.util.stream.Collectors;
+
+import static com.zzdzz.novelgen.service.StageLog.Phase.*;
+import static com.zzdzz.novelgen.service.StageLog.Stage.*;
 
 /**
  * 单章管线编排：AI 章纲 → 逐场景生成（场景门禁，失败带意见重写 1 次）→ 拼章 → 章级门禁
@@ -38,16 +40,14 @@ public class ChapterPipelineService {
     private final ReviewService reviewService;
     private final VolumePlanService volumePlanService;
     private final LlmPort llm;
-    private final PipelineSseService sse;
-    private final PipelineEventDAO eventDAO;
+    private final StageLog stageLog;
 
     public ChapterPipelineService(NovelDAO novelDAO, ChapterDAO chapterDAO,
                                   SceneDAO sceneDAO, OutlineService outlineService,
                                   ContextPackerService packer, SceneService sceneService,
                                   GateService gateService, DigestService digestService,
                                   ReviewService reviewService, VolumePlanService volumePlanService,
-                                  LlmPort llm, PipelineSseService sse,
-                                  PipelineEventDAO eventDAO) {
+                                  LlmPort llm, StageLog stageLog) {
         this.novelDAO = novelDAO;
         this.chapterDAO = chapterDAO;
         this.sceneDAO = sceneDAO;
@@ -59,16 +59,7 @@ public class ChapterPipelineService {
         this.reviewService = reviewService;
         this.volumePlanService = volumePlanService;
         this.llm = llm;
-        this.sse = sse;
-        this.eventDAO = eventDAO;
-    }
-
-    /** 向 SSE 订阅者推管线事件并落库为事件流水（重跑轮次/失败原因可回放）；无订阅者时 SSE 静默。 */
-    private void emit(Long novelId, String stage, Map<String, Object> data) {
-        sse.send(stage, data);
-        Object chapterNo = data.get("chapterNo");
-        eventDAO.insert(novelId, chapterNo instanceof Number n ? n.intValue() : null,
-                stage, String.valueOf(data.getOrDefault("phase", "")), data);
+        this.stageLog = stageLog;
     }
 
     /** 进度回调：队列服务据此回写任务进度；shouldStop 支持运行中协作取消（章与章之间检查）。 */
@@ -124,13 +115,13 @@ public class ChapterPipelineService {
      */
     private boolean runChapterWithHeal(long novelId, int chapterNo, String approvalMode) {
         if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
-        emit(novelId, "heal", Map.of("phase", "retry", "chapterNo", chapterNo,
-                "message", "第一次失败，自动重试"));
+        stageLog.emit(novelId, chapterNo, HEAL, RETRY,
+                Map.of("message", "第一次失败，自动重试"));
         log.warn("第 {} 章失败，自愈：直接重试一次", chapterNo);
         if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
         String reason = failureReason(novelId, chapterNo);
-        emit(novelId, "heal", Map.of("phase", "replan", "chapterNo", chapterNo,
-                "message", "重试仍败，重写卷纲目标后再试", "reason", reason));
+        stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
+                Map.of("message", "重试仍败，重写卷纲目标后再试", "reason", reason));
         log.warn("第 {} 章重试仍败，自愈：重写卷纲目标后再试一次（原因：{}）", chapterNo, reason);
         volumePlanService.replanChapter(novelId, chapterNo, reason);
         return attemptChapter(novelId, chapterNo, approvalMode);
@@ -229,17 +220,17 @@ public class ChapterPipelineService {
 
     private boolean runChapter(long novelId, int chapterNo, String approvalMode) {
         ChapterDO ch = outlineService.loadChapter(novelId, chapterNo);
-        emit(novelId, "chapter", Map.of("phase", "start", "chapterNo", chapterNo, "title", String.valueOf(ch.title())));
+        stageLog.emit(novelId, chapterNo, CHAPTER, START, Map.of("title", String.valueOf(ch.title())));
 
         // 1) AI 章纲（已物化则跳过——场景级断点续跑）
         if (sceneDAO.countByChapter(ch.id()) == 0) {
-            emit(novelId, "outline", Map.of("chapterNo", chapterNo, "phase", "start"));
+            stageLog.emit(novelId, chapterNo, OUTLINE, START, Map.of());
             List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
             outlineService.generate(novelId, ch, packer.world(novelId), packer.characters(novelId),
                     packer.foreshadowDirectives(novelId, chapterNo), digests,
                     packer.prevTail(novelId, chapterNo));
-            emit(novelId, "outline", Map.of("chapterNo", chapterNo, "phase", "done",
-                    "sceneCount", outlineService.loadSpecs(ch.id()).size()));
+            stageLog.emit(novelId, chapterNo, OUTLINE, DONE,
+                    Map.of("sceneCount", outlineService.loadSpecs(ch.id()).size()));
         }
 
         // 2) 逐场景生成 + 场景门禁（失败带意见重写一次）；已 PASSED 的场景直接复用（场景级断点续跑）
@@ -256,40 +247,41 @@ public class ChapterPipelineService {
             if (done != null && "PASSED".equals(done.gateStatus())) {
                 passedScenes++;
                 prevScene = done.draftText();
-                emit(novelId, "scene", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(),
-                        "phase", "reused", "text", String.valueOf(done.draftText())));
+                stageLog.emit(novelId, chapterNo, SCENE, REUSED,
+                        Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(done.draftText())));
                 continue;
             }
             Long sceneId = sceneDAO.findId(ch.id(), spec.sceneNo());
             var pack = packer.packScene(novelId, chapterNo, ch, spec, digests, prevTail, directives, prevScene);
-            emit(novelId, "scene", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(),
-                    "phase", "start", "goal", String.valueOf(spec.goal())));
+            stageLog.emit(novelId, chapterNo, SCENE, START,
+                    Map.of("sceneNo", spec.sceneNo(), "goal", String.valueOf(spec.goal())));
             String draft = sceneService.generate(novelId, ch.id(), chapterNo, pack, spec.sceneNo());
-            emit(novelId, "scene", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(),
-                    "phase", "draft", "text", String.valueOf(draft)));
+            stageLog.emit(novelId, chapterNo, SCENE, DRAFT,
+                    Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(draft)));
             boolean ok = gateService.checkScene(novelId, ch.id(), sceneId, spec.sceneNo(), draft, spec.words());
             // 带意见重写，最多 2 轮（密度类指标一轮修订常按下葫芦浮起瓢）
             for (int round = 1; round <= 2 && !ok; round++) {
                 log.warn("场景 {} 门禁未过，带意见重写（第 {} 轮）", spec.sceneNo(), round);
-                emit(novelId, "gate", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(),
-                        "passed", false, "rewrite", true, "round", round,
-                        "reason", gateService.failedChecksText(ch.id(), sceneId)));
+                stageLog.emit(novelId, chapterNo, SCENE_GATE, NONE,
+                        Map.of("sceneNo", spec.sceneNo(), "passed", false, "rewrite", true, "round", round,
+                                "reason", gateService.failedChecksText(ch.id(), sceneId)));
                 draft = sceneService.revise(novelId, ch.id(), sceneId, spec.sceneNo(),
                         draft, gateService.failureSummary(ch.id(), sceneId), pack);
-                emit(novelId, "scene", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(),
-                        "phase", "draft", "text", String.valueOf(draft)));
+                stageLog.emit(novelId, chapterNo, SCENE, DRAFT,
+                        Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(draft)));
                 ok = gateService.checkScene(novelId, ch.id(), sceneId, spec.sceneNo(), draft, spec.words());
             }
-            emit(novelId, "gate", Map.of("chapterNo", chapterNo, "sceneNo", spec.sceneNo(), "passed", ok,
-                    "reason", ok ? "" : gateService.failedChecksText(ch.id(), sceneId)));
+            stageLog.emit(novelId, chapterNo, SCENE_GATE, NONE,
+                    Map.of("sceneNo", spec.sceneNo(), "passed", ok,
+                            "reason", ok ? "" : gateService.failedChecksText(ch.id(), sceneId)));
             sceneDAO.updateGateStatus(sceneId, ok ? "PASSED" : "FAILED");
             if (ok) passedScenes++;
             prevScene = draft;
         }
         if (passedScenes < specs.size()) {
             log.error("第 {} 章场景通过 {}/{}，中止", chapterNo, passedScenes, specs.size());
-            emit(novelId, "chapter", Map.of("phase", "failed", "chapterNo", chapterNo,
-                    "reason", "场景通过 " + passedScenes + "/" + specs.size()));
+            stageLog.emit(novelId, chapterNo, CHAPTER, FAILED,
+                    Map.of("reason", "场景通过 " + passedScenes + "/" + specs.size()));
             chapterDAO.updateStatus(ch.id(), "FAILED");
             return false;
         }
@@ -300,16 +292,16 @@ public class ChapterPipelineService {
         String fullText = stripTitleLine(joiner.toString(), ch.title());
         chapterDAO.saveFullText(ch.id(), fullText);
         chapterDAO.updateStatus(ch.id(), "GATE_MECHANICAL");
-        emit(novelId, "assemble", Map.of("chapterNo", chapterNo, "chars", fullText.length()));
+        stageLog.emit(novelId, chapterNo, ASSEMBLE, NONE, Map.of("chars", fullText.length()));
         if (!gateService.checkChapter(novelId, ch.id(), chapterNo, fullText, ch.budgetMin(), ch.budgetMax())) {
-            emit(novelId, "chapter_gate", Map.of("chapterNo", chapterNo, "passed", false,
-                    "reason", gateService.failedChecksText(ch.id())));
+            stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE,
+                    Map.of("passed", false, "reason", gateService.failedChecksText(ch.id())));
             // 断点重跑场景：库里已有上一轮修订过、且能过检的正文，直接复用，省一轮修订调用
             String stored = ch.fullText();
             if (stored != null && !stored.equals(fullText)
                     && gateService.checkChapter(novelId, ch.id(), chapterNo, stored, ch.budgetMin(), ch.budgetMax())) {
                 log.info("第 {} 章复用已修订正文（{} 字符）", chapterNo, stored.length());
-                emit(novelId, "revise", Map.of("chapterNo", chapterNo, "phase", "reuse", "chars", stored.length()));
+                stageLog.emit(novelId, chapterNo, REVISE, REUSE, Map.of("chars", stored.length()));
                 fullText = stored;
                 chapterDAO.saveFullText(ch.id(), fullText);
             } else {
@@ -318,23 +310,24 @@ public class ChapterPipelineService {
                 boolean gatePassed = false;
                 for (int round = 1; round <= 2; round++) {
                     log.warn("第 {} 章章级门禁未过，带意见修订（第 {}/2 轮）", chapterNo, round);
-                    emit(novelId, "revise", Map.of("chapterNo", chapterNo, "phase", "start", "round", round));
+                    stageLog.emit(novelId, chapterNo, REVISE, START, Map.of("round", round));
                     String revised = reviseChapter(novelId, ch, fullText);
                     if (revised == null || revised.length() < fullText.length() * 0.5
                             || revised.length() > fullText.length() * 1.15) {
                         log.error("第 {} 章修订稿长度异常（{} 字符），弃用本轮", chapterNo,
                                 revised == null ? 0 : revised.length());
-                        emit(novelId, "revise", Map.of("chapterNo", chapterNo, "phase", "rejected", "round", round));
+                        stageLog.emit(novelId, chapterNo, REVISE, REJECTED, Map.of("round", round));
                         if (round == 2) {
-                            emit(novelId, "chapter", Map.of("phase", "failed", "chapterNo", chapterNo, "reason", "修订稿长度异常"));
+                            stageLog.emit(novelId, chapterNo, CHAPTER, FAILED,
+                                    Map.of("reason", "修订稿长度异常"));
                             chapterDAO.updateStatus(ch.id(), "FAILED");
                             return false;
                         }
                         continue;
                     }
                     fullText = stripTitleLine(revised, ch.title());
-                    emit(novelId, "revise", Map.of("chapterNo", chapterNo, "phase", "done", "round", round,
-                            "chars", fullText.length()));
+                    stageLog.emit(novelId, chapterNo, REVISE, DONE,
+                            Map.of("round", round, "chars", fullText.length()));
                     chapterDAO.saveFullText(ch.id(), fullText);
                     gatePassed = gateService.checkChapter(novelId, ch.id(), chapterNo, fullText, ch.budgetMin(), ch.budgetMax());
                     if (gatePassed) {
@@ -342,66 +335,65 @@ public class ChapterPipelineService {
                     }
                     if (round == 2) {
                         log.error("第 {} 章修订两轮后仍未过章级门禁（报告见 gate_reports）", chapterNo);
-                        emit(novelId, "chapter", Map.of("phase", "failed", "chapterNo", chapterNo, "reason", "修订后门禁仍未过"));
+                        stageLog.emit(novelId, chapterNo, CHAPTER, FAILED,
+                                Map.of("reason", "修订后门禁仍未过"));
                         chapterDAO.updateStatus(ch.id(), "FAILED");
                         return false;
                     }
                 }
             }
         }
-        emit(novelId, "chapter_gate", Map.of("chapterNo", chapterNo, "passed", true));
+        stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
 
         // 3.4) 读者评审（反无聊闸门）：钩子/戏剧张力/章间衔接/注水率；BLOCKER 带清单重写一轮+复审。
         chapterDAO.updateStatus(ch.id(), "GATE_AI_REVIEW");
-        emit(novelId, "reader", Map.of("chapterNo", chapterNo, "phase", "start"));
+        stageLog.emit(novelId, chapterNo, READER, START, Map.of());
         ReviewService.Outcome reader;
         try {
             reader = reviewService.readerReviewAndFix(novelId, ch, fullText);
         } catch (Exception e) {
             log.warn("第 {} 章读者评审异常，fail-open 放行：{}", chapterNo, e.getMessage());
-            emit(novelId, "reader", Map.of("chapterNo", chapterNo, "phase", "error",
-                    "message", String.valueOf(e.getMessage())));
+            stageLog.emit(novelId, chapterNo, READER, ERROR, Map.of("message", String.valueOf(e.getMessage())));
             reader = new ReviewService.Outcome(null, "skipped", false);
         }
         if (reader.revised() != null) {
             fullText = reader.revised();
             chapterDAO.saveFullText(ch.id(), fullText);
-            emit(novelId, "revise", Map.of("chapterNo", chapterNo, "phase", "reader_fix", "chars", fullText.length()));
+            stageLog.emit(novelId, chapterNo, REVISE, READER_FIX, Map.of("chars", fullText.length()));
         }
-        emit(novelId, "reader", Map.of("chapterNo", chapterNo, "phase", "done",
-                "verdict", reader.verdict(), "blocked", reader.blocked()));
+        stageLog.emit(novelId, chapterNo, READER, DONE,
+                Map.of("verdict", reader.verdict(), "blocked", reader.blocked()));
         if (reader.blocked()) {
             log.warn("第 {} 章读者评审复审仍 BLOCKER，转人工审批", chapterNo);
             chapterDAO.updateStatus(ch.id(), "PENDING_APPROVAL");
-            emit(novelId, "approve", Map.of("chapterNo", chapterNo, "phase", "pending", "reason", "reader_blocker"));
+            stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of("reason", "reader_blocker"));
             return true;
         }
 
         // 3.5) AI 语义审校（连续性/逻辑/错字）；BLOCKER 带清单修订一轮并复审。
         // 审校调用异常同样 fail-open——机械门禁已过的正文不能因审校故障而废。
         chapterDAO.updateStatus(ch.id(), "GATE_AI_REVIEW");
-        emit(novelId, "review", Map.of("chapterNo", chapterNo, "phase", "start"));
+        stageLog.emit(novelId, chapterNo, REVIEW, START, Map.of());
         ReviewService.Outcome review;
         try {
             review = reviewService.reviewAndFix(novelId, ch, fullText);
         } catch (Exception e) {
             log.warn("第 {} 章审校调用异常，fail-open 放行：{}", chapterNo, e.getMessage());
-            emit(novelId, "review", Map.of("chapterNo", chapterNo, "phase", "error",
-                    "message", String.valueOf(e.getMessage())));
+            stageLog.emit(novelId, chapterNo, REVIEW, ERROR, Map.of("message", String.valueOf(e.getMessage())));
             review = new ReviewService.Outcome(null, "skipped", false);
         }
         if (review.revised() != null) {
             fullText = review.revised();
             chapterDAO.saveFullText(ch.id(), fullText);
-            emit(novelId, "revise", Map.of("chapterNo", chapterNo, "phase", "review_fix", "chars", fullText.length()));
+            stageLog.emit(novelId, chapterNo, REVISE, REVIEW_FIX, Map.of("chars", fullText.length()));
         }
-        emit(novelId, "review", Map.of("chapterNo", chapterNo, "phase", "done",
-                "verdict", review.verdict(), "blocked", review.blocked()));
+        stageLog.emit(novelId, chapterNo, REVIEW, DONE,
+                Map.of("verdict", review.verdict(), "blocked", review.blocked()));
         if (review.blocked()) {
             // auto 模式也不过稿：审校硬伤未清，转人工看报告定夺
             log.warn("第 {} 章审校复审仍 BLOCKER，转人工审批", chapterNo);
             chapterDAO.updateStatus(ch.id(), "PENDING_APPROVAL");
-            emit(novelId, "approve", Map.of("chapterNo", chapterNo, "phase", "pending", "reason", "review_blocker"));
+            stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of("reason", "review_blocker"));
             return true;
         }
 
@@ -409,14 +401,14 @@ public class ChapterPipelineService {
         if ("manual".equals(approvalMode)) {
             chapterDAO.updateStatus(ch.id(), "PENDING_APPROVAL");
             log.info("第 {} 章待人工审批", chapterNo);
-            emit(novelId, "approve", Map.of("chapterNo", chapterNo, "phase", "pending"));
+            stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of());
             return true;
         }
 
         // 5) digest
         digestService.digest(novelId, ch.id(), chapterNo, fullText);
-        emit(novelId, "digest", Map.of("chapterNo", chapterNo, "phase", "done"));
-        emit(novelId, "chapter", Map.of("phase", "done", "chapterNo", chapterNo, "chars", fullText.length()));
+        stageLog.emit(novelId, chapterNo, DIGEST, DONE, Map.of());
+        stageLog.emit(novelId, chapterNo, CHAPTER, DONE, Map.of("chars", fullText.length()));
         return true;
     }
 }

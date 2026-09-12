@@ -59,14 +59,13 @@ public class VolumePlanService {
     private final ForeshadowDAO foreshadowDAO;
     private final NovelDAO novelDAO;
     private final CanonDocDAO canonDocDAO;
-    private final PipelineSseService sse;
-    private final PipelineEventDAO eventDAO;
+    private final StageLog stageLog;
     private final ObjectMapper mapper;
     private final TransactionTemplate tx;
 
     public VolumePlanService(LlmPort llm, LlmJson llmJson, ContextPackerService packer,
                              ChapterDAO chapterDAO, ForeshadowDAO foreshadowDAO, NovelDAO novelDAO,
-                             CanonDocDAO canonDocDAO, PipelineSseService sse, PipelineEventDAO eventDAO,
+                             CanonDocDAO canonDocDAO, StageLog stageLog,
                              ObjectMapper mapper, PlatformTransactionManager txManager) {
         this.llm = llm;
         this.llmJson = llmJson;
@@ -75,8 +74,7 @@ public class VolumePlanService {
         this.foreshadowDAO = foreshadowDAO;
         this.novelDAO = novelDAO;
         this.canonDocDAO = canonDocDAO;
-        this.sse = sse;
-        this.eventDAO = eventDAO;
+        this.stageLog = stageLog;
         this.mapper = mapper;
         this.tx = new TransactionTemplate(txManager);
     }
@@ -96,16 +94,16 @@ public class VolumePlanService {
         if (toNo != null && toNo < fromNo) {
             throw new BizException(ErrorCode.PARAM_ERROR, "结束章必须不小于起始章");
         }
-        emit(novelId, null, "volume_plan", Map.of("phase", "start",
-                "volNo", volNo, "from", fromNo, "to", Objects.toString(toNo, "auto")));
+        stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.START,
+                Map.of("volNo", volNo, "from", fromNo, "to", Objects.toString(toNo, "auto")));
         PlanDraft draft = generateWithReview(novelId, volNo, fromNo, toNo, seedOutline);
         String planMode = novelDAO.findPlanMode(novelId);
         AdoptResult result = "auto".equals(planMode) ? adopt(novelId, volNo, draft) : null;
-        emit(novelId, null, "volume_plan", Map.of(
-                "phase", result != null ? "adopted" : "draft",
-                "volNo", volNo, "arc", Objects.toString(draft.arc(), ""),
-                "chapters", draft.rows().size(),
-                "adoptedForeshadows", result == null ? List.of() : result.adoptedForeshadows()));
+        stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN,
+                result != null ? StageLog.Phase.ADOPTED : StageLog.Phase.DRAFT,
+                Map.of("volNo", volNo, "arc", Objects.toString(draft.arc(), ""),
+                        "chapters", draft.rows().size(),
+                        "adoptedForeshadows", result == null ? List.of() : result.adoptedForeshadows()));
         return new PlanOutcome(planMode, result != null, draft, result);
     }
 
@@ -287,7 +285,8 @@ public class VolumePlanService {
                     }, 2);
         } catch (Exception e) {
             log.warn("卷纲审校调用异常，fail-open 放行：{}", e.getMessage());
-            emit(novelId, null, "volume_plan_review", Map.of("phase", "error", "message", String.valueOf(e.getMessage())));
+            stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.ERROR,
+                    Map.of("message", String.valueOf(e.getMessage())));
             return null;
         }
     }
@@ -452,14 +451,9 @@ public class VolumePlanService {
                 ch.budgetMin(), ch.budgetMax());
         // 清场景与门禁报告：章纲将按新目标重出（runChapter 见场景数为 0 自动重生成）
         chapterDAO.resetForReoutline(ch.id(), null);
-        emit(novelId, chapterNo, "volume_plan", Map.of("phase", "chapter_replan",
-                "chapterNo", chapterNo, "goal", replan.goal()));
+        stageLog.emit(novelId, chapterNo, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.CHAPTER_REPLAN,
+                Map.of("goal", replan.goal()));
         log.info("第 {} 章卷纲已重写：{}", chapterNo, replan.goal());
         return chapterDAO.findById(ch.id()).orElseThrow();
-    }
-
-    private void emit(long novelId, Integer chapterNo, String stage, Map<String, Object> data) {
-        sse.send(stage, data);
-        eventDAO.insert(novelId, chapterNo, stage, String.valueOf(data.getOrDefault("phase", "")), data);
     }
 }
