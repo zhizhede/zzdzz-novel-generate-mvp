@@ -4,6 +4,7 @@ import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.PlanModeDTO;
 import com.zzdzz.novelgen.service.OutlineService;
 import com.zzdzz.novelgen.service.PlanningService;
+import com.zzdzz.novelgen.service.VolumeReviewService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,9 +25,11 @@ import java.util.Map;
 public class PlanningController {
 
     private final PlanningService planningService;
+    private final VolumeReviewService volumeReviewService;
 
-    public PlanningController(PlanningService planningService) {
+    public PlanningController(PlanningService planningService, VolumeReviewService volumeReviewService) {
         this.planningService = planningService;
+        this.volumeReviewService = volumeReviewService;
     }
 
     // ===== 大纲 =====
@@ -142,5 +145,20 @@ public class PlanningController {
     public Result<List<OutlineService.SceneSpec>> regenerate(@PathVariable long novelId,
                                                              @PathVariable int chapterNo) {
         return Result.ok(planningService.regenerate(novelId, chapterNo));
+    }
+
+    // ===== 卷级复盘 =====
+
+    /** 复盘一卷（同步，约 1-3 分钟）：机械对账 + LLM 漂移分析，报告落库并返回。 */
+    @PostMapping("/volumes/{volNo}/review")
+    public Result<Map<String, Object>> reviewVolume(@PathVariable long novelId,
+                                                    @PathVariable int volNo) {
+        return Result.ok(volumeReviewService.review(novelId, volNo));
+    }
+
+    /** 上次复盘报告；尚未复盘返回 null。 */
+    @GetMapping("/volumes/{volNo}/review")
+    public Result<String> lastReview(@PathVariable long novelId, @PathVariable int volNo) {
+        return Result.ok(volumeReviewService.findLatest(novelId, volNo));
     }
 }

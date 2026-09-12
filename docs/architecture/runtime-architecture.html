@@ -5156,7 +5156,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Spring Boot 单体（controller → service → dao）" x="265" y="5" width="945" height="455" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Spring Boot 单体（controller → service → dao）" x="210" y="5" width="1000" height="455" rx="12" class="c-region" stroke-width="1"/>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="security-group" data-composition-frame-id="1" data-composition-frame-label="信任边界 A：JWT 会话" x="265" y="175" width="235" height="114" rx="8" class="c-security-group" stroke-width="1"/>
 
@@ -5164,16 +5164,18 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
         <!-- Connection paths (before components for correct z-order) -->
         <path data-edge-from="spa" data-edge-to="api" data-edge-label="REST / SSE 订阅" data-edge-key="0" data-edge-id="spa-api" data-composition-points="215,360;255,360;255,237;295,237" d="M 215 360 L 247 360 Q 255 360 255 352 L 255 245 Q 255 237 263 237 L 295 237" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="auth" data-edge-to="api" data-edge-label="校验 JWT" data-edge-key="1" data-edge-id="auth-api" data-composition-points="130,100;130,152.5;382.5,152.5;382.5,205" d="M 130 100 L 130 144.5 Q 130 152.5 138 152.5 L 374.5 152.5 Q 382.5 152.5 382.5 160.5 L 382.5 205" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="auth" data-edge-to="api" data-edge-label="校验 JWT" data-edge-key="1" data-edge-id="auth-api" data-composition-points="130,100;130,152.5;375.5,152.5;375.5,205" d="M 130 100 L 130 144.5 Q 130 152.5 138 152.5 L 367.5 152.5 Q 375.5 152.5 375.5 160.5 L 375.5 205" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="api" data-edge-to="queue" data-edge-label="提交入队" data-edge-key="2" data-edge-id="api-queue" data-composition-points="470,237;540,237" d="M 470 237 L 540 237" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="queue" data-edge-to="pipeline" data-edge-label="逐章领取" data-edge-key="3" data-edge-id="queue-pipeline" data-composition-points="690,228;765,228" d="M 690 228 L 765 228" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="pipeline" data-edge-to="packer" data-edge-label="组装提示包" data-edge-key="4" data-edge-id="pipeline-packer" data-composition-points="857.5,200;857.5,176;873.5,176;873.5,119;852.5,119;852.5,95" d="M 857.5 200 L 857.5 184 Q 857.5 176 865.5 176 L 865.5 176 Q 873.5 176 873.5 168 L 873.5 127 Q 873.5 119 865.5 119 L 860.5 119 Q 852.5 119 852.5 111 L 852.5 95" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="packer" data-edge-to="llmgw" data-edge-label="生成调用" data-edge-key="5" data-edge-id="packer-llmgw" data-composition-points="940,65;1095,65;1095,205" d="M 940 65 L 1087 65 Q 1095 65 1095 73 L 1095 205" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="llmgw" data-edge-to="minimax" data-edge-label="OpenAI 兼容 /chat/completions" data-edge-key="6" data-edge-id="llmgw-minimax" data-composition-points="1095,269;1095,380" d="M 1095 269 L 1095 380" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="pipeline" data-edge-to="gates" data-edge-label="逐步骤过闸" data-edge-key="7" data-edge-id="pipeline-gates" data-composition-points="765,242;741,242;741,356;549.5,356;549.5,380" d="M 765 242 L 749 242 Q 741 242 741 250 L 741 348 Q 741 356 733 356 L 557.5 356 Q 549.5 356 549.5 364 L 549.5 380" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="gates" data-edge-to="pipeline" data-edge-label="BLOCKER 重写" data-edge-key="8" data-edge-id="gates-pipeline" data-composition-points="535.5,380;535.5,325;857.5,325;857.5,270" d="M 535.5 380 L 535.5 333 Q 535.5 325 543.5 325 L 849.5 325 Q 857.5 325 857.5 317 L 857.5 270" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="pipeline" data-edge-to="db" data-edge-label="正文·状态·事件流水" data-edge-key="9" data-edge-id="pipeline-db" data-composition-points="857.5,270;857.5,370" d="M 857.5 270 L 857.5 370" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="packer" data-edge-to="db" data-edge-label="四层记忆读取" data-edge-key="10" data-edge-id="packer-db" data-composition-points="940,65;975,65;975,330;857.5,330;857.5,370" d="M 940 65 L 967 65 Q 975 65 975 73 L 975 322 Q 975 330 967 330 L 865.5 330 Q 857.5 330 857.5 338 L 857.5 370" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="packer" data-edge-to="rag" data-edge-label="语义召回" data-edge-key="5" data-edge-id="packer-rag" data-composition-points="940,58;1010,58" d="M 940 58 L 1010 58" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="rag" data-edge-to="llmgw" data-edge-label="embo-01 向量化" data-edge-key="6" data-edge-id="rag-llmgw" data-composition-points="1095,95;1095,205" d="M 1095 95 L 1095 205" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="packer" data-edge-to="llmgw" data-edge-label="生成调用" data-edge-key="7" data-edge-id="packer-llmgw" data-composition-points="940,72;964,72;964,181;1095,181;1095,205" d="M 940 72 L 956 72 Q 964 72 964 80 L 964 173 Q 964 181 972 181 L 1087 181 Q 1095 181 1095 189 L 1095 205" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="llmgw" data-edge-to="minimax" data-edge-label="OpenAI 兼容 /chat/completions" data-edge-key="8" data-edge-id="llmgw-minimax" data-composition-points="1095,269;1095,380" d="M 1095 269 L 1095 380" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="pipeline" data-edge-to="gates" data-edge-label="逐步骤过闸" data-edge-key="9" data-edge-id="pipeline-gates" data-composition-points="765,242;741,242;741,356;549.5,356;549.5,380" d="M 765 242 L 749 242 Q 741 242 741 250 L 741 348 Q 741 356 733 356 L 557.5 356 Q 549.5 356 549.5 364 L 549.5 380" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="gates" data-edge-to="pipeline" data-edge-label="BLOCKER 重写" data-edge-key="10" data-edge-id="gates-pipeline" data-composition-points="535.5,380;535.5,325;857.5,325;857.5,270" d="M 535.5 380 L 535.5 333 Q 535.5 325 543.5 325 L 849.5 325 Q 857.5 325 857.5 317 L 857.5 270" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="pipeline" data-edge-to="db" data-edge-label="正文·状态·事件流水" data-edge-key="11" data-edge-id="pipeline-db" data-composition-points="857.5,270;857.5,370" d="M 857.5 270 L 857.5 370" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="api" data-edge-to="retro" data-edge-label="复盘触发" data-edge-key="12" data-edge-id="api-retro" data-composition-points="389.5,205;389.5,152.5;332.5,152.5;332.5,100" d="M 389.5 205 L 389.5 160.5 Q 389.5 152.5 381.5 152.5 L 340.5 152.5 Q 332.5 152.5 332.5 144.5 L 332.5 100" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Components -->
         <g id="node-auth" data-node-id="auth" data-node-label="JWT 认证" tabindex="0" role="button" aria-label="聚焦JWT 认证，HttpOnly Cookie, 架构组件" aria-pressed="false" data-node-kind="security" data-node-sublabel="HttpOnly Cookie" data-node-tag="无服务端会话" data-node-context="架构组件">
@@ -5187,6 +5189,41 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-node-label="" data-detail-anchor="" x="130" y="68" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">JWT 认证</text>
         <text data-detail="context" x="130" y="84" class="t-muted" font-size="9" text-anchor="middle">HttpOnly Cookie</text>
         <text data-detail="fine" x="130" y="92" class="t-security" font-size="7" text-anchor="middle">无服务端会话</text>
+        </g>
+
+        <g id="node-retro" data-node-id="retro" data-node-label="卷级复盘 Agent" tabindex="0" role="button" aria-label="聚焦卷级复盘 Agent，机械对账+漂移分析, Spring Boot 单体（controller → service → dao）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="机械对账+漂移分析" data-node-tag="每卷最新报告" data-node-context="Spring Boot 单体（controller → service → dao）">
+          <title>卷级复盘 Agent · 机械对账+漂移分析 · Spring Boot 单体（controller → service → dao） · 每卷最新报告</title>
+          <rect x="240" y="40" width="185" height="60" rx="6" class="c-mask"/>
+          <rect x="240" y="40" width="185" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(246 46) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="332.5" y="68" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">卷级复盘 Agent</text>
+        <text data-detail="context" x="332.5" y="84" class="t-muted" font-size="9" text-anchor="middle">机械对账+漂移分析</text>
+        <text data-detail="fine" x="332.5" y="92" class="t-backend" font-size="7" text-anchor="middle">每卷最新报告</text>
+        </g>
+
+        <g id="node-packer" data-node-id="packer" data-node-label="上下文打包器" tabindex="0" role="button" aria-label="聚焦上下文打包器，四层记忆+事件后果, Spring Boot 单体（controller → service → dao）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="四层记忆+事件后果" data-node-context="Spring Boot 单体（controller → service → dao）">
+          <title>上下文打包器 · 四层记忆+事件后果 · Spring Boot 单体（controller → service → dao）</title>
+          <rect x="765" y="35" width="175" height="60" rx="6" class="c-mask"/>
+          <rect x="765" y="35" width="175" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(771 41) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="852.5" y="63" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">上下文打包器</text>
+        <text data-detail="context" x="852.5" y="79" class="t-muted" font-size="9" text-anchor="middle">四层记忆+事件后果</text>
+        </g>
+
+        <g id="node-rag" data-node-id="rag" data-node-label="RAG 语义检索" tabindex="0" role="button" aria-label="聚焦RAG 语义检索，embo-01 · 1536 维, Spring Boot 单体（controller → service → dao）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="embo-01 · 1536 维" data-node-tag="惰性向量索引" data-node-context="Spring Boot 单体（controller → service → dao）">
+          <title>RAG 语义检索 · embo-01 · 1536 维 · Spring Boot 单体（controller → service → dao） · 惰性向量索引</title>
+          <rect x="1010" y="35" width="170" height="60" rx="6" class="c-mask"/>
+          <rect x="1010" y="35" width="170" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1016 41) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="1095" y="63" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">RAG 语义检索</text>
+        <text data-detail="context" x="1095" y="79" class="t-muted" font-size="9" text-anchor="middle">embo-01 · 1536 维</text>
+        <text data-detail="fine" x="1095" y="87" class="t-backend" font-size="7" text-anchor="middle">惰性向量索引</text>
         </g>
 
         <g id="node-spa" data-node-id="spa" data-node-label="浏览器 SPA" tabindex="0" role="button" aria-label="聚焦浏览器 SPA，Vue3 + Element Plus :5173, 架构组件" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="Vue3 + Element Plus :5173" data-node-context="架构组件">
@@ -5242,31 +5279,20 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="857.5" y="262" class="t-backend" font-size="7" text-anchor="middle">章纲→场景→门禁→评审→审批→digest</text>
         </g>
 
-        <g id="node-packer" data-node-id="packer" data-node-label="上下文打包器" tabindex="0" role="button" aria-label="聚焦上下文打包器，四层记忆注入, Spring Boot 单体（controller → service → dao）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="四层记忆注入" data-node-context="Spring Boot 单体（controller → service → dao）">
-          <title>上下文打包器 · 四层记忆注入 · Spring Boot 单体（controller → service → dao）</title>
-          <rect x="765" y="35" width="175" height="60" rx="6" class="c-mask"/>
-          <rect x="765" y="35" width="175" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(771 41) scale(0.6875)">
-            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="852.5" y="63" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">上下文打包器</text>
-        <text data-detail="context" x="852.5" y="79" class="t-muted" font-size="9" text-anchor="middle">四层记忆注入</text>
-        </g>
-
-        <g id="node-llmgw" data-node-id="llmgw" data-node-label="LLM 网关" tabindex="0" role="button" aria-label="聚焦LLM 网关，LlmPort · 节点路由, Spring Boot 单体（controller → service → dao）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="LlmPort · 节点路由" data-node-tag="峰谷计费" data-node-context="Spring Boot 单体（controller → service → dao）">
-          <title>LLM 网关 · LlmPort · 节点路由 · Spring Boot 单体（controller → service → dao） · 峰谷计费</title>
+        <g id="node-llmgw" data-node-id="llmgw" data-node-label="LLM 网关" tabindex="0" role="button" aria-label="聚焦LLM 网关，M3 对话 · embo-01 向量, Spring Boot 单体（controller → service → dao）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="M3 对话 · embo-01 向量" data-node-tag="峰谷计费" data-node-context="Spring Boot 单体（controller → service → dao）">
+          <title>LLM 网关 · M3 对话 · embo-01 向量 · Spring Boot 单体（controller → service → dao） · 峰谷计费</title>
           <rect x="1010" y="205" width="170" height="64" rx="6" class="c-mask"/>
           <rect x="1010" y="205" width="170" height="64" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1016 211) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="1095" y="235" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">LLM 网关</text>
-        <text data-detail="context" x="1095" y="251" class="t-muted" font-size="9" text-anchor="middle">LlmPort · 节点路由</text>
+        <text data-detail="context" x="1095" y="251" class="t-muted" font-size="9" text-anchor="middle">M3 对话 · embo-01 向量</text>
         <text data-detail="fine" x="1095" y="261" class="t-backend" font-size="7" text-anchor="middle">峰谷计费</text>
         </g>
 
-        <g id="node-db" data-node-id="db" data-node-label="PostgreSQL 16" tabindex="0" role="button" aria-label="聚焦PostgreSQL 16，docker pg-vector :5432, 架构组件" aria-pressed="false" data-node-kind="database" data-node-sublabel="docker pg-vector :5432" data-node-tag="V15 · Flyway" data-node-context="架构组件">
-          <title>PostgreSQL 16 · docker pg-vector :5432 · 架构组件 · V15 · Flyway</title>
+        <g id="node-db" data-node-id="db" data-node-label="PostgreSQL 16" tabindex="0" role="button" aria-label="聚焦PostgreSQL 16，docker pg-vector :5432, 架构组件" aria-pressed="false" data-node-kind="database" data-node-sublabel="docker pg-vector :5432" data-node-tag="V17 · embeddings·Flyway" data-node-context="架构组件">
+          <title>PostgreSQL 16 · docker pg-vector :5432 · 架构组件 · V17 · embeddings·Flyway</title>
           <rect x="765" y="370" width="185" height="60" rx="6" class="c-mask"/>
           <rect x="765" y="370" width="185" height="60" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(771 376) scale(0.6875)">
@@ -5275,23 +5301,23 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           </g>
           <text data-node-label="" data-detail-anchor="" x="857.5" y="398" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">PostgreSQL 16</text>
         <text data-detail="context" x="857.5" y="414" class="t-muted" font-size="9" text-anchor="middle">docker pg-vector :5432</text>
-        <text data-detail="fine" x="857.5" y="422" class="t-database" font-size="7" text-anchor="middle">V15 · Flyway</text>
+        <text data-detail="fine" x="857.5" y="422" class="t-database" font-size="7" text-anchor="middle">V17 · embeddings·Flyway</text>
         </g>
 
-        <g id="node-gates" data-node-id="gates" data-node-label="质量闸门组" tabindex="0" role="button" aria-label="聚焦质量闸门组，机械门禁·读者评审·AI审校, Spring Boot 单体（controller → service → dao）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="机械门禁·读者评审·AI审校" data-node-tag="带意见重写" data-node-context="Spring Boot 单体（controller → service → dao）">
-          <title>质量闸门组 · 机械门禁·读者评审·AI审校 · Spring Boot 单体（controller → service → dao） · 带意见重写</title>
+        <g id="node-gates" data-node-id="gates" data-node-label="质量闸门组" tabindex="0" role="button" aria-label="聚焦质量闸门组，机械门禁·读者评审五问·AI审校, Spring Boot 单体（controller → service → dao）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="机械门禁·读者评审五问·AI审校" data-node-tag="带意见重写" data-node-context="Spring Boot 单体（controller → service → dao）">
+          <title>质量闸门组 · 机械门禁·读者评审五问·AI审校 · Spring Boot 单体（controller → service → dao） · 带意见重写</title>
           <rect x="450" y="380" width="185" height="60" rx="6" class="c-mask"/>
           <rect x="450" y="380" width="185" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(456 386) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="542.5" y="408" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">质量闸门组</text>
-        <text data-detail="context" x="542.5" y="424" class="t-muted" font-size="9" text-anchor="middle">机械门禁·读者评审·AI审校</text>
+        <text data-detail="context" x="542.5" y="424" class="t-muted" font-size="9" text-anchor="middle">机械门禁·读者评审五问·AI审校</text>
         <text data-detail="fine" x="542.5" y="432" class="t-backend" font-size="7" text-anchor="middle">带意见重写</text>
         </g>
 
-        <g id="node-minimax" data-node-id="minimax" data-node-label="MiniMax 开放平台" tabindex="0" role="button" aria-label="聚焦MiniMax 开放平台，M3 对话 · embo-01 向量, 信任边界 B：API Key（仅 application-local.yaml）" aria-pressed="false" data-node-kind="external" data-node-sublabel="M3 对话 · embo-01 向量" data-node-context="信任边界 B：API Key（仅 application-local.yaml）">
-          <title>MiniMax 开放平台 · M3 对话 · embo-01 向量 · 信任边界 B：API Key（仅 application-local.yaml）</title>
+        <g id="node-minimax" data-node-id="minimax" data-node-label="MiniMax 开放平台" tabindex="0" role="button" aria-label="聚焦MiniMax 开放平台，全栈统一 MiniMax（用户决策）, 信任边界 B：API Key（仅 application-local.yaml）" aria-pressed="false" data-node-kind="external" data-node-sublabel="全栈统一 MiniMax（用户决策）" data-node-context="信任边界 B：API Key（仅 application-local.yaml）">
+          <title>MiniMax 开放平台 · 全栈统一 MiniMax（用户决策） · 信任边界 B：API Key（仅 application-local.yaml）</title>
           <rect x="1000" y="380" width="190" height="60" rx="6" class="c-mask"/>
           <rect x="1000" y="380" width="190" height="60" rx="6" class="c-external" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(1006 386) scale(0.6875)">
@@ -5299,7 +5325,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="1095" y="408" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">MiniMax 开放平台</text>
-        <text data-detail="context" x="1095" y="424" class="t-muted" font-size="9" text-anchor="middle">M3 对话 · embo-01 向量</text>
+        <text data-detail="context" x="1095" y="424" class="t-muted" font-size="9" text-anchor="middle">全栈统一 MiniMax（用户决策）</text>
         </g>
 
         <!-- Connection labels -->
@@ -5308,8 +5334,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text x="255" y="288.5" class="t-backend" font-size="8" text-anchor="middle">REST / SSE 订阅</text>
         </g>
         <g data-detail="context" data-edge-from="auth" data-edge-to="api" data-edge-label="校验 JWT" data-edge-key="1" data-edge-id="auth-api">
-          <rect x="232.05" y="132.5" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="256.25" y="142.5" class="t-security" font-size="8" text-anchor="middle">校验 JWT</text>
+          <rect x="228.55" y="132.5" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="252.75" y="142.5" class="t-security" font-size="8" text-anchor="middle">校验 JWT</text>
         </g>
         <g data-detail="context" data-edge-from="api" data-edge-to="queue" data-edge-label="提交入队" data-edge-key="2" data-edge-id="api-queue">
           <rect x="480.8" y="217" width="48.4" height="14" rx="3" class="c-mask"/>
@@ -5323,35 +5349,43 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="836.5" y="156" width="58" height="14" rx="3" class="c-mask"/>
           <text x="865.5" y="166" class="t-backend" font-size="8" text-anchor="middle">组装提示包</text>
         </g>
-        <g data-detail="context" data-edge-from="packer" data-edge-to="llmgw" data-edge-label="生成调用" data-edge-key="5" data-edge-id="packer-llmgw">
-          <rect x="1070.8" y="115" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="1095" y="125" class="t-backend" font-size="8" text-anchor="middle">生成调用</text>
+        <g data-detail="context" data-edge-from="packer" data-edge-to="rag" data-edge-label="语义召回" data-edge-key="5" data-edge-id="packer-rag">
+          <rect x="950.8" y="38" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="975" y="48" class="t-muted" font-size="8" text-anchor="middle">语义召回</text>
         </g>
-        <g data-detail="context" data-edge-from="llmgw" data-edge-to="minimax" data-edge-label="OpenAI 兼容 /chat/completions" data-edge-key="6" data-edge-id="llmgw-minimax">
+        <g data-detail="context" data-edge-from="rag" data-edge-to="llmgw" data-edge-label="embo-01 向量化" data-edge-key="6" data-edge-id="rag-llmgw">
+          <rect x="1063.4" y="142" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1102" y="152" class="t-messagebus" font-size="8" text-anchor="middle">embo-01 向量化</text>
+        </g>
+        <g data-detail="context" data-edge-from="packer" data-edge-to="llmgw" data-edge-label="生成调用" data-edge-key="7" data-edge-id="packer-llmgw">
+          <rect x="939.8" y="106.5" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="964" y="116.5" class="t-backend" font-size="8" text-anchor="middle">生成调用</text>
+        </g>
+        <g data-detail="context" data-edge-from="llmgw" data-edge-to="minimax" data-edge-label="OpenAI 兼容 /chat/completions" data-edge-key="8" data-edge-id="llmgw-minimax">
           <rect x="1085.4" y="330" width="149.2" height="14" rx="3" class="c-mask"/>
           <text x="1160" y="340" class="t-backend" font-size="8" text-anchor="middle">OpenAI 兼容 /chat/completions</text>
         </g>
-        <g data-detail="context" data-edge-from="pipeline" data-edge-to="gates" data-edge-label="逐步骤过闸" data-edge-key="7" data-edge-id="pipeline-gates">
+        <g data-detail="context" data-edge-from="pipeline" data-edge-to="gates" data-edge-label="逐步骤过闸" data-edge-key="9" data-edge-id="pipeline-gates">
           <rect x="712" y="279" width="58" height="14" rx="3" class="c-mask"/>
           <text x="741" y="289" class="t-backend" font-size="8" text-anchor="middle">逐步骤过闸</text>
         </g>
-        <g data-detail="context" data-edge-from="gates" data-edge-to="pipeline" data-edge-label="BLOCKER 重写" data-edge-key="8" data-edge-id="gates-pipeline">
+        <g data-detail="context" data-edge-from="gates" data-edge-to="pipeline" data-edge-label="BLOCKER 重写" data-edge-key="10" data-edge-id="gates-pipeline">
           <rect x="662.7" y="305" width="67.6" height="14" rx="3" class="c-mask"/>
           <text x="696.5" y="315" class="t-messagebus" font-size="8" text-anchor="middle">BLOCKER 重写</text>
         </g>
-        <g data-detail="context" data-edge-from="pipeline" data-edge-to="db" data-edge-label="正文·状态·事件流水" data-edge-key="9" data-edge-id="pipeline-db">
+        <g data-detail="context" data-edge-from="pipeline" data-edge-to="db" data-edge-label="正文·状态·事件流水" data-edge-key="11" data-edge-id="pipeline-db">
           <rect x="871.8" y="342" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
           <text x="920" y="352" class="t-backend" font-size="8" text-anchor="middle">正文·状态·事件流水</text>
         </g>
-        <g data-detail="context" data-edge-from="packer" data-edge-to="db" data-edge-label="四层记忆读取" data-edge-key="10" data-edge-id="packer-db">
-          <rect x="941.2" y="274" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="975" y="284" class="t-messagebus" font-size="8" text-anchor="middle">四层记忆读取</text>
+        <g data-detail="context" data-edge-from="api" data-edge-to="retro" data-edge-label="复盘触发" data-edge-key="12" data-edge-id="api-retro">
+          <rect x="336.8" y="132.5" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="361" y="142.5" class="t-messagebus" font-size="8" text-anchor="middle">复盘触发</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
         <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="Spring Boot 单体（controller → service → dao）">
-          <rect data-graph-role="structural-frame-label-mask" x="269" y="15" width="258.4" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="273" y="28" class="t-cloud" font-size="9" font-weight="600">Spring Boot 单体（controller → service → dao）</text>
+          <rect data-graph-role="structural-frame-label-mask" x="214" y="15" width="258.4" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="218" y="28" class="t-cloud" font-size="9" font-weight="600">Spring Boot 单体（controller → service → dao）</text>
         </g>
 
         <g data-graph-role="structural-frame-label" data-composition-frame-id="1" data-composition-frame-kind="security-group" data-composition-frame-label="信任边界 A：JWT 会话">
@@ -5559,7 +5593,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         </div>
         <ul>
           <li>&bull; 提交生成 → DB 队列 → 单 worker 逐章执行</li>
-          <li>&bull; 章纲 → 场景生成 → 场景门禁 → 拼章 → 章级门禁 → 读者评审 → AI 审校 → 审批 → digest</li>
+          <li>&bull; 章纲 → 场景生成（RAG 召回+四层记忆+事件后果注入）→ 场景门禁 → 拼章 → 章级门禁 → 读者评审五问 → AI 审校 → 审批 → digest</li>
           <li>&bull; 结果与进度经 pipeline_events 落库，SSE 实时推回浏览器</li>
         </ul>
       </div>
@@ -5567,12 +5601,12 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       <div class="card">
         <div class="card-header">
           <div class="card-dot cyan"></div>
-          <h3>四层记忆与三道闸</h3>
+          <h3>上下文与闸门</h3>
         </div>
         <ul>
-          <li>&bull; 记忆：素材卡（设定）· 事实账（事件，滚动 3 条）· 世界状态（时点）· 伏笔台账（长线）</li>
-          <li>&bull; 闸门：机械门禁（指纹/黑名单）→ 读者评审（注水率）→ AI 审校（BLOCKER 修一轮）；读者评审与 AI 审校同样经 LLM 网关调用模型</li>
-          <li>&bull; 失败自愈：重试 N1 次 → 换目标重写卷纲再试 N2 次（Tuning 可调）</li>
+          <li>&bull; 记忆四层：素材卡（设定）· 事实账（事件，滚动 3 条）· 世界状态（时点）· 伏笔台账（长线）</li>
+          <li>&bull; 上一章事件后果简报（目标+钩子+实际收束）注入章纲/场景/读者评审；读者评审第五问 consequence 无视上一章未竟事件=BLOCKER</li>
+          <li>&bull; RAG：事实账+素材卡惰性向量索引，top-6 带出处召回；闸门与自愈梯子次数全在 Tuning 可调</li>
         </ul>
       </div>
 
@@ -5584,7 +5618,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <ul>
           <li>&bull; 边界 A：浏览器 ↔ 后端，JWT HttpOnly Cookie，重启不掉线</li>
           <li>&bull; 边界 B：后端 ↔ MiniMax，API Key 仅存 application-local.yaml（gitignore），永不入库</li>
-          <li>&bull; PostgreSQL 在本机 docker（pg-vector），仅后端可达；REST 读取章节/台账也由接入层直查数据库；embedding 模型 embo-01 已备价目，RAG 未上线</li>
+          <li>&bull; PostgreSQL 本机 docker（pgvector 1536 维 HNSW）；打包器四层记忆直读、复盘读全卷台账、接入层读章节台账——均为读路径，不加线仅说明</li>
         </ul>
       </div>
 
@@ -5594,9 +5628,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>横切能力（见说明，不加连线）</h3>
         </div>
         <ul>
-          <li>&bull; 按节点模型路由与峰谷计费：14 个 LLM 节点独立路由，llm_call_log 全量台账（含 cached_tokens）</li>
-          <li>&bull; StageLog 事件门面：15 类事件枚举收口，SSE + 流水双通道</li>
-          <li>&bull; Tuning 调参中心：16 个行为参数在线可调（30s 生效）；错误码按阿里手册 A/B/C/D/E 五位分级</li>
+          <li>&bull; 按节点模型路由与峰谷计费：16 个 LLM 节点（含 embedding），全栈统一 MiniMax-M3/embo-01（用户决策）</li>
+          <li>&bull; StageLog 事件门面：16 类事件枚举收口（含 volume_retro），SSE + 流水双通道</li>
+          <li>&bull; Tuning 调参中心 19 键在线生效；卷级复盘 Agent：机械对账（确定性）+ LLM 漂移分析，每卷保留最新报告</li>
         </ul>
       </div>
     </div>

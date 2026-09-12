@@ -30,8 +30,9 @@
           </span>
         </div>
         <div v-for="v in volumes" :key="v.volNo" style="margin-bottom: 16px">
-          <div style="font-weight: bold; margin-bottom: 6px">
-            第 {{ v.volNo }} 卷 · {{ v.arc }}（{{ v.chapters.length }} 章）
+          <div style="font-weight: bold; margin-bottom: 6px; display: flex; gap: 10px; align-items: center">
+            <span>第 {{ v.volNo }} 卷 · {{ v.arc }}（{{ v.chapters.length }} 章）</span>
+            <el-button size="small" plain :loading="retroBusy === v.volNo" @click="runReview(v)">卷级复盘</el-button>
           </div>
           <el-table :data="v.chapters" border size="small" style="max-width: 980px">
             <el-table-column prop="chapterNo" label="章" width="60" />
@@ -170,6 +171,58 @@
         <el-button type="primary" @click="savePlan">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 卷级复盘报告 -->
+    <el-dialog v-model="retroOpen" :title="retro ? `第 ${retro.vol_no} 卷复盘报告（第 ${retro.from_no}-${retro.to_no} 章）` : '卷级复盘'" width="860px" top="4vh">
+      <template v-if="retro">
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+          <el-tag :type="retro.review?.overall === 'pass' ? 'success' : retro.review?.overall === 'critical' ? 'danger' : 'warning'">
+            {{ retro.review?.overall === 'pass' ? '整体达标' : retro.review?.overall === 'critical' ? '严重漂移' : retro.review?.overall === 'drift' ? '存在漂移' : '仅机械对账' }}
+          </el-tag>
+          <span style="color: #999; font-size: 12px">机械对账为确定性结果；叙事漂移为 LLM 分析（复审可覆盖）</span>
+        </div>
+        <div style="white-space: pre-wrap; line-height: 1.8; margin-bottom: 12px">{{ retro.review?.summary }}</div>
+
+        <div style="font-weight: bold; margin: 10px 0 6px">机械对账</div>
+        <div style="font-size: 13px; margin-bottom: 4px">
+          章节数 {{ retro.mechanical?.chapters }} · 总字数 {{ retro.mechanical?.text_len_total }} ·
+          状态分布 {{ JSON.stringify(retro.mechanical?.status_count || {}) }}
+        </div>
+        <el-table v-if="(retro.mechanical?.budget_outliers || []).length" :data="retro.mechanical.budget_outliers" border size="small" style="margin-bottom: 8px">
+          <el-table-column prop="chapter_no" label="章" width="70" />
+          <el-table-column prop="budget" label="预算" width="140" />
+          <el-table-column prop="actual" label="实际字数" width="100" />
+          <el-table-column prop="verdict" label="判定" />
+        </el-table>
+        <el-table v-if="(retro.mechanical?.foreshadow_audit || []).length" :data="retro.mechanical.foreshadow_audit" border size="small" style="margin-bottom: 12px">
+          <el-table-column prop="chapter_no" label="章" width="70" />
+          <el-table-column prop="code" label="伏笔" width="90" />
+          <el-table-column prop="verdict" label="对账结果" />
+        </el-table>
+
+        <div style="font-weight: bold; margin: 10px 0 6px">漂移分析</div>
+        <el-table v-if="(retro.review?.drifts || []).length" :data="retro.review.drifts" border size="small">
+          <el-table-column prop="type" label="类型" width="100" />
+          <el-table-column label="严重度" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.severity === 'major' ? 'danger' : 'warning'">{{ row.severity }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="where" label="位置" width="110" />
+          <el-table-column prop="issue" label="漂移" min-width="220" />
+          <el-table-column prop="suggestion" label="建议" min-width="200" />
+        </el-table>
+        <div v-else style="color: #999; font-size: 13px">无漂移项。</div>
+
+        <div v-if="(retro.review?.highlights || []).length" style="font-weight: bold; margin: 12px 0 6px">亮点</div>
+        <ul v-if="(retro.review?.highlights || []).length" style="margin: 0 0 10px 18px; font-size: 13px">
+          <li v-for="(h, i) in retro.review.highlights" :key="i">{{ h }}</li>
+        </ul>
+        <div v-if="retro.review?.next_volume" style="font-size: 13px">
+          <b>下一卷建议：</b>{{ retro.review.next_volume }}
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -196,6 +249,21 @@ const autoPlanResult = ref(null)
 const draftOpen = ref(false)
 const draft = ref({ arc: '', brief: '', rows: [] })
 const adoptBusy = ref(false)
+const retroBusy = ref(null)
+const retroOpen = ref(false)
+const retro = ref(null)
+
+async function runReview(v) {
+  retroBusy.value = v.volNo
+  try {
+    retro.value = await api.post(`/api/novels/${novelId.value}/planning/volumes/${v.volNo}/review`)
+    retroOpen.value = true
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    retroBusy.value = null
+  }
+}
 
 const planChapters = computed(() => volumes.value.flatMap((v) => v.chapters))
 
