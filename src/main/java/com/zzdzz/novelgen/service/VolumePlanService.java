@@ -60,12 +60,13 @@ public class VolumePlanService {
     private final NovelDAO novelDAO;
     private final CanonDocDAO canonDocDAO;
     private final StageLog stageLog;
+    private final TuningService tuning;
     private final ObjectMapper mapper;
     private final TransactionTemplate tx;
 
     public VolumePlanService(LlmPort llm, LlmJson llmJson, ContextPackerService packer,
                              ChapterDAO chapterDAO, ForeshadowDAO foreshadowDAO, NovelDAO novelDAO,
-                             CanonDocDAO canonDocDAO, StageLog stageLog,
+                             CanonDocDAO canonDocDAO, StageLog stageLog, TuningService tuning,
                              ObjectMapper mapper, PlatformTransactionManager txManager) {
         this.llm = llm;
         this.llmJson = llmJson;
@@ -75,6 +76,7 @@ public class VolumePlanService {
         this.novelDAO = novelDAO;
         this.canonDocDAO = canonDocDAO;
         this.stageLog = stageLog;
+        this.tuning = tuning;
         this.mapper = mapper;
         this.tx = new TransactionTemplate(txManager);
     }
@@ -121,11 +123,12 @@ public class VolumePlanService {
         return adopt(novelId, volNo, draft);
     }
 
-    /** 生成+校验+审校闭环：结构校验与 AI 审校的失败原因统一喂回下一轮重写。 */
+    /** 生成+校验+审校闭环：结构校验与 AI 审校的失败原因统一喂回下一轮重写。轮数走 tuning。 */
     private PlanDraft generateWithReview(long novelId, int volNo, int fromNo, Integer toNo, String seedOutline) {
         String context = packer.packVolumePlan(novelId, fromNo, seedOutline);
         String feedback = "";
-        for (int round = 1; round <= 3; round++) {
+        int maxRounds = tuning.i("volume_plan_review_rounds", 3);
+        for (int round = 1; round <= maxRounds; round++) {
             PlanDraft draft = askPlan(novelId, volNo, fromNo, toNo, context, feedback);
             String structural = structuralCheck(draft, fromNo, toNo);
             if (structural != null) {

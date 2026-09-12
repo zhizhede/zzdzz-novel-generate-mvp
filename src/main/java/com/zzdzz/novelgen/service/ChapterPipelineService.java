@@ -42,13 +42,14 @@ public class ChapterPipelineService {
     private final VolumePlanService volumePlanService;
     private final LlmPort llm;
     private final StageLog stageLog;
+    private final TuningService tuning;
 
     public ChapterPipelineService(NovelDAO novelDAO, ChapterDAO chapterDAO,
                                   SceneDAO sceneDAO, OutlineService outlineService,
                                   ContextPackerService packer, SceneService sceneService,
                                   GateService gateService, DigestService digestService,
                                   ReviewService reviewService, VolumePlanService volumePlanService,
-                                  LlmPort llm, StageLog stageLog) {
+                                  LlmPort llm, StageLog stageLog, TuningService tuning) {
         this.novelDAO = novelDAO;
         this.chapterDAO = chapterDAO;
         this.sceneDAO = sceneDAO;
@@ -61,6 +62,7 @@ public class ChapterPipelineService {
         this.volumePlanService = volumePlanService;
         this.llm = llm;
         this.stageLog = stageLog;
+        this.tuning = tuning;
     }
 
     /** 进度回调：队列服务据此回写任务进度；shouldStop 支持运行中协作取消（章与章之间检查）。 */
@@ -111,21 +113,29 @@ public class ChapterPipelineService {
     }
 
     /**
-     * 失败自愈梯子：直跑 → 重试 1 次（瞬态故障）→ 规划 Agent 换目标重写该章卷纲再试 1 次 → 放弃转人工。
-     * 生成异常与门禁未过同等对待；每次尝试共享场景级断点缓存。
+     * 失败自愈梯子：直跑 → 直接重试 N1 次（瞬态故障）→ 规划 Agent 换目标重写该章卷纲再试 N2 次 → 放弃转人工。
+     * 次数走 tuning（heal_retry_times / heal_replan_times）；每次尝试共享场景级断点缓存。
      */
     private boolean runChapterWithHeal(long novelId, int chapterNo, String approvalMode) {
         if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
-        stageLog.emit(novelId, chapterNo, HEAL, RETRY,
-                Map.of("message", "第一次失败，自动重试"));
-        log.warn("第 {} 章失败，自愈：直接重试一次", chapterNo);
-        if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
+        int retries = tuning.i("heal_retry_times", 1);
+        for (int r = 1; r <= retries; r++) {
+            stageLog.emit(novelId, chapterNo, HEAL, RETRY,
+                    Map.of("message", retries == 1 ? "第一次失败，自动重试"
+                            : "失败，自动重试（第 " + r + "/" + retries + " 次）"));
+            log.warn("第 {} 章失败，自愈：直接重试（{}/{}）", chapterNo, r, retries);
+            if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
+        }
         String reason = failureReason(novelId, chapterNo);
         stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
                 Map.of("message", "重试仍败，重写卷纲目标后再试", "reason", reason));
         log.warn("第 {} 章重试仍败，自愈：重写卷纲目标后再试一次（原因：{}）", chapterNo, reason);
         volumePlanService.replanChapter(novelId, chapterNo, reason);
-        return attemptChapter(novelId, chapterNo, approvalMode);
+        int replans = tuning.i("heal_replan_times", 1);
+        for (int r = 0; r < replans; r++) {
+            if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
+        }
+        return false;
     }
 
     private boolean attemptChapter(long novelId, int chapterNo, String approvalMode) {
@@ -306,8 +316,9 @@ public class ChapterPipelineService {
             stageLog.emit(novelId, chapterNo, SCENE, DRAFT,
                     Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(draft)));
             boolean ok = gateService.checkScene(novelId, ch.id(), sceneId, spec.sceneNo(), draft, spec.words());
-            // 带意见重写，最多 2 轮（密度类指标一轮修订常按下葫芦浮起瓢）
-            for (int round = 1; round <= 2 && !ok; round++) {
+            // 带意见重写（密度类指标一轮修订常按下葫芦浮起瓢），轮数走 tuning
+            int maxRewrites = tuning.i("scene_revise_rounds", 2);
+            for (int round = 1; round <= maxRewrites && !ok; round++) {
                 log.warn("场景 {} 门禁未过，带意见重写（第 {} 轮）", spec.sceneNo(), round);
                 stageLog.emit(novelId, chapterNo, SCENE_GATE, NONE,
                         Map.of("sceneNo", spec.sceneNo(), "passed", false, "rewrite", true, "round", round,
@@ -361,14 +372,17 @@ public class ChapterPipelineService {
             return stored;
         }
         // 修订迭代制：单轮修订常「修甲伤乙」（补对话密度时狂加破折号、撑爆字数），
-        // 最多两轮，每轮以最新失败清单喂回；修订稿长度异常直接弃用本轮防风格雪崩
+        // 最多 N 轮（tuning），每轮以最新失败清单喂回；修订稿长度异常直接弃用本轮防风格雪崩
+        int maxRounds = tuning.i("chapter_revise_rounds", 2);
+        double lenMin = tuning.d("chapter_revise_len_min", 0.5);
+        double lenMax = tuning.d("chapter_revise_len_max", 1.15);
         String failReason = "修订后门禁仍未过";
-        for (int round = 1; round <= 2; round++) {
-            log.warn("第 {} 章章级门禁未过，带意见修订（第 {}/2 轮）", chapterNo, round);
+        for (int round = 1; round <= maxRounds; round++) {
+            log.warn("第 {} 章章级门禁未过，带意见修订（第 {}/{} 轮）", chapterNo, round, maxRounds);
             stageLog.emit(novelId, chapterNo, REVISE, START, Map.of("round", round));
             String revised = reviseChapter(novelId, ch, fullText);
-            if (revised == null || revised.length() < fullText.length() * 0.5
-                    || revised.length() > fullText.length() * 1.15) {
+            if (revised == null || revised.length() < fullText.length() * lenMin
+                    || revised.length() > fullText.length() * lenMax) {
                 log.error("第 {} 章修订稿长度异常（{} 字符），弃用本轮", chapterNo,
                         revised == null ? 0 : revised.length());
                 stageLog.emit(novelId, chapterNo, REVISE, REJECTED, Map.of("round", round));

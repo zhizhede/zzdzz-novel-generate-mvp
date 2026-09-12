@@ -207,6 +207,28 @@
         </el-table>
       </el-tab-pane>
 
+      <!-- 调参（平台级行为参数） -->
+      <el-tab-pane :label="`调参（${tunings.length}）`">
+        <div style="color: #999; font-size: 12px; margin-bottom: 8px">
+          管线/门禁/提示词的行为参数，平台级生效（30 秒内）；删掉库内行即回退代码默认。改错会让门禁或自愈行为变形，改前看清说明。
+        </div>
+        <el-table :data="tunings" border size="small" style="max-width: 900px">
+          <el-table-column prop="key" label="键" width="220" />
+          <el-table-column prop="description" label="说明" min-width="300" show-overflow-tooltip />
+          <el-table-column label="值" width="160">
+            <template #default="{ row }">
+              <el-input v-model="row.editValue" size="small" />
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" plain :disabled="row.editValue === row.value"
+                @click="saveTuning(row)">保存</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <!-- 风格包 -->
       <el-tab-pane label="风格包">
         <el-tabs v-model="styleTab">
@@ -402,6 +424,7 @@ const nodeForm = ref({})
 const llmPrices = ref([])
 const priceEditor = ref(false)
 const priceForm = ref({})
+const tunings = ref([])
 
 const inPeak = computed(() => {
   const p = llmPrices.value[0]
@@ -547,12 +570,23 @@ const fingerprintRows = computed(() => {  try {
   }
 })
 
+async function saveTuning(row) {
+  try {
+    await api.put(`/api/tuning/${row.key}`, { value: row.editValue })
+    ElMessage.success('已保存，30 秒内生效')
+    row.value = row.editValue
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
 async function loadAll() {
   if (!novelId.value) return
   canon.value = await api.get(`/api/novels/${novelId.value}/canon`)
   cards.value = await api.get(`/api/novels/${novelId.value}/cards`)
   llmNodes.value = await api.get('/api/llm-nodes')
   llmPrices.value = await api.get('/api/llm-prices')
+  tunings.value = (await api.get('/api/tuning')).map(t => ({ ...t, editValue: t.value }))
   foreshadows.value = await api.get(`/api/novels/${novelId.value}/foreshadows`)
   digests.value = await api.get(`/api/novels/${novelId.value}/digests`)
   worldStates.value = await api.get(`/api/novels/${novelId.value}/world-states`)

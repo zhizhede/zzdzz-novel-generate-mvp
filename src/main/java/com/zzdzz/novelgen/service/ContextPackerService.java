@@ -40,6 +40,7 @@ public class ContextPackerService {
     private final ChapterDAO chapterDAO;
     private final WorldStateDAO worldStateDAO;
     private final MaterialCardService cardService;
+    private final TuningService tuning;
 
     public ContextPackerService(StylePackDAO stylePackDAO,
                                 CanonDocDAO canonDocDAO,
@@ -47,7 +48,8 @@ public class ContextPackerService {
                                 ForeshadowDAO foreshadowDAO,
                                 ChapterDAO chapterDAO,
                                 WorldStateDAO worldStateDAO,
-                                MaterialCardService cardService) {
+                                MaterialCardService cardService,
+                                TuningService tuning) {
         this.stylePackDAO = stylePackDAO;
         this.canonDocDAO = canonDocDAO;
         this.digestDAO = digestDAO;
@@ -55,6 +57,7 @@ public class ContextPackerService {
         this.chapterDAO = chapterDAO;
         this.worldStateDAO = worldStateDAO;
         this.cardService = cardService;
+        this.tuning = tuning;
     }
 
     public record Pack(String system, String user) {}
@@ -275,6 +278,9 @@ public class ContextPackerService {
                 String.valueOf(ch.title()), String.valueOf(ch.goal()), String.valueOf(ch.hook()),
                 spec.goal(), prevSceneText == null ? String.valueOf(prevTail) : prevSceneText,
                 String.join("\n", ctx));
+        // 提示词中的比喻密度红线走 tuning（与门禁 simile 上限是两道闸：一个管写、一个管验收）
+        String simileRedline = java.math.BigDecimal
+                .valueOf(tuning.d("prompt_simile_per1k", 3.0)).stripTrailingZeros().toPlainString();
         String user = """
                 任务：写第 %d 章场景 %d。
                 本章目标：%s
@@ -288,7 +294,7 @@ public class ContextPackerService {
                 - 情节推进靠人物说话：本章大部分节拍用对白承载，叙述只做对白之间的呼吸——大段描写是本书第一大忌。
                 - 每一行必须干一件活：推进事件、揭示新信息、或改变威胁与关系。写完自问「删掉这行读者会少知道什么」，答不出来就删。
                 - 一个微动作（点头/起身/放杯/搁笔）最多一行；禁止连续两行写同一对象；禁止给动作写人物志。
-                - 比喻（像/仿佛/如同）每千字不超过 3 个；「不是……是……」式修辞每场景最多 2 次。
+                - 比喻（像/仿佛/如同）每千字不超过 %s 个；「不是……是……」式修辞每场景最多 2 次。
                 - 观察只许作为行动的前奏——每个观察必须引出下一个动作或决定。
 
                 %s
@@ -311,6 +317,7 @@ public class ContextPackerService {
                 %s
                 """.formatted(chapterNo, spec.sceneNo(), ch.title(), spec.goal(),
                 spec.present(), spec.mustReveal(), spec.mustNot(), spec.words(),
+                simileRedline,
                 craft,
                 world(novelId),
                 charactersForScene(novelId, matchText),

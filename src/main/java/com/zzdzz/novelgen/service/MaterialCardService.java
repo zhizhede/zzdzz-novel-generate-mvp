@@ -38,13 +38,15 @@ public class MaterialCardService {
             MaterialCardDO.KIND_PHENOMENON, "现象", MaterialCardDO.KIND_DISASTER, "灾害",
             MaterialCardDO.KIND_ORG, "组织", MaterialCardDO.KIND_MISC, "其他");
 
-    /** 单场景匹配命中卡上限（常驻卡不占额），防上下文膨胀。 */
-    private static final int MAX_MATCHED = 12;
+    /** 单场景匹配命中卡上限的 tuning 键（常驻卡不占额），防上下文膨胀。 */
+    private static final String MAX_MATCHED_KEY = "pack_max_matched_cards";
 
     private final MaterialCardDAO cardDAO;
+    private final TuningService tuning;
 
-    public MaterialCardService(MaterialCardDAO cardDAO) {
+    public MaterialCardService(MaterialCardDAO cardDAO, TuningService tuning) {
         this.cardDAO = cardDAO;
+        this.tuning = tuning;
     }
 
     // ===== CRUD =====
@@ -122,7 +124,7 @@ public class MaterialCardService {
                 pinned.add(card);
             } else if (hits(card, text)) {
                 matched.add(card);
-                if (matched.size() >= MAX_MATCHED) {
+                if (matched.size() >= tuning.i(MAX_MATCHED_KEY, 12)) {
                     break;
                 }
             }

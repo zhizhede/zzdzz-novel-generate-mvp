@@ -25,6 +25,7 @@ public class ReviewService {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewService.class);
 
+    /** 读者评审提示词模板：%s=注水率判 blocker 阈值（tuning: reader_fat_ratio_block）。 */
     private static final String READER_SYSTEM = """
             你是一个没耐心的网文读者，刷手机时点开了这一章。你只关心「想不想继续读」，只回答下列问题：
             1. hook 前 3 行：会不会继续往下读？（环境/氛围/抒情式开场、或与上章结尾接不上=不会）
@@ -35,7 +36,7 @@ public class ReviewService {
             {"verdict":"pass|blocker","hook":"pass|fail","stakes":"pass|fail","continuity":"pass|fail","fat_ratio":0.4,"skip_quotes":["可整段删除的原句"],"issues":["具体问题（引用原句）"]}
             规则：
             - 引用原文一律用「」；字符串值内部禁止英文双引号。
-            - hook/stakes/continuity 任一 fail，或 fat_ratio 大于 0.33 → verdict=blocker；否则 pass。
+            - hook/stakes/continuity 任一 fail，或 fat_ratio 大于 %s → verdict=blocker；否则 pass。
             - 你只管「想不想往下读」，错别字与设定连续性是另一位审校的事，不要报。
             - 不要输出思考过程，只输出 JSON。
             """.strip();
@@ -61,15 +62,18 @@ public class ReviewService {
     private final GateReportDAO gateReportDAO;
     private final ChapterDAO chapterDAO;
     private final ObjectMapper mapper;
+    private final TuningService tuning;
 
     public ReviewService(LlmPort llmPort, LlmJson llmJson, ContextPackerService packer,
-                         GateReportDAO gateReportDAO, ChapterDAO chapterDAO, ObjectMapper mapper) {
+                         GateReportDAO gateReportDAO, ChapterDAO chapterDAO, ObjectMapper mapper,
+                         TuningService tuning) {
         this.llmPort = llmPort;
         this.llmJson = llmJson;
         this.packer = packer;
         this.gateReportDAO = gateReportDAO;
         this.chapterDAO = chapterDAO;
         this.mapper = mapper;
+        this.tuning = tuning;
     }
 
     /** 审校结论：revised 为修订后全文（null=未改），blocked=复审仍 BLOCKER。 */
@@ -123,7 +127,8 @@ public class ReviewService {
         try {
             JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
                             LlmNode.READER_REVIEW, novelId, ch.id(),
-                            List.of(LlmPort.Message.system(READER_SYSTEM),
+                            List.of(LlmPort.Message.system(
+                                            READER_SYSTEM.formatted(tuning.d("reader_fat_ratio_block", 0.33))),
                                     LlmPort.Message.user(user)),
                             0.2),
                     n -> {
@@ -180,8 +185,10 @@ public class ReviewService {
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
                 SceneService.cleanDraft(r.content()), ch.title());
-        if (cleaned.isBlank() || cleaned.length() < fullText.length() * 0.5
-                || cleaned.length() > fullText.length() * 1.15) {
+        double lenMin = tuning.d("reader_fix_len_min", 0.5);
+        double lenMax = tuning.d("reader_fix_len_max", 1.15);
+        if (cleaned.isBlank() || cleaned.length() < fullText.length() * lenMin
+                || cleaned.length() > fullText.length() * lenMax) {
             log.warn("第 {} 章读者重写稿长度异常（{} 字符），保留原文", ch.chapterNo(), cleaned.length());
             return null;
         }
@@ -274,7 +281,8 @@ public class ReviewService {
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
                 SceneService.cleanDraft(r.content()), ch.title());
-        if (cleaned.isBlank() || cleaned.length() < fullText.length() * 0.6) {
+        double floor = tuning.d("ai_review_fix_floor", 0.6);
+        if (cleaned.isBlank() || cleaned.length() < fullText.length() * floor) {
             log.warn("第 {} 章审校修订稿长度异常（{} 字符），保留原文", ch.chapterNo(), cleaned.length());
             return null;
         }

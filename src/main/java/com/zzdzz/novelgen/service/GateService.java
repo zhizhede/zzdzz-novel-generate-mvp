@@ -29,11 +29,14 @@ public class GateService {
     private final StylePackDAO stylePackDAO;
     private final GateReportDAO gateReportDAO;
     private final ChapterDAO chapterDAO;
+    private final TuningService tuning;
 
-    public GateService(StylePackDAO stylePackDAO, GateReportDAO gateReportDAO, ChapterDAO chapterDAO) {
+    public GateService(StylePackDAO stylePackDAO, GateReportDAO gateReportDAO,
+                       ChapterDAO chapterDAO, TuningService tuning) {
         this.stylePackDAO = stylePackDAO;
         this.gateReportDAO = gateReportDAO;
         this.chapterDAO = chapterDAO;
+        this.tuning = tuning;
     }
 
     @SuppressWarnings("unchecked")
@@ -54,9 +57,10 @@ public class GateService {
         int overlap = prevText == null ? 0 : openingOverlap(text, prevText);
         checks.add(check("opening_overlap", overlap, 0, 0, overlap == 0));
 
-        // 比喻密度：人类手稿 2.4-7/千字，AI 生成可冲到 15/千字（描写铺场的量化信号），天花板 8
+        // 比喻密度：人类手稿 2.4-7/千字，AI 生成可冲到 15/千字（描写铺场的量化信号）
+        double simileMax = tuning.d("simile_per1k_abs_max", 8.0);
         double simile = ((Number) metrics.get("simile_per1k")).doubleValue();
-        checks.add(check("simile_per1k", simile, null, 8.0, simile <= 8.0));
+        checks.add(check("simile_per1k", simile, null, simileMax, simile <= simileMax));
 
         checks.addAll(fingerprintChecks(base, metrics));
 
@@ -86,10 +90,13 @@ public class GateService {
         Map<String, Object> metrics = computeMetrics(text);
         List<Map<String, Object>> checks = new ArrayList<>();
 
-        // 场景长度：0.4×-1.6× 预算带。场景超长若放行，章级修订受 ±10% 约束救不回来（43 章实锤）
+        // 场景长度：预算比例带（43 章超长实锤后新增）。场景超长若放行，章级修订受 ±10% 约束救不回来
+        double sceneLenMin = tuning.d("scene_len_min_ratio", 0.4);
+        double sceneLenMax = tuning.d("scene_len_max_ratio", 1.6);
         int cjk = ((Number) metrics.get("cjk")).intValue();
-        boolean lenOk = cjk >= wordsBudget * 0.4 && cjk <= wordsBudget * 1.6;
-        checks.add(check("scene_length", cjk, (int) (wordsBudget * 0.4), (int) (wordsBudget * 1.6), lenOk));
+        boolean lenOk = cjk >= wordsBudget * sceneLenMin && cjk <= wordsBudget * sceneLenMax;
+        checks.add(check("scene_length", cjk, (int) (wordsBudget * sceneLenMin),
+                (int) (wordsBudget * sceneLenMax), lenOk));
 
         checks.add(check("no_straight_quote", text.contains("\"") ? 1 : 0, 0, 0, !text.contains("\"")));
         List<String> hits = new ArrayList<>();
