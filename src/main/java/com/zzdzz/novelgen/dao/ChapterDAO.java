@@ -116,6 +116,30 @@ public class ChapterDAO {
         jdbc.update("UPDATE chapters SET full_text=?, update_time=NOW() WHERE id=?", fullText, chapterId);
     }
 
+    /** 开篇样本行（非表行）：章节号 + 该章前 3 个非空行（人类手稿审美基准，注入第一场景用）。 */
+    public record Opening(int chapterNo, String firstLines) {
+    }
+
+    /** 1..maxChapterNo 章的开篇样本（有正文的章）。 */
+    public List<Opening> findOpeningLines(long novelId, int maxChapterNo) {
+        return jdbc.query("""
+                SELECT chapter_no, full_text FROM chapters
+                WHERE novel_id=? AND chapter_no<=? AND is_deleted=false
+                  AND full_text IS NOT NULL AND full_text<>''
+                ORDER BY chapter_no
+                """, (rs, i) -> new Opening(rs.getInt("chapter_no"), firstLines(rs.getString("full_text"))),
+                novelId, maxChapterNo);
+    }
+
+    private static String firstLines(String fullText) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String l : fullText.split("\n")) {
+            if (!l.strip().isEmpty()) out.add(l.strip());
+            if (out.size() == 3) break;
+        }
+        return String.join("\n", out);
+    }
+
     /** 无该章（如第 1 章无“上一章”）时返回 null，由调用方决定降级文案。 */
     public String findFullText(long novelId, int chapterNo) {
         List<String> rows = jdbc.query("""
