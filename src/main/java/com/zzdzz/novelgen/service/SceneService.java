@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service;
 
+import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.dao.SceneDAO;
 import org.springframework.stereotype.Service;
@@ -21,7 +22,7 @@ public class SceneService {
     public String generate(long novelId, long chapterId, int chapterNo,
                            ContextPackerService.Pack pack, int sceneNo) {
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
-                "scene_draft", novelId, chapterId,
+                LlmNode.SCENE_DRAFT, novelId, chapterId,
                 List.of(LlmPort.Message.system(pack.system()), LlmPort.Message.user(pack.user())),
                 0.9));
         String text = cleanDraft(r.content());
@@ -32,7 +33,7 @@ public class SceneService {
     public String revise(long novelId, long chapterId, long sceneId, int sceneNo,
                          String draft, String gateFeedback, ContextPackerService.Pack pack) {
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
-                "scene_revise", novelId, chapterId,
+                LlmNode.SCENE_REVISE, novelId, chapterId,
                 List.of(LlmPort.Message.system(pack.system()),
                         LlmPort.Message.user(pack.user() + "\n\n【你上一稿】\n" + draft
                                 + "\n\n【门禁意见（只改被点名的问题，保持其余原样）】\n" + gateFeedback

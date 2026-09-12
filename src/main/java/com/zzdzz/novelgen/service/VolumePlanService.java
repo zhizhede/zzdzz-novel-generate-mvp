@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.dao.ForeshadowDAO;
 import com.zzdzz.novelgen.dao.NovelDAO;
 import com.zzdzz.novelgen.dao.PipelineEventDAO;
 import com.zzdzz.novelgen.llm.LlmJson;
+import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
@@ -166,7 +167,7 @@ public class VolumePlanService {
 
                 %s
                 """.formatted(volNo, fromNo, span, fromNo, fromNo, context);
-        return llmJson.ask(new LlmPort.ChatRequest("volume_plan", novelId, null,
+        return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
                         List.of(LlmPort.Message.system("你是网文主编，负责整卷卷纲规划。只输出合法 JSON，不要任何解释或 markdown 代码块。"
                                         + "字符串值内部禁止英文双引号，引用一律用「」。"),
                                 LlmPort.Message.user(user)),
@@ -266,7 +267,7 @@ public class VolumePlanService {
                 """.formatted(plan, packer.characters(novelId),
                 packer.packLedgers(novelId, draft.rows().get(0).chapterNo()));
         try {
-            return llmJson.ask(new LlmPort.ChatRequest("volume_plan_review", novelId, null,
+            return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN_REVIEW, novelId, null,
                             List.of(LlmPort.Message.system("你是网文规划审校员，在卷纲落库前把关。只输出合法 JSON。"
                                             + "字符串值内部禁止英文双引号，引用一律用「」。"),
                                     LlmPort.Message.user(user)),
@@ -432,7 +433,7 @@ public class VolumePlanService {
                 Objects.toString(ch.goal(), ""), Objects.toString(ch.hook(), ""),
                 chapterNo - 1, chapterNo + 1, packer.characters(novelId),
                 packer.packLedgers(novelId, chapterNo));
-        Replan replan = llmJson.ask(new LlmPort.ChatRequest("chapter_replan", novelId, ch.id(),
+        Replan replan = llmJson.ask(new LlmPort.ChatRequest(LlmNode.CHAPTER_REPLAN, novelId, ch.id(),
                         List.of(LlmPort.Message.system("你是网文主编，只输出合法 JSON，字符串内禁英文双引号，引用一律用「」。"),
                                 LlmPort.Message.user(user)),
                         0.6),

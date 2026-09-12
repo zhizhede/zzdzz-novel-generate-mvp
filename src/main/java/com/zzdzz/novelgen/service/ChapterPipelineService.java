@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service;
 
+import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.SceneDO;
@@ -219,7 +220,7 @@ public class ChapterPipelineService {
                 %s
                 """.formatted(ch.chapterNo(), feedback, lengthRule, ch.chapterNo(), fullText);
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
-                "chapter_revise", novelId, ch.id(),
+                LlmNode.CHAPTER_REVISE, novelId, ch.id(),
                 List.of(LlmPort.Message.system("你是执行门禁修订的网文编辑，只做被点名的最小修改。"),
                         LlmPort.Message.user(user)),
                 0.5));
