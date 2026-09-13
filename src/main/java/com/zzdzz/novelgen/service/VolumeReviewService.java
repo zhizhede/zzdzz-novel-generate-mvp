@@ -46,11 +46,13 @@ public class VolumeReviewService {
     private final LlmJson llmJson;
     private final StageLog stageLog;
     private final ObjectMapper mapper;
+    private final PromptTemplateService promptTemplates;
 
     public VolumeReviewService(ChapterDAO chapterDAO, DigestDAO digestDAO,
                                ForeshadowDAO foreshadowDAO, WorldStateDAO worldStateDAO,
                                VolumeReviewDAO reviewDAO, LlmJson llmJson,
-                               StageLog stageLog, ObjectMapper mapper) {
+                               StageLog stageLog, ObjectMapper mapper,
+                               PromptTemplateService promptTemplates) {
         this.chapterDAO = chapterDAO;
         this.digestDAO = digestDAO;
         this.foreshadowDAO = foreshadowDAO;
@@ -59,6 +61,7 @@ public class VolumeReviewService {
         this.llmJson = llmJson;
         this.stageLog = stageLog;
         this.mapper = mapper;
+        this.promptTemplates = promptTemplates;
     }
 
     /** 复盘一卷（同步，约 1-3 分钟）：机械对账 + LLM 漂移分析，报告落库并返回。 */
@@ -186,7 +189,7 @@ public class VolumeReviewService {
                     .append("｜实际：").append(r.get("status")).append(' ').append(r.get("text_len")).append("字\n");
         }
 
-        String user = """
+        String user = promptTemplates.format(LlmNode.VOLUME_REVIEW, "user", """
                 任务：复盘第 %d 卷（第 %d-%d 章）。你是资深网文责编，对照卷纲意图与实际成稿找漂移。
 
                 【卷纲行 vs 实际】
@@ -209,14 +212,15 @@ public class VolumeReviewService {
                 - 机械对账已给出的伏笔/字数结论不要重复报，只在其揭示的模式上展开叙事层分析。
                 - 漂移 = 实际走向偏离卷纲意图或前后矛盾；没有把握的不要报；字符串值内部禁止英文双引号。
                 - 不要输出思考过程，只输出 JSON。
-                """.formatted(volNo, fromNo, toNo, rowsSb,
+                """, volNo, fromNo, toNo, rowsSb,
                 digestsSb.isEmpty() ? "（本卷无事实账）" : digestsSb.toString(),
                 worldFirst, worldLast, mechanical);
 
         JsonNode n = llmJson.ask(new LlmPort.ChatRequest(
                         LlmNode.VOLUME_REVIEW, novelId, null,
-                        List.of(LlmPort.Message.system("你是资深网文责编，负责卷级复盘。只输出合法 JSON，"
-                                        + "字符串值内部禁止英文双引号，引用一律用「」。"),
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_REVIEW, "system",
+                                        "你是资深网文责编，负责卷级复盘。只输出合法 JSON，"
+                                                + "字符串值内部禁止英文双引号，引用一律用「」。")),
                                 LlmPort.Message.user(user)),
                         0.3),
                 node -> {

@@ -63,11 +63,13 @@ public class VolumePlanService {
     private final TuningService tuning;
     private final ObjectMapper mapper;
     private final TransactionTemplate tx;
+    private final PromptTemplateService promptTemplates;
 
     public VolumePlanService(LlmPort llm, LlmJson llmJson, ContextPackerService packer,
                              ChapterDAO chapterDAO, ForeshadowDAO foreshadowDAO, NovelDAO novelDAO,
                              CanonDocDAO canonDocDAO, StageLog stageLog, TuningService tuning,
-                             ObjectMapper mapper, PlatformTransactionManager txManager) {
+                             ObjectMapper mapper, PlatformTransactionManager txManager,
+                             PromptTemplateService promptTemplates) {
         this.llm = llm;
         this.llmJson = llmJson;
         this.packer = packer;
@@ -79,6 +81,7 @@ public class VolumePlanService {
         this.tuning = tuning;
         this.mapper = mapper;
         this.tx = new TransactionTemplate(txManager);
+        this.promptTemplates = promptTemplates;
     }
 
     // ===== 规划一卷 =====
@@ -153,7 +156,7 @@ public class VolumePlanService {
         String span = toNo == null
                 ? "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）"
                 : "到第 " + toNo + " 章结束，共 " + (toNo - fromNo + 1) + " 章";
-        String user = """
+        String user = promptTemplates.format(LlmNode.VOLUME_PLAN, "user", """
                 任务：规划第 %d 卷，从第 %d 章开始，%s。
 
                 规划规则：
@@ -168,10 +171,11 @@ public class VolumePlanService {
                 字符串值内部禁止英文双引号，引用一律用「」。
 
                 %s
-                """.formatted(volNo, fromNo, span, fromNo, fromNo, context);
+                """, volNo, fromNo, span, fromNo, fromNo, context);
         return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
-                        List.of(LlmPort.Message.system("你是网文主编，负责整卷卷纲规划。只输出合法 JSON，不要任何解释或 markdown 代码块。"
-                                        + "字符串值内部禁止英文双引号，引用一律用「」。"),
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN, "system",
+                                        "你是网文主编，负责整卷卷纲规划。只输出合法 JSON，不要任何解释或 markdown 代码块。"
+                                                + "字符串值内部禁止英文双引号，引用一律用「」。")),
                                 LlmPort.Message.user(user)),
                         0.6),
                 node -> {
@@ -255,7 +259,7 @@ public class VolumePlanService {
                     .append(" 伏笔：").append(r.foreshadows().isEmpty() ? "无" : renderRefs(r.foreshadows()))
                     .append('\n');
         }
-        String user = """
+        String user = promptTemplates.format(LlmNode.VOLUME_PLAN_REVIEW, "user", """
                 【待审卷纲】
                 %s
                 【对照材料（人物设定卡 + 账本）】
@@ -266,12 +270,13 @@ public class VolumePlanService {
                 ④ 节奏——张弛是否有曲线、卷尾钩子是否成立。
                 只输出 JSON：{"verdict":"PASS"或"BLOCKER","issues":["问题（指明章号）"]}
                 存在必须修复的硬伤才 BLOCKER；风格偏好类意见写进 issues 但给 PASS。
-                """.formatted(plan, packer.characters(novelId),
+                """, plan, packer.characters(novelId),
                 packer.packLedgers(novelId, draft.rows().get(0).chapterNo()));
         try {
             return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN_REVIEW, novelId, null,
-                            List.of(LlmPort.Message.system("你是网文规划审校员，在卷纲落库前把关。只输出合法 JSON。"
-                                            + "字符串值内部禁止英文双引号，引用一律用「」。"),
+                            List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN_REVIEW, "system",
+                                            "你是网文规划审校员，在卷纲落库前把关。只输出合法 JSON。"
+                                                    + "字符串值内部禁止英文双引号，引用一律用「」。")),
                                     LlmPort.Message.user(user)),
                             0.2),
                     node -> {
@@ -419,7 +424,7 @@ public class VolumePlanService {
         if (ch.fullText() != null && !ch.fullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + chapterNo + " 章已有正文，禁止重写其卷纲");
         }
-        String user = """
+        String user = promptTemplates.format(LlmNode.CHAPTER_REPLAN, "user", """
                 任务：第 %d 章《%s》按现有卷纲目标生成反复失败，需要换一个写法。失败原因：
                 %s
                 现目标：%s
@@ -432,12 +437,13 @@ public class VolumePlanService {
 
                 【账本上下文】
                 %s
-                """.formatted(chapterNo, Objects.toString(ch.title(), ""), failureReason,
+                """, chapterNo, Objects.toString(ch.title(), ""), failureReason,
                 Objects.toString(ch.goal(), ""), Objects.toString(ch.hook(), ""),
                 chapterNo - 1, chapterNo + 1, packer.characters(novelId),
                 packer.packLedgers(novelId, chapterNo));
         Replan replan = llmJson.ask(new LlmPort.ChatRequest(LlmNode.CHAPTER_REPLAN, novelId, ch.id(),
-                        List.of(LlmPort.Message.system("你是网文主编，只输出合法 JSON，字符串内禁英文双引号，引用一律用「」。"),
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REPLAN, "system",
+                                        "你是网文主编，只输出合法 JSON，字符串内禁英文双引号，引用一律用「」。")),
                                 LlmPort.Message.user(user)),
                         0.6),
                 node -> {

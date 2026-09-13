@@ -66,10 +66,11 @@ public class ReviewService {
     private final ChapterDAO chapterDAO;
     private final ObjectMapper mapper;
     private final TuningService tuning;
+    private final PromptTemplateService promptTemplates;
 
     public ReviewService(LlmPort llmPort, LlmJson llmJson, ContextPackerService packer,
                          GateReportDAO gateReportDAO, ChapterDAO chapterDAO, ObjectMapper mapper,
-                         TuningService tuning) {
+                         TuningService tuning, PromptTemplateService promptTemplates) {
         this.llmPort = llmPort;
         this.llmJson = llmJson;
         this.packer = packer;
@@ -77,6 +78,7 @@ public class ReviewService {
         this.chapterDAO = chapterDAO;
         this.mapper = mapper;
         this.tuning = tuning;
+        this.promptTemplates = promptTemplates;
     }
 
     /** 审校结论：revised 为修订后全文（null=未改），blocked=复审仍 BLOCKER。 */
@@ -133,7 +135,8 @@ public class ReviewService {
             JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
                             LlmNode.READER_REVIEW, novelId, ch.id(),
                             List.of(LlmPort.Message.system(
-                                            READER_SYSTEM.formatted(tuning.d("reader_fat_ratio_block", 0.33))),
+                                            promptTemplates.format(LlmNode.READER_REVIEW, "system", READER_SYSTEM,
+                                                    tuning.d("reader_fat_ratio_block", 0.33))),
                                     LlmPort.Message.user(user)),
                             0.2),
                     n -> {
@@ -177,7 +180,7 @@ public class ReviewService {
         if (fb.isEmpty()) {
             fb.append("- 读者判定注水或无张力：删掉所有纯装饰描写，让每一段都推进事件或揭示信息。\n");
         }
-        String user = """
+        String user = promptTemplates.format(LlmNode.READER_FIX, "user", """
                 任务：修订第 %d 章全文。没耐心的网文读者给出以下弃书理由：
                 %s
                 要求：情节、信息与对白立场全部保留；删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；
@@ -185,10 +188,11 @@ public class ReviewService {
 
                 【第 %d 章全文（在此版本上修改）】
                 %s
-                """.formatted(ch.chapterNo(), fb, ch.chapterNo(), fullText);
+                """, ch.chapterNo(), fb, ch.chapterNo(), fullText);
         LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
                 LlmNode.READER_FIX, novelId, ch.id(),
-                List.of(LlmPort.Message.system("你是网文编辑，任务是让这一章「每一行都值得读」：删注水、保情节、补张力。"),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.READER_FIX, "system",
+                                "你是网文编辑，任务是让这一章「每一行都值得读」：删注水、保情节、补张力。")),
                         LlmPort.Message.user(user)),
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
@@ -218,7 +222,8 @@ public class ReviewService {
         try {
             JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
                             LlmNode.AI_REVIEW, novelId, ch.id(),
-                            List.of(LlmPort.Message.system(SYSTEM),
+                            List.of(LlmPort.Message.system(promptTemplates.get(
+                                            LlmNode.AI_REVIEW, "system", SYSTEM)),
                                     LlmPort.Message.user(user)),
                             0.2),
                     n -> {
@@ -273,7 +278,7 @@ public class ReviewService {
         if (fb.isEmpty()) {
             fb.append("- 审校判定存在硬伤但未给出条目，请通读自查时间线、称呼与错别字。\n");
         }
-        String user = """
+        String user = promptTemplates.format(LlmNode.AI_REVIEW_REVISE, "user", """
                 任务：修订第 %d 章全文。语义审校发现以下必须修复的问题：
                 %s
                 要求：只修被点名的问题（错字改字、矛盾句最小改写），严禁改动情节走向与分行节奏，总字数变化控制在 ±10%% 内。
@@ -281,10 +286,11 @@ public class ReviewService {
 
                 【第 %d 章全文（在此版本上修改）】
                 %s
-                """.formatted(ch.chapterNo(), fb, ch.chapterNo(), fullText);
+                """, ch.chapterNo(), fb, ch.chapterNo(), fullText);
         LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
                 LlmNode.AI_REVIEW_REVISE, novelId, ch.id(),
-                List.of(LlmPort.Message.system("你是执行审校修订的网文编辑，只做被点名的最小修改。"),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.AI_REVIEW_REVISE, "system",
+                                "你是执行审校修订的网文编辑，只做被点名的最小修改。")),
                         LlmPort.Message.user(user)),
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
