@@ -180,15 +180,18 @@ public class ReviewService {
         if (fb.isEmpty()) {
             fb.append("- 读者判定注水或无张力：删掉所有纯装饰描写，让每一段都推进事件或揭示信息。\n");
         }
+        String band = "约 " + ch.budgetMin() + "–" + (int) (ch.budgetMax() * 1.05)
+                + " 字（删注水后若低于下限，用推进情节的对白与动作补足，禁止新增环境/氛围/心理铺陈）";
         String user = promptTemplates.format(LlmNode.READER_FIX, "user", """
                 任务：修订第 %d 章全文。没耐心的网文读者给出以下弃书理由：
                 %s
                 要求：情节、信息与对白立场全部保留；删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；
                 分行节奏与风格特征保持本书原貌；直接输出修订后的完整正文，不要输出思考过程。
+                本章篇幅约束：%s。
 
                 【第 %d 章全文（在此版本上修改）】
                 %s
-                """, ch.chapterNo(), fb, ch.chapterNo(), fullText);
+                """, ch.chapterNo(), fb, band, ch.chapterNo(), fullText);
         LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
                 LlmNode.READER_FIX, novelId, ch.id(),
                 List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.READER_FIX, "system",
@@ -197,14 +200,58 @@ public class ReviewService {
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
                 SceneService.cleanDraft(r.content()), ch.title());
-        double lenMin = tuning.d("reader_fix_len_min", 0.5);
+        // 长度验收以本章预算下限为准（原稿注水越多，相对比例下限越不合理——ch60 实测教训）；
+        // 上限保留相对护栏防失控扩写。低于预算下限走恢复扩写（一轮），失败则 best effort 保留
         double lenMax = tuning.d("reader_fix_len_max", 1.15);
-        if (cleaned.isBlank() || cleaned.length() < fullText.length() * lenMin
-                || cleaned.length() > fullText.length() * lenMax) {
+        if (cleaned.isBlank() || cleaned.length() > fullText.length() * lenMax) {
             log.warn("第 {} 章读者重写稿长度异常（{} 字符），保留原文", ch.chapterNo(), cleaned.length());
             return null;
         }
+        if (cleaned.length() < ch.budgetMin()) {
+            log.warn("第 {} 章读者重写稿 {} 字低于预算下限 {}，启动恢复扩写", ch.chapterNo(), cleaned.length(), ch.budgetMin());
+            cleaned = recoverLength(novelId, ch, cleaned, fb);
+        }
         return cleaned;
+    }
+
+    /** 恢复扩写：把被过度删除的情节节拍以对白/动作形式扩回预算带；结果仍异常则返回扩写前文本。 */
+    private String recoverLength(long novelId, ChapterDO ch, String cleaned, StringBuilder fb) {
+        int floor = ch.budgetMin();
+        int cap = (int) (ch.budgetMax() * 1.05);
+        String user = """
+                任务：第 %d 章上一稿删注水后只剩约 %d 字，低于本章下限 %d 字。
+                请把被删掉的情节节拍恢复为对白与动作，禁止新增环境/氛围/心理铺陈，目标 %d–%d 字；
+                直接输出修订后的完整正文，不要输出思考过程。
+
+                【弃书理由清单（删除仍然成立，不得恢复纯装饰段落）】
+                %s
+                【当前稿（在此版本上扩写）】
+                %s
+                """.formatted(ch.chapterNo(), cleaned.length(), floor, floor, cap, fb, cleaned);
+        try {
+            LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
+                    LlmNode.READER_FIX, novelId, ch.id(),
+                    List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.READER_FIX, "system",
+                                    "你是网文编辑，任务是让这一章「每一行都值得读」：删注水、保情节、补张力。")),
+                            LlmPort.Message.user(user)),
+                    0.5));
+            String recovered = ChapterPipelineService.stripTitleLine(
+                    SceneService.cleanDraft(r.content()), ch.title());
+            if (!recovered.isBlank() && recovered.length() >= cleaned.length()
+                    && recovered.length() <= fullTextLimit(ch)) {
+                log.info("第 {} 章恢复扩写完成：{} 字", ch.chapterNo(), recovered.length());
+                return recovered;
+            }
+            log.warn("第 {} 章恢复扩写结果异常（{} 字符），保留扩写前文本", ch.chapterNo(), recovered.length());
+        } catch (Exception e) {
+            log.warn("第 {} 章恢复扩写失败，保留扩写前文本：{}", ch.chapterNo(), e.getMessage());
+        }
+        return cleaned;
+    }
+
+    private int fullTextLimit(ChapterDO ch) {
+        double lenMax = tuning.d("reader_fix_len_max", 1.15);
+        return (int) (ch.budgetMax() * 1.05 * lenMax);
     }
 
     /** 回溯/UI 用：对已有正文的章跑一次审校，只落报告，不动正文与状态。 */

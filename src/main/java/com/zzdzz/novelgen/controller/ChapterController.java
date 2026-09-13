@@ -42,9 +42,10 @@ public class ChapterController {
         return Result.ok(chapterQueryService.detail(id));
     }
 
+    /** 人工审批（异步）：占位后立即返回，digest（事实账/世界状态/伏笔提议）后台生成，失败自动回退待审批。 */
     @PostMapping("/chapters/{id}/approve")
     public Result<Void> approve(@PathVariable long id) {
-        pipelineService.approve(id);
+        pipelineService.approveAsync(id);
         return Result.ok();
     }
 

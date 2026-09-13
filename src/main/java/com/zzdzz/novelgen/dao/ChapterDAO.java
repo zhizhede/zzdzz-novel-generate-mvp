@@ -192,4 +192,16 @@ public class ChapterDAO {
                 """, (rs, i) -> rs.getString(1), novelId, chapterNo);
         return rows.isEmpty() ? null : rows.get(0);
     }
+
+    /** 异步审批占位后未落 digest 的章（进程重启遗留），启动自愈补跑用。 */
+    public record ApprovedNoDigest(long id, long novelId, int chapterNo) {}
+
+    public List<ApprovedNoDigest> findApprovedWithoutDigest() {
+        return jdbc.query("""
+                SELECT c.id, c.novel_id, c.chapter_no FROM chapters c
+                LEFT JOIN digests d ON d.chapter_id = c.id AND d.is_deleted = FALSE
+                WHERE c.status = 'DIGESTED' AND c.is_deleted = FALSE AND d.id IS NULL
+                ORDER BY c.novel_id, c.chapter_no
+                """, (rs, i) -> new ApprovedNoDigest(rs.getLong(1), rs.getLong(2), rs.getInt(3)));
+    }
 }

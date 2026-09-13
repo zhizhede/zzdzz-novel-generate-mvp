@@ -176,9 +176,9 @@ async function open(row) {
 async function approve() {
   approving.value = true
   try {
-    // 审批会同步跑 digest（一次 LLM 调用，可能 1-2 分钟），按钮转圈防重复提交
+    // 审批接口立即返回（占位），digest（事实账/世界状态）后台异步生成，失败会自动回退待审批
     await api.post(`/api/chapters/${detail.value.id}/approve`)
-    ElMessage.success('已过审并生成事实账')
+    ElMessage.success('已过审；事实账后台生成中（约 1 分钟）')
     detail.value = await api.get(`/api/chapters/${detail.value.id}`)
     await loadChapters()
   } catch (e) {

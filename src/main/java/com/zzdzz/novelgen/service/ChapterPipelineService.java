@@ -204,6 +204,55 @@ public class ChapterPipelineService {
         }
     }
 
+    /** 人工审批异步版：占位后立即返回，digest 后台跑（单线程串行）；失败回退待审批。 */
+    public void approveAsync(long chapterId) {
+        ChapterDO ch = chapterDAO.findById(chapterId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
+        if (!"PENDING_APPROVAL".equals(ch.status())) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "章 " + chapterId + " 状态为 " + ch.status() + "，不在待审批");
+        }
+        chapterDAO.updateStatusIf(chapterId, "PENDING_APPROVAL", "DIGESTED");
+        digestExecutor.submit(() -> runDigestQuietly(chapterId));
+    }
+
+    /** 异步 digest 主体：失败回退 PENDING_APPROVAL 并记事件（接口早已返回，只能靠日志与状态回退暴露）。 */
+    private void runDigestQuietly(long chapterId) {
+        ChapterDO ch = chapterDAO.findById(chapterId).orElse(null);
+        if (ch == null) {
+            log.warn("后台 digest 目标章 {} 不存在，跳过", chapterId);
+            return;
+        }
+        try {
+            digestService.digest(ch.novelId(), ch.id(), ch.chapterNo(), ch.fullText());
+        } catch (Exception e) {
+            log.warn("章 {} 后台 digest 失败，回退待审批：{}", ch.chapterNo(), e.getMessage());
+            chapterDAO.updateStatusIf(chapterId, "DIGESTED", "PENDING_APPROVAL");
+            stageLog.emit(ch.novelId(), ch.chapterNo(), StageLog.Stage.APPROVE, StageLog.Phase.FAILED,
+                    Map.of("message", String.valueOf(e.getMessage())));
+        }
+    }
+
+    /**
+     * 启动自愈：异步审批占位后若进程重启，章会停留在「DIGESTED 但无事实账」——这里统一补跑。
+     * 管线内自动审批保持同步（下一章上下文依赖本章 digest），仅人工审批走异步，故缺口只会来自人工路径。
+     */
+    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void healOrphanedApproved() {
+        List<ChapterDAO.ApprovedNoDigest> orphans = chapterDAO.findApprovedWithoutDigest();
+        for (ChapterDAO.ApprovedNoDigest o : orphans) {
+            log.warn("启动自愈：章 {}（novel {}）状态 DIGESTED 但无事实账，补跑后台 digest", o.chapterNo(), o.novelId());
+            digestExecutor.submit(() -> runDigestQuietly(o.id()));
+        }
+    }
+
+    private final java.util.concurrent.ExecutorService digestExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "digest-async");
+                t.setDaemon(true);
+                return t;
+            });
+
     /** 模型偶发把章题当正文首行（无 # 前缀，cleanDraft 剥不掉）：拼章与修订后各剥一次。 */
     static String stripTitleLine(String fullText, String title) {
         if (fullText == null || fullText.isBlank() || title == null || title.isBlank()) {

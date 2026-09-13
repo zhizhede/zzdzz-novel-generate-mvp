@@ -170,6 +170,7 @@ public final class PromptCatalog {
                 %s
                 要求：情节、信息与对白立场全部保留；删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；
                 分行节奏与风格特征保持本书原貌；直接输出修订后的完整正文，不要输出思考过程。
+                本章篇幅约束：%s。
 
                 【第 %d 章全文（在此版本上修改）】
                 %s
@@ -266,6 +267,7 @@ public final class PromptCatalog {
                 3. foreshadows 只列本章要「埋设」或「回收」的伏笔：账本中 proposed/planned 的编码被引用即排期埋设，planted 的被引用即安排回收（action=recover）；账本里没有的新伏笔省略 code、必须给 content（一句话）且 action=plant，将自动建账；已 recovered 的不要引用（旧线呼应写进 goal 即可）；与本章无关的不要列。
                 4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。
                 5. 卷尾必须留下强钩子；不得与已有卷纲重复桥段。
+                6. 若上下文给出【上卷复盘要点】，必须在 brief 决策与章节安排中做出回应：点名的悬置伏笔优先安排兑现（引用编码即排期）或给出明确悬置理由；漂移项须有对应修正安排。
 
                 只输出 JSON，格式：
                 {"arc":"卷名（8字内）","brief":"…","chapters":[{"no":%d,"title":"…","goal":"…","hook":"…","time_note":"…","foreshadows":[{"code":"F4","action":"recover","content":""},{"code":"","action":"plant","content":"新伏笔一句话"}],"budget_min":2400,"budget_max":3400}]}
