@@ -8,6 +8,7 @@ import com.zzdzz.novelgen.dao.ChapterDAO;
 import com.zzdzz.novelgen.dao.DigestDAO;
 import com.zzdzz.novelgen.dao.ForeshadowDAO;
 import com.zzdzz.novelgen.dao.StylePackDAO;
+import com.zzdzz.novelgen.dao.VolumeReviewDAO;
 import com.zzdzz.novelgen.dao.WorldStateDAO;
 import org.springframework.stereotype.Service;
 
@@ -44,6 +45,8 @@ public class ContextPackerService {
     private final TuningService tuning;
     private final EmbeddingService embeddingService;
     private final PromptTemplateService promptTemplates;
+    private final VolumeReviewDAO volumeReviewDAO;
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
     public ContextPackerService(StylePackDAO stylePackDAO,
                                 CanonDocDAO canonDocDAO,
@@ -54,7 +57,9 @@ public class ContextPackerService {
                                 MaterialCardService cardService,
                                 TuningService tuning,
                                 EmbeddingService embeddingService,
-                                PromptTemplateService promptTemplates) {
+                                PromptTemplateService promptTemplates,
+                                VolumeReviewDAO volumeReviewDAO,
+                                com.fasterxml.jackson.databind.ObjectMapper mapper) {
         this.stylePackDAO = stylePackDAO;
         this.canonDocDAO = canonDocDAO;
         this.digestDAO = digestDAO;
@@ -65,6 +70,8 @@ public class ContextPackerService {
         this.tuning = tuning;
         this.embeddingService = embeddingService;
         this.promptTemplates = promptTemplates;
+        this.volumeReviewDAO = volumeReviewDAO;
+        this.mapper = mapper;
     }
 
     public record Pack(String system, String user) {}
@@ -225,16 +232,69 @@ public class ContextPackerService {
     }
 
     /** 卷纲规划完整上下文：世界观+全书大纲、设定卡全量、全局账本、本卷种子大纲（可空）。 */
-    public String packVolumePlan(long novelId, int fromNo, String seedOutline) {
+    public String packVolumePlan(long novelId, int volNo, int fromNo, String seedOutline) {
         StringBuilder sb = new StringBuilder();
         sb.append("【世界观与全书大纲（必须遵守，不得发明矛盾设定）】\n").append(world(novelId)).append("\n\n");
         sb.append(characters(novelId)).append("\n\n");
         sb.append(packLedgers(novelId, fromNo));
+        sb.append(retroSection(novelId, volNo));
         sb.append("【本卷种子大纲（最高优先级，须全部落实）】\n")
                 .append(seedOutline == null || seedOutline.isBlank()
                         ? "（无——请基于上方全局账本自主设计本卷主线，并在 brief 中说明关键决策）"
                         : seedOutline);
         return sb.toString();
+    }
+
+    /** 上卷复盘要点（悬置伏笔/漂移/下卷建议）注入卷纲规划上下文；无上卷报告返回空串。 */
+    public String retroSection(long novelId, int volNo) {
+        if (volNo <= 1) {
+            return "";
+        }
+        String reportJson = volumeReviewDAO.findJson(novelId, volNo - 1);
+        if (reportJson == null || reportJson.isBlank()) {
+            return "";
+        }
+        String compact = compactRetroReport(reportJson, mapper);
+        return compact.isEmpty() ? "" : "【上卷复盘要点（第 " + (volNo - 1)
+                + " 卷复盘结论，本卷规划必须做出回应：点名的悬置伏笔优先安排兑现或给出理由）】\n" + compact + "\n\n";
+    }
+
+    /** 复盘报告 → 紧凑文本：总评一行 + drifts（最多 4 条）+ 下卷建议，总长截到 1200 字内。 */
+    public static String compactRetroReport(String reportJson, com.fasterxml.jackson.databind.ObjectMapper mapper) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            var root = mapper.readTree(reportJson);
+            var review = root.has("review") ? root.path("review") : root;
+            String overall = review.path("overall").asText("");
+            String summary = review.path("summary").asText("");
+            if (!summary.isBlank()) {
+                sb.append("- 总评（").append(overall).append("）：").append(clip(summary, 120)).append('\n');
+            }
+            int n = 0;
+            for (var d : review.path("drifts")) {
+                if (n >= 4) break;
+                String line = "- [" + d.path("severity").asText("") + "|" + d.path("type").asText("") + "] "
+                        + d.path("where").asText("") + "：" + clip(d.path("issue").asText(""), 80);
+                String sug = d.path("suggestion").asText("");
+                if (!sug.isBlank()) line += " → " + clip(sug, 60);
+                sb.append(line).append('\n');
+                n++;
+            }
+            String next = review.path("next_volume").asText("");
+            if (!next.isBlank()) {
+                if (next.length() > 140) next = next.substring(0, 140) + "…";
+                sb.append("- 下卷建议：").append(next).append('\n');
+            }
+        } catch (Exception e) {
+            return "";
+        }
+        String out = sb.toString();
+        return out.length() > 1200 ? out.substring(0, 1200) : out;
+    }
+
+    private static String clip(String s, int max) {
+        if (s == null) return "";
+        return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 
     /** 真实章节开篇范例（1-21 章人类手稿前 3 行隔章抽 10 例）：注入本章第一场景做审美对齐。 */
