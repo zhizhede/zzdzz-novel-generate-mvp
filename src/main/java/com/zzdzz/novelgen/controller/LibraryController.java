@@ -6,10 +6,13 @@ import com.zzdzz.novelgen.dao.WorldStateDAO;
 import com.zzdzz.novelgen.model.entity.CanonDocDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import com.zzdzz.novelgen.model.entity.MaterialCardDO;
+import com.zzdzz.novelgen.model.vo.PromptDetailVO;
+import com.zzdzz.novelgen.model.vo.PromptTemplateVO;
 import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.LibraryService;
 import com.zzdzz.novelgen.service.LlmNodeConfigService;
 import com.zzdzz.novelgen.service.MaterialCardService;
+import com.zzdzz.novelgen.service.PromptTemplateService;
 import com.zzdzz.novelgen.service.TuningService;
 import com.zzdzz.novelgen.service.EmbeddingService;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -36,16 +39,43 @@ public class LibraryController {
     private final LlmNodeConfigService nodeConfigService;
     private final TuningService tuningService;
     private final EmbeddingService embeddingService;
+    private final PromptTemplateService promptService;
 
     public LibraryController(LibraryService libraryService, DigestService digestService,
                              MaterialCardService cardService, LlmNodeConfigService nodeConfigService,
-                             TuningService tuningService, EmbeddingService embeddingService) {
+                             TuningService tuningService, EmbeddingService embeddingService,
+                             PromptTemplateService promptService) {
         this.libraryService = libraryService;
         this.digestService = digestService;
         this.cardService = cardService;
         this.nodeConfigService = nodeConfigService;
         this.tuningService = tuningService;
         this.embeddingService = embeddingService;
+        this.promptService = promptService;
+    }
+
+    // ===== 提示词注册表（平台级只读；阶段二开放从库读取与编辑） =====
+
+    @GetMapping("/prompts")
+    public Result<List<PromptTemplateVO>> prompts() {
+        return Result.ok(promptService.list());
+    }
+
+    @GetMapping("/prompts/{id}")
+    public Result<PromptDetailVO> promptDetail(@PathVariable long id) {
+        return Result.ok(promptService.detail(id));
+    }
+
+    /** 人工编辑模板（置 custom；占位符序列须与代码目录一致）。 */
+    @PutMapping("/prompts/{id}")
+    public Result<PromptDetailVO> updatePrompt(@PathVariable long id, @RequestBody Map<String, String> body) {
+        return Result.ok(promptService.updateContent(id, body == null ? null : body.get("content")));
+    }
+
+    /** 重置回代码目录版本（清 custom）。 */
+    @PostMapping("/prompts/{id}/reset")
+    public Result<PromptDetailVO> resetPrompt(@PathVariable long id) {
+        return Result.ok(promptService.reset(id));
     }
 
     // ===== 调参（平台级行为参数，改后 30s 内生效） =====

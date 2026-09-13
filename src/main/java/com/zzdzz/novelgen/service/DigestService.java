@@ -31,11 +31,12 @@ public class DigestService {
              "new_promises":["本章新立下的承诺/约定/邀约"],
              "unresolved":["本章留下的未解之谜或未回收伏笔"]}""";
 
+    /** 世界状态系统提示（%s=STATE_SPEC；保持未格式化的模板形态，运行时经 PromptTemplateService 填充）。 */
     private static final String STATE_SYSTEM = """
             你是世界状态记录员。读完本章，输出本章结束时刻的结构化状态快照，只输出 JSON：
             {%s}
             规则：只记硬事实；人名用规范名；拿不准的不写；字符串值内部禁止英文双引号，引用一律用「」。
-            """.strip().formatted(STATE_SPEC);
+            """.strip();
 
     private final LlmPort llm;
     private final LlmJson llmJson;
@@ -43,16 +44,18 @@ public class DigestService {
     private final ForeshadowDAO foreshadowDAO;
     private final ChapterDAO chapterDAO;
     private final WorldStateDAO worldStateDAO;
+    private final PromptTemplateService promptTemplates;
 
     public DigestService(LlmPort llm, LlmJson llmJson, DigestDAO digestDAO,
                          ForeshadowDAO foreshadowDAO, ChapterDAO chapterDAO,
-                         WorldStateDAO worldStateDAO) {
+                         WorldStateDAO worldStateDAO, PromptTemplateService promptTemplates) {
         this.llm = llm;
         this.llmJson = llmJson;
         this.digestDAO = digestDAO;
         this.foreshadowDAO = foreshadowDAO;
         this.chapterDAO = chapterDAO;
         this.worldStateDAO = worldStateDAO;
+        this.promptTemplates = promptTemplates;
     }
 
     public void digest(long novelId, long chapterId, int chapterNo, String fullText) {
@@ -63,7 +66,7 @@ public class DigestService {
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.DIGEST, novelId, chapterId,
-                List.of(LlmPort.Message.system("""
+                List.of(LlmPort.Message.system(promptTemplates.format(LlmNode.DIGEST, "system", """
                         你是事实账记录员。把章节压缩成供后续章节续写使用的事实账，只输出 JSON：
                         {"summary_md":"300字以内的md：谁做了什么/信息揭示/情绪落点/章末钩子",
                          "facts":["一条一句的硬事实（人名、物件、承诺、时间线变化）"],
@@ -73,7 +76,7 @@ public class DigestService {
                         summary_md 不要包含任何标题行，直接从摘要正文开始。
                         new_threads 只提议真正的长线（需要多章才能回收的谜、承诺、关系变化），本章内已解决的不提；
                         与已有伏笔账本同义的不提；最多 2 条；没有就给空数组。
-                        """.strip().formatted(STATE_SPEC)),
+                        """, STATE_SPEC)),
                         LlmPort.Message.user(digestUserPrompt(novelId, chapterId, fullText))), 0.3));
         JsonNode node;
         try {
@@ -149,7 +152,8 @@ public class DigestService {
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.WORLD_STATE, novelId, ch.id(),
-                List.of(LlmPort.Message.system(STATE_SYSTEM),
+                List.of(LlmPort.Message.system(promptTemplates.format(
+                                LlmNode.WORLD_STATE, "system", STATE_SYSTEM, STATE_SPEC)),
                         LlmPort.Message.user(ch.fullText() + "\n\n只输出 state JSON。")), 0.2));
         JsonNode node;
         try {

@@ -235,6 +235,63 @@
         </el-table>
       </el-tab-pane>
 
+      <!-- 提示词注册表 -->
+      <el-tab-pane :label="`提示词（${prompts.length}）`">
+        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px">
+          <span style="color: #999; font-size: 12px">
+            各 LLM 节点的提示词模板（启动时与代码同步落库）。本页只读；%s/%d 为运行时占位。
+          </span>
+          <el-input v-model="promptFilter" placeholder="按节点/标题筛选" size="small" clearable style="width: 220px" />
+        </div>
+        <el-table :data="filteredPrompts" border size="small" style="max-width: 1020px" @row-click="(r) => viewPrompt(r.id)">
+          <el-table-column prop="node" label="节点" width="150" />
+          <el-table-column prop="phase" label="阶段" width="70" />
+          <el-table-column prop="title" label="用途" min-width="260" show-overflow-tooltip />
+          <el-table-column label="形态" width="80">
+            <template #default="{ row }">
+              <el-tag :type="row.exact ? 'success' : 'warning'" size="small">{{ row.exact ? '逐字' : '骨架' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="来源" width="70">
+            <template #default="{ row }">
+              <el-tag v-if="row.custom" type="danger" size="small">已改</el-tag>
+              <span v-else style="color: #999; font-size: 12px">代码</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="version" label="版" width="50" />
+          <el-table-column label="字数" width="70">
+            <template #default="{ row }">{{ row.contentLength }}</template>
+          </el-table-column>
+          <el-table-column label="更新时间" width="150">
+            <template #default="{ row }">{{ fmtTime(row.updateTime) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <el-drawer v-model="promptOpen" :title="promptDetail ? promptDetail.node + ' · ' + promptDetail.phase : '提示词'" size="55%">
+          <template v-if="promptDetail">
+            <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
+              <el-tag size="small" :type="promptDetail.exact ? 'success' : 'warning'">
+                {{ promptDetail.exact ? '与代码逐字一致' : '运行时拼接骨架' }}
+              </el-tag>
+              <el-tag v-if="promptDetail.custom" type="danger" size="small">人工已改</el-tag>
+              <span style="color: #999; font-size: 12px">v{{ promptDetail.version }} · {{ promptDetail.title }}</span>
+              <el-button size="small" plain @click="copyPrompt">复制全文</el-button>
+              <template v-if="promptDetail.exact">
+                <el-button v-if="!promptEditing" size="small" type="primary" plain @click="promptContent = promptDetail.content; promptEditing = true">编辑</el-button>
+                <el-button v-else size="small" type="primary" :loading="promptSaving" @click="savePrompt">保存</el-button>
+                <el-button v-if="promptEditing" size="small" @click="promptEditing = false; loadPrompt()">取消</el-button>
+                <el-button v-if="promptDetail.custom" size="small" type="warning" plain @click="resetPrompt">重置回代码版</el-button>
+              </template>
+            </div>
+            <div style="color: #999; font-size: 12px; margin-bottom: 8px" v-if="promptEditing">
+              可直接改文案；%s/%d 占位符的数量与顺序必须保持不变（保存时校验）。保存后 30 秒内对新生效，格式化失败会自动回退代码模板。
+            </div>
+            <el-input v-if="promptEditing" v-model="promptContent" type="textarea" :rows="24" />
+            <pre v-else style="white-space: pre-wrap; background: #f7f8fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.7">{{ promptDetail.content }}</pre>
+          </template>
+        </el-drawer>
+      </el-tab-pane>
+
       <!-- 风格包 -->
       <el-tab-pane label="风格包">
         <el-tabs v-model="styleTab">
@@ -431,8 +488,72 @@ const llmPrices = ref([])
 const priceEditor = ref(false)
 const priceForm = ref({})
 const tunings = ref([])
+const prompts = ref([])
+const promptFilter = ref('')
+const promptOpen = ref(false)
+const promptDetail = ref(null)
+const promptEditing = ref(false)
+const promptSaving = ref(false)
+const promptContent = ref('')
 const embIndexed = ref(0)
 const embEnabled = ref(true)
+
+const filteredPrompts = computed(() => {
+  const kw = promptFilter.value.trim().toLowerCase()
+  if (!kw) return prompts.value
+  return prompts.value.filter((p) => p.node.toLowerCase().includes(kw) || p.title.toLowerCase().includes(kw))
+})
+
+async function viewPrompt(id) {
+  promptDetail.value = await api.get(`/api/prompts/${id}`)
+  promptEditing.value = false
+  promptOpen.value = true
+}
+
+function loadPrompt() {
+  if (promptDetail.value) viewPrompt(promptDetail.value.id)
+}
+
+async function savePrompt() {
+  promptSaving.value = true
+  try {
+    promptDetail.value = await api.put(`/api/prompts/${promptDetail.value.id}`, { content: promptContent.value })
+    promptEditing.value = false
+    ElMessage.success('已保存，30 秒内对新生效')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    promptSaving.value = false
+  }
+}
+
+async function resetPrompt() {
+  try {
+    await ElMessageBox.confirm('放弃人工修改，恢复为代码内置模板？', '重置确认')
+  } catch {
+    return
+  }
+  try {
+    promptDetail.value = await api.post(`/api/prompts/${promptDetail.value.id}/reset`)
+    ElMessage.success('已重置为代码版')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function copyPrompt() {
+  try {
+    await navigator.clipboard.writeText(promptDetail.value.content)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败（浏览器权限）')
+  }
+}
+
+function fmtTime(iso) {
+  if (!iso) return '-'
+  return String(iso).replace('T', ' ').slice(0, 19)
+}
 const embBackfilling = ref(false)
 
 async function backfillEmbeddings() {
@@ -609,6 +730,7 @@ async function loadAll() {
   llmNodes.value = await api.get('/api/llm-nodes')
   llmPrices.value = await api.get('/api/llm-prices')
   tunings.value = (await api.get('/api/tuning')).map(t => ({ ...t, editValue: t.value }))
+  prompts.value = await api.get('/api/prompts')
   try {
     const es = await api.get(`/api/novels/${novelId.value}/embeddings/status`)
     embIndexed.value = es.indexed

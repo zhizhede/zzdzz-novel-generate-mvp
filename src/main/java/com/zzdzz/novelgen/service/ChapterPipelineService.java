@@ -45,13 +45,15 @@ public class ChapterPipelineService {
     private final LlmPort llm;
     private final StageLog stageLog;
     private final TuningService tuning;
+    private final PromptTemplateService promptTemplates;
 
     public ChapterPipelineService(NovelDAO novelDAO, ChapterDAO chapterDAO,
                                   SceneDAO sceneDAO, OutlineService outlineService,
                                   ContextPackerService packer, SceneService sceneService,
                                   GateService gateService, DigestService digestService,
                                   ReviewService reviewService, VolumePlanService volumePlanService,
-                                  LlmPort llm, StageLog stageLog, TuningService tuning) {
+                                  LlmPort llm, StageLog stageLog, TuningService tuning,
+                                  PromptTemplateService promptTemplates) {
         this.novelDAO = novelDAO;
         this.chapterDAO = chapterDAO;
         this.sceneDAO = sceneDAO;
@@ -65,6 +67,7 @@ public class ChapterPipelineService {
         this.llm = llm;
         this.stageLog = stageLog;
         this.tuning = tuning;
+        this.promptTemplates = promptTemplates;
     }
 
     /** 进度回调：队列服务据此回写任务进度；shouldStop 支持运行中协作取消（章与章之间检查）。 */
@@ -224,7 +227,7 @@ public class ChapterPipelineService {
                 ? "当前正文约 %d 字，超出预算上限：请把篇幅压缩到 %d–%d 字（删冗余描写与重复信息，情节与对白全保留）"
                         .formatted(curWords, ch.budgetMin(), cap)
                 : "总字数变化控制在 ±10%% 内，且不得超过 %d 字".formatted(cap);
-        String user = """
+        String user = promptTemplates.format(LlmNode.CHAPTER_REVISE, "user", """
                 任务：修订第 %d 章全文。门禁检测出以下问题：
                 %s
                 要求：只针对被点名的问题做最小修改（例如破折号超标：把「——」改写为逗号、句号、拆句或直接删除）；
@@ -234,10 +237,11 @@ public class ChapterPipelineService {
 
                 【第 %d 章全文（在此版本上修改）】
                 %s
-                """.formatted(ch.chapterNo(), feedback, lengthRule, ch.chapterNo(), fullText);
+                """, ch.chapterNo(), feedback, lengthRule, ch.chapterNo(), fullText);
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.CHAPTER_REVISE, novelId, ch.id(),
-                List.of(LlmPort.Message.system("你是执行门禁修订的网文编辑，只做被点名的最小修改。"),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REVISE, "system",
+                                "你是执行门禁修订的网文编辑，只做被点名的最小修改。")),
                         LlmPort.Message.user(user)),
                 0.5));
         return SceneService.cleanDraft(r.content());

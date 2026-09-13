@@ -31,13 +31,16 @@ public class OutlineService {
     private final ObjectMapper mapper;
     private final ChapterDAO chapterDAO;
     private final SceneDAO sceneDAO;
+    private final PromptTemplateService promptTemplates;
 
     public OutlineService(LlmJson llmJson, ObjectMapper mapper,
-                          ChapterDAO chapterDAO, SceneDAO sceneDAO) {
+                          ChapterDAO chapterDAO, SceneDAO sceneDAO,
+                          PromptTemplateService promptTemplates) {
         this.llmJson = llmJson;
         this.mapper = mapper;
         this.chapterDAO = chapterDAO;
         this.sceneDAO = sceneDAO;
+        this.promptTemplates = promptTemplates;
     }
 
     public ChapterDO loadChapter(long novelId, int chapterNo) {
@@ -48,7 +51,7 @@ public class OutlineService {
     public void generate(long novelId, ChapterDO ch, String world, String characters,
                          List<String> directives, List<String> digests, String prevTail,
                          String prevBrief) {
-        String user = """
+        String user = promptTemplates.format(LlmNode.OUTLINE, "user", """
                 任务：为第 %d 章《%s》编写场景级章纲。
                 本章卷纲目标：%s
                 章末钩子类型：%s
@@ -73,7 +76,7 @@ public class OutlineService {
 
                 只输出 JSON，格式：
                 {"scenes":[{"no":1,"goal":"本场景目标","present":["出场人物"],"must_reveal":["必须让读者知道的信息"],"must_not":["禁止出现的内容"],"words":900}]}
-                """.formatted(ch.chapterNo(), ch.title(), ch.goal(), ch.hook(),
+                """, ch.chapterNo(), ch.title(), ch.goal(), ch.hook(),
                 Objects.toString(ch.timeNote(), "紧接上一章，无跳跃"),
                 Objects.toString(ch.ruleRefs(), "[]"), Objects.toString(ch.foreshadowRefs(), "[]"),
                 ch.budgetMin(), ch.budgetMax(), world, characters,

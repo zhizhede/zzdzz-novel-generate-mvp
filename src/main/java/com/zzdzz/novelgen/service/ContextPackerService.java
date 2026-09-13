@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service;
 
+import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import com.zzdzz.novelgen.dao.CanonDocDAO;
@@ -42,6 +43,7 @@ public class ContextPackerService {
     private final MaterialCardService cardService;
     private final TuningService tuning;
     private final EmbeddingService embeddingService;
+    private final PromptTemplateService promptTemplates;
 
     public ContextPackerService(StylePackDAO stylePackDAO,
                                 CanonDocDAO canonDocDAO,
@@ -51,7 +53,8 @@ public class ContextPackerService {
                                 WorldStateDAO worldStateDAO,
                                 MaterialCardService cardService,
                                 TuningService tuning,
-                                EmbeddingService embeddingService) {
+                                EmbeddingService embeddingService,
+                                PromptTemplateService promptTemplates) {
         this.stylePackDAO = stylePackDAO;
         this.canonDocDAO = canonDocDAO;
         this.digestDAO = digestDAO;
@@ -61,6 +64,7 @@ public class ContextPackerService {
         this.cardService = cardService;
         this.tuning = tuning;
         this.embeddingService = embeddingService;
+        this.promptTemplates = promptTemplates;
     }
 
     public record Pack(String system, String user) {}
@@ -307,7 +311,7 @@ public class ContextPackerService {
         String ragSection = embeddingService.searchSection(novelId, chapterNo,
                 Objects.toString(ch.goal(), "") + "\n" + Objects.toString(ch.hook(), "") + "\n" + spec.goal(),
                 chapterNo - 3);
-        String user = """
+        String user = promptTemplates.format(LlmNode.SCENE_DRAFT, "user", """
                 任务：写第 %d 章场景 %d。
                 本章目标：%s
                 本场景目标：%s
@@ -347,7 +351,7 @@ public class ContextPackerService {
 
                 【上一场景已写内容（紧接其后继续写；禁止复述其中任何句子——你的第一行必须是全新的句子；禁止重复情节与时间点）】
                 %s
-                """.formatted(chapterNo, spec.sceneNo(), ch.title(), spec.goal(),
+                """, chapterNo, spec.sceneNo(), ch.title(), spec.goal(),
                 spec.present(), spec.mustReveal(), spec.mustNot(), spec.words(),
                 simileRedline,
                 craft,
