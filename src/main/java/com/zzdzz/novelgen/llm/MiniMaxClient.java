@@ -8,7 +8,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
-import com.zzdzz.novelgen.dao.LlmCallLogDAO;
+import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
+import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -31,12 +32,12 @@ public class MiniMaxClient implements LlmPort {
 
     private final LlmProperties props;
     private final ObjectMapper mapper;
-    private final LlmCallLogDAO callLogDAO;
-    private final com.zzdzz.novelgen.dao.LlmNodeConfigDAO nodeConfigDAO;
+    private final LlmCallLogDataService callLogDAO;
+    private final com.zzdzz.novelgen.service.data.LlmNodeConfigDataService nodeConfigDAO;
     private final RestClient restClient;
 
-    public MiniMaxClient(LlmProperties props, ObjectMapper mapper, LlmCallLogDAO callLogDAO,
-                         com.zzdzz.novelgen.dao.LlmNodeConfigDAO nodeConfigDAO) {
+    public MiniMaxClient(LlmProperties props, ObjectMapper mapper, LlmCallLogDataService callLogDAO,
+                         com.zzdzz.novelgen.service.data.LlmNodeConfigDataService nodeConfigDAO) {
         this.props = props;
         this.mapper = mapper;
         this.callLogDAO = callLogDAO;
@@ -179,7 +180,7 @@ public class MiniMaxClient implements LlmPort {
     private static final java.util.regex.Pattern THINK_BLOCK =
             java.util.regex.Pattern.compile("(?s)<think>(.*?)</think>");
 
-    /** 台账先行入库（SQL 在 LlmCallLogDAO），失败也留痕，调用方据此可重放。 */
+    /** 台账先行入库（SQL 在 LlmCallLogDataService），失败也留痕，调用方据此可重放。 */
     private long insertLog(ChatRequest request, String model, String requestJson, JsonNode response, String reasoning,
                            int promptTokens, int cachedTokens, int completionTokens, int totalTokens,
                            long latencyMs, String status, String errorMsg) {

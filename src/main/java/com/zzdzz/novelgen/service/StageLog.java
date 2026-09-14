@@ -1,6 +1,6 @@
 package com.zzdzz.novelgen.service;
 
-import com.zzdzz.novelgen.dao.PipelineEventDAO;
+import com.zzdzz.novelgen.service.data.PipelineEventDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -65,9 +65,9 @@ public class StageLog {
     }
 
     private final PipelineSseService sse;
-    private final PipelineEventDAO eventDAO;
+    private final PipelineEventDataService eventDAO;
 
-    public StageLog(PipelineSseService sse, PipelineEventDAO eventDAO) {
+    public StageLog(PipelineSseService sse, PipelineEventDataService eventDAO) {
         this.sse = sse;
         this.eventDAO = eventDAO;
     }

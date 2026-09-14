@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.MaterialCardDAO;
+import com.zzdzz.novelgen.service.data.MaterialCardDataService;
 import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,10 +41,10 @@ public class MaterialCardService {
     /** 单场景匹配命中卡上限的 tuning 键（常驻卡不占额），防上下文膨胀。 */
     private static final String MAX_MATCHED_KEY = "pack_max_matched_cards";
 
-    private final MaterialCardDAO cardDAO;
+    private final MaterialCardDataService cardDAO;
     private final TuningService tuning;
 
-    public MaterialCardService(MaterialCardDAO cardDAO, TuningService tuning) {
+    public MaterialCardService(MaterialCardDataService cardDAO, TuningService tuning) {
         this.cardDAO = cardDAO;
         this.tuning = tuning;
     }
@@ -168,9 +168,11 @@ public class MaterialCardService {
         if (text.contains(card.name())) {
             return true;
         }
-        for (String alias : card.aliases()) {
-            if (alias != null && alias.length() >= 2 && text.contains(alias)) {
-                return true;
+        if (card.aliases() != null) {
+            for (String alias : card.aliases()) {
+                if (alias != null && alias.length() >= 2 && text.contains(alias)) {
+                    return true;
+                }
             }
         }
         return false;

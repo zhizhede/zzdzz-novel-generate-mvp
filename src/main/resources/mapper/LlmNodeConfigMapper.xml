@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.LlmNodeConfigMapper">
+
+    <select id="findEnabled" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
+
+                SELECT * FROM llm_node_config WHERE node=#{node} AND is_deleted=false AND enabled=true
+                
+    </select>
+
+    <select id="listAll" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
+SELECT * FROM llm_node_config WHERE is_deleted=false ORDER BY id
+    </select>
+
+    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
+SELECT * FROM llm_node_config WHERE id=#{id} AND is_deleted=false
+    </select>
+
+    <select id="exists" resultType="boolean">
+SELECT COUNT(*) FROM llm_node_config WHERE node=#{node} AND is_deleted=false
+    </select>
+
+    <update id="softDelete">
+UPDATE llm_node_config SET is_deleted=true, delete_time=NOW() WHERE id=#{id} AND is_deleted=false
+    </update>
+    <select id="insert" resultType="long">
+                INSERT INTO llm_node_config (node, model, temperature, max_tokens, extra_json, enabled, remark)
+                VALUES (#{node}, #{model}, #{temperature}, #{maxTokens}, #{extraJson}::jsonb, #{enabled}, #{remark}) RETURNING id
+    </select>
+
+    <update id="update">
+                UPDATE llm_node_config SET model=#{model}, temperature=#{temperature}, max_tokens=#{maxTokens}, extra_json=#{extraJson}::jsonb,
+                       enabled=#{enabled}, remark=#{remark}, update_time=NOW()
+                WHERE id=#{id} AND is_deleted=false
+    </update>
+</mapper>

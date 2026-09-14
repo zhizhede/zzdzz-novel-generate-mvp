@@ -6,10 +6,10 @@ import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.DigestDAO;
-import com.zzdzz.novelgen.dao.ForeshadowDAO;
-import com.zzdzz.novelgen.dao.WorldStateDAO;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.DigestDataService;
+import com.zzdzz.novelgen.service.data.ForeshadowDataService;
+import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.slf4j.Logger;
@@ -40,28 +40,28 @@ public class DigestService {
 
     private final LlmPort llm;
     private final LlmJson llmJson;
-    private final DigestDAO digestDAO;
-    private final ForeshadowDAO foreshadowDAO;
-    private final ChapterDAO chapterDAO;
-    private final WorldStateDAO worldStateDAO;
+    private final DigestDataService digestData;
+    private final ForeshadowDataService foreshadowData;
+    private final ChapterDataService chapterData;
+    private final WorldStateDataService worldStateData;
     private final PromptTemplateService promptTemplates;
 
-    public DigestService(LlmPort llm, LlmJson llmJson, DigestDAO digestDAO,
-                         ForeshadowDAO foreshadowDAO, ChapterDAO chapterDAO,
-                         WorldStateDAO worldStateDAO, PromptTemplateService promptTemplates) {
+    public DigestService(LlmPort llm, LlmJson llmJson, DigestDataService digestData,
+                         ForeshadowDataService foreshadowData, ChapterDataService chapterData,
+                         WorldStateDataService worldStateData, PromptTemplateService promptTemplates) {
         this.llm = llm;
         this.llmJson = llmJson;
-        this.digestDAO = digestDAO;
-        this.foreshadowDAO = foreshadowDAO;
-        this.chapterDAO = chapterDAO;
-        this.worldStateDAO = worldStateDAO;
+        this.digestData = digestData;
+        this.foreshadowData = foreshadowData;
+        this.chapterData = chapterData;
+        this.worldStateData = worldStateData;
         this.promptTemplates = promptTemplates;
     }
 
     public void digest(long novelId, long chapterId, int chapterNo, String fullText) {
-        if (digestDAO.existsByChapter(chapterId)) {
+        if (digestData.existsByChapter(chapterId)) {
             log.info("第 {} 章事实账已存在，跳过", chapterNo);
-            chapterDAO.updateStatus(chapterId, "DIGESTED");
+            chapterData.updateStatus(chapterId, "DIGESTED");
             return;
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
@@ -87,29 +87,29 @@ public class DigestService {
         // 模型偶发无视指令在摘要前加「## 事实账」标题行：入库前剥掉
         String summary = node.path("summary_md").asText("")
                 .replaceAll("(?m)^#{1,6}[^\\n]*\\n?", "").strip();
-        digestDAO.insert(chapterId, summary, node.path("facts").toString());
+        digestData.insert(chapterId, summary, node.path("facts").toString());
         JsonNode state = node.path("state");
         if (state.isObject() && state.size() > 0) {
-            worldStateDAO.upsert(novelId, chapterNo, state);
+            worldStateData.upsert(novelId, chapterNo, state);
             log.info("第 {} 章世界状态快照落库", chapterNo);
         }
         proposeThreads(novelId, chapterNo, node.path("new_threads"));
-        foreshadowDAO.markPlanted(novelId, chapterNo);
-        foreshadowDAO.markRecovered(novelId, chapterNo);
-        chapterDAO.updateStatus(chapterId, "DIGESTED");
+        foreshadowData.markPlanted(novelId, chapterNo);
+        foreshadowData.markRecovered(novelId, chapterNo);
+        chapterData.updateStatus(chapterId, "DIGESTED");
         log.info("第 {} 章事实账落库（{} tokens）", chapterNo, r.usage().totalTokens());
     }
 
     /** digest 用户提示：时间锚点 + 已有伏笔账本（防同义重复提议）+ 本章全文。 */
     private String digestUserPrompt(long novelId, long chapterId, String fullText) {
         StringBuilder sb = new StringBuilder();
-        chapterDAO.findById(chapterId).ifPresent(ch -> {
+        chapterData.findById(chapterId).ifPresent(ch -> {
             if (ch.timeNote() != null && !ch.timeNote().isBlank()) {
                 sb.append("【时间锚点】本章距上一章：").append(ch.timeNote())
                         .append("（state.time 必须体现该推进）\n\n");
             }
         });
-        List<ForeshadowDO> existing = foreshadowDAO.listByNovel(novelId);
+        List<ForeshadowDO> existing = foreshadowData.listByNovel(novelId);
         if (!existing.isEmpty()) {
             sb.append("【已有伏笔账本（同义勿重复提议）】\n");
             for (ForeshadowDO f : existing) {
@@ -132,10 +132,10 @@ public class DigestService {
             String content = t.path("content").asText("").strip();
             if (name.isBlank() || content.isBlank()) continue;
             String full = name + "：" + content;
-            if (foreshadowDAO.contentExists(novelId, full) || foreshadowDAO.contentExists(novelId, content)) {
+            if (foreshadowData.contentExists(novelId, full) || foreshadowData.contentExists(novelId, content)) {
                 continue;
             }
-            foreshadowDAO.insertProposal(novelId, foreshadowDAO.nextCode(novelId), full, chapterNo);
+            foreshadowData.insertProposal(novelId, foreshadowData.nextCode(novelId), full, chapterNo);
             added++;
         }
         if (added > 0) {
@@ -145,7 +145,7 @@ public class DigestService {
 
     /** 存量回填：只产出世界状态快照，不动事实账（轻量调用，逐章触发）。 */
     public void backfillState(long novelId, int chapterNo) {
-        ChapterDO ch = chapterDAO.find(novelId, chapterNo)
+        ChapterDO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
         if (ch.fullText() == null || ch.fullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法回填状态");
@@ -168,7 +168,7 @@ public class DigestService {
         if (!node.isObject() || node.size() == 0) {
             throw new IllegalStateException("第 " + chapterNo + " 章状态输出为空");
         }
-        worldStateDAO.upsert(novelId, chapterNo, node);
+        worldStateData.upsert(novelId, chapterNo, node);
         log.info("第 {} 章世界状态回填完成（{} tokens）", chapterNo, r.usage().totalTokens());
     }
 }

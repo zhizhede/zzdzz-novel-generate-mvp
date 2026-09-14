@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.EmbeddingMapper">
+
+    <update id="upsert">
+                INSERT INTO embeddings (source_type, source_id, novel_id, chapter_no, content, embedding)
+                VALUES (#{sourceType}, #{sourceId}, #{novelId}, #{chapterNo}, #{content}, #{vecStr}::vector)
+                ON CONFLICT (source_type, source_id) WHERE is_deleted = FALSE
+                DO UPDATE SET embedding = EXCLUDED.embedding, content = EXCLUDED.content,
+                              chapter_no = EXCLUDED.chapter_no, update_time = NOW()
+    </update>
+
+    <select id="search" resultType="map">
+                SELECT source_type, source_id, chapter_no, content,
+                       embedding &lt;=&gt; #{vecStr}::vector AS distance
+                FROM embeddings
+                WHERE novel_id = #{novelId} AND is_deleted = FALSE
+                ORDER BY embedding &lt;=&gt; #{vecStr}::vector
+                LIMIT #{limit}
+    </select>
+    <select id="findMissingDigests" resultType="map">
+                SELECT d.id AS source_id, c.chapter_no, d.content_md AS content
+                FROM digests d
+                JOIN chapters c ON c.id = d.chapter_id
+                WHERE c.novel_id = #{novelId} AND d.is_deleted = FALSE
+                  AND NOT EXISTS (SELECT 1 FROM embeddings e
+                                  WHERE e.source_type = 'digest' AND e.source_id = d.id AND e.is_deleted = FALSE)
+                ORDER BY c.chapter_no DESC
+                LIMIT #{limit}
+    </select>
+
+    <select id="findMissingCards" resultType="map">
+                SELECT id AS source_id, kind, name FROM material_cards
+                WHERE novel_id = #{novelId} AND is_deleted = FALSE
+                  AND NOT EXISTS (SELECT 1 FROM embeddings e
+                                  WHERE e.source_type = 'card' AND e.source_id = material_cards.id AND e.is_deleted = FALSE)
+                ORDER BY id
+                LIMIT #{limit}
+    </select>
+
+    <select id="countByNovel" resultType="int">
+                SELECT count(*) FROM embeddings WHERE novel_id = #{novelId} AND is_deleted = FALSE
+    </select>
+</mapper>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.ForeshadowMapper">
+
+    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+
+                SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
+                FROM foreshadows WHERE novel_id=#{novelId} AND is_deleted=false ORDER BY code
+                
+    </select>
+
+    <select id="exists" resultType="boolean">
+SELECT COUNT(*) FROM foreshadows WHERE novel_id=#{novelId} AND code=#{code} AND is_deleted=false
+    </select>
+
+    <update id="insert">
+INSERT INTO foreshadows (novel_id, code, content, planted_in, recovered_in) VALUES (#{novelId}, #{code}, #{content}, #{plantedIn}, #{recoveredIn})
+    </update>
+
+    <update id="update">
+
+                UPDATE foreshadows SET content=#{content}, planted_in=#{plantedIn}, recovered_in=#{recoveredIn}, status=#{status}, update_time=NOW()
+                WHERE id=#{id} AND is_deleted=false
+                
+    </update>
+
+    <select id="findByCode" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+
+                SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
+                FROM foreshadows WHERE novel_id=#{novelId} AND code=#{code} AND is_deleted=false
+                
+    </select>
+
+    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+
+                SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
+                FROM foreshadows WHERE id=#{id} AND is_deleted=false
+                
+    </select>
+
+    <update id="insertProposal">
+
+                INSERT INTO foreshadows (novel_id, code, content, proposed_in, status)
+                VALUES (#{novelId}, #{code}, #{content}, #{proposedIn}, 'proposed')
+                
+    </update>
+
+    <select id="contentExists" resultType="boolean">
+SELECT COUNT(*) FROM foreshadows WHERE novel_id=#{novelId} AND content=#{content} AND is_deleted=false
+    </select>
+
+    <select id="nextCode" resultType="string">
+
+                SELECT COALESCE(MAX(SUBSTRING(code FROM 2)::INT), 0) FROM foreshadows
+                WHERE novel_id=#{novelId} AND is_deleted=false AND code ~ '^F[0-9]+$'
+                
+    </select>
+
+    <update id="insertPlanned">
+
+                INSERT INTO foreshadows (novel_id, code, content, planted_in, status)
+                VALUES (#{novelId}, #{code}, #{content}, #{plantedIn}, 'planned')
+                
+    </update>
+
+    <select id="findDirectives" resultType="string">
+
+                SELECT CASE WHEN planted_in = #{chapterNo} THEN '埋设：' ELSE '回收：' END || code || '——' || content
+                FROM foreshadows
+                WHERE novel_id=#{novelId} AND is_deleted=false
+                  AND ((planted_in = #{chapterNo} AND status = 'planned') OR (recovered_in = #{chapterNo} AND status = 'planted'))
+                
+    </select>
+
+    <update id="promoteProposal">
+
+                UPDATE foreshadows SET status='planned', planted_in=#{plantedIn}, update_time=NOW()
+                WHERE id=#{id} AND status='proposed' AND is_deleted=false
+                
+    </update>
+
+    <update id="scheduleRecovery">
+
+                UPDATE foreshadows SET recovered_in=#{recoveredIn}, update_time=NOW()
+                WHERE id=#{id} AND status='planted' AND recovered_in IS NULL AND is_deleted=false
+                
+    </update>
+
+    <update id="markPlanted">
+
+                UPDATE foreshadows SET status='planted', update_time=NOW()
+                WHERE novel_id=#{novelId} AND planted_in &lt;= #{chapterNo} AND status='planned' AND is_deleted=false
+                
+    </update>
+
+    <update id="markRecovered">
+
+                UPDATE foreshadows SET status='recovered', update_time=NOW()
+                WHERE novel_id=#{novelId} AND recovered_in &lt;= #{chapterNo} AND status='planted' AND is_deleted=false
+
+    </update>
+</mapper>

@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zzdzz.novelgen.dao.LlmCallLogDAO;
+import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -38,10 +38,10 @@ public class MiniMaxEmbeddingClient {
 
     private final LlmProperties props;
     private final ObjectMapper mapper;
-    private final LlmCallLogDAO callLogDAO;
+    private final LlmCallLogDataService callLogDAO;
     private final RestClient restClient;
 
-    public MiniMaxEmbeddingClient(LlmProperties props, ObjectMapper mapper, LlmCallLogDAO callLogDAO) {
+    public MiniMaxEmbeddingClient(LlmProperties props, ObjectMapper mapper, LlmCallLogDataService callLogDAO) {
         this.props = props;
         this.mapper = mapper;
         this.callLogDAO = callLogDAO;

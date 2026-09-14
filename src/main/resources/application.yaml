@@ -25,3 +25,8 @@ novelgen:
     read-timeout: 600s
   style-dir: ${NOVELGEN_STYLE_DIR:docs/style}
   novel-dir: ${NOVELGEN_NOVEL_DIR:novel/夜班守则}
+
+mybatis-plus:
+  mapper-locations: classpath*:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true

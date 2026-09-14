@@ -1,6 +1,6 @@
 package com.zzdzz.novelgen.service;
 
-import com.zzdzz.novelgen.dao.EmbeddingDAO;
+import com.zzdzz.novelgen.service.data.EmbeddingDataService;
 import com.zzdzz.novelgen.llm.LlmException;
 import com.zzdzz.novelgen.llm.MiniMaxEmbeddingClient;
 import org.slf4j.Logger;
@@ -28,11 +28,11 @@ public class EmbeddingService {
     public record Hit(String sourceType, Integer chapterNo, String label, String content, double distance) {}
 
     private final MiniMaxEmbeddingClient client;
-    private final EmbeddingDAO dao;
+    private final EmbeddingDataService dao;
     private final TuningService tuning;
     private final MaterialCardService cardService;
 
-    public EmbeddingService(MiniMaxEmbeddingClient client, EmbeddingDAO dao,
+    public EmbeddingService(MiniMaxEmbeddingClient client, EmbeddingDataService dao,
                             TuningService tuning, MaterialCardService cardService) {
         this.client = client;
         this.dao = dao;
@@ -55,11 +55,11 @@ public class EmbeddingService {
             ensureNovelIndexed(novelId);
             int topK = tuning.i("rag_top_k", 6);
             double maxDist = tuning.d("rag_max_distance", 0.55);
-            List<EmbeddingDAO.Hit> hits = dao.search(novelId,
+            List<EmbeddingDataService.Hit> hits = dao.search(novelId,
                     client.embed(novelId, MiniMaxEmbeddingClient.TYPE_QUERY, List.of(query)).get(0),
                     topK + 8);
             List<Hit> picked = new ArrayList<>();
-            for (EmbeddingDAO.Hit h : hits) {
+            for (EmbeddingDataService.Hit h : hits) {
                 if (picked.size() >= topK) break;
                 if (h.distance() > maxDist) break;
                 if ("digest".equals(h.sourceType())) {

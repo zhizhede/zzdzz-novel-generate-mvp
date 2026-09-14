@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.runner;
 
 import com.zzdzz.novelgen.model.entity.ChapterDO;
-import com.zzdzz.novelgen.dao.CanonDocDAO;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.ForeshadowDAO;
-import com.zzdzz.novelgen.dao.NovelDAO;
-import com.zzdzz.novelgen.dao.StylePackDAO;
-import com.zzdzz.novelgen.dao.UserDAO;
+import com.zzdzz.novelgen.service.data.CanonDocDataService;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.ForeshadowDataService;
+import com.zzdzz.novelgen.service.data.NovelDataService;
+import com.zzdzz.novelgen.service.data.StylePackDataService;
+import com.zzdzz.novelgen.service.data.UserDataService;
 import com.zzdzz.novelgen.service.DigestService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -41,29 +41,29 @@ public class ImportRunner implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(ImportRunner.class);
     private static final Pattern CHAPTER_FILE = Pattern.compile("第(\\d+)章");
 
-    private final UserDAO userDAO;
-    private final StylePackDAO stylePackDAO;
-    private final NovelDAO novelDAO;
-    private final CanonDocDAO canonDocDAO;
-    private final ForeshadowDAO foreshadowDAO;
-    private final ChapterDAO chapterDAO;
+    private final UserDataService userData;
+    private final StylePackDataService stylePackData;
+    private final NovelDataService novelData;
+    private final CanonDocDataService canonData;
+    private final ForeshadowDataService foreshadowData;
+    private final ChapterDataService chapterData;
     private final DigestService digestService;
     private final ObjectMapper mapper;
     private final String novelDir;
     private final String styleDir;
 
-    public ImportRunner(UserDAO userDAO, StylePackDAO stylePackDAO,
-                        NovelDAO novelDAO, CanonDocDAO canonDocDAO,
-                        ForeshadowDAO foreshadowDAO, ChapterDAO chapterDAO,
+    public ImportRunner(UserDataService userData, StylePackDataService stylePackData,
+                        NovelDataService novelData, CanonDocDataService canonData,
+                        ForeshadowDataService foreshadowData, ChapterDataService chapterData,
                         DigestService digestService, ObjectMapper mapper,
                         @Value("${novelgen.novel-dir:novel/夜班守则}") String novelDir,
                         @Value("${novelgen.style-dir:docs/style}") String styleDir) {
-        this.userDAO = userDAO;
-        this.stylePackDAO = stylePackDAO;
-        this.novelDAO = novelDAO;
-        this.canonDocDAO = canonDocDAO;
-        this.foreshadowDAO = foreshadowDAO;
-        this.chapterDAO = chapterDAO;
+        this.userData = userData;
+        this.stylePackData = stylePackData;
+        this.novelData = novelData;
+        this.canonData = canonData;
+        this.foreshadowData = foreshadowData;
+        this.chapterData = chapterData;
         this.digestService = digestService;
         this.mapper = mapper;
         this.novelDir = novelDir;
@@ -88,9 +88,9 @@ public class ImportRunner implements ApplicationRunner {
         Map<String, Object> cfg = new Yaml().load(Files.readString(bookCfg));
         String title = (String) cfg.get("title");
         long packId = importBookStylePack(cfg);
-        Long exist = novelDAO.findIdByTitle(title);
+        Long exist = novelData.findIdByTitle(title);
         long novelId = exist != null ? exist
-                : novelDAO.insert(userId, title, (String) cfg.get("description"), packId, "auto");
+                : novelData.insert(userId, title, (String) cfg.get("description"), packId, "auto");
         if (exist == null) {
             log.info("书目导入：新作品 {} (novelId={})", title, novelId);
         }
@@ -109,13 +109,13 @@ public class ImportRunner implements ApplicationRunner {
     private long importBookStylePack(Map<String, Object> cfg) throws Exception {
         String packName = (String) cfg.get("style_pack_name");
         String fingerprint = Files.readString(Path.of(novelDir, "style-metrics.json"));
-        Long exist = stylePackDAO.findIdByName(packName);
+        Long exist = stylePackData.findIdByName(packName);
         if (exist != null) {
-            stylePackDAO.updateFingerprint(exist, fingerprint);
+            stylePackData.updateFingerprint(exist, fingerprint);
             return exist;
         }
         String rules = Files.readString(Path.of(novelDir, (String) cfg.get("rules_md_file")));
-        return stylePackDAO.insert(packName, (String) cfg.get("style_pack_desc"), rules, fingerprint);
+        return stylePackData.insert(packName, (String) cfg.get("style_pack_desc"), rules, fingerprint);
     }
 
     /** existing/ 下的现成正文：入章（APPROVED）并为最近 digest_recent 章补事实账（续写的前情来源）。 */
@@ -130,11 +130,11 @@ public class ImportRunner implements ApplicationRunner {
                     .forEach(f -> importExistingChapter(novelId, f));
         }
         int recent = cfg.get("digest_recent") instanceof Number n ? n.intValue() : 3;
-        List<ChapterDO> all = chapterDAO.listSummariesByNovel(novelId);
+        List<ChapterDO> all = chapterData.listSummariesByNovel(novelId);
         // 从最新章往回数，只为有正文的 recent 章补事实账（卷纲规划行没有正文，跳过）
         int done = 0;
         for (int i = all.size() - 1; i >= 0 && done < recent; i--) {
-            ChapterDO full = chapterDAO.find(novelId, all.get(i).chapterNo()).orElse(null);
+            ChapterDO full = chapterData.find(novelId, all.get(i).chapterNo()).orElse(null);
             if (full == null || full.fullText() == null) continue;
             digestService.digest(novelId, full.id(), full.chapterNo(), full.fullText());
             done++;
@@ -145,7 +145,7 @@ public class ImportRunner implements ApplicationRunner {
         Matcher m = CHAPTER_FILE.matcher(file.getFileName().toString());
         if (!m.find()) return;
         int no = Integer.parseInt(m.group(1));
-        if (chapterDAO.exists(novelId, no)) return;
+        if (chapterData.exists(novelId, no)) return;
         try {
             String content = Files.readString(file);
             String title = "第" + no + "章";
@@ -154,10 +154,10 @@ public class ImportRunner implements ApplicationRunner {
                 if (s.startsWith("## ") && s.length() > 3) { title = s.substring(3).strip(); break; }
                 if (s.matches("第\\d章\\s*\\S+.*")) { title = s.replaceFirst("第\\d章\\s*", ""); break; }
             }
-            chapterDAO.insertPlan(novelId, no, null, null, title, null, null, null, "[]", "[]", 0, 0);
-            ChapterDO ch = chapterDAO.find(novelId, no).orElseThrow();
-            chapterDAO.saveFullText(ch.id(), content);
-            chapterDAO.updateStatus(ch.id(), "FINAL");
+            chapterData.insertPlan(novelId, no, null, null, title, null, null, null, "[]", "[]", 0, 0);
+            ChapterDO ch = chapterData.find(novelId, no).orElseThrow();
+            chapterData.saveFullText(ch.id(), content);
+            chapterData.updateStatus(ch.id(), "FINAL");
             log.info("现成正文入库：第 {} 章 {}", no, title);
         } catch (Exception e) {
             throw new IllegalStateException("现成正文导入失败: " + file, e);
@@ -176,17 +176,17 @@ public class ImportRunner implements ApplicationRunner {
     }
 
     private long seedAdmin() {
-        Long id = userDAO.findIdByUsername("admin");
+        Long id = userData.findIdByUsername("admin");
         if (id != null) return id;
-        return userDAO.insert("admin", "(pending-m1-web)", "admin");
+        return userData.insert("admin", "(pending-m1-web)", "admin");
     }
 
     /** 风格包：rules_md = 蒸馏报告硬规则块 + E01 范例；fingerprint = 基线指标整体（可重复刷新） */
     private long importStylePack() throws Exception {
         String fingerprint = Files.readString(Path.of(novelDir, "style-metrics.json"));
-        Long exist = stylePackDAO.findIdByName("手搓风");
+        Long exist = stylePackData.findIdByName("手搓风");
         if (exist != null) {
-            stylePackDAO.updateFingerprint(exist, fingerprint);
+            stylePackData.updateFingerprint(exist, fingerprint);
             return exist;
         }
         String report = Files.readString(Path.of(styleDir, "写手风格蒸馏.md"));
@@ -194,14 +194,14 @@ public class ImportRunner implements ApplicationRunner {
         String rules = report.substring(report.lastIndexOf("```", marker) + 3, report.indexOf("```", marker)).strip();
         String exemplars = Files.readString(Path.of(styleDir, "exemplars.md"));
         String exemplar = exemplars.substring(exemplars.indexOf("### E01"), exemplars.indexOf("### E02")).strip();
-        return stylePackDAO.insert("手搓风", "冷面碎片体：一行一拍/自由间接引语/克制黑暗底色",
+        return stylePackData.insert("手搓风", "冷面碎片体：一行一拍/自由间接引语/克制黑暗底色",
                 rules + "\n\n【风格范例（逐字原文，严格模仿其分行节奏与口吻）】\n" + exemplar, fingerprint);
     }
 
     private long importNovel(long userId, long packId) {
-        Long exist = novelDAO.findIdByTitle("夜班守则");
+        Long exist = novelData.findIdByTitle("夜班守则");
         if (exist != null) return exist;
-        return novelDAO.insert(userId, "夜班守则",
+        return novelData.insert(userId, "夜班守则",
                 "规则怪谈：便利店夜班与不对劲的守则（管线测试作）", packId, "auto");
     }
 
@@ -211,8 +211,8 @@ public class ImportRunner implements ApplicationRunner {
     }
 
     private void importDoc(long novelId, String kind, String name, String content) {
-        if (canonDocDAO.exists(novelId, kind, name)) return;
-        canonDocDAO.insert(novelId, kind, name, content);
+        if (canonData.exists(novelId, kind, name)) return;
+        canonData.insert(novelId, kind, name, content);
     }
 
     @SuppressWarnings("unchecked")
@@ -220,8 +220,8 @@ public class ImportRunner implements ApplicationRunner {
         List<Map<String, Object>> items = new Yaml().load(Files.readString(Path.of(novelDir, "canon/foreshadows.yaml")));
         for (Map<String, Object> f : items) {
             String code = (String) f.get("id");
-            if (foreshadowDAO.exists(novelId, code)) continue;
-            foreshadowDAO.insert(novelId, code, (String) f.get("content"),
+            if (foreshadowData.exists(novelId, code)) continue;
+            foreshadowData.insert(novelId, code, (String) f.get("content"),
                     ((Number) f.get("planted_in")).intValue(), ((Number) f.get("recovered_in")).intValue());
         }
     }
@@ -238,8 +238,8 @@ public class ImportRunner implements ApplicationRunner {
             String arc = (String) vol.get("title");
             for (Map<String, Object> ch : (List<Map<String, Object>>) vol.get("chapters")) {
                 int no = ((Number) ch.get("num")).intValue();
-                if (chapterDAO.exists(novelId, no)) continue;
-                chapterDAO.insertPlan(novelId, no, volNo, arc, (String) ch.get("title"),
+                if (chapterData.exists(novelId, no)) continue;
+                chapterData.insertPlan(novelId, no, volNo, arc, (String) ch.get("title"),
                         (String) ch.get("goal"), (String) ch.get("hook"), (String) ch.get("time_note"),
                         mapper.writeValueAsString(ch.get("rule_refs")),
                         mapper.writeValueAsString(ch.get("foreshadow_refs")), bMin, bMax);

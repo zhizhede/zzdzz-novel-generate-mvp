@@ -1,9 +1,9 @@
 package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.GateReportDAO;
-import com.zzdzz.novelgen.dao.StylePackDAO;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.GateReportDataService;
+import com.zzdzz.novelgen.service.data.StylePackDataService;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -26,16 +26,16 @@ public class GateService {
 
     private static final Pattern CN = Pattern.compile("[\\u4e00-\\u9fff]");
 
-    private final StylePackDAO stylePackDAO;
-    private final GateReportDAO gateReportDAO;
-    private final ChapterDAO chapterDAO;
+    private final StylePackDataService stylePackData;
+    private final GateReportDataService gateReportData;
+    private final ChapterDataService chapterData;
     private final TuningService tuning;
 
-    public GateService(StylePackDAO stylePackDAO, GateReportDAO gateReportDAO,
-                       ChapterDAO chapterDAO, TuningService tuning) {
-        this.stylePackDAO = stylePackDAO;
-        this.gateReportDAO = gateReportDAO;
-        this.chapterDAO = chapterDAO;
+    public GateService(StylePackDataService stylePackData, GateReportDataService gateReportData,
+                       ChapterDataService chapterData, TuningService tuning) {
+        this.stylePackData = stylePackData;
+        this.gateReportData = gateReportData;
+        this.chapterData = chapterData;
         this.tuning = tuning;
     }
 
@@ -53,7 +53,7 @@ public class GateService {
         checks.add(check("chapter_length", words, budgetMin * (1 - lenTol), budgetMax * (1 + lenTol), lenOk));
 
         // 开篇复写检查：本章前 3 行不得与上一章末 3 行重复（场景续写惯性把衔接写成复写的实锤 bug）
-        String prevText = chapterNo > 1 ? chapterDAO.findFullText(novelId, chapterNo - 1) : null;
+        String prevText = chapterNo > 1 ? chapterData.findFullText(novelId, chapterNo - 1) : null;
         int overlap = prevText == null ? 0 : openingOverlap(text, prevText);
         checks.add(check("opening_overlap", overlap, 0, 0, overlap == 0));
 
@@ -74,7 +74,7 @@ public class GateService {
         checks.add(check("banned_phrases", hits.size(), 0, 0, hits.isEmpty()));
 
         boolean passed = checks.stream().allMatch(c -> (Boolean) c.get("ok"));
-        gateReportDAO.insert(chapterId, null, "mechanical", 0, passed,
+        gateReportData.insert(chapterId, null, "mechanical", 0, passed,
                 Map.of("chapter_no", chapterNo, "words", words,
                         "banned_hits", hits, "checks", checks));
         return passed;
@@ -124,27 +124,27 @@ public class GateService {
         checks.add(check("dialogue_density_per1k", dlg, null, dlgMax, dlg <= dlgMax));
 
         boolean passed = checks.stream().allMatch(c -> (Boolean) c.get("ok"));
-        gateReportDAO.insert(chapterId, sceneId, "mechanical", 0, passed,
+        gateReportData.insert(chapterId, sceneId, "mechanical", 0, passed,
                 Map.of("scene_no", sceneNo, "checks", checks));
         return passed;
     }
 
     public String failureSummary(long chapterId) {
-        return gateReportDAO.findLatestFailureJson(chapterId);
+        return gateReportData.findLatestFailureJson(chapterId);
     }
 
     /** 场景级失败意见：只取该场景自己的最新失败报告。 */
     public String failureSummary(long chapterId, long sceneId) {
-        return gateReportDAO.findLatestSceneFailureJson(chapterId, sceneId);
+        return gateReportData.findLatestSceneFailureJson(chapterId, sceneId);
     }
 
     /** 失败指标人话摘要（事件流水用）：「dialogue_density_per1k=3.92（基线12.51）」。无失败返回空串。 */
     public String failedChecksText(long chapterId) {
-        return failedChecksText(gateReportDAO.findLatestFailureJson(chapterId));
+        return failedChecksText(gateReportData.findLatestFailureJson(chapterId));
     }
 
     public String failedChecksText(long chapterId, long sceneId) {
-        return failedChecksText(gateReportDAO.findLatestSceneFailureJson(chapterId, sceneId));
+        return failedChecksText(gateReportData.findLatestSceneFailureJson(chapterId, sceneId));
     }
 
     @SuppressWarnings("unchecked")
@@ -206,12 +206,45 @@ public class GateService {
     /** 门禁配置（黑名单等）：读风格包 gate_config；无则用代码兜底。 */
     @SuppressWarnings("unchecked")
     private Map<String, Object> gateConfig(long novelId) {
-        String json = stylePackDAO.findGateConfigByNovel(novelId);
+        String json = stylePackData.findGateConfigByNovel(novelId);
         if (json == null || json.isBlank()) return Map.of();
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
         } catch (Exception e) {
             return Map.of();
+        }
+    }
+
+    /** 书级门禁参数：gate_config 有值即用（Number 或数字字符串，人工编辑容错），否则返回 fallback（调用方传平台 tuning 值）。 */
+    public double configValue(long novelId, String key, double fallback) {
+        Object v = gateConfig(novelId).get(key);
+        if (v instanceof Number n) return n.doubleValue();
+        if (v instanceof String s) {
+            try {
+                return Double.parseDouble(s.trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return fallback;
+    }
+
+    /** 有效评审标准五项（gate_config > tuning > 代码默认），工作台/风格包调参面板回显用。 */
+    public java.util.LinkedHashMap<String, Double> readerStandards(long novelId) {
+        java.util.LinkedHashMap<String, Double> m = new java.util.LinkedHashMap<>();
+        m.put("reader_fat_ratio_block", configValue(novelId, "reader_fat_ratio_block", tuning.d("reader_fat_ratio_block", 0.33)));
+        m.put("reader_fat_ratio_hard", configValue(novelId, "reader_fat_ratio_hard", tuning.d("reader_fat_ratio_hard", 0.50)));
+        m.put("reader_fix_len_min", configValue(novelId, "reader_fix_len_min", tuning.d("reader_fix_len_min", 0.75)));
+        m.put("reader_fix_len_max", configValue(novelId, "reader_fix_len_max", tuning.d("reader_fix_len_max", 1.15)));
+        m.put("ai_review_fix_floor", configValue(novelId, "ai_review_fix_floor", tuning.d("ai_review_fix_floor", 0.60)));
+        return m;
+    }
+
+    /** 评审标准快照 JSON（章节生成开始时随章落库，回看当时口径）。 */
+    public String readerStandardsJson(long novelId) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(readerStandards(novelId));
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -244,7 +277,7 @@ public class GateService {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> fingerprint(long novelId) {
-        String json = stylePackDAO.findFingerprintByNovel(novelId);
+        String json = stylePackData.findFingerprintByNovel(novelId);
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
         } catch (Exception e) {

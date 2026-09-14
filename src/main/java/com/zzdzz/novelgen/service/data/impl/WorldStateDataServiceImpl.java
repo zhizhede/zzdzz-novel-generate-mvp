@@ -1,0 +1,56 @@
+package com.zzdzz.novelgen.service.data.impl;
+
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzdzz.novelgen.dao.WorldStateMapper;
+import com.zzdzz.novelgen.model.entity.WorldStateDO;
+import com.zzdzz.novelgen.service.data.WorldStateDataService;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Map;
+
+/** world_states 数据服务实现。 */
+@Service
+public class WorldStateDataServiceImpl extends ServiceImpl<WorldStateMapper, WorldStateDO>
+        implements WorldStateDataService {
+
+    private final ObjectMapper mapper;
+
+    public WorldStateDataServiceImpl(ObjectMapper mapper) {
+        this.mapper = mapper;
+    }
+
+    @Override
+    public void upsert(long novelId, int chapterNo, Object state) {
+        try {
+            baseMapper.upsert(novelId, chapterNo, mapper.writeValueAsString(state));
+        } catch (Exception e) {
+            throw new IllegalStateException("世界状态写入失败", e);
+        }
+    }
+
+    @Override
+    public String findLatestBefore(long novelId, int beforeChapter) {
+        return baseMapper.findLatestBefore(novelId, beforeChapter);
+    }
+
+    @Override
+    public List<StateRow> listByNovel(long novelId, int limit) {
+        List<StateRow> out = new java.util.ArrayList<>();
+        for (Map<String, Object> m : baseMapper.listByNovel(novelId, limit)) {
+            out.add(new StateRow(((Number) m.get("chapter_no")).intValue(),
+                    (String) m.get("state"),
+                    String.valueOf(m.get("update_time"))));
+        }
+        return out;
+    }
+
+    @Override
+    public void updateByChapter(long novelId, int chapterNo, String stateJson) {
+        int n = baseMapper.updateByChapter(novelId, chapterNo, stateJson);
+        if (n == 0) {
+            baseMapper.insertRaw(novelId, chapterNo, stateJson);
+        }
+    }
+}

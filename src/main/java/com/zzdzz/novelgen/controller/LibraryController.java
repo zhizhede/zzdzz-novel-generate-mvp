@@ -1,14 +1,15 @@
 package com.zzdzz.novelgen.controller;
 
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.dao.DigestDAO;
-import com.zzdzz.novelgen.dao.WorldStateDAO;
+import com.zzdzz.novelgen.service.data.DigestDataService;
+import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import com.zzdzz.novelgen.model.entity.CanonDocDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 import com.zzdzz.novelgen.model.vo.PromptDetailVO;
 import com.zzdzz.novelgen.model.vo.PromptTemplateVO;
 import com.zzdzz.novelgen.service.DigestService;
+import com.zzdzz.novelgen.service.GateService;
 import com.zzdzz.novelgen.service.LibraryService;
 import com.zzdzz.novelgen.service.LlmNodeConfigService;
 import com.zzdzz.novelgen.service.MaterialCardService;
@@ -40,11 +41,12 @@ public class LibraryController {
     private final TuningService tuningService;
     private final EmbeddingService embeddingService;
     private final PromptTemplateService promptService;
+    private final GateService gateService;
 
     public LibraryController(LibraryService libraryService, DigestService digestService,
                              MaterialCardService cardService, LlmNodeConfigService nodeConfigService,
                              TuningService tuningService, EmbeddingService embeddingService,
-                             PromptTemplateService promptService) {
+                             PromptTemplateService promptService, GateService gateService) {
         this.libraryService = libraryService;
         this.digestService = digestService;
         this.cardService = cardService;
@@ -52,6 +54,7 @@ public class LibraryController {
         this.tuningService = tuningService;
         this.embeddingService = embeddingService;
         this.promptService = promptService;
+        this.gateService = gateService;
     }
 
     // ===== 提示词注册表（平台级只读；阶段二开放从库读取与编辑） =====
@@ -252,7 +255,7 @@ public class LibraryController {
     // ===== 事实账 =====
 
     @GetMapping("/novels/{novelId}/digests")
-    public Result<List<DigestDAO.DigestItem>> digests(@PathVariable long novelId) {
+    public Result<List<DigestDataService.DigestItem>> digests(@PathVariable long novelId) {
         return Result.ok(libraryService.listDigests(novelId));
     }
 
@@ -281,10 +284,22 @@ public class LibraryController {
         return Result.ok();
     }
 
+    /** 原始门禁配置 JSON（前端合并评审标准后保存）。 */
+    @GetMapping("/novels/{novelId}/gate-config")
+    public Result<String> gateConfig(@PathVariable long novelId) {
+        return Result.ok(libraryService.gateConfigJson(novelId));
+    }
+
+    /** 有效评审标准五项（gate_config > tuning > 代码默认），工作台/风格包调参面板回显。 */
+    @GetMapping("/novels/{novelId}/reader-standards")
+    public Result<Map<String, Double>> readerStandards(@PathVariable long novelId) {
+        return Result.ok(gateService.readerStandards(novelId));
+    }
+
     // ===== 世界状态账 =====
 
     @GetMapping("/novels/{novelId}/world-states")
-    public Result<List<WorldStateDAO.StateRow>> worldStates(@PathVariable long novelId,
+    public Result<List<WorldStateDataService.StateRow>> worldStates(@PathVariable long novelId,
                                                             @RequestParam(defaultValue = "50") int limit) {
         return Result.ok(libraryService.listWorldStates(novelId, limit));
     }

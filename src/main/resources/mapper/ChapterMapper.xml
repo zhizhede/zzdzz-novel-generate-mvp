@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.ChapterMapper">
+
+    <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
+                SELECT * FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
+    </select>
+
+    <select id="listSummaries" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
+                SELECT id, novel_id, chapter_no, volume_no, arc, title, pov, outline_yaml,
+                       NULL AS full_text, goal, hook, time_note, rule_refs, foreshadow_refs,
+                       budget_min, budget_max, status, round, is_deleted
+                FROM chapters WHERE novel_id=#{novelId} AND is_deleted=false ORDER BY chapter_no
+    </select>
+
+    <select id="maxChapterWithText" resultType="int">
+                SELECT MAX(chapter_no) FROM chapters
+                WHERE novel_id=#{novelId} AND is_deleted=false AND full_text IS NOT NULL AND full_text != ''
+    </select>
+
+    <select id="findOpeningRows" resultType="map">
+                SELECT chapter_no, full_text FROM chapters
+                WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo} AND is_deleted=false
+                  AND full_text IS NOT NULL AND full_text!=''
+                ORDER BY chapter_no
+    </select>
+
+    <select id="findFullText" resultType="string">
+                SELECT full_text FROM chapters
+                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false AND full_text IS NOT NULL
+    </select>
+
+    <select id="findApprovedWithoutDigest" resultType="map">
+                SELECT c.id, c.novel_id, c.chapter_no FROM chapters c
+                LEFT JOIN digests d ON d.chapter_id = c.id AND d.is_deleted = FALSE
+                WHERE c.status = 'DIGESTED' AND c.is_deleted = FALSE AND d.id IS NULL
+                ORDER BY c.novel_id, c.chapter_no
+    </select>
+
+    <select id="listVolumeFacts" resultType="map">
+                SELECT chapter_no, title, goal, hook, status, budget_min, budget_max,
+                       COALESCE(LENGTH(full_text), 0) AS text_len,
+                       COALESCE(foreshadow_refs::text, '[]') AS refs
+                FROM chapters
+                WHERE novel_id = #{novelId} AND volume_no = #{volNo} AND is_deleted = false
+                ORDER BY chapter_no
+    </select>
+
+    <select id="existsCount" resultType="long">
+                SELECT COUNT(*) FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
+    </select>
+
+    <insert id="insertPlan">
+                INSERT INTO chapters (novel_id, chapter_no, volume_no, arc, title, goal, hook, time_note,
+                                      rule_refs, foreshadow_refs, budget_min, budget_max, status)
+                VALUES (#{novelId}, #{chapterNo}, #{volumeNo}, #{arc}, #{title}, #{goal}, #{hook}, #{timeNote},
+                        #{ruleRefs}::jsonb, #{foreshadowRefs}::jsonb, #{budgetMin}, #{budgetMax}, 'NEW')
+    </insert>
+
+    <delete id="deleteGateReports">
+                DELETE FROM gate_reports WHERE chapter_id=#{chapterId}
+    </delete>
+
+    <delete id="deleteScenes">
+                DELETE FROM chapter_scenes WHERE chapter_id=#{chapterId}
+    </delete>
+
+    <update id="markOutlined">
+                UPDATE chapters SET outline_yaml=#{outlineYaml}, status='OUTLINED', update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <update id="updatePlan">
+                UPDATE chapters SET volume_no=#{volumeNo}, arc=#{arc}, title=#{title}, goal=#{goal}, hook=#{hook}, time_note=#{timeNote},
+                       budget_min=#{budgetMin}, budget_max=#{budgetMax}, update_time=NOW()
+                WHERE id=#{chapterId} AND is_deleted=false
+    </update>
+
+    <update id="softDeletePlan">
+                UPDATE chapters SET is_deleted=true, delete_time=NOW() WHERE id=#{chapterId} AND is_deleted=false
+    </update>
+
+    <update id="updateStatus">
+                UPDATE chapters SET status=#{status}, update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <update id="updateStatusIf">
+                UPDATE chapters SET status=#{to}, update_time=NOW() WHERE id=#{chapterId} AND status=#{expect}
+    </update>
+
+    <update id="updateStatusByNo">
+                UPDATE chapters SET status=#{status}, update_time=NOW()
+                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
+    </update>
+
+    <update id="saveFullText">
+                UPDATE chapters SET full_text=#{fullText}, update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <update id="updateReviewConfig">
+                UPDATE chapters SET review_config=#{reviewConfig}::jsonb, update_time=NOW() WHERE id=#{chapterId} AND is_deleted=false
+    </update>
+
+    <select id="findDialogueRows" resultType="map">
+                SELECT chapter_no, full_text FROM chapters
+                WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo} AND is_deleted=false
+                  AND full_text IS NOT NULL AND full_text!=''
+                ORDER BY chapter_no
+    </select>
+</mapper>

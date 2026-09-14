@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.UserDAO;
+import com.zzdzz.novelgen.service.data.UserDataService;
 import com.zzdzz.novelgen.model.dto.LoginDTO;
 import com.zzdzz.novelgen.model.entity.UserDO;
 import org.springframework.stereotype.Service;
@@ -14,10 +14,10 @@ import java.security.MessageDigest;
 @Service
 public class AuthService {
 
-    private final UserDAO userDAO;
+    private final UserDataService userData;
 
-    public AuthService(UserDAO userDAO) {
-        this.userDAO = userDAO;
+    public AuthService(UserDataService userData) {
+        this.userData = userData;
     }
 
     /** 认证通过的用户（id/username/role），供签发 JWT。 */
@@ -28,7 +28,7 @@ public class AuthService {
         if (dto == null || isBlank(dto.username()) || isBlank(dto.password())) {
             throw new BizException(ErrorCode.PARAM_ERROR, "用户名和密码不能为空");
         }
-        UserDO user = userDAO.findAliveByUsername(dto.username().trim());
+        UserDO user = userData.findAliveByUsername(dto.username().trim());
         String hash = sha256(dto.username().trim() + ":" + dto.password());
         if (user == null || !hash.equals(user.passwordHash())) {
             throw new BizException(ErrorCode.LOGIN_FAILED, "用户名或密码错误");

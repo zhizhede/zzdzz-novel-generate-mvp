@@ -4,11 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.CanonDocDAO;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.ForeshadowDAO;
-import com.zzdzz.novelgen.dao.NovelDAO;
-import com.zzdzz.novelgen.dao.PipelineEventDAO;
+import com.zzdzz.novelgen.service.data.CanonDocDataService;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.ForeshadowDataService;
+import com.zzdzz.novelgen.service.data.NovelDataService;
+import com.zzdzz.novelgen.service.data.PipelineEventDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -55,10 +55,10 @@ public class VolumePlanService {
     private final LlmPort llm;
     private final LlmJson llmJson;
     private final ContextPackerService packer;
-    private final ChapterDAO chapterDAO;
-    private final ForeshadowDAO foreshadowDAO;
-    private final NovelDAO novelDAO;
-    private final CanonDocDAO canonDocDAO;
+    private final ChapterDataService chapterData;
+    private final ForeshadowDataService foreshadowData;
+    private final NovelDataService novelData;
+    private final CanonDocDataService canonData;
     private final StageLog stageLog;
     private final TuningService tuning;
     private final ObjectMapper mapper;
@@ -66,17 +66,17 @@ public class VolumePlanService {
     private final PromptTemplateService promptTemplates;
 
     public VolumePlanService(LlmPort llm, LlmJson llmJson, ContextPackerService packer,
-                             ChapterDAO chapterDAO, ForeshadowDAO foreshadowDAO, NovelDAO novelDAO,
-                             CanonDocDAO canonDocDAO, StageLog stageLog, TuningService tuning,
+                             ChapterDataService chapterData, ForeshadowDataService foreshadowData, NovelDataService novelData,
+                             CanonDocDataService canonData, StageLog stageLog, TuningService tuning,
                              ObjectMapper mapper, PlatformTransactionManager txManager,
                              PromptTemplateService promptTemplates) {
         this.llm = llm;
         this.llmJson = llmJson;
         this.packer = packer;
-        this.chapterDAO = chapterDAO;
-        this.foreshadowDAO = foreshadowDAO;
-        this.novelDAO = novelDAO;
-        this.canonDocDAO = canonDocDAO;
+        this.chapterData = chapterData;
+        this.foreshadowData = foreshadowData;
+        this.novelData = novelData;
+        this.canonData = canonData;
         this.stageLog = stageLog;
         this.tuning = tuning;
         this.mapper = mapper;
@@ -91,7 +91,7 @@ public class VolumePlanService {
      * auto 模式审校通过直接落库；manual 模式返回草稿等采纳。同步调用，约 2-10 分钟。
      */
     public PlanOutcome planVolume(long novelId, int volNo, int fromNo, Integer toNo, String seedOutline) {
-        Integer maxText = chapterDAO.maxChapterWithText(novelId);
+        Integer maxText = chapterData.maxChapterWithText(novelId);
         if (maxText != null && fromNo <= maxText) {
             throw new BizException(ErrorCode.PARAM_ERROR,
                     "起始章 " + fromNo + " 不得早于已有正文的最末章 " + maxText + "，卷纲必须接续正文之后");
@@ -102,7 +102,7 @@ public class VolumePlanService {
         stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.START,
                 Map.of("volNo", volNo, "from", fromNo, "to", Objects.toString(toNo, "auto")));
         PlanDraft draft = generateWithReview(novelId, volNo, fromNo, toNo, seedOutline);
-        String planMode = novelDAO.findPlanMode(novelId);
+        String planMode = novelData.findPlanMode(novelId);
         AdoptResult result = "auto".equals(planMode) ? adopt(novelId, volNo, draft) : null;
         stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN,
                 result != null ? StageLog.Phase.ADOPTED : StageLog.Phase.DRAFT,
@@ -309,13 +309,13 @@ public class VolumePlanService {
         List<String> warnings = new ArrayList<>();
         List<String> adopted = new ArrayList<>();
         tx.executeWithoutResult(status -> {
-            for (ChapterDO c : chapterDAO.listSummariesByNovel(novelId)) {
+            for (ChapterDO c : chapterData.listSummariesByNovel(novelId)) {
                 if (c.chapterNo() >= fromNo) {
                     if (c.fullText() != null && !c.fullText().isBlank()) {
                         throw new BizException(ErrorCode.PARAM_ERROR,
                                 "第 " + c.chapterNo() + " 章已有正文，禁止覆盖其规划行");
                     }
-                    chapterDAO.softDeletePlan(c.id());
+                    chapterData.softDeletePlan(c.id());
                 }
             }
             // 先逐章解析伏笔引用（可能自动建账），再插规划行——refs 写最终编码，下游指令查询才有据
@@ -329,7 +329,7 @@ public class VolumePlanService {
                 refsByRow.put(r.chapterNo(), codes);
             }
             for (PlanRow r : draft.rows()) {
-                chapterDAO.insertPlan(novelId, r.chapterNo(), volNo, draft.arc(), r.title(), r.goal(),
+                chapterData.insertPlan(novelId, r.chapterNo(), volNo, draft.arc(), r.title(), r.goal(),
                         r.hook(), r.timeNote(), "[]", jsonRefs(refsByRow.get(r.chapterNo())),
                         r.budgetMin(), r.budgetMax());
             }
@@ -350,14 +350,14 @@ public class VolumePlanService {
         boolean hasContent = ref.content() != null && !ref.content().isBlank();
         String action = "recover".equals(ref.action()) ? "回收" : "埋设";
         if (hasCode) {
-            ForeshadowDO f = foreshadowDAO.findByCode(novelId, ref.code());
+            ForeshadowDO f = foreshadowData.findByCode(novelId, ref.code());
             if (f != null) {
                 if ("proposed".equals(f.status())) {
-                    foreshadowDAO.promoteProposal(f.id(), chapterNo);
+                    foreshadowData.promoteProposal(f.id(), chapterNo);
                     adopted.add(ref.code() + "（采纳，第" + chapterNo + "章" + action + "）");
                 } else if ("planted".equals(f.status()) && f.recoveredIn() == null
                         && "recover".equals(ref.action())) {
-                    foreshadowDAO.scheduleRecovery(f.id(), chapterNo);
+                    foreshadowData.scheduleRecovery(f.id(), chapterNo);
                     adopted.add(ref.code() + "（排期回收，第" + chapterNo + "章）");
                 }
                 return ref.code();
@@ -375,14 +375,14 @@ public class VolumePlanService {
     /** 新伏笔建账：给过编码且形如 F数字 则沿用，否则取下一可用号；同内容去重。 */
     private String createForeshadow(long novelId, String wantedCode, String content, int chapterNo,
                                     List<String> adopted) {
-        if (foreshadowDAO.contentExists(novelId, content)) {
-            for (ForeshadowDO f : foreshadowDAO.listByNovel(novelId)) {
+        if (foreshadowData.contentExists(novelId, content)) {
+            for (ForeshadowDO f : foreshadowData.listByNovel(novelId)) {
                 if (f.content().equals(content)) return f.code();
             }
         }
         String code = wantedCode != null && wantedCode.matches("F\\d+")
-                && foreshadowDAO.findByCode(novelId, wantedCode) == null ? wantedCode : foreshadowDAO.nextCode(novelId);
-        foreshadowDAO.insertPlanned(novelId, code, content, chapterNo);
+                && foreshadowData.findByCode(novelId, wantedCode) == null ? wantedCode : foreshadowData.nextCode(novelId);
+        foreshadowData.insertPlanned(novelId, code, content, chapterNo);
         adopted.add(code + "（新建账，第" + chapterNo + "章埋设：" + content + "）");
         return code;
     }
@@ -400,11 +400,11 @@ public class VolumePlanService {
     private void upsertBrief(long novelId, int volNo, PlanDraft draft) {
         String name = "卷" + volNo + "简报";
         String content = "【卷名】" + draft.arc() + "\n\n" + draft.brief();
-        Long id = canonDocDAO.findId(novelId, "misc", name);
+        Long id = canonData.findId(novelId, "misc", name);
         if (id == null) {
-            canonDocDAO.insert(novelId, "misc", name, content);
+            canonData.insert(novelId, "misc", name, content);
         } else {
-            canonDocDAO.updateContent(id, content);
+            canonData.updateContent(id, content);
         }
     }
 
@@ -420,7 +420,7 @@ public class VolumePlanService {
 
     /** 换一条可行路径重写该章 title/goal/hook/time_note（预算沿用），并重置章纲待重出。 */
     public ChapterDO replanChapter(long novelId, int chapterNo, String failureReason) {
-        ChapterDO ch = chapterDAO.find(novelId, chapterNo)
+        ChapterDO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
         if (ch.fullText() != null && !ch.fullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + chapterNo + " 章已有正文，禁止重写其卷纲");
@@ -455,16 +455,16 @@ public class VolumePlanService {
                     return new Replan(title, goal, node.path("hook").asText(""),
                             timeNote.isBlank() ? null : timeNote);
                 }, 2);
-        chapterDAO.updatePlan(ch.id(), ch.volumeNo(), ch.arc(),
+        chapterData.updatePlan(ch.id(), ch.volumeNo(), ch.arc(),
                 replan.title(), replan.goal(),
                 replan.hook().isBlank() ? ch.hook() : replan.hook(),
                 replan.timeNote() == null ? ch.timeNote() : replan.timeNote(),
                 ch.budgetMin(), ch.budgetMax());
         // 清场景与门禁报告：章纲将按新目标重出（runChapter 见场景数为 0 自动重生成）
-        chapterDAO.resetForReoutline(ch.id(), null);
+        chapterData.resetForReoutline(ch.id(), null);
         stageLog.emit(novelId, chapterNo, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.CHAPTER_REPLAN,
                 Map.of("goal", replan.goal()));
         log.info("第 {} 章卷纲已重写：{}", chapterNo, replan.goal());
-        return chapterDAO.findById(ch.id()).orElseThrow();
+        return chapterData.findById(ch.id()).orElseThrow();
     }
 }

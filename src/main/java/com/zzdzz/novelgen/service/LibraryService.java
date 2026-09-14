@@ -2,11 +2,11 @@ package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.CanonDocDAO;
-import com.zzdzz.novelgen.dao.DigestDAO;
-import com.zzdzz.novelgen.dao.ForeshadowDAO;
-import com.zzdzz.novelgen.dao.StylePackDAO;
-import com.zzdzz.novelgen.dao.WorldStateDAO;
+import com.zzdzz.novelgen.service.data.CanonDocDataService;
+import com.zzdzz.novelgen.service.data.DigestDataService;
+import com.zzdzz.novelgen.service.data.ForeshadowDataService;
+import com.zzdzz.novelgen.service.data.StylePackDataService;
+import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import com.zzdzz.novelgen.model.entity.CanonDocDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.springframework.stereotype.Service;
@@ -22,33 +22,33 @@ public class LibraryService {
     private static final Set<String> CANON_KINDS = Set.of("world", "character", "misc");
     private static final Set<String> FORESHADOW_STATUSES = Set.of("proposed", "planned", "planted", "recovered", "dropped");
 
-    private final CanonDocDAO canonDocDAO;
-    private final ForeshadowDAO foreshadowDAO;
-    private final StylePackDAO stylePackDAO;
-    private final DigestDAO digestDAO;
-    private final WorldStateDAO worldStateDAO;
+    private final CanonDocDataService canonData;
+    private final ForeshadowDataService foreshadowData;
+    private final StylePackDataService stylePackData;
+    private final DigestDataService digestData;
+    private final WorldStateDataService worldStateData;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
-    public LibraryService(CanonDocDAO canonDocDAO, ForeshadowDAO foreshadowDAO,
-                          StylePackDAO stylePackDAO, DigestDAO digestDAO,
-                          WorldStateDAO worldStateDAO,
+    public LibraryService(CanonDocDataService canonData, ForeshadowDataService foreshadowData,
+                          StylePackDataService stylePackData, DigestDataService digestData,
+                          WorldStateDataService worldStateData,
                           com.fasterxml.jackson.databind.ObjectMapper mapper) {
-        this.canonDocDAO = canonDocDAO;
-        this.foreshadowDAO = foreshadowDAO;
-        this.stylePackDAO = stylePackDAO;
-        this.digestDAO = digestDAO;
-        this.worldStateDAO = worldStateDAO;
+        this.canonData = canonData;
+        this.foreshadowData = foreshadowData;
+        this.stylePackData = stylePackData;
+        this.digestData = digestData;
+        this.worldStateData = worldStateData;
         this.mapper = mapper;
     }
 
     // ===== 正典文档 =====
 
     public List<CanonDocDO> listCanon(long novelId) {
-        return canonDocDAO.listByNovel(novelId);
+        return canonData.listByNovel(novelId);
     }
 
     public CanonDocDO canonDoc(long id) {
-        CanonDocDO doc = canonDocDAO.findById(id);
+        CanonDocDO doc = canonData.findById(id);
         if (doc == null) throw new BizException(ErrorCode.NOT_FOUND, "正典文档不存在: " + id);
         return doc;
     }
@@ -56,7 +56,7 @@ public class LibraryService {
     public void updateCanon(long id, String content) {
         requireText(content, "内容不能为空");
         canonDoc(id);
-        canonDocDAO.updateContent(id, content);
+        canonData.updateContent(id, content);
     }
 
     public void createCanon(long novelId, String kind, String name, String content) {
@@ -65,21 +65,21 @@ public class LibraryService {
         if (!CANON_KINDS.contains(kind)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "类型只支持 world / character / misc");
         }
-        if (canonDocDAO.exists(novelId, kind, name)) {
+        if (canonData.exists(novelId, kind, name)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "同类型下已存在同名文档: " + name);
         }
-        canonDocDAO.insert(novelId, kind, name, content);
+        canonData.insert(novelId, kind, name, content);
     }
 
     public void deleteCanon(long id) {
         canonDoc(id);
-        canonDocDAO.softDelete(id);
+        canonData.softDelete(id);
     }
 
     // ===== 伏笔账本 =====
 
     public List<ForeshadowDO> listForeshadows(long novelId) {
-        return foreshadowDAO.listByNovel(novelId);
+        return foreshadowData.listByNovel(novelId);
     }
 
     public void updateForeshadow(long id, String content, Integer plantedIn, Integer recoveredIn, String status) {
@@ -87,27 +87,27 @@ public class LibraryService {
         if (!FORESHADOW_STATUSES.contains(status)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "状态只支持 planned/planted/recovered/dropped");
         }
-        if (foreshadowDAO.findById(id) == null) {
+        if (foreshadowData.findById(id) == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "伏笔不存在: " + id);
         }
-        foreshadowDAO.update(id, content, plantedIn, recoveredIn, status);
+        foreshadowData.update(id, content, plantedIn, recoveredIn, status);
     }
 
     // ===== 事实账 =====
 
-    public List<DigestDAO.DigestItem> listDigests(long novelId) {
-        return digestDAO.listByNovel(novelId);
+    public List<DigestDataService.DigestItem> listDigests(long novelId) {
+        return digestData.listByNovel(novelId);
     }
 
     public void updateDigest(long id, String contentMd, String factsJson) {
         requireText(contentMd, "摘要不能为空");
-        digestDAO.updateContent(id, contentMd, factsJson == null || factsJson.isBlank() ? "[]" : factsJson);
+        digestData.updateContent(id, contentMd, factsJson == null || factsJson.isBlank() ? "[]" : factsJson);
     }
 
     // ===== 世界状态账 =====
 
-    public List<WorldStateDAO.StateRow> listWorldStates(long novelId, int limit) {
-        return worldStateDAO.listByNovel(novelId, limit);
+    public List<WorldStateDataService.StateRow> listWorldStates(long novelId, int limit) {
+        return worldStateData.listByNovel(novelId, limit);
     }
 
     /** 人工纠偏某章快照：必须是可解析 JSON 对象。 */
@@ -122,15 +122,15 @@ public class LibraryService {
         } catch (Exception e) {
             throw new BizException(ErrorCode.PARAM_ERROR, "状态必须是合法 JSON 对象");
         }
-        worldStateDAO.updateByChapter(novelId, chapterNo, stateJson);
+        worldStateData.updateByChapter(novelId, chapterNo, stateJson);
     }
 
     // ===== 风格包 =====
 
     public StylePackVO styleByNovel(long novelId) {
-        return new StylePackVO(stylePackDAO.findRulesMdByNovel(novelId),
-                stylePackDAO.findFingerprintByNovel(novelId),
-                stylePackDAO.findGateConfigByNovel(novelId));
+        return new StylePackVO(stylePackData.findRulesMdByNovel(novelId),
+                stylePackData.findFingerprintByNovel(novelId),
+                stylePackData.findGateConfigByNovel(novelId));
     }
 
     /** 门禁配置更新（黑名单/章长容差），JSON 由前端组装、后端校验可解析。 */
@@ -141,12 +141,18 @@ public class LibraryService {
         } catch (Exception e) {
             throw new BizException(ErrorCode.PARAM_ERROR, "门禁配置必须是合法 JSON");
         }
-        stylePackDAO.updateGateConfigByNovel(novelId, gateConfigJson);
+        stylePackData.updateGateConfigByNovel(novelId, gateConfigJson);
+    }
+
+    /** 原始门禁配置 JSON（工作台/风格包调参面板读取合并保存用）。 */
+    public String gateConfigJson(long novelId) {
+        String json = stylePackData.findGateConfigByNovel(novelId);
+        return json == null || json.isBlank() ? "{}" : json;
     }
 
     public void updateStyleRules(long novelId, String rulesMd) {
         requireText(rulesMd, "规则正文不能为空");
-        stylePackDAO.updateRulesMdByNovel(novelId, rulesMd);
+        stylePackData.updateRulesMdByNovel(novelId, rulesMd);
     }
 
     private void requireText(String s, String message) {

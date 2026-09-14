@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.TuningMapper">
+
+    <resultMap id="doMap" type="com.zzdzz.novelgen.model.entity.TuningDO">
+        <id property="id" column="id"/>
+        <result property="key" column="tkey"/>
+        <result property="value" column="tvalue"/>
+        <result property="description" column="description"/>
+    </resultMap>
+
+    <select id="findAll" resultMap="doMap">
+
+                SELECT id, tkey, tvalue, description FROM tuning
+                WHERE is_deleted = FALSE ORDER BY tkey
+
+    </select>
+
+    <update id="updateValue">
+UPDATE tuning SET tvalue=#{value}, update_time=NOW() WHERE tkey=#{key} AND is_deleted=FALSE
+    </update>
+</mapper>

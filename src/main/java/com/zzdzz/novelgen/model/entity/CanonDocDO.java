@@ -1,4 +1,50 @@
 package com.zzdzz.novelgen.model.entity;
 
-public record CanonDocDO(Long id, long novelId, String kind, String name, String content,
-        int sortNo, boolean isDeleted) {}
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+
+/** CanonDocDO。 */
+@Data
+@TableName(value = "canon_docs")
+public class CanonDocDO {
+    @TableId(type = IdType.AUTO)
+    private Long id;
+    private long novelId;
+    private String kind;
+    private String name;
+    private String content;
+    private int sortNo;
+    private boolean isDeleted;
+
+    @Deprecated
+    public Long id() {
+        return getId();
+    }
+
+    @Deprecated
+    public long novelId() {
+        return getNovelId();
+    }
+
+    @Deprecated
+    public String kind() {
+        return getKind();
+    }
+
+    @Deprecated
+    public String name() {
+        return getName();
+    }
+
+    @Deprecated
+    public String content() {
+        return getContent();
+    }
+
+    @Deprecated
+    public int sortNo() {
+        return getSortNo();
+    }
+}

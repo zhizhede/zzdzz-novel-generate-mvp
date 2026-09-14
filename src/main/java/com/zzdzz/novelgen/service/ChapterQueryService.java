@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.GateReportDAO;
-import com.zzdzz.novelgen.dao.LlmCallLogDAO;
-import com.zzdzz.novelgen.dao.SceneDAO;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.GateReportDataService;
+import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
+import com.zzdzz.novelgen.service.data.SceneDataService;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.vo.ChapterDetailVO;
 import com.zzdzz.novelgen.model.vo.ChapterListItemVO;
@@ -23,44 +23,44 @@ import java.util.List;
 @Service
 public class ChapterQueryService {
 
-    private final ChapterDAO chapterDAO;
-    private final SceneDAO sceneDAO;
-    private final GateReportDAO gateReportDAO;
-    private final LlmCallLogDAO llmCallLogDAO;
+    private final ChapterDataService chapterData;
+    private final SceneDataService sceneData;
+    private final GateReportDataService gateReportData;
+    private final LlmCallLogDataService llmCallLogData;
     private final ObjectMapper mapper;
 
-    public ChapterQueryService(ChapterDAO chapterDAO, SceneDAO sceneDAO,
-                               GateReportDAO gateReportDAO, LlmCallLogDAO llmCallLogDAO,
+    public ChapterQueryService(ChapterDataService chapterData, SceneDataService sceneData,
+                               GateReportDataService gateReportData, LlmCallLogDataService llmCallLogData,
                                ObjectMapper mapper) {
-        this.chapterDAO = chapterDAO;
-        this.sceneDAO = sceneDAO;
-        this.gateReportDAO = gateReportDAO;
-        this.llmCallLogDAO = llmCallLogDAO;
+        this.chapterData = chapterData;
+        this.sceneData = sceneData;
+        this.gateReportData = gateReportData;
+        this.llmCallLogData = llmCallLogData;
         this.mapper = mapper;
     }
 
     public List<ChapterListItemVO> listByNovel(long novelId) {
-        return chapterDAO.listSummariesByNovel(novelId).stream()
+        return chapterData.listSummariesByNovel(novelId).stream()
                 .map(c -> new ChapterListItemVO(c.id(), c.chapterNo(), c.title(), c.status(),
                         c.round(), c.budgetMin(), c.budgetMax()))
                 .toList();
     }
 
     public ChapterDetailVO detail(long chapterId) {
-        ChapterDO ch = chapterDAO.findById(chapterId)
+        ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
-        List<SceneVO> scenes = sceneDAO.findByChapter(chapterId).stream()
+        List<SceneVO> scenes = sceneData.findByChapter(chapterId).stream()
                 .map(s -> new SceneVO(s.id(), s.sceneNo(), s.goal(), s.draftText(),
                         s.gateStatus(), s.revisionRound()))
                 .toList();
         return new ChapterDetailVO(ch.id(), ch.chapterNo(), ch.title(), ch.status(), ch.round(),
                 ch.budgetMin(), ch.budgetMax(), ch.fullText(), scenes,
                 latestGateReport(chapterId), latestReview(chapterId),
-                toTotalsVO(llmCallLogDAO.totalsBy(null, chapterId)));
+                toTotalsVO(llmCallLogData.totalsBy(null, chapterId)), ch.getReviewConfig());
     }
 
     private GateReportVO latestGateReport(long chapterId) {
-        GateReportDAO.LatestChapterReport row = gateReportDAO.findLatestChapterReport(chapterId);
+        GateReportDataService.LatestChapterReport row = gateReportData.findLatestChapterReport(chapterId);
         if (row == null) return null;
         try {
             JsonNode node = mapper.readTree(row.resultJson());
@@ -78,7 +78,7 @@ public class ChapterQueryService {
 
     /** 最新 AI 审校报告 → VO（skipped 的报告也如实透出）。审校未跑过返回 null。 */
     public ReviewVO latestReview(long chapterId) {
-        GateReportDAO.LatestReview row = gateReportDAO.findLatestChapterReview(chapterId);
+        GateReportDataService.LatestReview row = gateReportData.findLatestChapterReview(chapterId);
         if (row == null) return null;
         String time = row.createTime().format(
                 java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
@@ -99,7 +99,7 @@ public class ChapterQueryService {
         }
     }
 
-    private LlmTotalsVO toTotalsVO(LlmCallLogDAO.Totals t) {
+    private LlmTotalsVO toTotalsVO(LlmCallLogDataService.Totals t) {
         return new LlmTotalsVO(t.calls(), t.promptTokens(), t.completionTokens(),
                 t.totalTokens(), t.avgLatencyMs());
     }
