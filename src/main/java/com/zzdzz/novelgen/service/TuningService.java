@@ -1,6 +1,6 @@
 package com.zzdzz.novelgen.service;
 
-import com.zzdzz.novelgen.dao.TuningDAO;
+import com.zzdzz.novelgen.service.data.TuningDataService;
 import com.zzdzz.novelgen.model.entity.TuningDO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,11 +23,11 @@ public class TuningService {
 
     private static final long TTL_MS = 30_000;
 
-    private final TuningDAO dao;
+    private final TuningDataService dao;
     private final Map<String, String> cache = new ConcurrentHashMap<>();
     private volatile long loadedAt = 0;
 
-    public TuningService(TuningDAO dao) {
+    public TuningService(TuningDataService dao) {
         this.dao = dao;
     }
 

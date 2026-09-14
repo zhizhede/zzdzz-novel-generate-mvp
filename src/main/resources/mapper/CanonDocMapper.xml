@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.CanonDocMapper">
+
+    <select id="exists" resultType="boolean">
+SELECT COUNT(*) FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND is_deleted=false
+    </select>
+
+    <update id="insert">
+INSERT INTO canon_docs (novel_id, kind, name, content) VALUES (#{novelId}, #{kind}, #{name}, #{content})
+    </update>
+
+    <select id="findFirstByKind" resultType="string">
+
+                SELECT content FROM canon_docs
+                WHERE novel_id=#{novelId} AND kind=#{kind} AND is_deleted=false LIMIT 1
+                
+    </select>
+
+    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.CanonDocDO">
+
+                SELECT id, novel_id, kind, name, NULL AS content, sort_no, is_deleted
+                FROM canon_docs WHERE novel_id=#{novelId} AND is_deleted=false ORDER BY kind, sort_no, id
+                
+    </select>
+
+    <select id="findId" resultType="long">
+SELECT id FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND is_deleted=false
+    </select>
+
+    <select id="findContentByKindName" resultType="string">
+
+                SELECT content FROM canon_docs
+                WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND is_deleted=false LIMIT 1
+                
+    </select>
+
+    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.CanonDocDO">
+
+                SELECT id, novel_id, kind, name, content, sort_no, is_deleted
+                FROM canon_docs WHERE id=#{id} AND is_deleted=false
+                
+    </select>
+
+    <update id="updateContent">
+UPDATE canon_docs SET content=#{content}, update_time=NOW() WHERE id=#{id} AND is_deleted=false
+    </update>
+
+    <update id="softDelete">
+UPDATE canon_docs SET is_deleted=true, delete_time=NOW() WHERE id=#{id} AND is_deleted=false
+    </update>
+</mapper>

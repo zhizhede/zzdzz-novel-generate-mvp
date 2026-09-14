@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.NovelDAO;
+import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.model.vo.NovelVO;
 import org.springframework.stereotype.Service;
 
@@ -12,16 +12,16 @@ import java.util.List;
 @Service
 public class NovelService {
 
-    private final NovelDAO novelDAO;
+    private final NovelDataService novelData;
 
-    public NovelService(NovelDAO novelDAO) {
-        this.novelDAO = novelDAO;
+    public NovelService(NovelDataService novelData) {
+        this.novelData = novelData;
     }
 
     public List<NovelVO> list() {
-        return novelDAO.listAlive().stream()
+        return novelData.listAlive().stream()
                 .map(n -> new NovelVO(n.id(), n.title(), n.description(), n.approvalMode(),
-                        n.status(), novelDAO.chapterCount(n.id())))
+                        n.status(), novelData.chapterCount(n.id())))
                 .toList();
     }
 
@@ -29,6 +29,6 @@ public class NovelService {
         if (!"auto".equals(mode) && !"manual".equals(mode)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "审批模式只支持 auto / manual");
         }
-        novelDAO.updateApprovalMode(novelId, mode);
+        novelData.updateApprovalMode(novelId, mode);
     }
 }

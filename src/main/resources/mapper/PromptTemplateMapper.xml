@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.PromptTemplateMapper">
+
+    <update id="updateContent">
+
+                UPDATE prompt_templates SET content = #{content}, custom = TRUE, version = version + 1, update_time = NOW()
+                WHERE id = #{id} AND is_deleted = FALSE AND exact = TRUE
+                
+    </update>
+
+    <update id="reset">
+
+                UPDATE prompt_templates SET content = #{content}, catalog_hash = #{catalogHash}, custom = FALSE,
+                       version = version + 1, update_time = NOW()
+                WHERE id = #{id} AND is_deleted = FALSE
+                
+    </update>
+
+    <select id="findAll" resultType="com.zzdzz.novelgen.model.entity.PromptTemplateDO">
+
+                SELECT * FROM prompt_templates WHERE is_deleted = FALSE ORDER BY node, phase
+                
+    </select>
+
+    <update id="syncUpdateStale">
+                UPDATE prompt_templates SET title = #{title}, content = #{content}, exact = #{exact}, catalog_hash = #{catalogHash},
+                       version = version + 1, update_time = NOW()
+                WHERE node = #{node} AND phase = #{phase} AND is_deleted = FALSE
+                  AND custom = FALSE AND (catalog_hash IS DISTINCT FROM #{catalogHash} OR content != #{content} OR title != #{title})
+    </update>
+
+    <update id="syncTouch">
+                UPDATE prompt_templates SET update_time = NOW()
+                WHERE node = #{node} AND phase = #{phase} AND is_deleted = FALSE
+    </update>
+
+    <insert id="syncInsertIfMissing">
+                INSERT INTO prompt_templates (node, phase, title, content, exact, catalog_hash)
+                SELECT #{node}, #{phase}, #{title}, #{content}, #{exact}, #{catalogHash}
+                WHERE NOT EXISTS (SELECT 1 FROM prompt_templates WHERE node = #{node} AND phase = #{phase} AND is_deleted = FALSE)
+    </insert>
+
+    <select id="findNodePhase" resultType="map">
+                SELECT node, phase FROM prompt_templates WHERE id = #{id} AND is_deleted = FALSE
+    </select>
+
+    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.PromptTemplateDO">
+                SELECT * FROM prompt_templates WHERE id = #{id} AND is_deleted = FALSE
+    </select>
+</mapper>

@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.dao.SceneDAO;
+import com.zzdzz.novelgen.service.data.SceneDataService;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -12,11 +12,11 @@ import java.util.List;
 public class SceneService {
 
     private final LlmPort llm;
-    private final SceneDAO sceneDAO;
+    private final SceneDataService sceneData;
 
-    public SceneService(LlmPort llm, SceneDAO sceneDAO) {
+    public SceneService(LlmPort llm, SceneDataService sceneData) {
         this.llm = llm;
-        this.sceneDAO = sceneDAO;
+        this.sceneData = sceneData;
     }
 
     public String generate(long novelId, long chapterId, int chapterNo,
@@ -26,7 +26,7 @@ public class SceneService {
                 List.of(LlmPort.Message.system(pack.system()), LlmPort.Message.user(pack.user())),
                 0.9));
         String text = cleanDraft(r.content());
-        sceneDAO.saveDraft(chapterId, sceneNo, text);
+        sceneData.saveDraft(chapterId, sceneNo, text);
         return text;
     }
 
@@ -40,7 +40,7 @@ public class SceneService {
                                 + "\n\n只输出修订后的完整正文。")),
                 0.8));
         String text = cleanDraft(r.content());
-        sceneDAO.applyRevise(sceneId, text);
+        sceneData.applyRevise(sceneId, text);
         return text;
     }
 

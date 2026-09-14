@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.SceneMapper">
+
+    <select id="countByChapter" resultType="int">
+SELECT COUNT(*) FROM chapter_scenes WHERE chapter_id=#{chapterId} AND is_deleted=false
+    </select>
+
+    <select id="findByChapter" resultType="com.zzdzz.novelgen.model.entity.SceneDO">
+
+                SELECT * FROM chapter_scenes WHERE chapter_id=#{chapterId} AND is_deleted=false ORDER BY scene_no
+                
+    </select>
+
+    <select id="findId" resultType="long">
+SELECT id FROM chapter_scenes WHERE chapter_id=#{chapterId} AND scene_no=#{sceneNo} AND is_deleted=false
+    </select>
+
+    <update id="saveDraft">
+
+                UPDATE chapter_scenes SET draft_text=#{draftText}, update_time=NOW()
+                WHERE chapter_id=#{chapterId} AND scene_no=#{sceneNo}
+                
+    </update>
+
+    <update id="applyRevise">
+
+                UPDATE chapter_scenes SET draft_text=#{draftText}, revision_round=revision_round+1, update_time=NOW()
+                WHERE id=#{sceneId}
+                
+    </update>
+
+    <update id="updateGateStatus">
+UPDATE chapter_scenes SET gate_status=#{status} WHERE id=#{sceneId}
+    </update>
+
+    <select id="findPassedDrafts" resultType="string">
+
+                SELECT draft_text FROM chapter_scenes
+                WHERE chapter_id=#{chapterId} AND gate_status='PASSED' AND is_deleted=false ORDER BY scene_no
+                
+    </select>
+    <delete id="deleteByChapter">
+                DELETE FROM chapter_scenes WHERE chapter_id=#{chapterId}
+    </delete>
+
+    <insert id="insertScene">
+                INSERT INTO chapter_scenes (chapter_id, scene_no, goal, present, must_reveal, must_not, words_budget)
+                VALUES (#{chapterId}, #{sceneNo}, #{goal}, #{present}::jsonb, #{mustReveal}::jsonb, #{mustNot}::jsonb, #{words})
+    </insert>
+</mapper>

@@ -2,8 +2,8 @@ package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.GenerationTaskDAO;
-import com.zzdzz.novelgen.dao.NovelDAO;
+import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
+import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.model.vo.GenerationTaskVO;
 import com.zzdzz.novelgen.model.vo.PipelineStatusVO;
 import jakarta.annotation.PreDestroy;
@@ -30,8 +30,8 @@ public class GenerationQueueService {
 
     private static final Logger log = LoggerFactory.getLogger(GenerationQueueService.class);
 
-    private final GenerationTaskDAO taskDAO;
-    private final NovelDAO novelDAO;
+    private final GenerationTaskDataService taskDAO;
+    private final NovelDataService novelData;
     private final ChapterPipelineService pipeline;
     private final StageLog stageLog;
 
@@ -44,10 +44,10 @@ public class GenerationQueueService {
         return t;
     });
 
-    public GenerationQueueService(GenerationTaskDAO taskDAO, NovelDAO novelDAO,
+    public GenerationQueueService(GenerationTaskDataService taskDAO, NovelDataService novelData,
                                   ChapterPipelineService pipeline, StageLog stageLog) {
         this.taskDAO = taskDAO;
-        this.novelDAO = novelDAO;
+        this.novelData = novelData;
         this.pipeline = pipeline;
         this.stageLog = stageLog;
         worker.scheduleWithFixedDelay(this::pump, 2, 2, TimeUnit.SECONDS);
@@ -64,7 +64,7 @@ public class GenerationQueueService {
 
     /** 入队：立即返回任务 id（异步执行）。 */
     public long submit(String novelTitle, int from, int to, Long userId) {
-        Long novelId = novelDAO.findIdByTitle(novelTitle);
+        Long novelId = novelData.findIdByTitle(novelTitle);
         if (novelId == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelTitle);
         }
@@ -97,7 +97,7 @@ public class GenerationQueueService {
 
     /** /status 派生：有 RUNNING 任务即运行中。 */
     public PipelineStatusVO status() {
-        GenerationTaskDAO.TaskRow running = taskDAO.findRunning();
+        GenerationTaskDataService.TaskRow running = taskDAO.findRunning();
         if (running == null) {
             return new PipelineStatusVO(false, "空闲");
         }
@@ -108,7 +108,7 @@ public class GenerationQueueService {
 
     private void pump() {
         try {
-            GenerationTaskDAO.TaskRow task = taskDAO.claimNextQueued();
+            GenerationTaskDataService.TaskRow task = taskDAO.claimNextQueued();
             if (task != null) {
                 runTask(task);
             }
@@ -117,7 +117,7 @@ public class GenerationQueueService {
         }
     }
 
-    private void runTask(GenerationTaskDAO.TaskRow task) {
+    private void runTask(GenerationTaskDataService.TaskRow task) {
         log.info("任务 #{} 开始执行：{} 第 {}-{} 章", task.id(), task.novelTitle(),
                 task.fromChapter(), task.toChapter());
         emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),

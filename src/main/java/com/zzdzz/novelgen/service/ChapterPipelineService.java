@@ -6,9 +6,9 @@ import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.SceneDO;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.NovelDAO;
-import com.zzdzz.novelgen.dao.SceneDAO;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.NovelDataService;
+import com.zzdzz.novelgen.service.data.SceneDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -32,9 +32,9 @@ public class ChapterPipelineService {
 
     private static final Logger log = LoggerFactory.getLogger(ChapterPipelineService.class);
 
-    private final NovelDAO novelDAO;
-    private final ChapterDAO chapterDAO;
-    private final SceneDAO sceneDAO;
+    private final NovelDataService novelData;
+    private final ChapterDataService chapterData;
+    private final SceneDataService sceneData;
     private final OutlineService outlineService;
     private final ContextPackerService packer;
     private final SceneService sceneService;
@@ -47,16 +47,16 @@ public class ChapterPipelineService {
     private final TuningService tuning;
     private final PromptTemplateService promptTemplates;
 
-    public ChapterPipelineService(NovelDAO novelDAO, ChapterDAO chapterDAO,
-                                  SceneDAO sceneDAO, OutlineService outlineService,
+    public ChapterPipelineService(NovelDataService novelData, ChapterDataService chapterData,
+                                  SceneDataService sceneData, OutlineService outlineService,
                                   ContextPackerService packer, SceneService sceneService,
                                   GateService gateService, DigestService digestService,
                                   ReviewService reviewService, VolumePlanService volumePlanService,
                                   LlmPort llm, StageLog stageLog, TuningService tuning,
                                   PromptTemplateService promptTemplates) {
-        this.novelDAO = novelDAO;
-        this.chapterDAO = chapterDAO;
-        this.sceneDAO = sceneDAO;
+        this.novelData = novelData;
+        this.chapterData = chapterData;
+        this.sceneData = sceneData;
         this.outlineService = outlineService;
         this.packer = packer;
         this.sceneService = sceneService;
@@ -79,14 +79,14 @@ public class ChapterPipelineService {
 
     /** 兼容旧入口：按作品标题连跑，无进度回调。 */
     public int runChapters(String novelTitle, int from, int to) {
-        Long novelId = novelDAO.findIdByTitle(novelTitle);
+        Long novelId = novelData.findIdByTitle(novelTitle);
         if (novelId == null) throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelTitle);
         return runChapters(novelId, novelTitle, from, to, null);
     }
 
     /** 连跑 [from, to] 章；返回通过章数。任一章失败/异常即停止（状态保留，断点重跑）。 */
     public int runChapters(long novelId, String novelTitle, int from, int to, ProgressSink sink) {
-        String mode = novelDAO.findApprovalMode(novelId);
+        String mode = novelData.findApprovalMode(novelId);
         log.info("连跑开始 {} 第 {}–{} 章（审批模式 {}）", novelTitle, from, to, mode);
 
         int okChapters = 0;
@@ -106,7 +106,7 @@ public class ChapterPipelineService {
                 }
             } catch (Exception e) {
                 log.error("=== 第 {} 章异常：{}；状态保留，可断点重跑 ===", no, e.getMessage());
-                chapterDAO.updateStatusByNo(novelId, no, "FAILED");
+                chapterData.updateStatusByNo(novelId, no, "FAILED");
                 break;
             }
             if (sink != null) {
@@ -148,7 +148,7 @@ public class ChapterPipelineService {
             return runChapter(novelId, chapterNo, approvalMode);
         } catch (Exception e) {
             log.error("第 {} 章尝试异常：{}", chapterNo, e.getMessage());
-            chapterDAO.updateStatusByNo(novelId, chapterNo, "FAILED");
+            chapterData.updateStatusByNo(novelId, chapterNo, "FAILED");
             return false;
         }
     }
@@ -156,7 +156,7 @@ public class ChapterPipelineService {
     /** 自愈用失败原因：优先取最近一次门禁失败清单，取不到给兜底文案。 */
     private String failureReason(long novelId, int chapterNo) {
         try {
-            ChapterDO ch = chapterDAO.find(novelId, chapterNo).orElse(null);
+            ChapterDO ch = chapterData.find(novelId, chapterNo).orElse(null);
             if (ch != null) {
                 String s = gateService.failedChecksText(ch.id());
                 if (s != null && !s.isBlank()) return s;
@@ -187,7 +187,7 @@ public class ChapterPipelineService {
      * 库约束不含 APPROVED，历史版本在此必撞约束导致「digest 成功、接口报错」）。
      * 条件状态推进防并发重复审批。
      */
-    public void approve(long chapterId) {        ChapterDO ch = chapterDAO.findById(chapterId)
+    public void approve(long chapterId) {        ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (!"PENDING_APPROVAL".equals(ch.status())) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
@@ -195,30 +195,30 @@ public class ChapterPipelineService {
         }
         // 先原子占位（PENDING_APPROVAL → DIGESTED，占位必须用合法状态值；库约束无 DIGESTING/APPROVED），
         // 并发第二次点击立刻被拒；digest 异常则回退原状态
-        chapterDAO.updateStatusIf(chapterId, "PENDING_APPROVAL", "DIGESTED");
+        chapterData.updateStatusIf(chapterId, "PENDING_APPROVAL", "DIGESTED");
         try {
             digestService.digest(ch.novelId(), ch.id(), ch.chapterNo(), ch.fullText());
         } catch (Exception e) {
-            chapterDAO.updateStatus(chapterId, "PENDING_APPROVAL");
+            chapterData.updateStatus(chapterId, "PENDING_APPROVAL");
             throw e;
         }
     }
 
     /** 人工审批异步版：占位后立即返回，digest 后台跑（单线程串行）；失败回退待审批。 */
     public void approveAsync(long chapterId) {
-        ChapterDO ch = chapterDAO.findById(chapterId)
+        ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (!"PENDING_APPROVAL".equals(ch.status())) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "章 " + chapterId + " 状态为 " + ch.status() + "，不在待审批");
         }
-        chapterDAO.updateStatusIf(chapterId, "PENDING_APPROVAL", "DIGESTED");
+        chapterData.updateStatusIf(chapterId, "PENDING_APPROVAL", "DIGESTED");
         digestExecutor.submit(() -> runDigestQuietly(chapterId));
     }
 
     /** 异步 digest 主体：失败回退 PENDING_APPROVAL 并记事件（接口早已返回，只能靠日志与状态回退暴露）。 */
     private void runDigestQuietly(long chapterId) {
-        ChapterDO ch = chapterDAO.findById(chapterId).orElse(null);
+        ChapterDO ch = chapterData.findById(chapterId).orElse(null);
         if (ch == null) {
             log.warn("后台 digest 目标章 {} 不存在，跳过", chapterId);
             return;
@@ -227,7 +227,7 @@ public class ChapterPipelineService {
             digestService.digest(ch.novelId(), ch.id(), ch.chapterNo(), ch.fullText());
         } catch (Exception e) {
             log.warn("章 {} 后台 digest 失败，回退待审批：{}", ch.chapterNo(), e.getMessage());
-            chapterDAO.updateStatusIf(chapterId, "DIGESTED", "PENDING_APPROVAL");
+            chapterData.updateStatusIf(chapterId, "DIGESTED", "PENDING_APPROVAL");
             stageLog.emit(ch.novelId(), ch.chapterNo(), StageLog.Stage.APPROVE, StageLog.Phase.FAILED,
                     Map.of("message", String.valueOf(e.getMessage())));
         }
@@ -239,8 +239,8 @@ public class ChapterPipelineService {
      */
     @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
     public void healOrphanedApproved() {
-        List<ChapterDAO.ApprovedNoDigest> orphans = chapterDAO.findApprovedWithoutDigest();
-        for (ChapterDAO.ApprovedNoDigest o : orphans) {
+        List<ChapterDataService.ApprovedNoDigest> orphans = chapterData.findApprovedWithoutDigest();
+        for (ChapterDataService.ApprovedNoDigest o : orphans) {
             log.warn("启动自愈：章 {}（novel {}）状态 DIGESTED 但无事实账，补跑后台 digest", o.chapterNo(), o.novelId());
             digestExecutor.submit(() -> runDigestQuietly(o.id()));
         }
@@ -313,6 +313,7 @@ public class ChapterPipelineService {
 
     private boolean runChapter(long novelId, int chapterNo, String approvalMode) {
         ChapterDO ch = outlineService.loadChapter(novelId, chapterNo);
+        chapterData.updateReviewConfig(ch.id(), gateService.readerStandardsJson(novelId)); // 评审标准随章快照，回看当时口径
         stageLog.emit(novelId, chapterNo, CHAPTER, START, Map.of("title", String.valueOf(ch.title())));
 
         outlineStep(novelId, ch);                            // 1) AI 章纲
@@ -329,7 +330,7 @@ public class ChapterPipelineService {
 
         // 4) 审批（auto 直过；manual 停在 PENDING_APPROVAL 等人）
         if ("manual".equals(approvalMode)) {
-            chapterDAO.updateStatus(ch.id(), "PENDING_APPROVAL");
+            chapterData.updateStatus(ch.id(), "PENDING_APPROVAL");
             log.info("第 {} 章待人工审批", chapterNo);
             stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of());
             return true;
@@ -344,7 +345,7 @@ public class ChapterPipelineService {
 
     /** 步骤 1：AI 章纲。已物化则跳过（场景级断点续跑）。 */
     private void outlineStep(long novelId, ChapterDO ch) {
-        if (sceneDAO.countByChapter(ch.id()) > 0) return;
+        if (sceneData.countByChapter(ch.id()) > 0) return;
         int chapterNo = ch.chapterNo();
         stageLog.emit(novelId, chapterNo, OUTLINE, START, Map.of());
         List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
@@ -359,7 +360,7 @@ public class ChapterPipelineService {
     private boolean scenesStep(long novelId, ChapterDO ch) {
         int chapterNo = ch.chapterNo();
         var specs = outlineService.loadSpecs(ch.id());
-        Map<Integer, SceneDO> doneScenes = sceneDAO.findByChapter(ch.id()).stream()
+        Map<Integer, SceneDO> doneScenes = sceneData.findByChapter(ch.id()).stream()
                 .collect(Collectors.toMap(SceneDO::sceneNo, s -> s));
         List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
         String prevTail = packer.prevTail(novelId, chapterNo);
@@ -375,7 +376,7 @@ public class ChapterPipelineService {
                         Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(done.draftText())));
                 continue;
             }
-            Long sceneId = sceneDAO.findId(ch.id(), spec.sceneNo());
+            Long sceneId = sceneData.findId(ch.id(), spec.sceneNo());
             var pack = packer.packScene(novelId, chapterNo, ch, spec, digests, prevTail, directives, prevScene);
             stageLog.emit(novelId, chapterNo, SCENE, START,
                     Map.of("sceneNo", spec.sceneNo(), "goal", String.valueOf(spec.goal())));
@@ -399,7 +400,7 @@ public class ChapterPipelineService {
             stageLog.emit(novelId, chapterNo, SCENE_GATE, NONE,
                     Map.of("sceneNo", spec.sceneNo(), "passed", ok,
                             "reason", ok ? "" : gateService.failedChecksText(ch.id(), sceneId)));
-            sceneDAO.updateGateStatus(sceneId, ok ? "PASSED" : "FAILED");
+            sceneData.updateGateStatus(sceneId, ok ? "PASSED" : "FAILED");
             if (ok) passedScenes++;
             prevScene = draft;
         }
@@ -407,7 +408,7 @@ public class ChapterPipelineService {
             log.error("第 {} 章场景通过 {}/{}，中止", chapterNo, passedScenes, specs.size());
             stageLog.emit(novelId, chapterNo, CHAPTER, FAILED,
                     Map.of("reason", "场景通过 " + passedScenes + "/" + specs.size()));
-            chapterDAO.updateStatus(ch.id(), "FAILED");
+            chapterData.updateStatus(ch.id(), "FAILED");
             return false;
         }
         return true;
@@ -417,10 +418,10 @@ public class ChapterPipelineService {
     private String assembleGateStep(long novelId, ChapterDO ch) {
         int chapterNo = ch.chapterNo();
         StringJoiner joiner = new StringJoiner("\n\n");
-        sceneDAO.findPassedDrafts(ch.id()).forEach(joiner::add);
+        sceneData.findPassedDrafts(ch.id()).forEach(joiner::add);
         String fullText = stripTitleLine(joiner.toString(), ch.title());
-        chapterDAO.saveFullText(ch.id(), fullText);
-        chapterDAO.updateStatus(ch.id(), "GATE_MECHANICAL");
+        chapterData.saveFullText(ch.id(), fullText);
+        chapterData.updateStatus(ch.id(), "GATE_MECHANICAL");
         stageLog.emit(novelId, chapterNo, ASSEMBLE, NONE, Map.of("chars", fullText.length()));
         if (gateService.checkChapter(novelId, ch.id(), chapterNo, fullText, ch.budgetMin(), ch.budgetMax())) {
             stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
@@ -434,7 +435,7 @@ public class ChapterPipelineService {
                 && gateService.checkChapter(novelId, ch.id(), chapterNo, stored, ch.budgetMin(), ch.budgetMax())) {
             log.info("第 {} 章复用已修订正文（{} 字符）", chapterNo, stored.length());
             stageLog.emit(novelId, chapterNo, REVISE, REUSE, Map.of("chars", stored.length()));
-            chapterDAO.saveFullText(ch.id(), stored);
+            chapterData.saveFullText(ch.id(), stored);
             stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
             return stored;
         }
@@ -459,7 +460,7 @@ public class ChapterPipelineService {
             fullText = stripTitleLine(revised, ch.title());
             stageLog.emit(novelId, chapterNo, REVISE, DONE,
                     Map.of("round", round, "chars", fullText.length()));
-            chapterDAO.saveFullText(ch.id(), fullText);
+            chapterData.saveFullText(ch.id(), fullText);
             if (gateService.checkChapter(novelId, ch.id(), chapterNo, fullText, ch.budgetMin(), ch.budgetMax())) {
                 stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
                 return fullText;
@@ -467,7 +468,7 @@ public class ChapterPipelineService {
         }
         log.error("第 {} 章修订两轮后仍未过章级门禁（报告见 gate_reports）", chapterNo);
         stageLog.emit(novelId, chapterNo, CHAPTER, FAILED, Map.of("reason", failReason));
-        chapterDAO.updateStatus(ch.id(), "FAILED");
+        chapterData.updateStatus(ch.id(), "FAILED");
         return null;
     }
 
@@ -480,7 +481,7 @@ public class ChapterPipelineService {
      */
     private ReviewStepResult reviewStep(long novelId, ChapterDO ch, String fullText, StageLog.Stage stage) {
         boolean isReader = stage == StageLog.Stage.READER;
-        chapterDAO.updateStatus(ch.id(), "GATE_AI_REVIEW");
+        chapterData.updateStatus(ch.id(), "GATE_AI_REVIEW");
         stageLog.emit(novelId, ch.chapterNo(), stage, START, Map.of());
         ReviewService.Outcome outcome;
         try {
@@ -493,7 +494,7 @@ public class ChapterPipelineService {
         }
         if (outcome.revised() != null) {
             fullText = outcome.revised();
-            chapterDAO.saveFullText(ch.id(), fullText);
+            chapterData.saveFullText(ch.id(), fullText);
             stageLog.emit(novelId, ch.chapterNo(), REVISE, isReader ? READER_FIX : REVIEW_FIX,
                     Map.of("chars", fullText.length()));
         }
@@ -501,7 +502,7 @@ public class ChapterPipelineService {
                 Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked()));
         if (outcome.blocked()) {
             log.warn("第 {} 章{}复审仍 BLOCKER，转人工审批", ch.chapterNo(), stage.label());
-            chapterDAO.updateStatus(ch.id(), "PENDING_APPROVAL");
+            chapterData.updateStatus(ch.id(), "PENDING_APPROVAL");
             stageLog.emit(novelId, ch.chapterNo(), APPROVE, PENDING, Map.of("reason", stage.wire() + "_blocker"));
             return new ReviewStepResult(fullText, true);
         }

@@ -4,11 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.DigestDAO;
-import com.zzdzz.novelgen.dao.ForeshadowDAO;
-import com.zzdzz.novelgen.dao.VolumeReviewDAO;
-import com.zzdzz.novelgen.dao.WorldStateDAO;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.DigestDataService;
+import com.zzdzz.novelgen.service.data.ForeshadowDataService;
+import com.zzdzz.novelgen.service.data.VolumeReviewDataService;
+import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -38,25 +38,25 @@ public class VolumeReviewService {
 
     private static final Logger log = LoggerFactory.getLogger(VolumeReviewService.class);
 
-    private final ChapterDAO chapterDAO;
-    private final DigestDAO digestDAO;
-    private final ForeshadowDAO foreshadowDAO;
-    private final WorldStateDAO worldStateDAO;
-    private final VolumeReviewDAO reviewDAO;
+    private final ChapterDataService chapterData;
+    private final DigestDataService digestData;
+    private final ForeshadowDataService foreshadowData;
+    private final WorldStateDataService worldStateData;
+    private final VolumeReviewDataService reviewDAO;
     private final LlmJson llmJson;
     private final StageLog stageLog;
     private final ObjectMapper mapper;
     private final PromptTemplateService promptTemplates;
 
-    public VolumeReviewService(ChapterDAO chapterDAO, DigestDAO digestDAO,
-                               ForeshadowDAO foreshadowDAO, WorldStateDAO worldStateDAO,
-                               VolumeReviewDAO reviewDAO, LlmJson llmJson,
+    public VolumeReviewService(ChapterDataService chapterData, DigestDataService digestData,
+                               ForeshadowDataService foreshadowData, WorldStateDataService worldStateData,
+                               VolumeReviewDataService reviewDAO, LlmJson llmJson,
                                StageLog stageLog, ObjectMapper mapper,
                                PromptTemplateService promptTemplates) {
-        this.chapterDAO = chapterDAO;
-        this.digestDAO = digestDAO;
-        this.foreshadowDAO = foreshadowDAO;
-        this.worldStateDAO = worldStateDAO;
+        this.chapterData = chapterData;
+        this.digestData = digestData;
+        this.foreshadowData = foreshadowData;
+        this.worldStateData = worldStateData;
         this.reviewDAO = reviewDAO;
         this.llmJson = llmJson;
         this.stageLog = stageLog;
@@ -67,7 +67,7 @@ public class VolumeReviewService {
     /** 复盘一卷（同步，约 1-3 分钟）：机械对账 + LLM 漂移分析，报告落库并返回。 */
     @SuppressWarnings("unchecked")
     public Map<String, Object> review(long novelId, int volNo) {
-        List<Map<String, Object>> rows = chapterDAO.listVolumeFacts(novelId, volNo);
+        List<Map<String, Object>> rows = chapterData.listVolumeFacts(novelId, volNo);
         if (rows.isEmpty()) {
             throw new BizException(ErrorCode.NOT_FOUND, "卷 " + volNo + " 不存在或没有规划行");
         }
@@ -77,7 +77,7 @@ public class VolumeReviewService {
                 Map.of("volNo", volNo, "from", fromNo, "to", toNo));
 
         Map<String, ForeshadowDO> ledger = new HashMap<>();
-        for (ForeshadowDO f : foreshadowDAO.listByNovel(novelId)) ledger.put(f.code(), f);
+        for (ForeshadowDO f : foreshadowData.listByNovel(novelId)) ledger.put(f.code(), f);
         Map<String, Object> mechanical = mechanicalAudit(rows, ledger);
 
         Map<String, Object> review;
@@ -170,13 +170,13 @@ public class VolumeReviewService {
                                           Map<String, Object> mechanical, int fromNo, int toNo) {
         // 各章实际收束：该卷范围内的事实账摘要
         StringBuilder digestsSb = new StringBuilder();
-        for (DigestDAO.DigestItem d : digestDAO.listByNovel(novelId)) {
+        for (DigestDataService.DigestItem d : digestData.listByNovel(novelId)) {
             if (d.chapterNo() < fromNo || d.chapterNo() > toNo) continue;
             digestsSb.append("第").append(d.chapterNo()).append("章：")
                     .append(d.contentMd().replaceAll("\\s+", " ")).append('\n');
         }
         // 世界状态：卷首 vs 卷末
-        List<WorldStateDAO.StateRow> states = worldStateDAO.listByNovel(novelId, 200).stream()
+        List<WorldStateDataService.StateRow> states = worldStateData.listByNovel(novelId, 200).stream()
                 .filter(s -> s.chapterNo() >= fromNo && s.chapterNo() <= toNo).toList();
         String worldFirst = states.isEmpty() ? "（无）" : states.get(states.size() - 1).stateJson();
         String worldLast = states.isEmpty() ? "（无）" : states.get(0).stateJson();

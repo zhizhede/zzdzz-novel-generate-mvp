@@ -3,9 +3,9 @@ package com.zzdzz.novelgen.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.LlmCallLogDAO;
-import com.zzdzz.novelgen.dao.LlmModelPriceDAO;
-import com.zzdzz.novelgen.dao.LlmNodeConfigDAO;
+import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
+import com.zzdzz.novelgen.service.data.LlmModelPriceDataService;
+import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
 import com.zzdzz.novelgen.model.entity.LlmModelPriceDO;
 import com.zzdzz.novelgen.model.entity.LlmNodeConfigDO;
 import org.slf4j.Logger;
@@ -38,13 +38,13 @@ public class LlmNodeConfigService {
     public record LlmNodeStat(long calls, long totalTokens, long avgLatencyMs, Double cost, Double peakCost) {
     }
 
-    private final LlmNodeConfigDAO configDAO;
-    private final LlmCallLogDAO callLogDAO;
-    private final LlmModelPriceDAO priceDAO;
+    private final LlmNodeConfigDataService configDAO;
+    private final LlmCallLogDataService callLogDAO;
+    private final LlmModelPriceDataService priceDAO;
     private final ObjectMapper mapper;
 
-    public LlmNodeConfigService(LlmNodeConfigDAO configDAO, LlmCallLogDAO callLogDAO,
-                                LlmModelPriceDAO priceDAO, ObjectMapper mapper) {
+    public LlmNodeConfigService(LlmNodeConfigDataService configDAO, LlmCallLogDataService callLogDAO,
+                                LlmModelPriceDataService priceDAO, ObjectMapper mapper) {
         this.configDAO = configDAO;
         this.callLogDAO = callLogDAO;
         this.priceDAO = priceDAO;
@@ -135,7 +135,7 @@ public class LlmNodeConfigService {
     private Map<String, LlmNodeStat> statsSince(int days, Map<String, LlmModelPriceDO> prices) {
         Map<String, long[]> acc = new LinkedHashMap<>();   // node -> {calls, tokens, latencySum}
         Map<String, double[]> cost = new HashMap<>();      // node -> {cost, peakCost}，null 用 NaN 表示无价
-        for (LlmCallLogDAO.UsageGroup g : callLogDAO.usageByNodeSince(days)) {
+        for (LlmCallLogDataService.UsageGroup g : callLogDAO.usageByNodeSince(days)) {
             long[] a = acc.computeIfAbsent(g.node(), k -> new long[3]);
             a[0] += g.calls();
             a[1] += g.promptTokens() + g.completionTokens();
@@ -164,7 +164,7 @@ public class LlmNodeConfigService {
     }
 
     /** 单组成本（元）＝(缓存命中×命中价 + 未命中×未命中价 + 输出×输出价)/百万。 */
-    private double costOf(LlmCallLogDAO.UsageGroup g, LlmModelPriceDO p) {
+    private double costOf(LlmCallLogDataService.UsageGroup g, LlmModelPriceDO p) {
         long hit = Math.min(g.cachedTokens(), g.promptTokens());
         long miss = g.promptTokens() - hit;
         BigDecimal inHit = g.peak() ? p.peakInputHit() : p.idleInputHit();

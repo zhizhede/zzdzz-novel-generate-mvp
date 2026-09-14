@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.GateReportDAO;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.GateReportDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -27,7 +27,7 @@ public class ReviewService {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewService.class);
 
-    /** 读者评审提示词模板：%s=注水率判 blocker 阈值（tuning: reader_fat_ratio_block）。 */
+    /** 读者评审提示词模板：%s=注水率软阈值，%s=硬上限（书级 gate_config 可覆盖，兜底 tuning）。 */
     private static final String READER_SYSTEM = """
             你是一个没耐心的网文读者，刷手机时点开了这一章。你只关心「想不想继续读」，只回答下列问题：
             1. hook 前 3 行：会不会继续往下读？（环境/氛围/抒情式开场、或与上章结尾接不上=不会）
@@ -39,7 +39,9 @@ public class ReviewService {
             {"verdict":"pass|blocker","hook":"pass|fail","stakes":"pass|fail","continuity":"pass|fail","consequence":"pass|fail","fat_ratio":0.4,"skip_quotes":["可整段删除的原句"],"issues":["具体问题（引用原句）"]}
             规则：
             - 引用原文一律用「」；字符串值内部禁止英文双引号。
-            - hook/stakes/continuity/consequence 任一 fail，或 fat_ratio 大于 %s → verdict=blocker；否则 pass。
+            - hook/stakes/continuity/consequence 任一 fail → verdict=blocker。
+            - fat_ratio 是报告项：大于 %s（软阈值）只提示偏水，不否决；只有大于 %s（硬上限）才判 blocker。连贯性永远比注水重要，不要为注水否决剧情完整的章节。
+            - skip_quotes 只能列纯装饰句；推进剧情、刻画人物、交代信息的句子一律不许进清单。
             - 你只管「想不想往下读」，错别字与设定连续性是另一位审校的事，不要报。
             - 不要输出思考过程，只输出 JSON。
             """.strip();
@@ -62,23 +64,30 @@ public class ReviewService {
     private final LlmPort llmPort;      // 文本修订轮（reader_fix / ai_review_revise）
     private final LlmJson llmJson;      // JSON 评审轮（reader_review / ai_review）
     private final ContextPackerService packer;
-    private final GateReportDAO gateReportDAO;
-    private final ChapterDAO chapterDAO;
+    private final GateReportDataService gateReportData;
+    private final ChapterDataService chapterData;
     private final ObjectMapper mapper;
     private final TuningService tuning;
     private final PromptTemplateService promptTemplates;
+    private final GateService gateService;
 
     public ReviewService(LlmPort llmPort, LlmJson llmJson, ContextPackerService packer,
-                         GateReportDAO gateReportDAO, ChapterDAO chapterDAO, ObjectMapper mapper,
-                         TuningService tuning, PromptTemplateService promptTemplates) {
+                         GateReportDataService gateReportData, ChapterDataService chapterData, ObjectMapper mapper,
+                         TuningService tuning, PromptTemplateService promptTemplates, GateService gateService) {
         this.llmPort = llmPort;
         this.llmJson = llmJson;
         this.packer = packer;
-        this.gateReportDAO = gateReportDAO;
-        this.chapterDAO = chapterDAO;
+        this.gateReportData = gateReportData;
+        this.chapterData = chapterData;
         this.mapper = mapper;
         this.tuning = tuning;
         this.promptTemplates = promptTemplates;
+        this.gateService = gateService;
+    }
+
+    /** 书级评审标准：gate_config 优先（按书定制），tuning 平台默认兜底；键名两边一致。 */
+    private double perNovel(long novelId, String key, double def) {
+        return gateService.configValue(novelId, key, tuning.d(key, def));
     }
 
     /** 审校结论：revised 为修订后全文（null=未改），blocked=复审仍 BLOCKER。 */
@@ -132,11 +141,13 @@ public class ReviewService {
                 + "\n\n【本章目标】" + ch.goal()
                 + "\n\n【第 " + ch.chapterNo() + " 章全文（评审对象）】\n" + text + "\n\n只输出 JSON。";
         try {
+            double fatSoft = perNovel(novelId, "reader_fat_ratio_block", 0.33);
+            double fatHard = perNovel(novelId, "reader_fat_ratio_hard", 0.50);
             JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
                             LlmNode.READER_REVIEW, novelId, ch.id(),
                             List.of(LlmPort.Message.system(
                                             promptTemplates.format(LlmNode.READER_REVIEW, "system", READER_SYSTEM,
-                                                    tuning.d("reader_fat_ratio_block", 0.33))),
+                                                    fatSoft, fatHard)),
                                     LlmPort.Message.user(user)),
                             0.2),
                     n -> {
@@ -146,17 +157,34 @@ public class ReviewService {
                         }
                         return n;
                     }, 2);
-            gateReportDAO.insert(ch.id(), null, "reader_review", round,
+            node = downgradeFatOnly(ch, node, fatHard);
+            gateReportData.insert(ch.id(), null, "reader_review", round,
                     !"blocker".equals(node.path("verdict").asText()), node);
             log.info("第 {} 章读者评审 round={}：{}（fat_ratio={}）", ch.chapterNo(), round,
                     node.path("verdict").asText(), node.path("fat_ratio").asText());
             return node;
         } catch (IllegalStateException e) {
             log.warn("第 {} 章读者评审输出两次解析失败，本轮跳过（fail-open）", ch.chapterNo());
-            gateReportDAO.insert(ch.id(), null, "reader_review", round, true,
+            gateReportData.insert(ch.id(), null, "reader_review", round, true,
                     Map.of("skipped", true, "reason", "parse_failed"));
             return mapper.createObjectNode().put("verdict", "pass").put("summary", "解析失败跳过");
         }
+    }
+
+    /** 连贯性优先（本书标准）：四个结构性维度全过、仅 fat_ratio 超软阈值时降级为 pass；超硬上限仍拦。 */
+    private JsonNode downgradeFatOnly(ChapterDO ch, JsonNode node, double fatHard) {
+        if (!"blocker".equals(node.path("verdict").asText()) || !(node instanceof com.fasterxml.jackson.databind.node.ObjectNode obj)) {
+            return node;
+        }
+        boolean structuralFail = List.of("hook", "stakes", "continuity", "consequence").stream()
+                .anyMatch(k -> "fail".equals(node.path(k).asText()));
+        double fat = node.path("fat_ratio").asDouble(0);
+        if (structuralFail || fat > fatHard) {
+            return node;
+        }
+        log.info("第 {} 章仅注水比超标（{}），结构性四问全过，按本书标准不拦（硬上限 {}）", ch.chapterNo(), fat, fatHard);
+        return obj.put("raw_verdict", "blocker")
+                .put("note", "仅 fat_ratio 超软阈值，四问全过且未超硬上限 " + fatHard + "，连贯性优先降级为 pass");
     }
 
     /** 读者评审重写轮：保留情节/信息/对白立场，删纯装饰描写；修订稿异常时保留原文（返回 null）。 */
@@ -180,12 +208,13 @@ public class ReviewService {
         if (fb.isEmpty()) {
             fb.append("- 读者判定注水或无张力：删掉所有纯装饰描写，让每一段都推进事件或揭示信息。\n");
         }
-        String band = "约 " + ch.budgetMin() + "–" + (int) (ch.budgetMax() * 1.05)
-                + " 字（删注水后若低于下限，用推进情节的对白与动作补足，禁止新增环境/氛围/心理铺陈）";
+        String band = "目标 " + ch.budgetMin() + "–" + (int) (ch.budgetMax() * 1.05)
+                + " 字；删注水后低于目标时可用推进情节的对白与动作补足，但与保留剧情冲突时宁短勿注";
         String user = promptTemplates.format(LlmNode.READER_FIX, "user", """
                 任务：修订第 %d 章全文。没耐心的网文读者给出以下弃书理由：
                 %s
-                要求：情节、信息与对白立场全部保留；删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；
+                要求：情节节拍、关键信息与对白立场全部保留，人物性格与说话方式不得改变，任何剧情节拍不得删除或合并；
+                删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；篇幅与保留剧情冲突时优先保剧情，字数可低于目标。
                 分行节奏与风格特征保持本书原貌；直接输出修订后的完整正文，不要输出思考过程。
                 本章篇幅约束：%s。
 
@@ -200,15 +229,17 @@ public class ReviewService {
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
                 SceneService.cleanDraft(r.content()), ch.title());
-        // 长度验收以本章预算下限为准（原稿注水越多，相对比例下限越不合理——ch60 实测教训）；
-        // 上限保留相对护栏防失控扩写。低于预算下限走恢复扩写（一轮），失败则 best effort 保留
-        double lenMax = tuning.d("reader_fix_len_max", 1.15);
+        // 长度上限保留相对护栏防失控扩写；下限允许按书牺牲字数（reader_fix_len_min × 预算下限，
+        // 平台默认 0.75）：轻微低于预算不扩写（连贯性优先），跌破恢复线才走一轮恢复扩写
+        double lenMax = perNovel(novelId, "reader_fix_len_max", 1.15);
         if (cleaned.isBlank() || cleaned.length() > fullText.length() * lenMax) {
             log.warn("第 {} 章读者重写稿长度异常（{} 字符），保留原文", ch.chapterNo(), cleaned.length());
             return null;
         }
-        if (cleaned.length() < ch.budgetMin()) {
-            log.warn("第 {} 章读者重写稿 {} 字低于预算下限 {}，启动恢复扩写", ch.chapterNo(), cleaned.length(), ch.budgetMin());
+        int recoverFloor = (int) (ch.budgetMin() * perNovel(novelId, "reader_fix_len_min", 0.75));
+        if (cleaned.length() < recoverFloor) {
+            log.warn("第 {} 章读者重写稿 {} 字低于恢复线 {}（下限 {}），启动恢复扩写",
+                    ch.chapterNo(), cleaned.length(), recoverFloor, ch.budgetMin());
             cleaned = recoverLength(novelId, ch, cleaned, fb);
         }
         return cleaned;
@@ -250,12 +281,12 @@ public class ReviewService {
     }
 
     private int fullTextLimit(ChapterDO ch) {
-        double lenMax = tuning.d("reader_fix_len_max", 1.15);
+        double lenMax = perNovel(ch.novelId(), "reader_fix_len_max", 1.15);
         return (int) (ch.budgetMax() * 1.05 * lenMax);
     }
 
     /** 回溯/UI 用：对已有正文的章跑一次审校，只落报告，不动正文与状态。 */
-    public void reviewExisting(long chapterId) {        ChapterDO ch = chapterDAO.findById(chapterId)
+    public void reviewExisting(long chapterId) {        ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (ch.fullText() == null || ch.fullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法审校");
@@ -280,14 +311,14 @@ public class ReviewService {
                         }
                         return n;
                     }, 2);
-            gateReportDAO.insert(ch.id(), null, "ai_review", round,
+            gateReportData.insert(ch.id(), null, "ai_review", round,
                     !"blocker".equals(node.path("verdict").asText()), node);
             log.info("第 {} 章审校 round={}：{}（{} 条问题）", ch.chapterNo(), round,
                     node.path("verdict").asText(), node.path("issues").size());
             return node;
         } catch (IllegalStateException e) {
             log.warn("第 {} 章审校输出两次解析失败，本轮跳过（fail-open）：{}", ch.chapterNo(), e.getMessage());
-            gateReportDAO.insert(ch.id(), null, "ai_review", round, true,
+            gateReportData.insert(ch.id(), null, "ai_review", round, true,
                     Map.of("skipped", true, "reason", "parse_failed"));
             return mapper.createObjectNode()
                     .put("verdict", "skipped")
@@ -342,7 +373,7 @@ public class ReviewService {
                 0.5));
         String cleaned = ChapterPipelineService.stripTitleLine(
                 SceneService.cleanDraft(r.content()), ch.title());
-        double floor = tuning.d("ai_review_fix_floor", 0.6);
+        double floor = perNovel(novelId, "ai_review_fix_floor", 0.6);
         if (cleaned.isBlank() || cleaned.length() < fullText.length() * floor) {
             log.warn("第 {} 章审校修订稿长度异常（{} 字符），保留原文", ch.chapterNo(), cleaned.length());
             return null;

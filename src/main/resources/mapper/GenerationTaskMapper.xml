@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.GenerationTaskMapper">
+
+    <select id="insert" resultType="long">
+                INSERT INTO generation_tasks (novel_id, from_chapter, to_chapter, submitted_by)
+                VALUES (#{novelId}, #{fromChapter}, #{toChapter}, #{submittedBy}) RETURNING id
+    </select>
+
+    <select id="list" resultType="map">
+                SELECT t.id, t.novel_id, n.title, t.from_chapter, t.to_chapter, t.status,
+                       t.done_chapters, t.current_chapter, t.last_message, t.create_time
+                FROM generation_tasks t JOIN novels n ON n.id = t.novel_id
+                WHERE t.is_deleted = FALSE
+                ORDER BY CASE WHEN t.status IN ('QUEUED', 'RUNNING') THEN 0 ELSE 1 END, t.id DESC
+                LIMIT #{limit}
+    </select>
+
+    <select id="findQueuedId" resultType="long">
+                SELECT id FROM generation_tasks WHERE status = 'QUEUED' ORDER BY id LIMIT 1
+    </select>
+
+    <update id="claim">
+                UPDATE generation_tasks SET status='RUNNING', current_chapter=from_chapter, update_time=now() WHERE id=#{id} AND status='QUEUED'
+    </update>
+
+    <select id="findRunning" resultType="map">
+                SELECT t.id, t.novel_id, n.title, t.from_chapter, t.to_chapter, t.status,
+                       t.done_chapters, t.current_chapter, t.last_message, t.create_time
+                FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.status = 'RUNNING'
+                ORDER BY t.id LIMIT 1
+    </select>
+
+    <select id="findRunningById" resultType="map">
+                SELECT t.id, t.novel_id, n.title, t.from_chapter, t.to_chapter, t.status,
+                       t.done_chapters, t.current_chapter, t.last_message, t.create_time
+                FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.id = #{id}
+    </select>
+
+    <update id="updateProgress">
+                UPDATE generation_tasks SET done_chapters=#{doneChapters}, current_chapter=#{currentChapter}, last_message=#{message}, update_time=now()
+                WHERE id=#{id}
+    </update>
+
+    <update id="updateStatus">
+                UPDATE generation_tasks SET status=#{status}, last_message=#{message}, update_time=now() WHERE id=#{id}
+    </update>
+
+    <update id="cancelQueued">
+                UPDATE generation_tasks SET status='CANCELED', last_message='提交后取消', update_time=now() WHERE id=#{id} AND status='QUEUED'
+    </update>
+
+    <select id="findStatus" resultType="string">
+                SELECT status FROM generation_tasks WHERE id=#{id}
+    </select>
+
+    <update id="resetInterrupted">
+                UPDATE generation_tasks SET status='QUEUED', last_message='重启重排', update_time=now()
+                WHERE status='RUNNING' AND is_deleted=false
+    </update>
+</mapper>

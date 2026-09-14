@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.dao.PromptTemplateDAO;
+import com.zzdzz.novelgen.service.data.PromptTemplateDataService;
 import com.zzdzz.novelgen.llm.PromptCatalog;
 import com.zzdzz.novelgen.model.entity.PromptTemplateDO;
 import com.zzdzz.novelgen.model.vo.PromptDetailVO;
@@ -34,11 +34,11 @@ public class PromptTemplateService {
     private static final Pattern FORMAT_SPEC = Pattern.compile("%[a-zA-Z%]");
     private static final long CACHE_TTL_MS = 30_000;
 
-    private final PromptTemplateDAO dao;
+    private final PromptTemplateDataService dao;
     private final Map<String, String> cache = new HashMap<>();
     private volatile long cacheLoadedAt = 0;
 
-    public PromptTemplateService(PromptTemplateDAO dao) {
+    public PromptTemplateService(PromptTemplateDataService dao) {
         this.dao = dao;
     }
 

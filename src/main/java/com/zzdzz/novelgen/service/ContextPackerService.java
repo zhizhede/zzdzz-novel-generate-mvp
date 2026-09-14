@@ -3,13 +3,13 @@ package com.zzdzz.novelgen.service;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
-import com.zzdzz.novelgen.dao.CanonDocDAO;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.DigestDAO;
-import com.zzdzz.novelgen.dao.ForeshadowDAO;
-import com.zzdzz.novelgen.dao.StylePackDAO;
-import com.zzdzz.novelgen.dao.VolumeReviewDAO;
-import com.zzdzz.novelgen.dao.WorldStateDAO;
+import com.zzdzz.novelgen.service.data.CanonDocDataService;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.DigestDataService;
+import com.zzdzz.novelgen.service.data.ForeshadowDataService;
+import com.zzdzz.novelgen.service.data.StylePackDataService;
+import com.zzdzz.novelgen.service.data.VolumeReviewDataService;
+import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -35,55 +35,55 @@ public class ContextPackerService {
             - 顿号每千字不超过 1 个；感叹号每千字不超过 2 个。
             """;
 
-    private final StylePackDAO stylePackDAO;
-    private final CanonDocDAO canonDocDAO;
-    private final DigestDAO digestDAO;
-    private final ForeshadowDAO foreshadowDAO;
-    private final ChapterDAO chapterDAO;
-    private final WorldStateDAO worldStateDAO;
+    private final StylePackDataService stylePackData;
+    private final CanonDocDataService canonData;
+    private final DigestDataService digestData;
+    private final ForeshadowDataService foreshadowData;
+    private final ChapterDataService chapterData;
+    private final WorldStateDataService worldStateData;
     private final MaterialCardService cardService;
     private final TuningService tuning;
     private final EmbeddingService embeddingService;
     private final PromptTemplateService promptTemplates;
-    private final VolumeReviewDAO volumeReviewDAO;
+    private final VolumeReviewDataService volumeReviewData;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
-    public ContextPackerService(StylePackDAO stylePackDAO,
-                                CanonDocDAO canonDocDAO,
-                                DigestDAO digestDAO,
-                                ForeshadowDAO foreshadowDAO,
-                                ChapterDAO chapterDAO,
-                                WorldStateDAO worldStateDAO,
+    public ContextPackerService(StylePackDataService stylePackData,
+                                CanonDocDataService canonData,
+                                DigestDataService digestData,
+                                ForeshadowDataService foreshadowData,
+                                ChapterDataService chapterData,
+                                WorldStateDataService worldStateData,
                                 MaterialCardService cardService,
                                 TuningService tuning,
                                 EmbeddingService embeddingService,
                                 PromptTemplateService promptTemplates,
-                                VolumeReviewDAO volumeReviewDAO,
+                                VolumeReviewDataService volumeReviewData,
                                 com.fasterxml.jackson.databind.ObjectMapper mapper) {
-        this.stylePackDAO = stylePackDAO;
-        this.canonDocDAO = canonDocDAO;
-        this.digestDAO = digestDAO;
-        this.foreshadowDAO = foreshadowDAO;
-        this.chapterDAO = chapterDAO;
-        this.worldStateDAO = worldStateDAO;
+        this.stylePackData = stylePackData;
+        this.canonData = canonData;
+        this.digestData = digestData;
+        this.foreshadowData = foreshadowData;
+        this.chapterData = chapterData;
+        this.worldStateData = worldStateData;
         this.cardService = cardService;
         this.tuning = tuning;
         this.embeddingService = embeddingService;
         this.promptTemplates = promptTemplates;
-        this.volumeReviewDAO = volumeReviewDAO;
+        this.volumeReviewData = volumeReviewData;
         this.mapper = mapper;
     }
 
     public record Pack(String system, String user) {}
 
     public String styleRules(long novelId) {
-        return stylePackDAO.findRulesMdByNovel(novelId);
+        return stylePackData.findRulesMdByNovel(novelId);
     }
 
     /** 世界观设定 + 全书大纲（misc/大纲 文档存在时自动拼接，进入每章生成上下文）。 */
     public String world(long novelId) {
-        String world = canonDocDAO.findFirstByKind(novelId, "world");
-        String storyOutline = canonDocDAO.findContentByKindName(novelId, "misc", "大纲");
+        String world = canonData.findFirstByKind(novelId, "world");
+        String storyOutline = canonData.findContentByKindName(novelId, "misc", "大纲");
         if (storyOutline == null || storyOutline.isBlank()) {
             return world;
         }
@@ -99,7 +99,7 @@ public class ContextPackerService {
         if (block != null) {
             return block;
         }
-        String doc = canonDocDAO.findFirstByKind(novelId, "character");
+        String doc = canonData.findFirstByKind(novelId, "character");
         return doc == null ? "（无）" : "【人物卡】\n" + doc;
     }
 
@@ -116,11 +116,11 @@ public class ContextPackerService {
     }
 
     public List<String> recentDigests(long novelId, int beforeChapter, int n) {
-        return digestDAO.findRecent(novelId, beforeChapter, n);
+        return digestData.findRecent(novelId, beforeChapter, n);
     }
 
     public String prevTail(long novelId, int beforeChapter) {
-        String fullText = chapterDAO.findFullText(novelId, beforeChapter - 1);
+        String fullText = chapterData.findFullText(novelId, beforeChapter - 1);
         if (fullText == null) return null;
         String[] lines = fullText.split("\n");
         StringBuilder sb = new StringBuilder();
@@ -131,7 +131,7 @@ public class ContextPackerService {
     }
 
     public List<String> foreshadowDirectives(long novelId, int chapterNo) {
-        return foreshadowDAO.findDirectives(novelId, chapterNo);
+        return foreshadowData.findDirectives(novelId, chapterNo);
     }
 
     /**
@@ -141,9 +141,9 @@ public class ContextPackerService {
      */
     public String prevChapterBrief(long novelId, int chapterNo) {
         if (chapterNo <= 1) return null;
-        ChapterDO prev = chapterDAO.find(novelId, chapterNo - 1).orElse(null);
+        ChapterDO prev = chapterData.find(novelId, chapterNo - 1).orElse(null);
         if (prev == null) return null;
-        List<String> summaries = digestDAO.findRecent(novelId, chapterNo - 1, 1);
+        List<String> summaries = digestData.findRecent(novelId, chapterNo - 1, 1);
         String outcome = summaries.isEmpty() ? prevTail(novelId, chapterNo)
                 : summaries.get(summaries.size() - 1);
         return "上一章目标：" + Objects.toString(prev.goal(), "（无）")
@@ -153,7 +153,7 @@ public class ContextPackerService {
 
     /** 世界状态快照（上一章结束时）格式化为紧凑清单；无则 null。写错时素材库可人工纠偏。 */
     public String worldState(long novelId, int chapterNo) {
-        String json = worldStateDAO.findLatestBefore(novelId, chapterNo);
+        String json = worldStateData.findLatestBefore(novelId, chapterNo);
         if (json == null) return null;
         try {
             com.fasterxml.jackson.databind.JsonNode n =
@@ -193,7 +193,7 @@ public class ContextPackerService {
      */
     public String packLedgers(long novelId, int fromNo) {
         StringBuilder sb = new StringBuilder();
-        List<ChapterDO> plans = chapterDAO.listSummariesByNovel(novelId);
+        List<ChapterDO> plans = chapterData.listSummariesByNovel(novelId);
         if (!plans.isEmpty()) {
             sb.append("【已有卷纲（往卷已写与当前规划；不得重复其桥段，须衔接其走向）】\n");
             for (ChapterDO c : plans) {
@@ -214,7 +214,7 @@ public class ContextPackerService {
             sb.append("【世界状态（截至第 ").append(fromNo - 1).append(" 章结束，必须遵守——物品归属与位置不得凭空变化）】\n")
                     .append(ws).append("\n\n");
         }
-        List<ForeshadowDO> fss = foreshadowDAO.listByNovel(novelId).stream()
+        List<ForeshadowDO> fss = foreshadowData.listByNovel(novelId).stream()
                 .filter(f -> !"recovered".equals(f.status()) && !"dropped".equals(f.status()))
                 .filter(f -> f.recoveredIn() == null || f.recoveredIn() >= fromNo)
                 .toList();
@@ -250,7 +250,7 @@ public class ContextPackerService {
         if (volNo <= 1) {
             return "";
         }
-        String reportJson = volumeReviewDAO.findJson(novelId, volNo - 1);
+        String reportJson = volumeReviewData.findJson(novelId, volNo - 1);
         if (reportJson == null || reportJson.isBlank()) {
             return "";
         }
@@ -299,7 +299,7 @@ public class ContextPackerService {
 
     /** 真实章节开篇范例（1-21 章人类手稿前 3 行隔章抽 10 例）：注入本章第一场景做审美对齐。 */
     public String openingExamples(long novelId) {
-        List<ChapterDAO.Opening> all = chapterDAO.findOpeningLines(novelId, 21);
+        List<ChapterDataService.Opening> all = chapterData.findOpeningLines(novelId, 21);
         if (all.isEmpty()) {
             return null;
         }
@@ -314,7 +314,7 @@ public class ContextPackerService {
 
     /** 对白推进范例：本作真实章节中对白最密集的连续 10 行（情节靠人物说话的活样本）。 */
     public String dialogueExcerpt(long novelId) {
-        ChapterDAO.Opening ex = chapterDAO.findDialogueExcerpt(novelId, 21, 10);
+        ChapterDataService.Opening ex = chapterData.findDialogueExcerpt(novelId, 21, 10);
         if (ex == null) {
             return null;
         }

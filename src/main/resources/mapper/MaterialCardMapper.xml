@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.MaterialCardMapper">
+
+    <resultMap id="doMap" type="com.zzdzz.novelgen.model.entity.MaterialCardDO">
+        <id property="id" column="id"/>
+        <result property="aliases" column="aliases"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+    </resultMap>
+
+    <select id="listByNovel" resultMap="doMap">
+
+                SELECT * FROM material_cards WHERE novel_id=#{novelId} AND is_deleted=false
+                  AND (#{kind,jdbcType=VARCHAR}::text IS NULL OR kind=#{kind})
+                ORDER BY kind, name
+
+    </select>
+
+    <select id="findById" resultMap="doMap">
+SELECT * FROM material_cards WHERE id=#{id} AND is_deleted=false
+    </select>
+
+    <select id="exists" resultType="boolean">
+
+                SELECT COUNT(*) FROM material_cards
+                WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND is_deleted=false
+                
+    </select>
+
+    <update id="softDelete">
+UPDATE material_cards SET is_deleted=true, delete_time=NOW() WHERE id=#{id} AND is_deleted=false
+    </update>
+
+    <select id="hasCards" resultType="boolean">
+SELECT COUNT(*) FROM material_cards WHERE novel_id=#{novelId} AND is_deleted=false
+    </select>
+    <insert id="insert">
+                INSERT INTO material_cards (novel_id, kind, name, aliases, summary, content_md, pinned, status, source_chapter)
+                VALUES (#{novelId}, #{kind}, #{name}, #{aliases}::jsonb, #{summary}, #{contentMd}, #{pinned}, #{status}, #{sourceChapter})
+    </insert>
+
+    <update id="update">
+                UPDATE material_cards SET name=#{name}, aliases=#{aliases}::jsonb, summary=#{summary}, content_md=#{contentMd}, pinned=#{pinned},
+                       status=#{status}, source_chapter=#{sourceChapter}, update_time=NOW()
+                WHERE id=#{id} AND is_deleted=false
+    </update>
+</mapper>

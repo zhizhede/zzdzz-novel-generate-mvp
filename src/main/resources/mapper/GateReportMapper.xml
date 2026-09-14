@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.GateReportMapper">
+
+    <insert id="insert">
+                INSERT INTO gate_reports (chapter_id, scene_id, gate_type, round, passed, result)
+                VALUES (#{chapterId}, #{sceneId}, #{gateType}, #{round}, #{passed}, #{resultJson}::jsonb)
+    </insert>
+
+    <delete id="deleteByChapter">
+                DELETE FROM gate_reports WHERE chapter_id=#{chapterId}
+    </delete>
+
+    <select id="findLatestFailureJson" resultType="string">
+                SELECT result::text FROM gate_reports WHERE chapter_id=#{chapterId} AND gate_type='mechanical' AND passed=false
+                ORDER BY id DESC LIMIT 1
+    </select>
+
+    <select id="findLatestSceneFailureJson" resultType="string">
+                SELECT result::text FROM gate_reports
+                WHERE chapter_id=#{chapterId} AND scene_id=#{sceneId} AND passed=false
+                ORDER BY id DESC LIMIT 1
+    </select>
+
+    <select id="findLatestChapterReport" resultType="map">
+                SELECT passed, create_time, result::text FROM gate_reports
+                WHERE chapter_id=#{chapterId} AND scene_id IS NULL AND gate_type='mechanical'
+                ORDER BY id DESC LIMIT 1
+    </select>
+
+    <select id="findLatestChapterReview" resultType="map">
+                SELECT passed, create_time, result::text FROM gate_reports
+                WHERE chapter_id=#{chapterId} AND scene_id IS NULL AND gate_type='ai_review'
+                ORDER BY id DESC LIMIT 1
+    </select>
+</mapper>

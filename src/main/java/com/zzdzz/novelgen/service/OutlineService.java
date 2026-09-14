@@ -8,8 +8,8 @@ import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
-import com.zzdzz.novelgen.dao.ChapterDAO;
-import com.zzdzz.novelgen.dao.SceneDAO;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.SceneDataService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,22 +29,22 @@ public class OutlineService {
 
     private final LlmJson llmJson;
     private final ObjectMapper mapper;
-    private final ChapterDAO chapterDAO;
-    private final SceneDAO sceneDAO;
+    private final ChapterDataService chapterData;
+    private final SceneDataService sceneData;
     private final PromptTemplateService promptTemplates;
 
     public OutlineService(LlmJson llmJson, ObjectMapper mapper,
-                          ChapterDAO chapterDAO, SceneDAO sceneDAO,
+                          ChapterDataService chapterData, SceneDataService sceneData,
                           PromptTemplateService promptTemplates) {
         this.llmJson = llmJson;
         this.mapper = mapper;
-        this.chapterDAO = chapterDAO;
-        this.sceneDAO = sceneDAO;
+        this.chapterData = chapterData;
+        this.sceneData = sceneData;
         this.promptTemplates = promptTemplates;
     }
 
     public ChapterDO loadChapter(long novelId, int chapterNo) {
-        return chapterDAO.find(novelId, chapterNo)
+        return chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
     }
 
@@ -99,13 +99,13 @@ public class OutlineService {
             words.add(s.path("words").asInt(900));
         }
         // 先清旧场景与门禁报告（外键顺序在 repository 内处理），再物化新场景
-        chapterDAO.resetForReoutline(ch.id(), scenes.toString());
-        sceneDAO.replaceAll(ch.id(), goals, present, reveal, not, words);
+        chapterData.resetForReoutline(ch.id(), scenes.toString());
+        sceneData.replaceAll(ch.id(), goals, present, reveal, not, words);
         log.info("章纲落库: scenes={}", scenes.size());
     }
 
     public List<SceneSpec> loadSpecs(long chapterId) {
-        return sceneDAO.findByChapter(chapterId).stream()
+        return sceneData.findByChapter(chapterId).stream()
                 .map(s -> new SceneSpec(s.sceneNo(), s.goal() == null ? "" : s.goal(),
                         toStringList(s.present()), toStringList(s.mustReveal()),
                         toStringList(s.mustNot()), s.wordsBudget()))

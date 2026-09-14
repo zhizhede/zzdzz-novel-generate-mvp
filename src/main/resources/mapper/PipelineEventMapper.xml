@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.PipelineEventMapper">
+
+    <insert id="insert">
+                INSERT INTO pipeline_events (novel_id, chapter_no, stage, phase, payload)
+                VALUES (#{novelId}, #{chapterNo}, #{stage}, #{phase}, #{payload}::jsonb)
+    </insert>
+
+    <select id="list" resultType="map">
+                SELECT id, chapter_no, stage, phase, payload::text, create_time FROM pipeline_events
+                WHERE is_deleted = FALSE AND novel_id = #{novelId}
+                  AND (#{chapterNo,jdbcType=INTEGER} IS NULL OR chapter_no = #{chapterNo})
+                ORDER BY id DESC LIMIT #{limit}
+    </select>
+</mapper>

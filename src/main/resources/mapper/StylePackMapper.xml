@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.StylePackMapper">
+
+    <select id="findIdByName" resultType="long">
+SELECT id FROM style_packs WHERE name=#{name} AND is_deleted=false
+    </select>
+
+    <select id="insert" resultType="long">
+INSERT INTO style_packs (name, description, rules_md, fingerprint) VALUES (#{name}, #{description}, #{rulesMd}::text, #{fingerprint}::jsonb) RETURNING id
+    </select>
+
+    <update id="updateFingerprint">
+UPDATE style_packs SET fingerprint=#{fingerprint}::jsonb, update_time=NOW() WHERE id=#{id}
+    </update>
+
+    <update id="updateRulesMdByNovel">
+
+                UPDATE style_packs sp SET rules_md=#{rulesMd}, update_time=NOW()
+                FROM novels n WHERE n.style_pack_id = sp.id AND n.id = #{novelId}
+                
+    </update>
+
+    <select id="findGateConfigByNovel" resultType="string">
+
+                SELECT sp.gate_config::text FROM style_packs sp
+                JOIN novels n ON n.style_pack_id = sp.id WHERE n.id = #{novelId}
+                
+    </select>
+
+    <update id="updateGateConfigByNovel">
+
+                UPDATE style_packs sp SET gate_config=#{gateConfigJson}::jsonb, update_time=NOW()
+                FROM novels n WHERE n.style_pack_id = sp.id AND n.id = #{novelId}
+                
+    </update>
+
+    <select id="findRulesMdByNovel" resultType="string">
+
+                SELECT sp.rules_md FROM style_packs sp
+                JOIN novels n ON n.style_pack_id = sp.id WHERE n.id = #{novelId}
+                
+    </select>
+
+    <select id="findFingerprintByNovel" resultType="string">
+
+                SELECT sp.fingerprint::text FROM style_packs sp
+                JOIN novels n ON n.style_pack_id = sp.id WHERE n.id = #{novelId}
+                
+    </select>
+</mapper>

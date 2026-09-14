@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.NovelMapper">
+
+    <select id="listAlive" resultType="com.zzdzz.novelgen.model.entity.NovelDO">
+
+                SELECT id, user_id, title, description, style_pack_id, approval_mode, status, is_deleted
+                FROM novels WHERE is_deleted=false ORDER BY id
+                
+    </select>
+
+    <select id="findIdByTitle" resultType="long">
+SELECT id FROM novels WHERE title=#{title} AND is_deleted=false
+    </select>
+
+    <select id="insert" resultType="long">
+INSERT INTO novels (user_id, title, description, style_pack_id, approval_mode)
+                VALUES (#{userId}, #{title}, #{description}, #{stylePackId}, #{approvalMode}) RETURNING id
+    </select>
+
+    <select id="findApprovalMode" resultType="string">
+SELECT approval_mode FROM novels WHERE id=#{novelId}
+    </select>
+
+    <update id="updateApprovalMode">
+UPDATE novels SET approval_mode=#{mode}, update_time=NOW() WHERE id=#{novelId} AND is_deleted=false
+    </update>
+
+    <select id="findPlanMode" resultType="string">
+SELECT plan_mode FROM novels WHERE id=#{novelId}
+    </select>
+
+    <update id="updatePlanMode">
+UPDATE novels SET plan_mode=#{mode}, update_time=NOW() WHERE id=#{novelId} AND is_deleted=false
+    </update>
+
+    <select id="chapterCount" resultType="int">
+SELECT COUNT(*) FROM chapters WHERE novel_id=#{novelId} AND is_deleted=false
+    </select>
+</mapper>
