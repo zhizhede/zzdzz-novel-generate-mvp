@@ -21,6 +21,11 @@
       <template v-if="detail">
         <div style="margin-bottom: 8px; display: flex; gap: 12px; align-items: center">
           <el-tag size="small">{{ detail.status }}</el-tag>
+          <span v-if="genStd" style="font-size: 12px; color: #999">
+            生成时评审：注水软 {{ genStd.reader_fat_ratio_block }} / 硬上限 {{ genStd.reader_fat_ratio_hard }} /
+            恢复线 {{ genStd.reader_fix_len_min }} / 扩写护栏 {{ genStd.reader_fix_len_max }} / 审校下限 {{ genStd.ai_review_fix_floor }}
+          </span>
+          <span v-else style="font-size: 12px; color: #c0c4cc">生成时评审标准未记录（历史章节）</span>
           <span style="font-size: 12px; color: #999">
             LLM：{{ detail.llmTotals?.calls ?? 0 }} 次调用 / {{ detail.llmTotals?.totalTokens ?? 0 }} tokens / 平均 {{ detail.llmTotals?.avgLatencyMs ?? 0 }}ms
           </span>
@@ -123,6 +128,15 @@ const approving = ref(false)
 const reviewLabel = computed(() => {
   const r = detail.value?.review
   return r ? (VERDICT_TEXT[r.verdict] || r.verdict) : '未审'
+})
+
+/** 生成时的评审标准快照（历史章节无记录时为 null）。 */
+const genStd = computed(() => {
+  try {
+    return JSON.parse(detail.value?.reviewConfig || 'null')
+  } catch {
+    return null
+  }
 })
 
 async function loadChapters() {

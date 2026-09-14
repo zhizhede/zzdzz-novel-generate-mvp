@@ -319,6 +319,20 @@
                 <el-input-number v-model="lenTol" :min="0" :max="0.5" :step="0.05" size="small" />
                 <span style="color: #999; font-size: 12px">预算 2400-3200、容差 0.15 → 实际允许 2040-3680 字</span>
               </div>
+              <div style="font-size: 13px; margin: 10px 0 6px">评审标准（本书覆盖，未列出的键继承平台调参）</div>
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+                <span style="font-size: 13px">注水软阈值</span>
+                <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: 92px" />
+                <span style="font-size: 13px">硬上限</span>
+                <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: 92px" />
+                <span style="font-size: 13px">恢复线比例</span>
+                <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: 92px" />
+                <span style="font-size: 13px">扩写护栏</span>
+                <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: 92px" />
+                <span style="font-size: 13px">审校下限</span>
+                <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: 92px" />
+              </div>
+              <div style="color: #999; font-size: 12px; margin-top: 4px">软阈值只提示不拦；结构性四问全过且超硬上限才转人工；恢复线 = 预算下限 × 比例</div>
               <el-button type="primary" @click="saveGateConfig">保存门禁配置</el-button>
               <span style="color: #999; font-size: 12px; margin-left: 10px">落库于 style_packs.gate_config，下一次门禁检测即生效</span>
             </div>
@@ -453,7 +467,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
@@ -488,6 +502,7 @@ const llmPrices = ref([])
 const priceEditor = ref(false)
 const priceForm = ref({})
 const tunings = ref([])
+const readerStd = reactive({ reader_fat_ratio_block: 0.33, reader_fat_ratio_hard: 0.5, reader_fix_len_min: 0.75, reader_fix_len_max: 1.15, ai_review_fix_floor: 0.6 })
 const prompts = ref([])
 const promptFilter = ref('')
 const promptOpen = ref(false)
@@ -749,6 +764,9 @@ async function loadAll() {
   styleRules.value = s.rulesMd
   styleFingerprint.value = s.fingerprintJson
   try {
+    Object.assign(readerStd, await api.get(`/api/novels/${novelId.value}/reader-standards`))
+  } catch { /* 回显失败保持默认 */ }
+  try {
     const cfg = JSON.parse(s.gateConfigJson || '{}')
     bannedText.value = (cfg.banned_phrases || []).join('\n')
     lenTol.value = typeof cfg.chapter_length_tolerance === 'number' ? cfg.chapter_length_tolerance : 0.15
@@ -851,7 +869,7 @@ async function saveDigest() {
 async function saveGateConfig() {
   try {
     const phrases = bannedText.value.split('\n').map((s) => s.trim()).filter(Boolean)
-    const cfg = { banned_phrases: phrases, chapter_length_tolerance: lenTol.value, no_straight_quote: true }
+    const cfg = { banned_phrases: phrases, chapter_length_tolerance: lenTol.value, no_straight_quote: true, ...JSON.parse(JSON.stringify(readerStd)) }
     await api.put(`/api/novels/${novelId.value}/gate-config`, { gateConfig: JSON.stringify(cfg) })
     ElMessage.success('门禁配置已落库（下一次门禁检测即生效）')
   } catch (e) {

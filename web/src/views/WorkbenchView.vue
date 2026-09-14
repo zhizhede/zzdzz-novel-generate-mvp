@@ -21,6 +21,24 @@
       </div>
     </el-card>
 
+    <el-card shadow="never" style="margin-bottom: 12px">
+      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+        <b style="font-size: 13px">评审标准（本书）</b>
+        <span style="font-size: 12px; color: #606266">注水软阈值</span>
+        <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: 92px" />
+        <span style="font-size: 12px; color: #606266">硬上限</span>
+        <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: 92px" />
+        <span style="font-size: 12px; color: #606266">恢复线比例</span>
+        <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: 92px" />
+        <span style="font-size: 12px; color: #606266">扩写护栏</span>
+        <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: 92px" />
+        <span style="font-size: 12px; color: #606266">审校下限</span>
+        <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: 92px" />
+        <el-button size="small" :loading="stdSaving" @click="saveStd">保存到本书</el-button>
+        <span style="color:#999;font-size:12px">连贯性优先：四问全过时仅超硬上限才转人工；字数可让路剧情。保存写入本书门禁配置，立即生效</span>
+      </div>
+    </el-card>
+
     <el-card shadow="never" style="margin-bottom: 12px" header="生成队列（异步执行，逐章回写进度）">
       <el-table v-if="queue.length" :data="queue" border size="small">
         <el-table-column prop="id" label="#" width="50" />
@@ -78,7 +96,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, nextTick } from 'vue'
+import { onMounted, onUnmounted, ref, nextTick, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
@@ -99,6 +117,31 @@ const scenes = ref([])
 const logBox = ref(null)
 let es = null
 let poll = null
+
+const readerStd = reactive({ reader_fat_ratio_block: 0.33, reader_fat_ratio_hard: 0.5, reader_fix_len_min: 0.75, reader_fix_len_max: 1.15, ai_review_fix_floor: 0.6 })
+const stdSaving = ref(false)
+
+async function loadStd() {
+  if (!novelId.value) return
+  try {
+    Object.assign(readerStd, await api.get(`/api/novels/${novelId.value}/reader-standards`))
+  } catch { /* 回显失败保持默认 */ }
+}
+
+async function saveStd() {
+  stdSaving.value = true
+  try {
+    const raw = await api.get(`/api/novels/${novelId.value}/gate-config`)
+    const cfg = JSON.parse(raw || '{}')
+    Object.assign(cfg, JSON.parse(JSON.stringify(readerStd)))
+    await api.put(`/api/novels/${novelId.value}/gate-config`, { gateConfig: JSON.stringify(cfg) })
+    ElMessage.success('评审标准已写入本书门禁配置，立即生效')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    stdSaving.value = false
+  }
+}
 
 const COLORS = {
   run: '#909399', chapter: '#409eff', outline: '#67c23a', scene: '#303133',
@@ -207,6 +250,7 @@ function onNovelChange() {
   novel.value = novels.value.find((n) => n.id === novelId.value) || null
   setSelectedNovelId(novelId.value)
   manual.value = novel.value?.approvalMode === 'manual'
+  loadStd()
 }
 
 onMounted(async () => {

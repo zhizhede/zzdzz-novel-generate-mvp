@@ -131,7 +131,7 @@ public final class PromptCatalog {
                 """),
 
         // ===== 读者评审与重写 =====
-        new TemplateDef(LlmNode.READER_REVIEW, "system", "读者评审五问（%s=注水率 blocker 阈值，tuning: reader_fat_ratio_block）", true, """
+        new TemplateDef(LlmNode.READER_REVIEW, "system", "读者评审五问（%s=注水率软阈值，%s=硬上限；书级 gate_config 可覆盖）", true, """
                 你是一个没耐心的网文读者，刷手机时点开了这一章。你只关心「想不想继续读」，只回答下列问题：
                 1. hook 前 3 行：会不会继续往下读？（环境/氛围/抒情式开场、或与上章结尾接不上=不会）
                 2. stakes 这场戏：谁想要什么？什么在阻止？（说不出来=没有戏剧张力）
@@ -142,7 +142,9 @@ public final class PromptCatalog {
                 {"verdict":"pass|blocker","hook":"pass|fail","stakes":"pass|fail","continuity":"pass|fail","consequence":"pass|fail","fat_ratio":0.4,"skip_quotes":["可整段删除的原句"],"issues":["具体问题（引用原句）"]}
                 规则：
                 - 引用原文一律用「」；字符串值内部禁止英文双引号。
-                - hook/stakes/continuity/consequence 任一 fail，或 fat_ratio 大于 %s → verdict=blocker；否则 pass。
+                - hook/stakes/continuity/consequence 任一 fail → verdict=blocker。
+                - fat_ratio 是报告项：大于 %s（软阈值）只提示偏水，不否决；只有大于 %s（硬上限）才判 blocker。连贯性永远比注水重要，不要为注水否决剧情完整的章节。
+                - skip_quotes 只能列纯装饰句；推进剧情、刻画人物、交代信息的句子一律不许进清单。
                 - 你只管「想不想往下读」，错别字与设定连续性是另一位审校的事，不要报。
                 - 不要输出思考过程，只输出 JSON。
                 """),
@@ -165,10 +167,11 @@ public final class PromptCatalog {
         new TemplateDef(LlmNode.READER_FIX, "system", "读者重写系统提示", true,
                 "你是网文编辑，任务是让这一章「每一行都值得读」：删注水、保情节、补张力。"),
 
-        new TemplateDef(LlmNode.READER_FIX, "user", "读者重写（弃书理由驱动的整章重写）", true, """
+        new TemplateDef(LlmNode.READER_FIX, "user", "读者重写（弃书理由驱动的整章重写，剧情人设优先）", true, """
                 任务：修订第 %d 章全文。没耐心的网文读者给出以下弃书理由：
                 %s
-                要求：情节、信息与对白立场全部保留；删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；
+                要求：情节节拍、关键信息与对白立场全部保留，人物性格与说话方式不得改变，任何剧情节拍不得删除或合并；
+                删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；篇幅与保留剧情冲突时优先保剧情，字数可低于目标。
                 分行节奏与风格特征保持本书原貌；直接输出修订后的完整正文，不要输出思考过程。
                 本章篇幅约束：%s。
 
