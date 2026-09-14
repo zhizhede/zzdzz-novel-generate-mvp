@@ -33,3 +33,6 @@ var/
 # 会话/工作区文档（本地维护，不入库）
 AGENTS.md
 docs/STATUS.md
+
+# 一次性迁移脚本
+scripts/
