@@ -2,10 +2,10 @@ package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zzdzz.novelgen.model.entity.GenerationTaskDO;
+import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
-import java.util.Map;
 
 /** generation_tasks 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/GenerationTaskMapper.xml。 */
 public interface GenerationTaskMapper extends BaseMapper<GenerationTaskDO> {
@@ -14,21 +14,21 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTaskDO> {
                 @Param("toChapter") int toChapter, @Param("submittedBy") Long submittedBy,
                 @Param("kind") String kind, @Param("payload") String payload);
 
-    List<Map<String, Object>> list(@Param("limit") int limit);
+    List<GenerationTaskDataService.TaskRow> list(@Param("limit") int limit);
 
     Long findQueuedId();
 
     int claim(@Param("id") long id);
 
-    List<Map<String, Object>> findRunning();
+    List<GenerationTaskDataService.TaskRow> findRunning();
 
-    List<Map<String, Object>> listRunning();
+    List<GenerationTaskDataService.TaskRow> listRunning();
 
     Long findQueuedForDispatch();
 
     int countRunningNovels();
 
-    List<Map<String, Object>> findRunningById(@Param("id") long id);
+    List<GenerationTaskDataService.TaskRow> findRunningById(@Param("id") long id);
 
     int updateProgress(@Param("id") long id, @Param("doneChapters") int doneChapters,
                        @Param("currentChapter") Integer currentChapter, @Param("message") String message);

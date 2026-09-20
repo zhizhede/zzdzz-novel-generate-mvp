@@ -50,12 +50,11 @@ public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMap
 
     @Override
     public java.util.Optional<Reset> findNodePhase(long id) {
-        List<java.util.Map<String, Object>> rows = baseMapper.findNodePhase(id);
+        var rows = baseMapper.findNodePhase(id);
         if (rows.isEmpty()) {
             return java.util.Optional.empty();
         }
-        Map<String, Object> m = rows.get(0);
-        return java.util.Optional.of(new Reset((String) m.get("node"), (String) m.get("phase")));
+        return java.util.Optional.of(rows.get(0));
     }
 
 

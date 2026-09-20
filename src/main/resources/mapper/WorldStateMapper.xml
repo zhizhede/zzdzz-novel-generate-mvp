@@ -15,8 +15,8 @@
                 ORDER BY chapter_no DESC LIMIT 1
     </select>
 
-    <select id="listByNovel" resultType="map">
-                SELECT chapter_no, state::text, update_time FROM world_states
+    <select id="listByNovel" resultType="com.zzdzz.novelgen.service.data.WorldStateDataService$StateRow">
+                SELECT chapter_no AS "chapterNo", state::text AS "stateJson", to_char(update_time, 'YYYY-MM-DD HH24:MI:SS') AS "updateTime" FROM world_states
                 WHERE novel_id=#{novelId} AND is_deleted = FALSE
                 ORDER BY chapter_no DESC LIMIT #{limit}
     </select>

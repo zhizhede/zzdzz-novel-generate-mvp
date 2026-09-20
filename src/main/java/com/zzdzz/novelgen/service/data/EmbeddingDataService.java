@@ -13,16 +13,20 @@ public interface EmbeddingDataService extends IService<EmbeddingDO> {
     record Hit(String sourceType, long sourceId, Integer chapterNo, String content, double distance) {
     }
 
+    /** 待补嵌条目：事实账带 chapterNo+content，素材卡带 kind+name（缺席列为 null）。 */
+    record MissingRow(long sourceId, Integer chapterNo, String content, String kind, String name) {
+    }
+
     void upsert(String sourceType, long sourceId, long novelId, Integer chapterNo,
                 String content, float[] vec);
 
     List<Hit> search(long novelId, float[] queryVec, int limit);
 
     /** 未建索引的事实账（惰性补嵌用）。 */
-    List<Map<String, Object>> findMissingDigests(long novelId, int limit);
+    List<MissingRow> findMissingDigests(long novelId, int limit);
 
     /** 未建索引的素材卡。 */
-    List<Map<String, Object>> findMissingCards(long novelId, int limit);
+    List<MissingRow> findMissingCards(long novelId, int limit);
 
     int countByNovel(long novelId);
 }

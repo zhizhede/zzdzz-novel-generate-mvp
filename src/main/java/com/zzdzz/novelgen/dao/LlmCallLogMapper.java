@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zzdzz.novelgen.model.entity.LlmCallLogDO;
+import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -25,7 +26,7 @@ public interface LlmCallLogMapper extends BaseMapper<LlmCallLogDO> {
 
     Long countBy(@Param("novelId") Long novelId, @Param("chapterId") Long chapterId);
 
-    List<Map<String, Object>> totalsBy(@Param("novelId") Long novelId, @Param("chapterId") Long chapterId);
+    List<LlmCallLogDataService.Totals> totalsBy(@Param("novelId") Long novelId, @Param("chapterId") Long chapterId);
 
-    List<Map<String, Object>> usageByNodeSince(@Param("days") int days);
+    List<LlmCallLogDataService.UsageGroup> usageByNodeSince(@Param("days") int days);
 }

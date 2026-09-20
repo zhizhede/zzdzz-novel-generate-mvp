@@ -31,25 +31,25 @@
                   AND (#{chapterId,jdbcType=BIGINT} IS NULL OR chapter_id=#{chapterId})
     </select>
 
-    <select id="totalsBy" resultType="map">
-                SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens),0) AS prompt_tokens,
-                       COALESCE(SUM(completion_tokens),0) AS completion_tokens, COALESCE(SUM(total_tokens),0) AS total_tokens,
-                       COALESCE(AVG(latency_ms),0) AS avg_latency
+    <select id="totalsBy" resultType="com.zzdzz.novelgen.service.data.LlmCallLogDataService$Totals">
+                SELECT COUNT(*)::bigint AS "calls", COALESCE(SUM(prompt_tokens),0)::bigint AS "promptTokens",
+                       COALESCE(SUM(completion_tokens),0)::bigint AS "completionTokens", COALESCE(SUM(total_tokens),0)::bigint AS "totalTokens",
+                       COALESCE(AVG(latency_ms),0)::bigint AS "avgLatencyMs"
                 FROM llm_call_log
                 WHERE is_deleted=false
                   AND (#{novelId,jdbcType=BIGINT} IS NULL OR novel_id=#{novelId})
                   AND (#{chapterId,jdbcType=BIGINT} IS NULL OR chapter_id=#{chapterId})
     </select>
 
-    <select id="usageByNodeSince" resultType="map">
+    <select id="usageByNodeSince" resultType="com.zzdzz.novelgen.service.data.LlmCallLogDataService$UsageGroup">
                 SELECT l.node, l.model,
                        (EXTRACT(HOUR FROM l.create_time AT TIME ZONE 'Asia/Shanghai') >= p.peak_start_hour
-                        AND EXTRACT(HOUR FROM l.create_time AT TIME ZONE 'Asia/Shanghai') &lt; p.peak_end_hour) AS is_peak,
-                       COUNT(*) AS calls,
-                       COALESCE(SUM(l.prompt_tokens),0) AS prompt_tokens,
-                       COALESCE(SUM(COALESCE(l.cached_tokens,0)),0) AS cached_tokens,
-                       COALESCE(SUM(l.completion_tokens),0) AS completion_tokens,
-                       COALESCE(SUM(l.latency_ms),0) AS latency_sum
+                        AND EXTRACT(HOUR FROM l.create_time AT TIME ZONE 'Asia/Shanghai') &lt; p.peak_end_hour) AS "peak",
+                       COUNT(*)::bigint AS "calls",
+                       COALESCE(SUM(l.prompt_tokens),0)::bigint AS "promptTokens",
+                       COALESCE(SUM(COALESCE(l.cached_tokens,0)),0)::bigint AS "cachedTokens",
+                       COALESCE(SUM(l.completion_tokens),0)::bigint AS "completionTokens",
+                       COALESCE(SUM(l.latency_ms),0)::bigint AS "latencySum"
                 FROM llm_call_log l
                 LEFT JOIN llm_model_price p ON p.model = l.model AND p.is_deleted=false AND p.enabled=true
                 WHERE l.is_deleted=false AND l.create_time &gt; NOW() - ((#{days}) || ' days')::interval

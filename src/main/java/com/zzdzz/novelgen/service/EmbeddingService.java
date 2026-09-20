@@ -100,11 +100,11 @@ public class EmbeddingService {
     public int ensureNovelIndexed(long novelId) {
         int indexed = 0;
         try {
-            List<Map<String, Object>> digests = dao.findMissingDigests(novelId, 64);
+            List<EmbeddingDataService.MissingRow> digests = dao.findMissingDigests(novelId, 64);
             for (int i = 0; i < digests.size(); i += BATCH) {
                 indexed += indexBatch(novelId, digests.subList(i, Math.min(i + BATCH, digests.size())));
             }
-            List<Map<String, Object>> cards = dao.findMissingCards(novelId, 64);
+            List<EmbeddingDataService.MissingRow> cards = dao.findMissingCards(novelId, 64);
             for (int i = 0; i < cards.size(); i += BATCH) {
                 indexed += indexCardsBatch(novelId, cards.subList(i, Math.min(i + BATCH, cards.size())));
             }
@@ -130,27 +130,25 @@ public class EmbeddingService {
         return dao.countByNovel(novelId);
     }
 
-    private int indexBatch(long novelId, List<Map<String, Object>> rows) {
-        List<String> texts = rows.stream().map(r -> String.valueOf(r.get("content"))).toList();
+    private int indexBatch(long novelId, List<EmbeddingDataService.MissingRow> rows) {
+        List<String> texts = rows.stream().map(EmbeddingDataService.MissingRow::content).toList();
         List<float[]> vecs = client.embed(novelId, MiniMaxEmbeddingClient.TYPE_DB, texts);
         for (int i = 0; i < rows.size(); i++) {
-            Map<String, Object> r = rows.get(i);
-            dao.upsert("digest", ((Number) r.get("source_id")).longValue(), novelId,
-                    (Integer) r.get("chapter_no"), texts.get(i), vecs.get(i));
+            dao.upsert("digest", rows.get(i).sourceId(), novelId,
+                    rows.get(i).chapterNo(), texts.get(i), vecs.get(i));
         }
         return rows.size();
     }
 
-    private int indexCardsBatch(long novelId, List<Map<String, Object>> rows) {
+    private int indexCardsBatch(long novelId, List<EmbeddingDataService.MissingRow> rows) {
         List<String> texts = new ArrayList<>(rows.size());
-        for (Map<String, Object> r : rows) {
-            var card = cardService.get(((Number) r.get("source_id")).longValue());
+        for (var r : rows) {
+            var card = cardService.get(r.sourceId());
             texts.add(cardService.embeddingText(card));
         }
         List<float[]> vecs = client.embed(novelId, MiniMaxEmbeddingClient.TYPE_DB, texts);
         for (int i = 0; i < rows.size(); i++) {
-            Map<String, Object> r = rows.get(i);
-            dao.upsert("card", ((Number) r.get("source_id")).longValue(), novelId,
+            dao.upsert("card", rows.get(i).sourceId(), novelId,
                     null, texts.get(i), vecs.get(i));
         }
         return rows.size();

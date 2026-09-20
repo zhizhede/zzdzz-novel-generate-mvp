@@ -33,13 +33,6 @@ public class PipelineEventDataServiceImpl extends ServiceImpl<PipelineEventMappe
 
     @Override
     public List<EventRow> list(Long novelId, Integer chapterNo, int limit) {
-        List<EventRow> out = new ArrayList<>();
-        for (Map<String, Object> m : baseMapper.list(novelId, chapterNo, limit)) {
-            out.add(new EventRow(((Number) m.get("id")).longValue(),
-                    m.get("chapter_no") == null ? null : ((Number) m.get("chapter_no")).intValue(),
-                    (String) m.get("stage"), (String) m.get("phase"), (String) m.get("payload"),
-                    String.valueOf(m.get("create_time"))));
-        }
-        return out;
+        return baseMapper.list(novelId, chapterNo, limit);
     }
 }

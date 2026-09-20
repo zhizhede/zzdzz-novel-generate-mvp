@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zzdzz.novelgen.model.entity.PromptTemplateDO;
+import com.zzdzz.novelgen.service.data.PromptTemplateDataService;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -25,6 +26,6 @@ public interface PromptTemplateMapper extends BaseMapper<PromptTemplateDO> {
     int syncInsertIfMissing(@Param("node") String node, @Param("phase") String phase, @Param("title") String title,
                             @Param("content") String content, @Param("exact") boolean exact, @Param("catalogHash") String catalogHash);
 
-    java.util.List<java.util.Map<String, Object>> findNodePhase(@Param("id") long id);
+    List<PromptTemplateDataService.Reset> findNodePhase(@Param("id") long id);
 
 }

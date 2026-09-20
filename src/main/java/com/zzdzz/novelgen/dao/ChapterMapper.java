@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -16,13 +17,13 @@ public interface ChapterMapper extends BaseMapper<ChapterDO> {
 
     List<ChapterDO> listSummaries(@Param("novelId") long novelId);
 
-    List<Map<String, Object>> findOpeningRows(@Param("novelId") long novelId, @Param("maxChapterNo") int maxChapterNo);
+    List<ChapterDataService.ChapterTextRow> findOpeningRows(@Param("novelId") long novelId, @Param("maxChapterNo") int maxChapterNo);
 
     String findFullText(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
 
-    List<Map<String, Object>> findApprovedWithoutDigest();
+    List<ChapterDataService.ApprovedNoDigest> findApprovedWithoutDigest();
 
-    List<Map<String, Object>> listVolumeFacts(@Param("novelId") long novelId, @Param("volNo") int volNo);
+    List<ChapterDataService.VolumeFactRow> listVolumeFacts(@Param("novelId") long novelId, @Param("volNo") int volNo);
 
     Long existsCount(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
 
@@ -62,5 +63,5 @@ public interface ChapterMapper extends BaseMapper<ChapterDO> {
 
     int saveFullText(@Param("chapterId") long chapterId, @Param("fullText") String fullText);
 
-    List<Map<String, Object>> findDialogueRows(@Param("novelId") long novelId, @Param("maxChapterNo") int maxChapterNo);
+    List<ChapterDataService.ChapterTextRow> findDialogueRows(@Param("novelId") long novelId, @Param("maxChapterNo") int maxChapterNo);
 }

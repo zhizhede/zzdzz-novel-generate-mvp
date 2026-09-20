@@ -56,12 +56,12 @@ public class VolumeReviewService {
     /** 复盘一卷（同步，约 1-3 分钟）：机械对账 + LLM 漂移分析，报告落库并返回。 */
     @SuppressWarnings("unchecked")
     public Map<String, Object> review(long novelId, int volNo) {
-        List<Map<String, Object>> rows = chapterData.listVolumeFacts(novelId, volNo);
+        List<ChapterDataService.VolumeFactRow> rows = chapterData.listVolumeFacts(novelId, volNo);
         if (rows.isEmpty()) {
             throw new BizException(ErrorCode.NOT_FOUND, "卷 " + volNo + " 不存在或没有规划行");
         }
-        int fromNo = ((Number) rows.get(0).get("chapter_no")).intValue();
-        int toNo = ((Number) rows.get(rows.size() - 1).get("chapter_no")).intValue();
+        int fromNo = rows.get(0).chapterNo();
+        int toNo = rows.get(rows.size() - 1).chapterNo();
         stageLog.emit(novelId, StageLog.Stage.VOLUME_RETRO, START,
                 Map.of("volNo", volNo, "from", fromNo, "to", toNo));
 
@@ -124,22 +124,22 @@ public class VolumeReviewService {
     // ===== 机械对账（确定性，零 LLM） =====
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> mechanicalAudit(List<Map<String, Object>> rows,
+    private Map<String, Object> mechanicalAudit(List<ChapterDataService.VolumeFactRow> rows,
                                                 Map<String, ForeshadowDO> ledger) {
         List<Map<String, Object>> foreshadowAudit = new ArrayList<>();
         List<Map<String, Object>> budgetAudit = new ArrayList<>();
         Map<String, Integer> statusCount = new LinkedHashMap<>();
         int textLenTotal = 0;
 
-        for (Map<String, Object> row : rows) {
-            int no = ((Number) row.get("chapter_no")).intValue();
-            int len = ((Number) row.get("text_len")).intValue();
+        for (var row : rows) {
+            int no = row.chapterNo();
+            int len = (int) row.textLen();
             textLenTotal += len;
-            statusCount.merge(String.valueOf(row.get("status")), 1, Integer::sum);
+            statusCount.merge(row.status(), 1, Integer::sum);
 
             // 字数预算偏差
-            int bMin = ((Number) row.get("budget_min")).intValue();
-            int bMax = ((Number) row.get("budget_max")).intValue();
+            int bMin = row.budgetMin();
+            int bMax = row.budgetMax();
             boolean outOfBand = len > 0 && (len < bMin * 0.85 || len > bMax * 1.15);
             if (outOfBand || len == 0) {
                 budgetAudit.add(Map.of("chapter_no", no, "budget", bMin + "-" + bMax,
@@ -148,7 +148,7 @@ public class VolumeReviewService {
 
             // 伏笔排期对账
             try {
-                for (JsonNode codeNode : mapper.readTree(String.valueOf(row.get("refs")))) {
+                for (JsonNode codeNode : mapper.readTree(row.refs())) {
                     String code = codeNode.asText("");
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("chapter_no", no);
@@ -182,7 +182,7 @@ public class VolumeReviewService {
     // ===== LLM 漂移分析 =====
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> llmReview(long novelId, int volNo, List<Map<String, Object>> rows,
+    private Map<String, Object> llmReview(long novelId, int volNo, List<ChapterDataService.VolumeFactRow> rows,
                                           Map<String, Object> mechanical, int fromNo, int toNo) {
         // 各章实际收束：该卷范围内的事实账摘要
         StringBuilder digestsSb = new StringBuilder();
@@ -198,11 +198,11 @@ public class VolumeReviewService {
         String worldLast = states.isEmpty() ? "（无）" : states.get(0).stateJson();
 
         StringBuilder rowsSb = new StringBuilder();
-        for (Map<String, Object> r : rows) {
-            rowsSb.append("第").append(r.get("chapter_no")).append("章《").append(r.get("title"))
-                    .append("》目标：").append(r.get("goal"))
-                    .append("｜钩子：").append(r.get("hook"))
-                    .append("｜实际：").append(r.get("status")).append(' ').append(r.get("text_len")).append("字\n");
+        for (var r : rows) {
+            rowsSb.append("第").append(r.chapterNo()).append("章《").append(r.title())
+                    .append("》目标：").append(r.goal())
+                    .append("｜钩子：").append(r.hook())
+                    .append("｜实际：").append(r.status()).append(' ').append(r.textLen()).append("字\n");
         }
 
         String user = promptTemplates.format(LlmNode.VOLUME_REVIEW, "user", """

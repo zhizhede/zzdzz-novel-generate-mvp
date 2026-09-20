@@ -10,16 +10,16 @@
                               chapter_no = EXCLUDED.chapter_no, update_time = NOW()
     </update>
 
-    <select id="search" resultType="map">
-                SELECT source_type, source_id, chapter_no, content,
+    <select id="search" resultType="com.zzdzz.novelgen.service.data.EmbeddingDataService$Hit">
+                SELECT source_type AS "sourceType", source_id AS "sourceId", chapter_no AS "chapterNo", content,
                        embedding &lt;=&gt; #{vecStr}::vector AS distance
                 FROM embeddings
                 WHERE novel_id = #{novelId} AND is_deleted = FALSE
                 ORDER BY embedding &lt;=&gt; #{vecStr}::vector
                 LIMIT #{limit}
     </select>
-    <select id="findMissingDigests" resultType="map">
-                SELECT d.id AS source_id, c.chapter_no, d.content_md AS content
+    <select id="findMissingDigests" resultType="com.zzdzz.novelgen.service.data.EmbeddingDataService$MissingRow">
+                SELECT d.id AS "sourceId", c.chapter_no AS "chapterNo", d.content_md AS content
                 FROM digests d
                 JOIN chapters c ON c.id = d.chapter_id
                 WHERE c.novel_id = #{novelId} AND d.is_deleted = FALSE
@@ -29,8 +29,8 @@
                 LIMIT #{limit}
     </select>
 
-    <select id="findMissingCards" resultType="map">
-                SELECT id AS source_id, kind, name FROM material_cards
+    <select id="findMissingCards" resultType="com.zzdzz.novelgen.service.data.EmbeddingDataService$MissingRow">
+                SELECT id AS "sourceId", kind, name FROM material_cards
                 WHERE novel_id = #{novelId} AND is_deleted = FALSE
                   AND NOT EXISTS (SELECT 1 FROM embeddings e
                                   WHERE e.source_type = 'card' AND e.source_id = material_cards.id AND e.is_deleted = FALSE)

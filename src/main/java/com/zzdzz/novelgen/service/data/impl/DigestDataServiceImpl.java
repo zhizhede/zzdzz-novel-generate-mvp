@@ -14,14 +14,7 @@ public class DigestDataServiceImpl extends ServiceImpl<DigestMapper, DigestDO> i
 
     @Override
     public List<DigestItem> listByNovel(long novelId) {
-        List<DigestItem> out = new java.util.ArrayList<>();
-        for (java.util.Map<String, Object> m : baseMapper.listByNovel(novelId)) {
-            out.add(new DigestItem(((Number) m.get("id")).longValue(),
-                    ((Number) m.get("chapter_no")).intValue(),
-                    (String) m.get("content_md"), (String) m.get("facts"),
-                    String.valueOf(m.get("update_time"))));
-        }
-        return out;
+        return baseMapper.listByNovel(novelId);
     }
 
     @Override

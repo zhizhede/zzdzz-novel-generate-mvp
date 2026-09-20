@@ -14,6 +14,15 @@ public interface ChapterDataService extends IService<ChapterDO> {
     record Opening(int chapterNo, String firstLines) {
     }
 
+    /** 章文本行（开场相似度/对话密度统计用）。 */
+    record ChapterTextRow(int chapterNo, String fullText) {
+    }
+
+    /** 卷级复盘的事实行（规划 + 实际产出）。 */
+    record VolumeFactRow(int chapterNo, String title, String goal, String hook, String status,
+                         int budgetMin, int budgetMax, long textLen, String refs) {
+    }
+
     /** 异步审批占位后未落 digest 的章（进程重启遗留），启动自愈补跑用。 */
     record ApprovedNoDigest(long id, long novelId, int chapterNo) {
     }
@@ -26,7 +35,7 @@ public interface ChapterDataService extends IService<ChapterDO> {
     List<ChapterDO> listSummariesByNovel(long novelId);
 
     /** 卷级复盘用：一卷各章的事实行（规划 + 实际产出）。 */
-    List<Map<String, Object>> listVolumeFacts(long novelId, int volNo);
+    List<VolumeFactRow> listVolumeFacts(long novelId, int volNo);
 
     /** 已有正文的最末章号（无任何正文时为 null）：卷纲规划必须接续其后来。 */
     Integer maxChapterWithText(long novelId);

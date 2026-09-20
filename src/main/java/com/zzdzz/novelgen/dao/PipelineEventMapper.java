@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zzdzz.novelgen.model.entity.PipelineEventDO;
+import com.zzdzz.novelgen.service.data.PipelineEventDataService;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -13,6 +14,6 @@ public interface PipelineEventMapper extends BaseMapper<PipelineEventDO> {
     int insert(@Param("novelId") Long novelId, @Param("chapterNo") Integer chapterNo,
                @Param("stage") String stage, @Param("phase") String phase, @Param("payload") String payload);
 
-    List<Map<String, Object>> list(@Param("novelId") Long novelId, @Param("chapterNo") Integer chapterNo,
+    List<PipelineEventDataService.EventRow> list(@Param("novelId") Long novelId, @Param("chapterNo") Integer chapterNo,
                                    @Param("limit") int limit);
 }

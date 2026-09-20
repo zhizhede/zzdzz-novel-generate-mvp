@@ -20,9 +20,9 @@ public interface GateReportMapper extends BaseMapper<GateReportDO> {
 
     String findLatestSceneFailureJson(@Param("chapterId") long chapterId, @Param("sceneId") long sceneId);
 
-    List<Map<String, Object>> findLatestChapterReport(@Param("chapterId") long chapterId);
+    List<GateReportDO> findLatestChapterReport(@Param("chapterId") long chapterId);
 
-    List<Map<String, Object>> findLatestChapterReview(@Param("chapterId") long chapterId);
+    List<GateReportDO> findLatestChapterReview(@Param("chapterId") long chapterId);
 
     List<GateReportDO> listByChapter(@Param("chapterId") long chapterId);
 }

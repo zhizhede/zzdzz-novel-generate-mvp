@@ -41,7 +41,7 @@
                 WHERE NOT EXISTS (SELECT 1 FROM prompt_templates WHERE node = #{node} AND phase = #{phase} AND is_deleted = FALSE)
     </insert>
 
-    <select id="findNodePhase" resultType="map">
+    <select id="findNodePhase" resultType="com.zzdzz.novelgen.service.data.PromptTemplateDataService$Reset">
                 SELECT node, phase FROM prompt_templates WHERE id = #{id} AND is_deleted = FALSE
     </select>
 

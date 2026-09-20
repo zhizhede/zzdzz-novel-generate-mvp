@@ -36,13 +36,7 @@ public class WorldStateDataServiceImpl extends ServiceImpl<WorldStateMapper, Wor
 
     @Override
     public List<StateRow> listByNovel(long novelId, int limit) {
-        List<StateRow> out = new java.util.ArrayList<>();
-        for (Map<String, Object> m : baseMapper.listByNovel(novelId, limit)) {
-            out.add(new StateRow(((Number) m.get("chapter_no")).intValue(),
-                    (String) m.get("state"),
-                    String.valueOf(m.get("update_time"))));
-        }
-        return out;
+        return baseMapper.listByNovel(novelId, limit);
     }
 
     @Override

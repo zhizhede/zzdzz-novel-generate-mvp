@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zzdzz.novelgen.model.entity.DigestDO;
+import com.zzdzz.novelgen.service.data.DigestDataService;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
@@ -17,5 +18,5 @@ public interface DigestMapper extends BaseMapper<DigestDO> {
 
     boolean existsByChapter(@Param("chapterId") long chapterId);
 
-    java.util.List<java.util.Map<String, Object>> listByNovel(@Param("novelId") long novelId);
+    List<DigestDataService.DigestItem> listByNovel(@Param("novelId") long novelId);
 }

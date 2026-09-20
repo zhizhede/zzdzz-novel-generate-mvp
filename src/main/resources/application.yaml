@@ -30,3 +30,5 @@ mybatis-plus:
   mapper-locations: classpath*:mapper/*.xml
   configuration:
     map-underscore-to-camel-case: true
+    # record 投影按构造器参数名映射（投影 record 无 setter；SQL 列别名对齐参数名）
+    arg-name-based-constructor-auto-mapping: true

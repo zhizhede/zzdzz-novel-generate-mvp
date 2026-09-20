@@ -47,24 +47,22 @@ public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, Gat
 
     @Override
     public LatestChapterReport findLatestChapterReport(long chapterId) {
-        List<Map<String, Object>> rows = baseMapper.findLatestChapterReport(chapterId);
+        List<GateReportDO> rows = baseMapper.findLatestChapterReport(chapterId);
         if (rows.isEmpty()) {
             return null;
         }
-        Map<String, Object> m = rows.get(0);
-        return new LatestChapterReport((Boolean) m.get("passed"),
-                odt(m.get("create_time")), (String) m.get("result"));
+        GateReportDO r = rows.get(0);
+        return new LatestChapterReport(r.isPassed(), r.getCreateTime(), r.getResult());
     }
 
     @Override
     public LatestReview findLatestChapterReview(long chapterId) {
-        List<Map<String, Object>> rows = baseMapper.findLatestChapterReview(chapterId);
+        List<GateReportDO> rows = baseMapper.findLatestChapterReview(chapterId);
         if (rows.isEmpty()) {
             return null;
         }
-        Map<String, Object> m = rows.get(0);
-        return new LatestReview((Boolean) m.get("passed"),
-                odt(m.get("create_time")), (String) m.get("result"));
+        GateReportDO r = rows.get(0);
+        return new LatestReview(r.isPassed(), r.getCreateTime(), r.getResult());
     }
 
     @Override
@@ -72,16 +70,4 @@ public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, Gat
         return baseMapper.listByChapter(chapterId);
     }
 
-    private static java.time.OffsetDateTime odt(Object v) {
-        if (v == null) {
-            return null;
-        }
-        if (v instanceof java.time.OffsetDateTime o) {
-            return o;
-        }
-        if (v instanceof java.sql.Timestamp t) {
-            return t.toInstant().atOffset(java.time.ZoneOffset.UTC);
-        }
-        return null;
-    }
 }

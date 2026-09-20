@@ -22,13 +22,13 @@
                 ORDER BY id DESC LIMIT 1
     </select>
 
-    <select id="findLatestChapterReport" resultType="map">
+    <select id="findLatestChapterReport" resultType="com.zzdzz.novelgen.model.entity.GateReportDO">
                 SELECT passed, create_time, result::text FROM gate_reports
                 WHERE chapter_id=#{chapterId} AND scene_id IS NULL AND gate_type='mechanical'
                 ORDER BY id DESC LIMIT 1
     </select>
 
-    <select id="findLatestChapterReview" resultType="map">
+    <select id="findLatestChapterReview" resultType="com.zzdzz.novelgen.model.entity.GateReportDO">
                 SELECT passed, create_time, result::text FROM gate_reports
                 WHERE chapter_id=#{chapterId} AND scene_id IS NULL AND gate_type='ai_review'
                 ORDER BY id DESC LIMIT 1

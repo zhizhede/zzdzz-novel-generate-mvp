@@ -23,15 +23,7 @@ public class EmbeddingDataServiceImpl extends ServiceImpl<EmbeddingMapper, Embed
 
     @Override
     public List<Hit> search(long novelId, float[] queryVec, int limit) {
-        List<Hit> out = new ArrayList<>();
-        for (Map<String, Object> m : baseMapper.search(novelId, vectorLiteral(queryVec), limit)) {
-            out.add(new Hit((String) m.get("source_type"),
-                    ((Number) m.get("source_id")).longValue(),
-                    m.get("chapter_no") == null ? null : ((Number) m.get("chapter_no")).intValue(),
-                    (String) m.get("content"),
-                    ((Number) m.get("distance")).doubleValue()));
-        }
-        return out;
+        return baseMapper.search(novelId, vectorLiteral(queryVec), limit);
     }
 
     private static String vectorLiteral(float[] vec) {
@@ -45,12 +37,12 @@ public class EmbeddingDataServiceImpl extends ServiceImpl<EmbeddingMapper, Embed
     }
 
     @Override
-    public List<Map<String, Object>> findMissingDigests(long novelId, int limit) {
+    public List<MissingRow> findMissingDigests(long novelId, int limit) {
         return baseMapper.findMissingDigests(novelId, limit);
     }
 
     @Override
-    public List<Map<String, Object>> findMissingCards(long novelId, int limit) {
+    public List<MissingRow> findMissingCards(long novelId, int limit) {
         return baseMapper.findMissingCards(novelId, limit);
     }
 
