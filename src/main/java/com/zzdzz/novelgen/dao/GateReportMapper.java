@@ -23,4 +23,6 @@ public interface GateReportMapper extends BaseMapper<GateReportDO> {
     List<Map<String, Object>> findLatestChapterReport(@Param("chapterId") long chapterId);
 
     List<Map<String, Object>> findLatestChapterReview(@Param("chapterId") long chapterId);
+
+    List<GateReportDO> listByChapter(@Param("chapterId") long chapterId);
 }

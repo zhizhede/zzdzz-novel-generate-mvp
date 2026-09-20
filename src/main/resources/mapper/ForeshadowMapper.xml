@@ -51,9 +51,11 @@ SELECT COUNT(*) FROM foreshadows WHERE novel_id=#{novelId} AND content=#{content
 
     <select id="nextCode" resultType="string">
 
-                SELECT COALESCE(MAX(SUBSTRING(code FROM 2)::INT), 0) FROM foreshadows
-                WHERE novel_id=#{novelId} AND is_deleted=false AND code ~ '^F[0-9]+$'
-                
+                <!-- 返回可直接落库的下一编码 'F'+最大+1；regexp_match 对不匹配行返回 NULL 被 MAX 忽略，
+                     兼容历史裸数字脏行（如 ch62 时代误插的 '72'），避免分配回退导致连环撞键丢提议 -->
+                SELECT 'F' || (COALESCE(MAX((REGEXP_MATCH(code, '^(F)?([0-9]+)$'))[2]::INT), 0) + 1) FROM foreshadows
+                WHERE novel_id=#{novelId} AND is_deleted=false
+
     </select>
 
     <update id="insertPlanned">

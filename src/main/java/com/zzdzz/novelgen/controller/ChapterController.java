@@ -55,6 +55,12 @@ public class ChapterController {
         return Result.ok(chapterQueryService.detail(id));
     }
 
+    /** 章生成档案：步骤状态行 + 按章 LLM 台账（元数据）+ 全轮次门禁/评审判定 + 节点小计。 */
+    @GetMapping("/chapters/{id}/trace")
+    public Result<com.zzdzz.novelgen.model.vo.ChapterTraceVO> trace(@PathVariable long id) {
+        return Result.ok(chapterQueryService.trace(id));
+    }
+
     /** 人工审批（异步）：占位后立即返回，digest（事实账/世界状态/伏笔提议）后台生成，失败自动回退待审批。 */
     @PostMapping("/chapters/{id}/approve")
     public Result<Void> approve(@PathVariable long id) {

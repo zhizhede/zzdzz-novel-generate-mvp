@@ -99,7 +99,7 @@ public class OutlineService {
                 prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，无上一章后果）" : prevBrief,
                 prevTail == null ? "（无）" : prevTail);
 
-        JsonNode scenes = askScenes(user, 2);
+        JsonNode scenes = askScenes(novelId, ch.id(), user, 2);
         if (rejectReason != null && !rejectReason.isBlank()) {
             chapterData.clearRejectReason(ch.id()); // 意见已注入本次章纲，消费清零
         }
@@ -130,9 +130,10 @@ public class OutlineService {
                 .toList();
     }
 
-    private JsonNode askScenes(String user, int tries) {
+    /** novelId/chapterId 必传：章纲调用归章（台账按章回放/档案聚合依赖此前修的双空归属缺口）。 */
+    private JsonNode askScenes(long novelId, long chapterId, String user, int tries) {
         return llmJson.ask(new LlmPort.ChatRequest(
-                        LlmNode.OUTLINE, null, null,
+                        LlmNode.OUTLINE, novelId, chapterId,
                         List.of(LlmPort.Message.system("你是网文章纲规划器，只输出合法 JSON，不要任何解释或 markdown 代码块。"
                                 + "字符串值内部禁止英文双引号，引用一律用「」。"),
                                 LlmPort.Message.user(user)),

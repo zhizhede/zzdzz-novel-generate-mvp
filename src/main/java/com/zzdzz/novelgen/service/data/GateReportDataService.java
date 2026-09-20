@@ -24,4 +24,7 @@ public interface GateReportDataService extends IService<GateReportDO> {
     LatestChapterReport findLatestChapterReport(long chapterId);
 
     LatestReview findLatestChapterReview(long chapterId);
+
+    /** 章生成档案：全轮次全类型报告（含场景级与读者评审），按 id 升序。 */
+    java.util.List<GateReportDO> listByChapter(long chapterId);
 }

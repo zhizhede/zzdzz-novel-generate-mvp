@@ -172,7 +172,9 @@ public class GenerationQueueService {
                             chapterTokens = chapterTokens(t.novelId(), t.currentChapter());
                         }
                     }
-                    return new GenerationTaskVO(t.id(), t.novelTitle(), t.fromChapter(), t.toChapter(),
+                    return new GenerationTaskVO(t.id(), t.novelTitle(),
+                            t.kind() == null ? "CHAPTERS" : t.kind(),
+                            t.fromChapter(), t.toChapter(),
                             t.status(), t.doneChapters(), t.toChapter() - t.fromChapter() + 1,
                             t.currentChapter(), t.lastMessage(), t.createTime(), currentStep, chapterTokens);
                 })

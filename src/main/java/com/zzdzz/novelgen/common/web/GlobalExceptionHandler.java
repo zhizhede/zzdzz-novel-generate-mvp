@@ -49,6 +49,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public Result<Void> handleOther(Exception e, HttpServletResponse resp) {
+        // SSE/长连接客户端断开后，异步响应体的迟到写失败——响应已提交，无事可做，静默即可
+        if (e instanceof java.net.SocketTimeoutException
+                || e instanceof org.springframework.web.context.request.async.AsyncRequestNotUsableException
+                || "ClientAbortException".equals(e.getClass().getSimpleName())) {
+            log.debug("客户端连接已断开，响应写失败忽略：{}", e.getMessage());
+            resp.setStatus(200);
+            return null;
+        }
         log.error("未捕获异常", e);
         resp.setStatus(ErrorCode.SYSTEM_ERROR.httpStatus().value());
         return Result.fail(ErrorCode.SYSTEM_ERROR, "系统错误：" + e.getMessage());

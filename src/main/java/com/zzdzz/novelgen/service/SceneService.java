@@ -21,10 +21,17 @@ public class SceneService {
 
     public String generate(long novelId, long chapterId, int chapterNo,
                            ContextPackerService.Pack pack, int sceneNo) {
-        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
+        return generate(novelId, chapterId, chapterNo, pack, sceneNo, null);
+    }
+
+    /** onDelta 非空走流式（LLM_PORT.chatStream，长文本实时增量），空走阻塞 chat——开关由调用方裁决。 */
+    public String generate(long novelId, long chapterId, int chapterNo,
+                           ContextPackerService.Pack pack, int sceneNo, LlmPort.StreamDelta onDelta) {
+        LlmPort.ChatRequest req = new LlmPort.ChatRequest(
                 LlmNode.SCENE_DRAFT, novelId, chapterId,
                 List.of(LlmPort.Message.system(pack.system()), LlmPort.Message.user(pack.user())),
-                0.9));
+                0.9);
+        LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
         String text = cleanDraft(r.content());
         sceneData.saveDraft(chapterId, sceneNo, text);
         return text;

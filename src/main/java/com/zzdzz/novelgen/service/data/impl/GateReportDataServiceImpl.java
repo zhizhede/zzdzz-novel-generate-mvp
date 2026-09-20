@@ -68,6 +68,11 @@ public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, Gat
                 odt(m.get("create_time")), (String) m.get("result"));
     }
 
+    @Override
+    public List<GateReportDO> listByChapter(long chapterId) {
+        return baseMapper.listByChapter(chapterId);
+    }
+
     private static java.time.OffsetDateTime odt(Object v) {
         if (v == null) {
             return null;

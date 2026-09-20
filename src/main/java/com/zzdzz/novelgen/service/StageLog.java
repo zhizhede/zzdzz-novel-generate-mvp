@@ -55,7 +55,9 @@ public class StageLog {
         ERROR("error"), RETRY("retry"), REPLAN("replan"), PENDING("pending"), REUSE("reuse"),
         REJECTED("rejected"), READER_FIX("reader_fix"), REVIEW_FIX("review_fix"),
         CHAPTER_REPLAN("chapter_replan"), ADOPTED("adopted"),
-        CANCELED("canceled"), STOPPED("stopped"), QUEUED("queued"), NONE("");
+        CANCELED("canceled"), STOPPED("stopped"), QUEUED("queued"),
+        /** 流式增量（emitLive 专用，不落 pipeline_events）。 */
+        CHUNK("chunk"), NONE("");
 
         private final String wire;
 
@@ -79,13 +81,27 @@ public class StageLog {
 
     /** 章级事件：chapterNo 同时进 payload（SSE/流水口径与旧 emit 一致）。 */
     public void emit(Long novelId, Integer chapterNo, Stage stage, Phase phase, Map<String, Object> extra) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        if (chapterNo != null) payload.put("chapterNo", chapterNo);
-        if (phase != Phase.NONE) payload.put("phase", phase.wire());
-        if (extra != null) payload.putAll(extra);
+        Map<String, Object> payload = buildPayload(chapterNo, phase, extra);
         sse.send(stage.wire(), payload);
         eventDAO.insert(novelId, chapterNo, stage.wire(), phase.wire(), payload);
         log.debug("[novel={}][chapter={}][{}/{}] {}",
                 novelId, chapterNo, stage.wire(), phase.wire(), stage.label());
+    }
+
+    /**
+     * 纯实时展示事件（流式 CHUNK 等高频增量）：只推 SSE，不落 pipeline_events——
+     * 落库会以每秒数行的速度撑爆流水表，而增量本身在 llm_call_log 有全量存档。
+     */
+    public void emitLive(Long novelId, Integer chapterNo, Stage stage, Phase phase, Map<String, Object> extra) {
+        Map<String, Object> payload = buildPayload(chapterNo, phase, extra);
+        sse.send(stage.wire(), payload);
+    }
+
+    private Map<String, Object> buildPayload(Integer chapterNo, Phase phase, Map<String, Object> extra) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (chapterNo != null) payload.put("chapterNo", chapterNo);
+        if (phase != Phase.NONE) payload.put("phase", phase.wire());
+        if (extra != null) payload.putAll(extra);
+        return payload;
     }
 }

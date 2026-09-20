@@ -20,8 +20,9 @@ import com.zzdzz.novelgen.model.vo.SceneVO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 
-/** 章查询：列表摘要 + 详情聚合（正文/场景/最新章级门禁/本章 LLM 用量）。 */
+/** 章查询：列表摘要 + 详情聚合（正文/场景/最新章级门禁/本章 LLM 用量）+ 生成档案（trace）。 */
 @Service
 public class ChapterQueryService {
 
@@ -30,16 +31,19 @@ public class ChapterQueryService {
     private final GateReportDataService gateReportData;
     private final LlmCallLogDataService llmCallLogData;
     private final ChapterStepDataService stepData;
+    private final LlmNodeConfigService nodeConfig;
     private final ObjectMapper mapper;
 
     public ChapterQueryService(ChapterDataService chapterData, SceneDataService sceneData,
                                GateReportDataService gateReportData, LlmCallLogDataService llmCallLogData,
-                               ChapterStepDataService stepData, ObjectMapper mapper) {
+                               ChapterStepDataService stepData, LlmNodeConfigService nodeConfig,
+                               ObjectMapper mapper) {
         this.chapterData = chapterData;
         this.sceneData = sceneData;
         this.gateReportData = gateReportData;
         this.llmCallLogData = llmCallLogData;
         this.stepData = stepData;
+        this.nodeConfig = nodeConfig;
         this.mapper = mapper;
     }
 
@@ -76,6 +80,68 @@ public class ChapterQueryService {
                 toTotalsVO(llmCallLogData.totalsBy(null, chapterId)), ch.getReviewConfig(),
                 steps, ch.getRejectReason(), failureBrief(chapterId),
                 stepData.hasRunning(chapterId, "DIGEST"));
+    }
+
+    /** 章生成档案：steps + calls（仅元数据，全文走台账详情）+ checks 全轮次 + 按节点小计。 */
+    public com.zzdzz.novelgen.model.vo.ChapterTraceVO trace(long chapterId) {
+        ChapterDO ch = chapterData.findById(chapterId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
+
+        List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.StepItem> steps = stepData.listByChapter(chapterId).stream()
+                .map(s -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.StepItem(
+                        s.getStep(), s.getSubKey(),
+                        s.getAttempt() == null ? 1 : s.getAttempt(), s.getStatus(), s.getDetail(),
+                        iso(s.getCreateTime()), iso(s.getUpdateTime())))
+                .toList();
+
+        List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.CallItem> calls = new java.util.ArrayList<>(
+                llmCallLogData.findPage(null, chapterId, 500, 0).stream()
+                        .map(l -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.CallItem(
+                                l.id(), l.node(), l.model(), l.status(),
+                                l.promptTokens(), l.completionTokens(), l.totalTokens(), l.getCachedTokens(),
+                                l.latencyMs(), nodeConfig.costOf(l), iso(l.getCreateTime())))
+                        .toList());
+        java.util.Collections.reverse(calls);   // findPage 为 id DESC，档案要时间正序
+
+        List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.CheckItem> checks = gateReportData.listByChapter(chapterId).stream()
+                .map(g -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.CheckItem(
+                        g.getSceneId(), g.getGateType(), g.getRound(), g.isPassed(),
+                        parseJson(g.getResult()), iso(g.getCreateTime())))
+                .toList();
+
+        // 按节点小计（calls 已正序；成本无价目行的节点计 null）
+        Map<String, long[]> acc = new java.util.LinkedHashMap<>();
+        Map<String, double[]> cost = new java.util.HashMap<>();
+        for (var c : calls) {
+            long[] a = acc.computeIfAbsent(c.node(), k -> new long[2]);
+            a[0]++;
+            a[1] += c.totalTokens();
+            if (c.cost() != null) {
+                double[] cc = cost.computeIfAbsent(c.node(), k -> new double[1]);
+                cc[0] += c.cost();
+            }
+        }
+        List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.NodeStatItem> nodeStats = acc.entrySet().stream()
+                .map(e -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.NodeStatItem(
+                        e.getKey(), (int) e.getValue()[0], e.getValue()[1],
+                        cost.containsKey(e.getKey()) ? Math.round(cost.get(e.getKey())[0] * 1e6) / 1e6 : null))
+                .toList();
+
+        return new com.zzdzz.novelgen.model.vo.ChapterTraceVO(ch.id(), ch.chapterNo(), ch.title(),
+                ch.status(), steps, calls, checks, nodeStats);
+    }
+
+    private JsonNode parseJson(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return mapper.readTree(raw);
+        } catch (Exception e) {
+            return mapper.valueToTree(java.util.Map.of("unparsed", raw));
+        }
+    }
+
+    private static String iso(java.time.OffsetDateTime t) {
+        return t == null ? null : t.toString();
     }
 
     /** 最近一次失败/中断步骤的原因原文（流 B 一屏答案；无则 null）。 */

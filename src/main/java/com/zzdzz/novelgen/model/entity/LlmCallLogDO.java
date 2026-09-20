@@ -16,6 +16,7 @@ public class LlmCallLogDO {
     private Long chapterId;
     private String model;
     private int promptTokens;
+    private int cachedTokens;
     private int completionTokens;
     private int totalTokens;
     private int latencyMs;
@@ -25,6 +26,7 @@ public class LlmCallLogDO {
     private String requestJson;
     private String responseJson;
     private boolean isDeleted;
+    private java.time.OffsetDateTime createTime;
 
     @Deprecated
     public Long id() {

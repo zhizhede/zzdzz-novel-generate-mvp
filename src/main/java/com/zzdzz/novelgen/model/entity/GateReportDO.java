@@ -18,6 +18,7 @@ public class GateReportDO {
     private boolean passed;
     private String result;
     private boolean isDeleted;
+    private java.time.OffsetDateTime createTime;
 
     @Deprecated
     public Long id() {

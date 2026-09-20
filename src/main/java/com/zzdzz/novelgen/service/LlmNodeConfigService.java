@@ -51,6 +51,33 @@ public class LlmNodeConfigService {
         this.mapper = mapper;
     }
 
+    /** 单条调用成本（元）：按价目峰谷（Asia/Shanghai 时区口径与 usageByNodeSince SQL 一致）折算；
+     * 无价目行或价目查询失败返回 null（fail-open，不拦台账/档案展示）。 */
+    public Double costOf(com.zzdzz.novelgen.model.entity.LlmCallLogDO call) {
+        try {
+            LlmModelPriceDO p = priceMap().get(call.model());
+            if (p == null) return null;
+            boolean peak = call.getCreateTime() != null
+                    && isPeakHour(call.getCreateTime(), p);
+            long hit = Math.min(call.getCachedTokens(), call.promptTokens());
+            long miss = call.promptTokens() - hit;
+            BigDecimal inHit = peak ? p.peakInputHit() : p.idleInputHit();
+            BigDecimal inMiss = peak ? p.peakInputMiss() : p.idleInputMiss();
+            BigDecimal out = peak ? p.peakOutput() : p.idleOutput();
+            double v = hit * inHit.doubleValue() / 1e6 + miss * inMiss.doubleValue() / 1e6
+                    + call.completionTokens() * out.doubleValue() / 1e6;
+            return round(v);
+        } catch (Exception e) {
+            log.warn("单条成本折算失败（按无价目处理）：llm_call_log id={} {}", call.id(), e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean isPeakHour(java.time.OffsetDateTime createTime, LlmModelPriceDO p) {
+        int hour = createTime.atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai")).getHour();
+        return hour >= p.peakStartHour() && hour < p.peakEndHour();
+    }
+
     // ===== 节点路由 =====
 
     public List<NodeVO> list() {

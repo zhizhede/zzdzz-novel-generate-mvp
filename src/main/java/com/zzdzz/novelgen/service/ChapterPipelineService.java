@@ -541,6 +541,55 @@ public class ChapterPipelineService {
         Step(String label) { this.label = label; }
     }
 
+    private boolean streamLongText() {
+        return tuning.i("stream_long_text", 1) == 1;
+    }
+
+    /**
+     * 场景流式增量转发（SCENE/CHUNK，纯 SSE 不落库）：思考/正文各自缓冲、约 200ms 合并一批，
+     * 避免每秒数帧的 delta 直推前端；close() 冲刷尾部。事件负载 {sceneNo,type:text|think,delta}。
+     */
+    final class SceneChunkRelay implements LlmPort.StreamDelta {
+        private static final long FLUSH_INTERVAL_MS = 200;
+
+        private final long novelId;
+        private final int chapterNo;
+        private final int sceneNo;
+        private final StringBuilder thinkBuf = new StringBuilder();
+        private final StringBuilder textBuf = new StringBuilder();
+        private long lastFlush = System.currentTimeMillis();
+
+        SceneChunkRelay(long novelId, int chapterNo, int sceneNo) {
+            this.novelId = novelId;
+            this.chapterNo = chapterNo;
+            this.sceneNo = sceneNo;
+        }
+
+        @Override
+        public void accept(boolean think, String piece) {
+            (think ? thinkBuf : textBuf).append(piece);
+            if (System.currentTimeMillis() - lastFlush >= FLUSH_INTERVAL_MS) flush();
+        }
+
+        void flush() {
+            if (thinkBuf.length() > 0) {
+                stageLog.emitLive(novelId, chapterNo, SCENE, CHUNK,
+                        Map.of("sceneNo", sceneNo, "type", "think", "delta", thinkBuf.toString()));
+                thinkBuf.setLength(0);
+            }
+            if (textBuf.length() > 0) {
+                stageLog.emitLive(novelId, chapterNo, SCENE, CHUNK,
+                        Map.of("sceneNo", sceneNo, "type", "text", "delta", textBuf.toString()));
+                textBuf.setLength(0);
+            }
+            lastFlush = System.currentTimeMillis();
+        }
+
+        void close() {
+            flush();
+        }
+    }
+
     /** 步骤 1：AI 章纲。已物化则跳过（场景级断点续跑）。 */
     private ChapterOutcome outlineStep(long novelId, ChapterDO ch, int attempt, BooleanSupplier stopCheck) {
         if (sceneData.countByChapter(ch.id()) > 0) return ChapterOutcome.DONE;
@@ -585,7 +634,14 @@ public class ChapterPipelineService {
             var pack = packer.packScene(novelId, chapterNo, ch, spec, digests, prevTail, directives, prevScene);
             stageLog.emit(novelId, chapterNo, SCENE, START,
                     Map.of("sceneNo", spec.sceneNo(), "goal", String.valueOf(spec.goal())));
-            String draft = sceneService.generate(novelId, ch.id(), chapterNo, pack, spec.sceneNo());
+            SceneChunkRelay relay = streamLongText()
+                    ? new SceneChunkRelay(novelId, chapterNo, spec.sceneNo()) : null;
+            String draft;
+            try {
+                draft = sceneService.generate(novelId, ch.id(), chapterNo, pack, spec.sceneNo(), relay);
+            } finally {
+                if (relay != null) relay.close(); // 冲刷节流缓冲的尾部增量
+            }
             stageLog.emit(novelId, chapterNo, SCENE, DRAFT,
                     Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(draft)));
             boolean ok = gateService.checkScene(novelId, ch.id(), sceneId, spec.sceneNo(), draft, spec.words());

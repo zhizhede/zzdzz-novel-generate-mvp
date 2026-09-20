@@ -126,7 +126,8 @@ public class VolumePlanService {
         return adopt(novelId, volNo, draft);
     }
 
-    /** 生成+校验+审校闭环：结构校验与 AI 审校的失败原因统一喂回下一轮重写。轮数走 tuning。 */
+    /** 生成+校验+审校闭环：结构校验与 AI 审校的失败原因统一喂回下一轮重写。轮数走 tuning。
+     * 每轮失败发 RETRY 事件（轮次+原因摘要），3 轮全败发 FAILED——此前只有 log.warn，过程不透明。 */
     private PlanDraft generateWithReview(long novelId, int volNo, int fromNo, Integer toNo, String seedOutline) {
         String context = packer.packVolumePlan(novelId, volNo, fromNo, seedOutline);
         String feedback = "";
@@ -136,20 +137,34 @@ public class VolumePlanService {
             String structural = structuralCheck(draft, fromNo, toNo);
             if (structural != null) {
                 log.warn("卷纲第 {} 轮结构校验未过：{}", round, structural);
+                stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.RETRY,
+                        Map.of("volNo", volNo, "round", round, "check", "结构校验",
+                                "reason", brief(structural)));
                 feedback = "【结构校验】" + structural;
                 continue;
             }
             String issues = reviewPlan(novelId, draft);
             if (issues != null) {
                 log.warn("卷纲第 {} 轮 AI 审校 BLOCKER：{}", round, issues);
+                stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.RETRY,
+                        Map.of("volNo", volNo, "round", round, "check", "AI 审校 BLOCKER",
+                                "reason", brief(issues)));
                 feedback = "【规划审校 BLOCKER】" + issues;
                 continue;
             }
             log.info("卷纲规划通过：第 {} 卷 {} 共 {} 章", volNo, draft.arc(), draft.rows().size());
             return draft;
         }
+        stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.FAILED,
+                Map.of("volNo", volNo, "rounds", maxRounds, "reason", "结构校验/AI 审校连续未过，放弃落库"));
         throw new BizException(ErrorCode.LLM_OUTPUT_INVALID,
-                "卷纲规划 3 轮未过结构校验/AI 审校，放弃落库（llm_call_log node=volume_plan 可回放）");
+                "卷纲规划 " + maxRounds + " 轮未过结构校验/AI 审校，放弃落库（llm_call_log node=volume_plan 可回放）");
+    }
+
+    /** 事件里的原因摘要（全文在 llm_call_log 台账）。 */
+    private static String brief(String text) {
+        String t = text.strip();
+        return t.length() <= 500 ? t : t.substring(0, 500) + "…";
     }
 
     private PlanDraft askPlan(long novelId, int volNo, int fromNo, Integer toNo, String context, String feedback) {
