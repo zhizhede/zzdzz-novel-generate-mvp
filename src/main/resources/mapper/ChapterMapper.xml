@@ -65,8 +65,22 @@
                 DELETE FROM chapter_scenes WHERE chapter_id=#{chapterId}
     </delete>
 
+    <delete id="deleteChapterSteps">
+                DELETE FROM chapter_steps WHERE chapter_id=#{chapterId}
+    </delete>
+
     <update id="markOutlined">
                 UPDATE chapters SET outline_yaml=#{outlineYaml}, status='OUTLINED', update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <update id="markRejected">
+                UPDATE chapters SET status='NEW', full_text=NULL, outline_yaml=NULL, round=0,
+                       reject_reason=#{reason}, update_time=NOW()
+                WHERE id=#{chapterId} AND is_deleted=false
+    </update>
+
+    <update id="clearRejectReason">
+                UPDATE chapters SET reject_reason=NULL, update_time=NOW() WHERE id=#{chapterId}
     </update>
 
     <update id="updatePlan">

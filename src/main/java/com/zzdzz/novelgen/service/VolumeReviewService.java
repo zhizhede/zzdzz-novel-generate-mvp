@@ -43,6 +43,7 @@ public class VolumeReviewService {
     private final ForeshadowDataService foreshadowData;
     private final WorldStateDataService worldStateData;
     private final VolumeReviewDataService reviewDAO;
+    private final com.zzdzz.novelgen.service.data.RetroProposalDataService proposalData;
     private final LlmJson llmJson;
     private final StageLog stageLog;
     private final ObjectMapper mapper;
@@ -50,7 +51,8 @@ public class VolumeReviewService {
 
     public VolumeReviewService(ChapterDataService chapterData, DigestDataService digestData,
                                ForeshadowDataService foreshadowData, WorldStateDataService worldStateData,
-                               VolumeReviewDataService reviewDAO, LlmJson llmJson,
+                               VolumeReviewDataService reviewDAO,
+            com.zzdzz.novelgen.service.data.RetroProposalDataService proposalData, LlmJson llmJson,
                                StageLog stageLog, ObjectMapper mapper,
                                PromptTemplateService promptTemplates) {
         this.chapterData = chapterData;
@@ -62,6 +64,7 @@ public class VolumeReviewService {
         this.stageLog = stageLog;
         this.mapper = mapper;
         this.promptTemplates = promptTemplates;
+        this.proposalData = proposalData;
     }
 
     /** 复盘一卷（同步，约 1-3 分钟）：机械对账 + LLM 漂移分析，报告落库并返回。 */
@@ -96,8 +99,35 @@ public class VolumeReviewService {
         report.put("mechanical", mechanical);
         report.put("review", review);
         reviewDAO.upsert(novelId, volNo, mapper.valueToTree(report));
+        extractProposals(novelId, volNo, review);
         stageLog.emit(novelId, StageLog.Stage.VOLUME_RETRO, DONE, Map.of("volNo", volNo));
         return report;
+    }
+
+    /** 流 D：复盘建议落 retro_proposals（同卷同内容去重；采纳状态人工决策）。 */
+    @SuppressWarnings("unchecked")
+    private void extractProposals(long novelId, int volNo, Map<String, Object> review) {
+        try {
+            Object driftsObj = review.get("drifts");
+            if (driftsObj instanceof List<?> drifts) {
+                for (Object d : drifts) {
+                    String text;
+                    if (d instanceof Map<?, ?> dm) {
+                        Object desc = dm.get("desc") != null ? dm.get("desc") : dm.get("description");
+                        text = "[" + dm.get("severity") + "/" + dm.get("type") + "] " + desc;
+                    } else {
+                        text = String.valueOf(d);
+                    }
+                    proposalData.propose(novelId, volNo, "REVIEW", text);
+                }
+            }
+            Object next = review.get("next_volume");
+            if (next != null && !String.valueOf(next).isBlank()) {
+                proposalData.propose(novelId, volNo, "REVIEW", "下卷建议：" + next);
+            }
+        } catch (Exception e) {
+            log.warn("复盘提案提取失败（不影响报告）：{}", e.getMessage());
+        }
     }
 
     /** 上次报告；无则 null。 */

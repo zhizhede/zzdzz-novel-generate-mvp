@@ -30,6 +30,8 @@ public class ChapterDO {
     private int round;
     /** 生成时的评审标准快照（JSON：reader 五参数），历史章节为 NULL。 */
     private String reviewConfig;
+    /** 人工打回意见（流 A）：注入下次章纲提示词，消费后清零。 */
+    private String rejectReason;
     private boolean isDeleted;
 
     @Deprecated

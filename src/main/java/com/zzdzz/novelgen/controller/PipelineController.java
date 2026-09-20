@@ -51,12 +51,38 @@ public class PipelineController {
         return Result.ok(queueService.list());
     }
 
-    /** 取消任务：排队中直接取消；运行中在下一章边界生效。 */
+    /** 取消任务：仅排队中。运行中停止请用 /stop（流 0 硬中断）。 */
     @PostMapping("/queue/{id}/cancel")
     public Result<Boolean> cancel(@PathVariable long id) {
         boolean accepted = queueService.cancel(id);
         if (!accepted) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "任务不在可取消状态（QUEUED/RUNNING）");
+            throw new BizException(ErrorCode.PARAM_ERROR, "任务不在排队状态；运行中请使用 /stop");
+        }
+        return Result.ok(true);
+    }
+
+    /** 流 0 停止：运行中任务在下一个场景/步骤边界立即终止（章节 INTERRUPTED，已完成产物保留）。 */
+    @PostMapping("/queue/{id}/stop")
+    public Result<Boolean> stop(@PathVariable long id) {
+        boolean accepted = queueService.stop(id);
+        if (!accepted) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "任务不在运行状态");
+        }
+        return Result.ok(true);
+    }
+
+    /** 全局急停：终止所有 RUNNING 任务（跑批失控的最后闸门）。 */
+    @PostMapping("/queue/stop-all")
+    public Result<Integer> stopAll() {
+        return Result.ok(queueService.stopAll());
+    }
+
+    /** 插队暂停后继续（④）：PAUSED 任务从暂停点下一章接跑。 */
+    @PostMapping("/queue/{id}/resume")
+    public Result<Boolean> resume(@PathVariable long id) {
+        boolean accepted = queueService.resume(id);
+        if (!accepted) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "任务不在暂停状态");
         }
         return Result.ok(true);
     }

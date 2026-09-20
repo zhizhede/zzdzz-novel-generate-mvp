@@ -15,9 +15,13 @@
         <span>连跑范围：第 <el-input-number v-model="from" :min="1" size="small" /> 至
           <el-input-number v-model="to" :min="from" size="small" /> 章</span>
         <el-button type="primary" size="small" :loading="running" @click="run">启动生成</el-button>
+        <el-button size="small" type="danger" plain @click="stopAllTasks">全部停止</el-button>
         <el-tag :type="running ? 'warning' : 'info'" size="small">{{ running ? '运行中' : '空闲' }}</el-tag>
         <span style="color:#999;font-size:12px">{{ lastMessage }}</span>
-        <router-link to="/chapters" style="font-size: 12px; margin-left: auto">去章节页阅读 →</router-link>
+        <el-badge :value="pendingCount" :hidden="!pendingCount" style="margin-left: auto">
+          <el-button size="small" plain @click="goPending">待审批{{ pendingCount ? ` ${pendingCount} 章` : '' }}</el-button>
+        </el-badge>
+        <router-link to="/chapters" style="font-size: 12px; margin-left: 12px">去章节页阅读 →</router-link>
       </div>
     </el-card>
 
@@ -60,12 +64,25 @@
         <el-table-column label="当前章" width="70">
           <template #default="{ row }">{{ row.status === 'RUNNING' ? (row.currentChapter ?? '-') : '-' }}</template>
         </el-table-column>
+        <el-table-column label="当前阶段" min-width="140">
+          <template #default="{ row }">
+            <span v-if="row.status === 'RUNNING'" style="color:#e6a23c;font-size:12px">{{ row.currentStep || '准备中' }}</span>
+            <span v-else style="color:#bbb">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="本章tokens" width="95">
+          <template #default="{ row }">
+            <span v-if="row.status === 'RUNNING' && row.chapterTokens != null" style="font-size:12px;color:#606266">{{ row.chapterTokens.toLocaleString() }}</span>
+            <span v-else style="color:#bbb">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="lastMessage" label="消息" min-width="150" show-overflow-tooltip />
         <el-table-column prop="createTime" label="提交时间" width="110" />
         <el-table-column label="操作" width="80">
           <template #default="{ row }">
-            <el-button v-if="row.status === 'QUEUED' || row.status === 'RUNNING'" size="small" type="danger"
-              plain @click="cancelTask(row)">取消</el-button>
+            <el-button v-if="row.status === 'QUEUED'" size="small" type="danger" plain @click="cancelTask(row)">取消</el-button>
+            <el-button v-else-if="row.status === 'RUNNING'" size="small" type="danger" @click="stopTask(row)">停止</el-button>
+            <el-button v-else-if="row.status === 'PAUSED'" size="small" type="success" @click="resumeTask(row)">继续</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -97,7 +114,7 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref, nextTick, reactive } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 
@@ -110,8 +127,9 @@ const to = ref(2)
 const running = ref(false)
 const lastMessage = ref('')
 const queue = ref([])
-const TASK_TEXT = { QUEUED: '排队中', RUNNING: '生成中', DONE: '完成', STOPPED: '已停止', CANCELED: '已取消' }
-const TASK_COLOR = { QUEUED: 'info', RUNNING: 'warning', DONE: 'success', STOPPED: 'danger', CANCELED: 'info' }
+const TASK_TEXT = { QUEUED: '排队中', RUNNING: '生成中', DONE: '完成', STOPPED: '已停止', CANCELED: '已取消', INTERRUPTED: '已终止', PAUSED: '已暂停' }
+const TASK_COLOR = { QUEUED: 'info', RUNNING: 'warning', DONE: 'success', STOPPED: 'danger', CANCELED: 'info', INTERRUPTED: 'danger', PAUSED: 'info' }
+const pendingCount = ref(0)
 const logs = ref([])
 const scenes = ref([])
 const logBox = ref(null)
@@ -230,11 +248,60 @@ async function loadQueue() {
 async function cancelTask(row) {
   try {
     await api.post(`/api/pipeline/queue/${row.id}/cancel`)
-    ElMessage.success(row.status === 'RUNNING' ? '取消请求已受理，当前章完成后生效' : '已取消排队任务')
+    ElMessage.success('已取消排队任务')
     await loadQueue()
   } catch (e) {
     ElMessage.error(e.message)
   }
+}
+
+/** 流 0 v2：硬停止——落库取消标记并中断在飞 LLM 调用（毫秒级生效），已完成内容保留。 */
+async function stopTask(row) {
+  try {
+    await api.post(`/api/pipeline/queue/${row.id}/stop`)
+    ElMessage.success('停止请求已受理，正在中断在飞调用（秒级生效）；已完成内容保留')
+    await loadQueue()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+/** 全局急停：终止所有 RUNNING 任务（失控最后闸门）。 */
+async function stopAllTasks() {
+  try {
+    await ElMessageBox.confirm('终止当前所有运行中的生成任务？在飞调用将被中断，已完成内容保留（章节标记为已终止）。', '全部停止', {
+      type: 'warning', confirmButtonText: '全部停止', cancelButtonText: '再想想'
+    })
+  } catch { return }
+  try {
+    const n = await api.post('/api/pipeline/queue/stop-all')
+    ElMessage.success(n > 0 ? `已受理 ${n} 个任务的停止请求` : '当前没有运行中的任务')
+    await loadQueue()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function resumeTask(row) {
+  try {
+    await api.post(`/api/pipeline/queue/${row.id}/resume`)
+    ElMessage.success('已继续')
+    await loadQueue()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function loadPending() {
+  if (!novelId.value) return
+  try {
+    pendingCount.value = (await api.get(`/api/novels/${novelId.value}/pending-approvals`)).length
+  } catch { /* 忽略轮询错误 */ }
+}
+
+function goPending() {
+  setSelectedNovelId(novelId.value)
+  window.location.hash = '#/chapters'
 }
 
 async function pollStatus() {
@@ -243,6 +310,7 @@ async function pollStatus() {
     running.value = s.running
     lastMessage.value = s.lastMessage
     await loadQueue()
+    await loadPending()
   } catch { /* 忽略轮询错误 */ }
 }
 

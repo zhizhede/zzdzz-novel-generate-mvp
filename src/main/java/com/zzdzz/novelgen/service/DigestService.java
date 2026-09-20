@@ -135,8 +135,13 @@ public class DigestService {
             if (foreshadowData.contentExists(novelId, full) || foreshadowData.contentExists(novelId, content)) {
                 continue;
             }
-            foreshadowData.insertProposal(novelId, foreshadowData.nextCode(novelId), full, chapterNo);
-            added++;
+            try {
+                foreshadowData.insertProposal(novelId, foreshadowData.nextCode(novelId), full, chapterNo);
+                added++;
+            } catch (Exception dup) {
+                // 编码唯一键冲突（部分失败的 digest 残留/并发提议）：跳过该条，不炸整个 digest
+                log.warn("伏笔提议 {} 落库冲突，跳过：{}", name, dup.getMessage());
+            }
         }
         if (added > 0) {
             log.info("第 {} 章自动提议 {} 条新伏笔（PROPOSED，待人工采纳）", chapterNo, added);

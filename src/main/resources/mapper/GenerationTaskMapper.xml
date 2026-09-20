@@ -3,13 +3,14 @@
 <mapper namespace="com.zzdzz.novelgen.dao.GenerationTaskMapper">
 
     <select id="insert" resultType="long">
-                INSERT INTO generation_tasks (novel_id, from_chapter, to_chapter, submitted_by)
-                VALUES (#{novelId}, #{fromChapter}, #{toChapter}, #{submittedBy}) RETURNING id
+                INSERT INTO generation_tasks (novel_id, from_chapter, to_chapter, submitted_by, kind, payload)
+                VALUES (#{novelId}, #{fromChapter}, #{toChapter}, #{submittedBy},
+                        #{kind}, #{payload}::jsonb) RETURNING id
     </select>
 
     <select id="list" resultType="map">
                 SELECT t.id, t.novel_id, n.title, t.from_chapter, t.to_chapter, t.status,
-                       t.done_chapters, t.current_chapter, t.last_message, t.create_time
+                       t.done_chapters, t.current_chapter, t.last_message, t.create_time, t.kind
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id
                 WHERE t.is_deleted = FALSE
                 ORDER BY CASE WHEN t.status IN ('QUEUED', 'RUNNING') THEN 0 ELSE 1 END, t.id DESC
@@ -26,14 +27,34 @@
 
     <select id="findRunning" resultType="map">
                 SELECT t.id, t.novel_id, n.title, t.from_chapter, t.to_chapter, t.status,
-                       t.done_chapters, t.current_chapter, t.last_message, t.create_time
+                       t.done_chapters, t.current_chapter, t.last_message, t.create_time, t.kind
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.status = 'RUNNING'
                 ORDER BY t.id LIMIT 1
     </select>
 
+    <select id="listRunning" resultType="map">
+                SELECT t.id, t.novel_id, n.title, t.from_chapter, t.to_chapter, t.status,
+                       t.done_chapters, t.current_chapter, t.last_message, t.create_time, t.kind
+                FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.status = 'RUNNING'
+                ORDER BY t.id
+    </select>
+
+    <select id="findQueuedForDispatch" resultType="long">
+                SELECT t.id FROM generation_tasks t
+                WHERE t.status = 'QUEUED' AND t.is_deleted = FALSE
+                  AND NOT EXISTS (SELECT 1 FROM generation_tasks r
+                                  WHERE r.novel_id = t.novel_id AND r.status = 'RUNNING')
+                ORDER BY t.id LIMIT 1
+    </select>
+
+    <select id="countRunningNovels" resultType="int">
+                SELECT COUNT(DISTINCT novel_id) FROM generation_tasks
+                WHERE status = 'RUNNING' AND is_deleted = FALSE
+    </select>
+
     <select id="findRunningById" resultType="map">
                 SELECT t.id, t.novel_id, n.title, t.from_chapter, t.to_chapter, t.status,
-                       t.done_chapters, t.current_chapter, t.last_message, t.create_time
+                       t.done_chapters, t.current_chapter, t.last_message, t.create_time, t.kind, t.payload
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.id = #{id}
     </select>
 
@@ -56,6 +77,30 @@
 
     <update id="resetInterrupted">
                 UPDATE generation_tasks SET status='QUEUED', last_message='重启重排', update_time=now()
-                WHERE status='RUNNING' AND is_deleted=false
+                WHERE status='RUNNING' AND is_deleted=false AND cancel_requested=FALSE
+    </update>
+
+    <update id="cancelFlaggedOnRestart">
+                UPDATE generation_tasks SET status='CANCELED', last_message='重启前已请求停止', update_time=now()
+                WHERE status='RUNNING' AND is_deleted=false AND cancel_requested=TRUE
+    </update>
+
+    <update id="requestCancel">
+                UPDATE generation_tasks SET cancel_requested=TRUE, update_time=now() WHERE id=#{id}
+    </update>
+
+    <select id="isCancelRequested" resultType="boolean">
+                SELECT cancel_requested FROM generation_tasks WHERE id=#{id}
+    </select>
+
+    <select id="isPauseRequested" resultType="boolean">
+                SELECT pause_requested FROM generation_tasks WHERE id=#{id}
+    </select>
+
+    <update id="resumePaused">
+                UPDATE generation_tasks SET status='QUEUED',
+                       from_chapter=COALESCE(current_chapter, from_chapter - 1) + 1,
+                       pause_requested=FALSE, cancel_requested=FALSE, last_message='暂停后继续', update_time=now()
+                WHERE id=#{id} AND status='PAUSED'
     </update>
 </mapper>

@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmNode;
@@ -7,6 +8,8 @@ import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.SceneDO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.ChapterStepDataService;
+import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
 import org.slf4j.Logger;
@@ -16,6 +19,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import static com.zzdzz.novelgen.service.StageLog.Phase.*;
@@ -23,9 +27,10 @@ import static com.zzdzz.novelgen.service.StageLog.Stage.*;
 
 /**
  * 单章管线编排。步骤清单见 {@link Step}（章纲→场景→拼章门禁→读者评审→AI 审校→审批→digest），
- * 每步一个 step 方法，runChapter 只做顺序编排与卫语句跳转。
- * 自愈梯子在 {@link #runChapterWithHeal}：直跑 → 重试 → 换目标重写。
- * 场景级缓存：已物化章纲/已过门禁场景的章可断点续跑。
+ * runChapter 只做顺序编排与卫语句跳转；每个步骤向 chapter_steps 落状态行（契约②）。
+ * 中断语义（流 0）：stopCheck 在每个步骤/场景边界检查，命中即章节 INTERRUPTED、已完成产物保留。
+ * 自愈梯子在 {@link #runChapterWithHeal}：直跑 → 重试 → 换目标重写；INTERRUPTED 不参与自愈。
+ * 人工打回（流 A）：{@link #reject}/{@link #rejectOutline} 清场落意见重排队；意见在章纲重出时注入并清零。
  */
 @Service
 public class ChapterPipelineService {
@@ -35,6 +40,8 @@ public class ChapterPipelineService {
     private final NovelDataService novelData;
     private final ChapterDataService chapterData;
     private final SceneDataService sceneData;
+    private final ChapterStepDataService stepData;
+    private final DigestDataService digestData;
     private final OutlineService outlineService;
     private final ContextPackerService packer;
     private final SceneService sceneService;
@@ -46,17 +53,21 @@ public class ChapterPipelineService {
     private final StageLog stageLog;
     private final TuningService tuning;
     private final PromptTemplateService promptTemplates;
+    private final ObjectMapper mapper;
 
     public ChapterPipelineService(NovelDataService novelData, ChapterDataService chapterData,
-                                  SceneDataService sceneData, OutlineService outlineService,
+                                  SceneDataService sceneData, ChapterStepDataService stepData,
+                                  DigestDataService digestData, OutlineService outlineService,
                                   ContextPackerService packer, SceneService sceneService,
                                   GateService gateService, DigestService digestService,
                                   ReviewService reviewService, VolumePlanService volumePlanService,
                                   LlmPort llm, StageLog stageLog, TuningService tuning,
-                                  PromptTemplateService promptTemplates) {
+                                  PromptTemplateService promptTemplates, ObjectMapper mapper) {
         this.novelData = novelData;
         this.chapterData = chapterData;
         this.sceneData = sceneData;
+        this.stepData = stepData;
+        this.digestData = digestData;
         this.outlineService = outlineService;
         this.packer = packer;
         this.sceneService = sceneService;
@@ -68,6 +79,7 @@ public class ChapterPipelineService {
         this.stageLog = stageLog;
         this.tuning = tuning;
         this.promptTemplates = promptTemplates;
+        this.mapper = mapper;
     }
 
     /** 进度回调：队列服务据此回写任务进度；shouldStop 支持运行中协作取消（章与章之间检查）。 */
@@ -75,7 +87,16 @@ public class ChapterPipelineService {
         void onProgress(int doneChapters, int nextChapter, String message);
 
         boolean shouldStop();
+
+        /** 插队权：当前章完成后暂停（④ 批）。默认无插队。 */
+        default boolean pauseRequested() { return false; }
+
+        /** 暂停命中回调：队列层负责把任务置 PAUSED。 */
+        default void onPauseHit() {}
     }
+
+    /** 单章一次尝试的结果：DONE 正常走完（含 manual 停等）；FAILED 可自愈；INTERRUPTED 用户终止。 */
+    enum ChapterOutcome { DONE, FAILED, INTERRUPTED, PENDING }
 
     /** 兼容旧入口：按作品标题连跑，无进度回调。 */
     public int runChapters(String novelTitle, int from, int to) {
@@ -84,7 +105,7 @@ public class ChapterPipelineService {
         return runChapters(novelId, novelTitle, from, to, null);
     }
 
-    /** 连跑 [from, to] 章；返回通过章数。任一章失败/异常即停止（状态保留，断点重跑）。 */
+    /** 连跑 [from, to] 章；返回通过章数。失败/异常/中断即停止（状态保留，断点重跑）。 */
     public int runChapters(long novelId, String novelTitle, int from, int to, ProgressSink sink) {
         String mode = novelData.findApprovalMode(novelId);
         log.info("连跑开始 {} 第 {}–{} 章（审批模式 {}）", novelTitle, from, to, mode);
@@ -96,18 +117,25 @@ public class ChapterPipelineService {
                 break;
             }
             long t0 = System.currentTimeMillis();
-            try {
-                if (runChapterWithHeal(novelId, no, mode)) {
+            ChapterOutcome outcome = runChapterWithHeal(novelId, no, mode, sink);
+            switch (outcome) {
+                case DONE, PENDING -> {
                     okChapters++;
-                    log.info("=== 第 {} 章完成，耗时 {}s ===", no, (System.currentTimeMillis() - t0) / 1000);
-                } else {
-                    log.error("=== 第 {} 章自愈后仍失败，停止连跑（已完成 {} 章）===", no, okChapters);
-                    break;
+                    log.info("=== 第 {} 章完成（{}），耗时 {}s ===", no, outcome, (System.currentTimeMillis() - t0) / 1000);
                 }
-            } catch (Exception e) {
-                log.error("=== 第 {} 章异常：{}；状态保留，可断点重跑 ===", no, e.getMessage());
-                chapterData.updateStatusByNo(novelId, no, "FAILED");
-                break;
+                case INTERRUPTED -> {
+                    log.warn("=== 第 {} 章被用户终止，停止连跑（已完成 {} 章）===", no, okChapters);
+                    return okChapters;
+                }
+                case FAILED -> {
+                    log.error("=== 第 {} 章自愈后仍失败，停止连跑（已完成 {} 章）===", no, okChapters);
+                    return okChapters;
+                }
+            }
+            if (sink != null && sink.pauseRequested()) {
+                sink.onPauseHit();
+                log.warn("插队暂停命中：第 {} 章后暂停（已完成 {} 章）", no, okChapters);
+                return okChapters;
             }
             if (sink != null) {
                 sink.onProgress(okChapters, Math.min(no + 1, to), "第 " + no + " 章完成");
@@ -119,38 +147,114 @@ public class ChapterPipelineService {
 
     /**
      * 失败自愈梯子：直跑 → 直接重试 N1 次（瞬态故障）→ 规划 Agent 换目标重写该章卷纲再试 N2 次 → 放弃转人工。
-     * 次数走 tuning（heal_retry_times / heal_replan_times）；每次尝试共享场景级断点缓存。
+     * 次数走 tuning（heal_retry_times / heal_replan_times）；每次尝试共享场景级断点缓存；INTERRUPTED 不自愈。
      */
-    private boolean runChapterWithHeal(long novelId, int chapterNo, String approvalMode) {
-        if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
+    private ChapterOutcome runChapterWithHeal(long novelId, int chapterNo, String approvalMode, ProgressSink sink) {
+        BooleanSupplier stopCheck = sink == null ? () -> false : sink::shouldStop;
+        int attempt = 1;
+        ChapterOutcome outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt, stopCheck);
+        if (outcome != ChapterOutcome.FAILED) return outcome;
         int retries = tuning.i("heal_retry_times", 1);
-        for (int r = 1; r <= retries; r++) {
+        for (int r = 1; r <= retries && outcome == ChapterOutcome.FAILED; r++) {
             stageLog.emit(novelId, chapterNo, HEAL, RETRY,
                     Map.of("message", retries == 1 ? "第一次失败，自动重试"
                             : "失败，自动重试（第 " + r + "/" + retries + " 次）"));
             log.warn("第 {} 章失败，自愈：直接重试（{}/{}）", chapterNo, r, retries);
-            if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
+            outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt++, stopCheck);
         }
+        if (outcome != ChapterOutcome.FAILED) return outcome;
         String reason = failureReason(novelId, chapterNo);
         stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
                 Map.of("message", "重试仍败，重写卷纲目标后再试", "reason", reason));
         log.warn("第 {} 章重试仍败，自愈：重写卷纲目标后再试一次（原因：{}）", chapterNo, reason);
         volumePlanService.replanChapter(novelId, chapterNo, reason);
         int replans = tuning.i("heal_replan_times", 1);
-        for (int r = 0; r < replans; r++) {
-            if (attemptChapter(novelId, chapterNo, approvalMode)) return true;
+        for (int r = 0; r < replans && outcome == ChapterOutcome.FAILED; r++) {
+            outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt++, stopCheck);
         }
-        return false;
+        return outcome;
     }
 
-    private boolean attemptChapter(long novelId, int chapterNo, String approvalMode) {
+    /** 单章尝试：异常收敛为 FAILED；用户停止引发的异常（硬中断打断在飞调用）收敛为 INTERRUPTED。 */
+    private ChapterOutcome attemptChapter(long novelId, int chapterNo, String approvalMode,
+                                          int attempt, BooleanSupplier stopCheck) {
         try {
-            return runChapter(novelId, chapterNo, approvalMode);
+            return runChapter(novelId, chapterNo, approvalMode, attempt, stopCheck);
         } catch (Exception e) {
-            log.error("第 {} 章尝试异常：{}", chapterNo, e.getMessage());
-            chapterData.updateStatusByNo(novelId, chapterNo, "FAILED");
-            return false;
+            boolean stopped = stopCheck.getAsBoolean();
+            Thread.interrupted(); // 清中断标志，避免殃及该 worker 线程的后续 JDBC/HTTP 操作
+            log.error("第 {} 章尝试异常（{}）：{}", chapterNo, stopped ? "用户终止" : "失败", e.getMessage());
+            ChapterDO ch = chapterData.find(novelId, chapterNo).orElse(null);
+            if (ch != null) {
+                stepData.finishRunningInterrupted(ch.id());
+                if (stopped) {
+                    chapterData.updateStatus(ch.id(), "INTERRUPTED");
+                    stageLog.emit(novelId, chapterNo, CHAPTER, STOPPED,
+                            Map.of("reason", "用户终止（硬中断）", "step", "IN_FLIGHT"));
+                    return ChapterOutcome.INTERRUPTED;
+                }
+                chapterData.updateStatus(ch.id(), "FAILED");
+            }
+            return stopped ? ChapterOutcome.INTERRUPTED : ChapterOutcome.FAILED;
         }
+    }
+
+    private ChapterOutcome runChapter(long novelId, int chapterNo, String approvalMode,
+                                      int attempt, BooleanSupplier stopCheck) {
+        ChapterDO ch = outlineService.loadChapter(novelId, chapterNo);
+        chapterData.updateReviewConfig(ch.id(), gateService.readerStandardsJson(novelId)); // 评审标准随章快照，回看当时口径
+        stageLog.emit(novelId, chapterNo, CHAPTER, START, Map.of("title", String.valueOf(ch.title())));
+
+        ChapterOutcome outlineOutcome = outlineStep(novelId, ch, attempt, stopCheck);
+        if (outlineOutcome != ChapterOutcome.DONE) return outlineOutcome;
+        ch = reload(ch.id());
+
+        // 流 A：manual 模式章纲卡点——章纲就绪即停等人工批准/打回（已批准过则继续）
+        if ("manual".equals(approvalMode) && !"OUTLINE_APPROVED".equals(ch.getStatus())) {
+            stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of("reason", "outline_pending"));
+            log.info("第 {} 章章纲待人工批准（manual）", chapterNo);
+            return ChapterOutcome.PENDING;
+        }
+
+        ChapterOutcome scenesOutcome = scenesStep(novelId, ch, attempt, stopCheck);
+        if (scenesOutcome != ChapterOutcome.DONE) return scenesOutcome;
+        ChapterOutcome assembleOutcome = assembleGateStep(novelId, ch, attempt, stopCheck);
+        if (assembleOutcome != ChapterOutcome.DONE) return assembleOutcome;
+        ch = reload(ch.id());
+        String fullText = ch.fullText() == null ? "" : ch.fullText();
+
+        ReviewStepResult reader = reviewStep(novelId, ch, fullText, StageLog.Stage.READER, attempt, stopCheck);
+        if (reader.outcome() != ChapterOutcome.DONE) return reader.outcome();
+        fullText = reader.fullText();
+        ReviewStepResult review = reviewStep(novelId, ch, fullText, StageLog.Stage.REVIEW, attempt, stopCheck);
+        if (review.outcome() != ChapterOutcome.DONE) return review.outcome();
+        fullText = review.fullText();
+
+        // 4) 审批（auto 直过；manual 停在 PENDING_APPROVAL 等人）
+        if ("manual".equals(approvalMode)) {
+            chapterData.updateStatus(ch.id(), "PENDING_APPROVAL");
+            log.info("第 {} 章待人工审批", chapterNo);
+            stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of());
+            return ChapterOutcome.PENDING;
+        }
+
+        // 5) digest
+        Long digestStep = stepData.start(novelId, ch.id(), chapterNo, Step.DIGEST.name(), null, attempt);
+        try {
+            digestService.digest(novelId, ch.id(), chapterNo, fullText);
+            stepData.finish(digestStep, "DONE", json(Map.of("chars", fullText.length())));
+        } catch (Exception e) {
+            stepData.finish(digestStep, "FAILED", json(Map.of("reason", String.valueOf(e.getMessage()))));
+            throw e;
+        }
+        stageLog.emit(novelId, chapterNo, DIGEST, DONE, Map.of());
+        stageLog.emit(novelId, chapterNo, CHAPTER, DONE, Map.of("chars", fullText.length()));
+        return ChapterOutcome.DONE;
+    }
+
+    private ChapterDO reload(long chapterId) {
+        return chapterData.findById(chapterId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
     }
 
     /** 自愈用失败原因：优先取最近一次门禁失败清单，取不到给兜底文案。 */
@@ -167,7 +271,7 @@ public class ChapterPipelineService {
         return "生成异常或审校未过（详见 gate_reports / llm_call_log）";
     }
 
-    // ===== Web 触发已迁移至 GenerationQueueService（DB 队列 + 单 worker 异步执行） =====
+    // ===== Web 触发已迁移至 GenerationQueueService（DB 队列 + worker 异步执行） =====
 
     /** 强制重出章纲：清掉旧场景与门禁报告，按当前卷纲目标/大纲/前情重新生成场景拆解（同步调用，约 1-2 分钟）。 */
     public List<OutlineService.SceneSpec> regenerateOutline(long novelId, int chapterNo) {
@@ -182,16 +286,15 @@ public class ChapterPipelineService {
         return outlineService.loadSpecs(ch.id());
     }
 
-    /**
-     * 人工审批：仅 PENDING_APPROVAL 可过审；过审即生成 digest，终点状态 DIGESTED（与 auto 流一致；
+    /** 人工审批：仅 PENDING_APPROVAL 可过审；过审即生成 digest，终点状态 DIGESTED（与 auto 流一致；
      * 库约束不含 APPROVED，历史版本在此必撞约束导致「digest 成功、接口报错」）。
-     * 条件状态推进防并发重复审批。
-     */
-    public void approve(long chapterId) {        ChapterDO ch = chapterData.findById(chapterId)
+     * 条件状态推进防并发重复审批。 */
+    public void approve(long chapterId) {
+        ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
-        if (!"PENDING_APPROVAL".equals(ch.status())) {
+        if (!"PENDING_APPROVAL".equals(ch.getStatus())) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
-                    "章 " + chapterId + " 状态为 " + ch.status() + "，不在待审批");
+                    "章 " + chapterId + " 状态为 " + ch.getStatus() + "，不在待审批");
         }
         // 先原子占位（PENDING_APPROVAL → DIGESTED，占位必须用合法状态值；库约束无 DIGESTING/APPROVED），
         // 并发第二次点击立刻被拒；digest 异常则回退原状态
@@ -208,9 +311,9 @@ public class ChapterPipelineService {
     public void approveAsync(long chapterId) {
         ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
-        if (!"PENDING_APPROVAL".equals(ch.status())) {
+        if (!"PENDING_APPROVAL".equals(ch.getStatus())) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
-                    "章 " + chapterId + " 状态为 " + ch.status() + "，不在待审批");
+                    "章 " + chapterId + " 状态为 " + ch.getStatus() + "，不在待审批");
         }
         chapterData.updateStatusIf(chapterId, "PENDING_APPROVAL", "DIGESTED");
         digestExecutor.submit(() -> runDigestQuietly(chapterId));
@@ -223,9 +326,12 @@ public class ChapterPipelineService {
             log.warn("后台 digest 目标章 {} 不存在，跳过", chapterId);
             return;
         }
+        Long stepId = stepData.start(ch.novelId(), ch.id(), ch.chapterNo(), Step.DIGEST.name(), null, 1);
         try {
             digestService.digest(ch.novelId(), ch.id(), ch.chapterNo(), ch.fullText());
+            stepData.finish(stepId, "DONE", null);
         } catch (Exception e) {
+            stepData.finish(stepId, "FAILED", json(Map.of("reason", String.valueOf(e.getMessage()))));
             log.warn("章 {} 后台 digest 失败，回退待审批：{}", ch.chapterNo(), e.getMessage());
             chapterData.updateStatusIf(chapterId, "DIGESTED", "PENDING_APPROVAL");
             stageLog.emit(ch.novelId(), ch.chapterNo(), StageLog.Stage.APPROVE, StageLog.Phase.FAILED,
@@ -244,6 +350,130 @@ public class ChapterPipelineService {
             log.warn("启动自愈：章 {}（novel {}）状态 DIGESTED 但无事实账，补跑后台 digest", o.chapterNo(), o.novelId());
             digestExecutor.submit(() -> runDigestQuietly(o.id()));
         }
+    }
+
+    // ===== 流 A：打回 / 章纲卡点 =====
+
+    /** 打回目标：队列层据此重新入队。 */
+    public record RejectTarget(long novelId, String novelTitle, int chapterNo) {}
+
+    /** 终稿打回：仅 PENDING_APPROVAL 可打回；清场落意见重排队，意见注入下次章纲。 */
+    public RejectTarget reject(long chapterId, String reason) {
+        ChapterDO ch = chapterData.findById(chapterId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
+        if (!"PENDING_APPROVAL".equals(ch.getStatus())) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "章 " + chapterId + " 状态为 " + ch.getStatus() + "，仅待审批章可打回");
+        }
+        chapterData.rejectReset(chapterId, reason);
+        stageLog.emit(ch.novelId(), ch.chapterNo(), APPROVE, REJECTED,
+                Map.of("reason", truncate(reason), "flow", "final_reject"));
+        log.info("第 {} 章被人工打回：{}", ch.chapterNo(), truncate(reason));
+        return new RejectTarget(ch.novelId(), novelTitle(ch.novelId()), ch.chapterNo());
+    }
+
+    /** 章纲打回：OUTLINED（manual 卡点）可打回；清场落意见，重出章纲时注入。 */
+    public RejectTarget rejectOutline(long chapterId, String reason) {
+        ChapterDO ch = chapterData.findById(chapterId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
+        if (!"OUTLINED".equals(ch.getStatus())) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "章 " + chapterId + " 状态为 " + ch.getStatus() + "，仅待批章纲可打回");
+        }
+        chapterData.rejectReset(chapterId, reason);
+        stageLog.emit(ch.novelId(), ch.chapterNo(), OUTLINE, REJECTED,
+                Map.of("reason", truncate(reason), "flow", "outline_reject"));
+        log.info("第 {} 章章纲被人工打回：{}", ch.chapterNo(), truncate(reason));
+        return new RejectTarget(ch.novelId(), novelTitle(ch.novelId()), ch.chapterNo());
+    }
+
+    /** 人工编辑场景草稿（Q5a）：仅未在生成中的章；保存后立即重过该场景机械门禁。
+     * 续跑时 PASSED 场景复用编辑稿，FAILED 场景继续人工改或重生成。 */
+    public boolean editSceneDraft(long sceneId, String draftText) {
+        SceneDO scene = sceneData.getById(sceneId);
+        if (scene == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "场景不存在: " + sceneId);
+        }
+        ChapterDO ch = chapterData.findById(scene.chapterId())
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在"));
+        String st = ch.getStatus();
+        if (List.of("GATE_MECHANICAL", "GATE_AI_REVIEW", "REVISING", "PENDING_APPROVAL", "DIGESTED")
+                .contains(st)) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "章状态为 " + st + "，场景编辑仅限生成前（NEW/OUTLINED/OUTLINE_APPROVED/FAILED/INTERRUPTED）");
+        }
+        sceneData.applyRevise(sceneId, draftText);
+        int words = outlineService.loadSpecs(ch.id()).stream()
+                .filter(spec -> spec.sceneNo() == scene.sceneNo())
+                .findFirst().map(OutlineService.SceneSpec::words).orElse(900);
+        boolean passed = gateService.checkScene(ch.novelId(), ch.id(), sceneId, scene.sceneNo(),
+                draftText, words);
+        sceneData.updateGateStatus(sceneId, passed ? "PASSED" : "FAILED");
+        stageLog.emit(ch.novelId(), ch.chapterNo(), SCENE, DRAFT,
+                Map.of("sceneNo", scene.sceneNo(), "edited", true, "gatePassed", passed));
+        return passed;
+    }
+
+    /** 人工编辑正文（Q5b）：仅 PENDING_APPROVAL/DIGESTED（生成后静态态，不会被管线覆盖）。
+     * DIGESTED 编辑后事实账作废、状态回 PENDING_APPROVAL，重新审批即重算。 */
+    public void editFullText(long chapterId, String fullText) {
+        ChapterDO ch = chapterData.findById(chapterId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
+        String st = ch.getStatus();
+        if (!"PENDING_APPROVAL".equals(st) && !"DIGESTED".equals(st)) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "章状态为 " + st + "，正文编辑仅限待审批/已 digest 章");
+        }
+        chapterData.saveFullText(chapterId, fullText);
+        if ("DIGESTED".equals(st)) {
+            digestData.deleteByChapter(chapterId);
+            chapterData.updateStatus(chapterId, "PENDING_APPROVAL");
+            stageLog.emit(ch.novelId(), ch.chapterNo(), APPROVE, PENDING,
+                    Map.of("reason", "manual_edit", "chars", fullText.length()));
+        } else {
+            stageLog.emit(ch.novelId(), ch.chapterNo(), CHAPTER, DRAFT,
+                    Map.of("chars", fullText.length(), "edited", true));
+        }
+        log.info("第 {} 章正文被人工编辑（{} 字符）", ch.chapterNo(), fullText.length());
+    }
+
+    /** 事后否决（流 A 扩展，依赖 digest 解耦）：DIGESTED 章打回；清除本章事实账（摘要+facts），
+     * 重生成末尾 digest 步骤重建。世界状态快照不删（重算 upsert 覆盖）；伏笔 flips 保留（后续章可能引用）。 */
+    public RejectTarget veto(long chapterId, String reason) {
+        ChapterDO ch = chapterData.findById(chapterId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
+        if (!"DIGESTED".equals(ch.getStatus())) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "章 " + chapterId + " 状态为 " + ch.getStatus() + "，仅已 digest 章可否决");
+        }
+        digestData.deleteByChapter(chapterId);
+        chapterData.rejectReset(chapterId, reason);
+        stageLog.emit(ch.novelId(), ch.chapterNo(), DIGEST, REJECTED,
+                Map.of("reason", truncate(reason), "flow", "veto"));
+        log.info("第 {} 章被人工否决（digest 已清除，重算待重生成）：{}", ch.chapterNo(), truncate(reason));
+        return new RejectTarget(ch.novelId(), novelTitle(ch.novelId()), ch.chapterNo());
+    }
+
+    /** 章纲批准（manual 卡点放行）：OUTLINED → OUTLINE_APPROVED，续跑入队后从场景步开始。 */
+    public RejectTarget approveOutline(long chapterId) {
+        ChapterDO ch = chapterData.findById(chapterId)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
+        if (!chapterData.updateStatusIf(chapterId, "OUTLINED", "OUTLINE_APPROVED")) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "章 " + chapterId + " 状态为 " + ch.getStatus() + "，不在待批章纲");
+        }
+        stageLog.emit(ch.novelId(), ch.chapterNo(), OUTLINE, ADOPTED, Map.of("flow", "outline_approve"));
+        return new RejectTarget(ch.novelId(), novelTitle(ch.novelId()), ch.chapterNo());
+    }
+
+    private String novelTitle(long novelId) {
+        var novel = novelData.getById(novelId);
+        return novel == null ? String.valueOf(novelId) : novel.getTitle();
+    }
+
+    private static String truncate(String s) {
+        if (s == null) return "";
+        return s.length() <= 200 ? s : s.substring(0, 200) + "…";
     }
 
     private final java.util.concurrent.ExecutorService digestExecutor =
@@ -296,12 +526,12 @@ public class ChapterPipelineService {
         return SceneService.cleanDraft(r.content());
     }
 
-    /** 单章管线步骤清单：一个枚举看全流程（新增步骤=加一行+一个 step 方法），亦作 Tuning 调参作用域键。 */
+    /** 单章管线步骤清单：一个枚举看全流程（新增步骤=加一行+一个 step 方法），亦作 chapter_steps.step 字典。 */
     enum Step {
         OUTLINE("AI 章纲"),
-        SCENES("逐场景生成+场景门禁"),
-        ASSEMBLE_GATE("拼章+章级门禁"),
-        READER_REVIEW("读者评审"),
+        SCENE("场景生成+门禁"),
+        ASSEMBLE("拼章+章级门禁+修订"),
+        READER("读者评审"),
         AI_REVIEW("AI 语义审校"),
         APPROVE("审批"),
         DIGEST("事实账");
@@ -311,53 +541,25 @@ public class ChapterPipelineService {
         Step(String label) { this.label = label; }
     }
 
-    private boolean runChapter(long novelId, int chapterNo, String approvalMode) {
-        ChapterDO ch = outlineService.loadChapter(novelId, chapterNo);
-        chapterData.updateReviewConfig(ch.id(), gateService.readerStandardsJson(novelId)); // 评审标准随章快照，回看当时口径
-        stageLog.emit(novelId, chapterNo, CHAPTER, START, Map.of("title", String.valueOf(ch.title())));
-
-        outlineStep(novelId, ch);                            // 1) AI 章纲
-        if (!scenesStep(novelId, ch)) return false;          // 2) 逐场景生成+门禁
-        String fullText = assembleGateStep(novelId, ch);     // 3) 拼章+章级门禁
-        if (fullText == null) return false;
-
-        ReviewStepResult reader = reviewStep(novelId, ch, fullText, StageLog.Stage.READER);   // 3.4
-        fullText = reader.fullText();
-        if (reader.pending()) return true;
-        ReviewStepResult review = reviewStep(novelId, ch, fullText, StageLog.Stage.REVIEW);   // 3.5
-        fullText = review.fullText();
-        if (review.pending()) return true;
-
-        // 4) 审批（auto 直过；manual 停在 PENDING_APPROVAL 等人）
-        if ("manual".equals(approvalMode)) {
-            chapterData.updateStatus(ch.id(), "PENDING_APPROVAL");
-            log.info("第 {} 章待人工审批", chapterNo);
-            stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of());
-            return true;
-        }
-
-        // 5) digest
-        digestService.digest(novelId, ch.id(), chapterNo, fullText);
-        stageLog.emit(novelId, chapterNo, DIGEST, DONE, Map.of());
-        stageLog.emit(novelId, chapterNo, CHAPTER, DONE, Map.of("chars", fullText.length()));
-        return true;
-    }
-
     /** 步骤 1：AI 章纲。已物化则跳过（场景级断点续跑）。 */
-    private void outlineStep(long novelId, ChapterDO ch) {
-        if (sceneData.countByChapter(ch.id()) > 0) return;
+    private ChapterOutcome outlineStep(long novelId, ChapterDO ch, int attempt, BooleanSupplier stopCheck) {
+        if (sceneData.countByChapter(ch.id()) > 0) return ChapterOutcome.DONE;
+        if (stopCheck.getAsBoolean()) return interrupt(novelId, ch, Step.OUTLINE.name(), null);
         int chapterNo = ch.chapterNo();
+        Long stepId = stepData.start(novelId, ch.id(), chapterNo, Step.OUTLINE.name(), null, attempt);
         stageLog.emit(novelId, chapterNo, OUTLINE, START, Map.of());
         List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
         outlineService.generate(novelId, ch, packer.world(novelId), packer.characters(novelId),
                 packer.foreshadowDirectives(novelId, chapterNo), digests,
                 packer.prevTail(novelId, chapterNo), packer.prevChapterBrief(novelId, chapterNo));
-        stageLog.emit(novelId, chapterNo, OUTLINE, DONE,
-                Map.of("sceneCount", outlineService.loadSpecs(ch.id()).size()));
+        int sceneCount = outlineService.loadSpecs(ch.id()).size();
+        stepData.finish(stepId, "DONE", json(Map.of("sceneCount", sceneCount)));
+        stageLog.emit(novelId, chapterNo, OUTLINE, DONE, Map.of("sceneCount", sceneCount));
+        return ChapterOutcome.DONE;
     }
 
-    /** 步骤 2：逐场景生成 + 场景门禁（带意见重写≤2 轮）；已 PASSED 场景直接复用。全过返回 true。 */
-    private boolean scenesStep(long novelId, ChapterDO ch) {
+    /** 步骤 2：逐场景生成 + 场景门禁（带意见重写≤2 轮）；已 PASSED 场景直接复用。全过返回 DONE。 */
+    private ChapterOutcome scenesStep(long novelId, ChapterDO ch, int attempt, BooleanSupplier stopCheck) {
         int chapterNo = ch.chapterNo();
         var specs = outlineService.loadSpecs(ch.id());
         Map<Integer, SceneDO> doneScenes = sceneData.findByChapter(ch.id()).stream()
@@ -368,6 +570,7 @@ public class ChapterPipelineService {
         int passedScenes = 0;
         String prevScene = null;
         for (var spec : specs) {
+            if (stopCheck.getAsBoolean()) return interrupt(novelId, ch, Step.SCENE.name(), String.valueOf(spec.sceneNo()));
             SceneDO done = doneScenes.get(spec.sceneNo());
             if (done != null && "PASSED".equals(done.gateStatus())) {
                 passedScenes++;
@@ -377,6 +580,8 @@ public class ChapterPipelineService {
                 continue;
             }
             Long sceneId = sceneData.findId(ch.id(), spec.sceneNo());
+            Long stepId = stepData.start(novelId, ch.id(), chapterNo, Step.SCENE.name(),
+                    String.valueOf(spec.sceneNo()), attempt);
             var pack = packer.packScene(novelId, chapterNo, ch, spec, digests, prevTail, directives, prevScene);
             stageLog.emit(novelId, chapterNo, SCENE, START,
                     Map.of("sceneNo", spec.sceneNo(), "goal", String.valueOf(spec.goal())));
@@ -387,6 +592,10 @@ public class ChapterPipelineService {
             // 带意见重写（密度类指标一轮修订常按下葫芦浮起瓢），轮数走 tuning
             int maxRewrites = tuning.i("scene_revise_rounds", 2);
             for (int round = 1; round <= maxRewrites && !ok; round++) {
+                if (stopCheck.getAsBoolean()) {
+                    stepData.finish(stepId, "INTERRUPTED", json(Map.of("sceneNo", spec.sceneNo(), "round", round)));
+                    return interrupt(novelId, ch, Step.SCENE.name(), String.valueOf(spec.sceneNo()));
+                }
                 log.warn("场景 {} 门禁未过，带意见重写（第 {} 轮）", spec.sceneNo(), round);
                 stageLog.emit(novelId, chapterNo, SCENE_GATE, NONE,
                         Map.of("sceneNo", spec.sceneNo(), "passed", false, "rewrite", true, "round", round,
@@ -401,7 +610,14 @@ public class ChapterPipelineService {
                     Map.of("sceneNo", spec.sceneNo(), "passed", ok,
                             "reason", ok ? "" : gateService.failedChecksText(ch.id(), sceneId)));
             sceneData.updateGateStatus(sceneId, ok ? "PASSED" : "FAILED");
-            if (ok) passedScenes++;
+            if (ok) {
+                stepData.finish(stepId, "DONE", json(Map.of("sceneNo", spec.sceneNo())));
+                passedScenes++;
+            } else {
+                stepData.finish(stepId, "FAILED",
+                        json(Map.of("sceneNo", spec.sceneNo(), "reason",
+                                gateService.failedChecksText(ch.id(), sceneId))));
+            }
             prevScene = draft;
         }
         if (passedScenes < specs.size()) {
@@ -409,14 +625,16 @@ public class ChapterPipelineService {
             stageLog.emit(novelId, chapterNo, CHAPTER, FAILED,
                     Map.of("reason", "场景通过 " + passedScenes + "/" + specs.size()));
             chapterData.updateStatus(ch.id(), "FAILED");
-            return false;
+            return ChapterOutcome.FAILED;
         }
-        return true;
+        return ChapterOutcome.DONE;
     }
 
-    /** 步骤 3：拼章 + 章级门禁（复用已修订正文或带意见修订≤2 轮）。返回过检正文；失败返回 null。 */
-    private String assembleGateStep(long novelId, ChapterDO ch) {
+    /** 步骤 3：拼章 + 章级门禁（复用已修订正文或带意见修订≤2 轮）。过检 DONE，失败 FAILED，终止 INTERRUPTED。 */
+    private ChapterOutcome assembleGateStep(long novelId, ChapterDO ch, int attempt, BooleanSupplier stopCheck) {
         int chapterNo = ch.chapterNo();
+        if (stopCheck.getAsBoolean()) return interrupt(novelId, ch, Step.ASSEMBLE.name(), null);
+        Long stepId = stepData.start(novelId, ch.id(), chapterNo, Step.ASSEMBLE.name(), null, attempt);
         StringJoiner joiner = new StringJoiner("\n\n");
         sceneData.findPassedDrafts(ch.id()).forEach(joiner::add);
         String fullText = stripTitleLine(joiner.toString(), ch.title());
@@ -424,8 +642,9 @@ public class ChapterPipelineService {
         chapterData.updateStatus(ch.id(), "GATE_MECHANICAL");
         stageLog.emit(novelId, chapterNo, ASSEMBLE, NONE, Map.of("chars", fullText.length()));
         if (gateService.checkChapter(novelId, ch.id(), chapterNo, fullText, ch.budgetMin(), ch.budgetMax())) {
+            stepData.finish(stepId, "DONE", json(Map.of("chars", fullText.length())));
             stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
-            return fullText;
+            return ChapterOutcome.DONE;
         }
         stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE,
                 Map.of("passed", false, "reason", gateService.failedChecksText(ch.id())));
@@ -436,8 +655,9 @@ public class ChapterPipelineService {
             log.info("第 {} 章复用已修订正文（{} 字符）", chapterNo, stored.length());
             stageLog.emit(novelId, chapterNo, REVISE, REUSE, Map.of("chars", stored.length()));
             chapterData.saveFullText(ch.id(), stored);
+            stepData.finish(stepId, "DONE", json(Map.of("reuse", true)));
             stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
-            return stored;
+            return ChapterOutcome.DONE;
         }
         // 修订迭代制：单轮修订常「修甲伤乙」（补对话密度时狂加破折号、撑爆字数），
         // 最多 N 轮（tuning），每轮以最新失败清单喂回；修订稿长度异常直接弃用本轮防风格雪崩
@@ -446,6 +666,10 @@ public class ChapterPipelineService {
         double lenMax = tuning.d("chapter_revise_len_max", 1.15);
         String failReason = "修订后门禁仍未过";
         for (int round = 1; round <= maxRounds; round++) {
+            if (stopCheck.getAsBoolean()) {
+                stepData.finish(stepId, "INTERRUPTED", json(Map.of("round", round)));
+                return interrupt(novelId, ch, Step.ASSEMBLE.name(), null);
+            }
             log.warn("第 {} 章章级门禁未过，带意见修订（第 {}/{} 轮）", chapterNo, round, maxRounds);
             stageLog.emit(novelId, chapterNo, REVISE, START, Map.of("round", round));
             String revised = reviseChapter(novelId, ch, fullText);
@@ -462,26 +686,34 @@ public class ChapterPipelineService {
                     Map.of("round", round, "chars", fullText.length()));
             chapterData.saveFullText(ch.id(), fullText);
             if (gateService.checkChapter(novelId, ch.id(), chapterNo, fullText, ch.budgetMin(), ch.budgetMax())) {
+                stepData.finish(stepId, "DONE", json(Map.of("chars", fullText.length(), "rounds", round)));
                 stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
-                return fullText;
+                return ChapterOutcome.DONE;
             }
         }
         log.error("第 {} 章修订两轮后仍未过章级门禁（报告见 gate_reports）", chapterNo);
+        stepData.finish(stepId, "FAILED", json(Map.of("reason", failReason)));
         stageLog.emit(novelId, chapterNo, CHAPTER, FAILED, Map.of("reason", failReason));
         chapterData.updateStatus(ch.id(), "FAILED");
-        return null;
+        return ChapterOutcome.FAILED;
     }
 
-    /** 评审步骤结果：fullText 为修订后正文（可能未改）；pending=true 表示转人工，管线到此为止。 */
-    private record ReviewStepResult(String fullText, boolean pending) {}
+    /** 评审步骤结果：fullText 为修订后正文（可能未改）；outcome 非 DONE 表示转人工/终止。 */
+    private record ReviewStepResult(String fullText, ChapterOutcome outcome) {}
 
     /**
      * 步骤 3.4/3.5 共用评审模板：读者评审与 AI 语义审校同构——评审 → BLOCKER 带清单自动修一轮 → 复审；
      * 复审仍 BLOCKER 转人工（auto 也不过稿）。调用异常 fail-open（机械门禁已过的正文不因评审故障而废）。
      */
-    private ReviewStepResult reviewStep(long novelId, ChapterDO ch, String fullText, StageLog.Stage stage) {
+    private ReviewStepResult reviewStep(long novelId, ChapterDO ch, String fullText,
+                                        StageLog.Stage stage, int attempt, BooleanSupplier stopCheck) {
         boolean isReader = stage == StageLog.Stage.READER;
+        String stepName = isReader ? Step.READER.name() : Step.AI_REVIEW.name();
+        if (stopCheck.getAsBoolean()) {
+            return new ReviewStepResult(fullText, interrupt(novelId, ch, stepName, null));
+        }
         chapterData.updateStatus(ch.id(), "GATE_AI_REVIEW");
+        Long stepId = stepData.start(novelId, ch.id(), ch.chapterNo(), stepName, null, attempt);
         stageLog.emit(novelId, ch.chapterNo(), stage, START, Map.of());
         ReviewService.Outcome outcome;
         try {
@@ -491,6 +723,7 @@ public class ChapterPipelineService {
             log.warn("第 {} 章{}调用异常，fail-open 放行：{}", ch.chapterNo(), stage.label(), e.getMessage());
             stageLog.emit(novelId, ch.chapterNo(), stage, ERROR, Map.of("message", String.valueOf(e.getMessage())));
             outcome = new ReviewService.Outcome(null, "skipped", false);
+            stepData.finish(stepId, "DONE", json(Map.of("verdict", "skipped", "failOpen", true)));
         }
         if (outcome.revised() != null) {
             fullText = outcome.revised();
@@ -498,14 +731,34 @@ public class ChapterPipelineService {
             stageLog.emit(novelId, ch.chapterNo(), REVISE, isReader ? READER_FIX : REVIEW_FIX,
                     Map.of("chars", fullText.length()));
         }
+        stepData.finish(stepId, "DONE", json(Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked())));
         stageLog.emit(novelId, ch.chapterNo(), stage, DONE,
                 Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked()));
         if (outcome.blocked()) {
             log.warn("第 {} 章{}复审仍 BLOCKER，转人工审批", ch.chapterNo(), stage.label());
             chapterData.updateStatus(ch.id(), "PENDING_APPROVAL");
             stageLog.emit(novelId, ch.chapterNo(), APPROVE, PENDING, Map.of("reason", stage.wire() + "_blocker"));
-            return new ReviewStepResult(fullText, true);
+            return new ReviewStepResult(fullText, ChapterOutcome.PENDING);
         }
-        return new ReviewStepResult(fullText, false);
+        return new ReviewStepResult(fullText, ChapterOutcome.DONE);
+    }
+
+    /** 流 0 中断落地：当前章 INTERRUPTED，已完成产物保留，事件流水可回放终止位置。 */
+    private ChapterOutcome interrupt(long novelId, ChapterDO ch, String step, String subKey) {
+        stepData.finishRunningInterrupted(ch.id());
+        chapterData.updateStatus(ch.id(), "INTERRUPTED");
+        stageLog.emit(novelId, ch.chapterNo(), CHAPTER, STOPPED,
+                Map.of("reason", "用户终止", "step", step,
+                        "subKey", subKey == null ? "" : subKey));
+        log.warn("第 {} 章被用户终止于 {}（{}）", ch.chapterNo(), step, subKey == null ? "-" : subKey);
+        return ChapterOutcome.INTERRUPTED;
+    }
+
+    private String json(Map<String, Object> data) {
+        try {
+            return mapper.writeValueAsString(data);
+        } catch (Exception e) {
+            return String.valueOf(data);
+        }
     }
 }
