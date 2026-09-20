@@ -1,0 +1,364 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "UI 操作流：六个用户任务 × 页面 × 缺口",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1150,
+      560
+    ],
+    "output": "ui-workflow.html"
+  },
+  "lanes": [
+    {
+      "id": "gen",
+      "label": "生成侧"
+    },
+    {
+      "id": "gate",
+      "label": "质量侧",
+      "variant": "exception"
+    },
+    {
+      "id": "loop",
+      "label": "闭环侧"
+    }
+  ],
+  "groups": [
+    {
+      "id": "g_submit",
+      "label": "任务① 提交生成",
+      "lane": "gen",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "g_monitor",
+      "label": "任务② 盯进度",
+      "lane": "gen",
+      "fromCol": 3,
+      "toCol": 5,
+      "variant": "dashed"
+    },
+    {
+      "id": "g_approve",
+      "label": "任务③ 审批",
+      "lane": "gate",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "g_diagnose",
+      "label": "任务④ 查失败原因",
+      "lane": "gate",
+      "fromCol": 3,
+      "toCol": 5,
+      "variant": "security"
+    },
+    {
+      "id": "g_redo",
+      "label": "任务⑤ 纠偏重跑",
+      "lane": "loop",
+      "fromCol": 0,
+      "toCol": 2,
+      "variant": "security"
+    },
+    {
+      "id": "g_retro",
+      "label": "任务⑥ 复盘与账本纠偏",
+      "lane": "loop",
+      "fromCol": 3,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "wb",
+    "run",
+    "qok"
+  ],
+  "nodes": [
+    {
+      "id": "wb",
+      "lane": "gen",
+      "col": 0,
+      "type": "frontend",
+      "label": "工作台",
+      "sublabel": "选书+章区间",
+      "width": 132
+    },
+    {
+      "id": "run",
+      "lane": "gen",
+      "col": 1,
+      "type": "frontend",
+      "label": "开始生成",
+      "sublabel": "POST run·秒回任务号",
+      "width": 132
+    },
+    {
+      "id": "qok",
+      "lane": "gen",
+      "col": 2,
+      "type": "messagebus",
+      "label": "队列面板盯任务",
+      "tag": "顺畅",
+      "width": 132
+    },
+    {
+      "id": "sse",
+      "lane": "gen",
+      "col": 3,
+      "type": "frontend",
+      "label": "日志面板 SSE",
+      "sublabel": "事件逐条滚",
+      "width": 132
+    },
+    {
+      "id": "scenegap",
+      "lane": "gen",
+      "col": 4,
+      "type": "frontend",
+      "label": "进度只有章级",
+      "sublabel": "场景级一闪而过",
+      "tag": "粒度粗",
+      "width": 132
+    },
+    {
+      "id": "lane1",
+      "lane": "gen",
+      "col": 5,
+      "type": "messagebus",
+      "label": "全局单车道",
+      "sublabel": "多任务排队无预期",
+      "tag": "假异步真串行",
+      "width": 132
+    },
+    {
+      "id": "chpage",
+      "lane": "gate",
+      "col": 0,
+      "type": "frontend",
+      "label": "章节页",
+      "sublabel": "点行开抽屉",
+      "width": 132
+    },
+    {
+      "id": "approvebtn",
+      "lane": "gate",
+      "col": 1,
+      "type": "frontend",
+      "label": "通过审批",
+      "sublabel": "干等约 1 分钟",
+      "tag": "缺「打回+意见」",
+      "width": 132
+    },
+    {
+      "id": "digbg",
+      "lane": "gate",
+      "col": 2,
+      "type": "messagebus",
+      "label": "digest 后台跑",
+      "sublabel": "失败=状态回退",
+      "tag": "进度不可见",
+      "width": 132
+    },
+    {
+      "id": "stopped",
+      "lane": "gate",
+      "col": 3,
+      "type": "frontend",
+      "label": "任务 STOPPED",
+      "sublabel": "只到章级",
+      "width": 132
+    },
+    {
+      "id": "dig3",
+      "lane": "gate",
+      "col": 4,
+      "type": "frontend",
+      "label": "跨 3 页拼答案",
+      "sublabel": "章节→日志→事件流水",
+      "tag": "3 跳",
+      "width": 132
+    },
+    {
+      "id": "oneview",
+      "lane": "gate",
+      "col": 5,
+      "type": "backend",
+      "label": "章详情一屏",
+      "sublabel": "状态+原因+digest",
+      "tag": "目标·契约②",
+      "width": 132
+    },
+    {
+      "id": "chfailed",
+      "lane": "loop",
+      "col": 0,
+      "type": "frontend",
+      "label": "章节 FAILED",
+      "sublabel": "详情抽屉里找按钮",
+      "width": 132
+    },
+    {
+      "id": "rerun",
+      "lane": "loop",
+      "col": 1,
+      "type": "frontend",
+      "label": "重新生成本章",
+      "sublabel": "=断点续跑",
+      "tag": "缺全新重生成",
+      "width": 132
+    },
+    {
+      "id": "chain3",
+      "lane": "loop",
+      "col": 2,
+      "type": "security",
+      "label": "清场→纠偏→重跑",
+      "sublabel": "手工三步+另开规划页",
+      "tag": "应一端点",
+      "width": 132
+    },
+    {
+      "id": "volbtn",
+      "lane": "loop",
+      "col": 3,
+      "type": "frontend",
+      "label": "规划页复盘按钮",
+      "sublabel": "按卷触发",
+      "width": 132
+    },
+    {
+      "id": "dialog",
+      "lane": "loop",
+      "col": 4,
+      "type": "frontend",
+      "label": "报告对话框只读",
+      "tag": "无采纳/拒绝",
+      "width": 132
+    },
+    {
+      "id": "ledger",
+      "lane": "loop",
+      "col": 5,
+      "type": "database",
+      "label": "素材库深处纠偏",
+      "sublabel": "伏笔/世界状态",
+      "tag": "埋两层",
+      "width": 132
+    }
+  ],
+  "edges": [
+    {
+      "id": "wb-run",
+      "from": "wb",
+      "to": "run",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "run-qok",
+      "from": "run",
+      "to": "qok",
+      "variant": "emphasis",
+      "role": "main"
+    },
+    {
+      "id": "sse-scenegap",
+      "from": "sse",
+      "to": "scenegap",
+      "variant": "default"
+    },
+    {
+      "id": "scenegap-lane1",
+      "from": "scenegap",
+      "to": "lane1",
+      "variant": "default"
+    },
+    {
+      "id": "chpage-approvebtn",
+      "from": "chpage",
+      "to": "approvebtn",
+      "variant": "default"
+    },
+    {
+      "id": "approvebtn-digbg",
+      "from": "approvebtn",
+      "to": "digbg",
+      "variant": "default"
+    },
+    {
+      "id": "stopped-dig3",
+      "from": "stopped",
+      "to": "dig3",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "dig3-oneview",
+      "from": "dig3",
+      "to": "oneview",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "chfailed-rerun",
+      "from": "chfailed",
+      "to": "rerun",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "rerun-chain3",
+      "from": "rerun",
+      "to": "chain3",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "volbtn-dialog",
+      "from": "volbtn",
+      "to": "dialog",
+      "variant": "default"
+    },
+    {
+      "id": "dialog-ledger",
+      "from": "dialog",
+      "to": "ledger",
+      "variant": "dashed",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "图例读法",
+      "items": [
+        "每个小组=一个用户任务：在哪一屏→点什么→结果与缺口",
+        "绿色主链=今天顺畅的路（只有提交生成一条）；红边+tag=缺口；虚线=目标态"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "四个没有终点的任务",
+      "items": [
+        "全新重生成：断点续跑冒充重跑，干净重来只能手工清库",
+        "打回+意见：审批只有「通过」，人话意见进不了 replan",
+        "复盘建议采纳：报告只读，单条采纳/拒绝无操作",
+        "digest 后台进度：审批后干等，失败只回退状态不告诉你"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "一屏答案清单（目标）",
+      "items": [
+        "章详情一屏回答：走到哪步/为何失败/digest 进度/当时评审口径",
+        "数据源=时序图契约②的状态行；入口深度随三图改造一并收敛"
+      ]
+    }
+  ]
+}

@@ -36,7 +36,15 @@ public interface ChapterMapper extends BaseMapper<ChapterDO> {
 
     int deleteScenes(@Param("chapterId") long chapterId);
 
+    int deleteChapterSteps(@Param("chapterId") long chapterId);
+
     int markOutlined(@Param("chapterId") long chapterId, @Param("outlineYaml") String outlineYaml);
+
+    /** 人工打回清场（流 A）：状态→NEW、清正文/章纲/轮次、落打回意见；调用方先删场景与门禁报告。 */
+    int markRejected(@Param("chapterId") long chapterId, @Param("reason") String reason);
+
+    /** 打回意见消费后清零（章纲提示词注入成功后调用）。 */
+    int clearRejectReason(@Param("chapterId") long chapterId);
 
     int updatePlan(@Param("chapterId") long chapterId, @Param("volumeNo") Integer volumeNo, @Param("arc") String arc,
                    @Param("title") String title, @Param("goal") String goal, @Param("hook") String hook,

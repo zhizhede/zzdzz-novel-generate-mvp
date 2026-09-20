@@ -27,12 +27,34 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
                 ((Number) m.get("done_chapters")).intValue(),
                 m.get("current_chapter") == null ? null : ((Number) m.get("current_chapter")).intValue(),
                 (String) m.get("last_message"),
-                String.valueOf(m.get("create_time")));
+                String.valueOf(m.get("create_time")),
+                m.get("kind") == null ? "CHAPTERS" : (String) m.get("kind"),
+                m.get("payload") == null ? null : String.valueOf(m.get("payload")));
     }
 
     @Override
-    public long insert(long novelId, int fromChapter, int toChapter, Long submittedBy) {
-        return baseMapper.insert(novelId, fromChapter, toChapter, submittedBy);
+    public long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload) {
+        return baseMapper.insert(novelId, fromChapter, toChapter, submittedBy, kind, payload);
+    }
+
+    @Override
+    public GenerationTaskDataService.TaskRow claimNextQueuedForDispatch() {
+        Long queuedId = baseMapper.findQueuedForDispatch();
+        if (queuedId == null) {
+            return null;
+        }
+        int claimed = baseMapper.claim(queuedId);
+        if (claimed == 0) {
+            return null;
+        }
+        List<Map<String, Object>> rows = baseMapper.findRunningById(queuedId);
+        return toRow(rows.isEmpty() ? null : rows.get(0));
+    }
+
+    @Override
+    public int countRunningNovels() {
+        Integer n = baseMapper.countRunningNovels();
+        return n == null ? 0 : n;
     }
 
     @Override
@@ -65,6 +87,15 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
     }
 
     @Override
+    public List<TaskRow> listRunning() {
+        List<TaskRow> out = new java.util.ArrayList<>();
+        for (Map<String, Object> m : baseMapper.listRunning()) {
+            out.add(toRow(m));
+        }
+        return out;
+    }
+
+    @Override
     public void updateProgress(long id, int doneChapters, Integer currentChapter, String message) {
         baseMapper.updateProgress(id, doneChapters, currentChapter, message);
     }
@@ -87,5 +118,32 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
     @Override
     public int resetInterrupted() {
         return baseMapper.resetInterrupted();
+    }
+
+    @Override
+    public int cancelFlaggedOnRestart() {
+        return baseMapper.cancelFlaggedOnRestart();
+    }
+
+    @Override
+    public int requestCancel(long id) {
+        return baseMapper.requestCancel(id);
+    }
+
+    @Override
+    public boolean isCancelRequested(long id) {
+        Boolean flag = baseMapper.isCancelRequested(id);
+        return flag != null && flag;
+    }
+
+    @Override
+    public boolean isPauseRequested(long id) {
+        Boolean flag = baseMapper.isPauseRequested(id);
+        return flag != null && flag;
+    }
+
+    @Override
+    public int resumePaused(long id) {
+        return baseMapper.resumePaused(id);
     }
 }

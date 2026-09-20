@@ -20,6 +20,13 @@ public class GenerationTaskDO {
     private Integer currentChapter;
     private String lastMessage;
     private Long submittedBy;
+    /** CHAPTERS/PLAN/OUTLINE/REVIEW/DIGEST（V20 起落库，旧任务默认 CHAPTERS） */
+    private String kind;
+    private String payload;
+    /** 用户停止请求（流 0）：落库持久，pipeline 在步骤/场景边界消费 */
+    private boolean cancelRequested;
+    /** 插队暂停请求（④ 批启用） */
+    private boolean pauseRequested;
     private boolean isDeleted;
     private java.time.OffsetDateTime createTime;
     private java.time.OffsetDateTime updateTime;

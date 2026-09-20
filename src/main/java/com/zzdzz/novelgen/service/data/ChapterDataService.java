@@ -40,6 +40,12 @@ public interface ChapterDataService extends IService<ChapterDO> {
     /** 章纲回填并推进状态；同时清掉旧的场景与门禁报告（外键顺序：先报告后场景）。 */
     void resetForReoutline(long chapterId, String outlineYaml);
 
+    /** 人工打回清场（流 A）：删场景/门禁报告/步骤行，状态→NEW，正文与章纲清空，意见落行。 */
+    void rejectReset(long chapterId, String reason);
+
+    /** 打回意见消费后清零（章纲提示词注入成功后调用）。 */
+    void clearRejectReason(long chapterId);
+
     /** 卷纲规划编辑：改标题/目标/钩子/卷归属/字数预算（不改状态与正文）。 */
     void updatePlan(long chapterId, Integer volumeNo, String arc, String title,
                     String goal, String hook, String timeNote, int budgetMin, int budgetMax);

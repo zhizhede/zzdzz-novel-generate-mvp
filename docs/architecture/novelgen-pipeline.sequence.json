@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "生成管线修正后时序：交接物·状态行·按书分道",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1050,
+      560
+    ],
+    "output": "pipeline-sequence.html"
+  },
+  "participants": [
+    {
+      "id": "spa",
+      "type": "frontend",
+      "label": "浏览器 SPA",
+      "sublabel": "提交·审批·查询"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "REST 接入层",
+      "sublabel": "Spring Boot :8090"
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "生成队列",
+      "sublabel": "按 novel_id 分道"
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "单章管线编排器",
+      "sublabel": "七步 Step·自愈梯子"
+    },
+    {
+      "id": "steps",
+      "type": "database",
+      "label": "步骤状态表",
+      "sublabel": "每步一行·失败结构化"
+    },
+    {
+      "id": "handoff",
+      "type": "database",
+      "label": "章间交接表",
+      "sublabel": "钩子·未竟事件·伏笔提议"
+    },
+    {
+      "id": "digest",
+      "type": "backend",
+      "label": "digest 工序",
+      "sublabel": "后台质量步骤"
+    }
+  ],
+  "segments": [
+    {
+      "from": 168,
+      "to": 252,
+      "label": "① 提交即返回"
+    },
+    {
+      "from": 252,
+      "to": 338,
+      "label": "② 章 N 生成·每步落状态"
+    },
+    {
+      "from": 338,
+      "to": 424,
+      "label": "③ 过审落交接·digest 解耦入队"
+    },
+    {
+      "from": 424,
+      "to": 512,
+      "label": "④ 章 N+1 只读交接行接力"
+    }
+  ],
+  "messages": [
+    {
+      "from": "spa",
+      "to": "api",
+      "y": 178,
+      "label": "POST /api/pipeline/run",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "queue",
+      "y": 207,
+      "label": "入队·按 novel_id 分道",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "spa",
+      "y": 236,
+      "label": "立即返回 task id",
+      "variant": "return"
+    },
+    {
+      "from": "queue",
+      "to": "pipeline",
+      "y": 265,
+      "label": "认领章 N（书内串行·跨书并行）",
+      "variant": "emphasis"
+    },
+    {
+      "from": "pipeline",
+      "to": "steps",
+      "y": 294,
+      "label": "每步落状态行·失败结构化",
+      "variant": "emphasis",
+      "note": "断点续跑读执行位置；replan/队列/前端读同一份失败记录（step/scene/round/原因原文）"
+    },
+    {
+      "from": "pipeline",
+      "to": "handoff",
+      "y": 323,
+      "label": "过审即落交接行",
+      "variant": "emphasis"
+    },
+    {
+      "from": "pipeline",
+      "to": "queue",
+      "y": 352,
+      "label": "digest 入队（同一队列模型）",
+      "variant": "emphasis"
+    },
+    {
+      "from": "queue",
+      "to": "digest",
+      "y": 381,
+      "label": "认领 digest（独立质量工序）",
+      "variant": "emphasis"
+    },
+    {
+      "from": "digest",
+      "to": "steps",
+      "y": 410,
+      "label": "状态行 DONE 才置章 DIGESTED",
+      "variant": "emphasis"
+    },
+    {
+      "from": "queue",
+      "to": "pipeline",
+      "y": 439,
+      "label": "认领章 N+1（无需等 N 的 digest）",
+      "variant": "emphasis",
+      "note": "交接行兜底，章间主链解耦"
+    },
+    {
+      "from": "pipeline",
+      "to": "handoff",
+      "y": 468,
+      "label": "章纲读交接行注入上下文",
+      "variant": "emphasis"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "api",
+      "from": 172,
+      "to": 242
+    },
+    {
+      "participant": "queue",
+      "from": 201,
+      "to": 271
+    },
+    {
+      "participant": "pipeline",
+      "from": 259,
+      "to": 358
+    },
+    {
+      "participant": "steps",
+      "from": 288,
+      "to": 300
+    },
+    {
+      "participant": "handoff",
+      "from": 317,
+      "to": 329
+    },
+    {
+      "participant": "queue",
+      "from": 346,
+      "to": 387
+    },
+    {
+      "participant": "digest",
+      "from": 375,
+      "to": 416
+    },
+    {
+      "participant": "steps",
+      "from": 404,
+      "to": 416
+    },
+    {
+      "participant": "queue",
+      "from": 433,
+      "to": 445
+    },
+    {
+      "participant": "pipeline",
+      "from": 433,
+      "to": 474
+    },
+    {
+      "participant": "handoff",
+      "from": 462,
+      "to": 474
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "契约一：章间交接物",
+      "items": [
+        "章 N 过审即落交接行（钩子/未竟事件/伏笔提议）",
+        "章 N+1 只读交接行，不等 digest，主链解耦"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "契约二：状态行与失败结构化",
+      "items": [
+        "章纲/场景/评审/digest 各有状态行，状态机只由记录推进",
+        "失败落 step/scene/round/原因一行，replan/队列/前端读同一份"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "契约三：按书分道",
+      "items": [
+        "队列按 novel_id 分 worker：书内串行，跨书并行互不阻塞",
+        "审批 digest 并入同一队列模型，废除裸单线程 executor"
+      ]
+    }
+  ]
+}

@@ -1,10 +1,16 @@
 package com.zzdzz.novelgen.controller;
 
+import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.PlanModeDTO;
+import com.zzdzz.novelgen.model.entity.RetroProposalDO;
+import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.OutlineService;
 import com.zzdzz.novelgen.service.PlanningService;
 import com.zzdzz.novelgen.service.VolumeReviewService;
+import com.zzdzz.novelgen.service.data.NovelDataService;
+import com.zzdzz.novelgen.service.data.RetroProposalDataService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,10 +32,18 @@ public class PlanningController {
 
     private final PlanningService planningService;
     private final VolumeReviewService volumeReviewService;
+    private final GenerationQueueService queueService;
+    private final NovelDataService novelData;
+    private final RetroProposalDataService proposalData;
 
-    public PlanningController(PlanningService planningService, VolumeReviewService volumeReviewService) {
+    public PlanningController(PlanningService planningService, VolumeReviewService volumeReviewService,
+                              GenerationQueueService queueService, NovelDataService novelData,
+                              RetroProposalDataService proposalData) {
         this.planningService = planningService;
         this.volumeReviewService = volumeReviewService;
+        this.queueService = queueService;
+        this.novelData = novelData;
+        this.proposalData = proposalData;
     }
 
     // ===== 大纲 =====
@@ -98,6 +112,37 @@ public class PlanningController {
     @PutMapping("/plan-mode")
     public Result<Void> setPlanMode(@PathVariable long novelId, @RequestBody PlanModeDTO dto) {
         planningService.setPlanMode(novelId, dto.mode());
+        return Result.ok();
+    }
+
+    /** ⑤ 任务化：AI 规划一卷入队（秒回；进度见工作台队列，完成后队列 DONE）。 */
+    @PostMapping("/volume/auto-plan-async")
+    public Result<Map<String, Object>> autoPlanAsync(@PathVariable long novelId,
+                                                     @RequestBody Map<String, Object> body) {
+        int volNo = ((Number) body.get("volNo")).intValue();
+        int from = ((Number) body.get("from")).intValue();
+        Integer to = body.get("to") instanceof Number n ? n.intValue() : null;
+        String seed = (String) body.get("seedOutline");
+        String title = String.valueOf(novelData.getById(novelId).getTitle());
+        long taskId = queueService.submitPlan(novelId, title, volNo, from, to, seed, null);
+        return Result.ok(Map.of("taskId", taskId));
+    }
+
+    /** 流 D：某卷复盘建议/提案列表（含采纳状态）。 */
+    @GetMapping("/volumes/{volNo}/proposals")
+    public Result<List<RetroProposalDO>> proposals(@PathVariable long novelId, @PathVariable int volNo) {
+        return Result.ok(proposalData.listByVolume(novelId, volNo));
+    }
+
+    /** 流 D：提案决策（采纳/忽略）。 */
+    @PostMapping("/retro/{proposalId}/decision")
+    public Result<Void> decideProposal(@PathVariable long proposalId,
+                                       @RequestBody Map<String, Object> body) {
+        boolean adopt = Boolean.TRUE.equals(body.get("adopt"));
+        String note = body.get("note") == null ? null : String.valueOf(body.get("note"));
+        if (!proposalData.decide(proposalId, adopt, note)) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "提案不存在或已决策");
+        }
         return Result.ok();
     }
 

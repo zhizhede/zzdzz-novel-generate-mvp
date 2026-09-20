@@ -22,4 +22,7 @@ public interface DigestDataService extends IService<DigestDO> {
     int insert(long chapterId, String contentMd, String factsJson);
 
     boolean existsByChapter(long chapterId);
+
+    /** 事后否决（流 A 扩展）：按章清除事实账/摘要行，重生成末尾 digest 步骤重建。 */
+    int deleteByChapter(long chapterId);
 }

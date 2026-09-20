@@ -11,7 +11,8 @@ import java.util.Map;
 public interface GenerationTaskMapper extends BaseMapper<GenerationTaskDO> {
 
     Long insert(@Param("novelId") long novelId, @Param("fromChapter") int fromChapter,
-                @Param("toChapter") int toChapter, @Param("submittedBy") Long submittedBy);
+                @Param("toChapter") int toChapter, @Param("submittedBy") Long submittedBy,
+                @Param("kind") String kind, @Param("payload") String payload);
 
     List<Map<String, Object>> list(@Param("limit") int limit);
 
@@ -20,6 +21,12 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTaskDO> {
     int claim(@Param("id") long id);
 
     List<Map<String, Object>> findRunning();
+
+    List<Map<String, Object>> listRunning();
+
+    Long findQueuedForDispatch();
+
+    int countRunningNovels();
 
     List<Map<String, Object>> findRunningById(@Param("id") long id);
 
@@ -33,4 +40,15 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTaskDO> {
     String findStatus(@Param("id") long id);
 
     int resetInterrupted();
+
+    int cancelFlaggedOnRestart();
+
+    int requestCancel(@Param("id") long id);
+
+    Boolean isCancelRequested(@Param("id") long id);
+
+    Boolean isPauseRequested(@Param("id") long id);
+
+    /** 插队暂停后继续：PAUSED→QUEUED，从暂停点下一章续跑。 */
+    int resumePaused(@Param("id") long id);
 }

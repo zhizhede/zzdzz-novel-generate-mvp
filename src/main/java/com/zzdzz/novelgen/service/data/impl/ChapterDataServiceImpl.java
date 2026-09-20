@@ -63,6 +63,19 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO
     }
 
     @Override
+    public void rejectReset(long chapterId, String reason) {
+        baseMapper.deleteGateReports(chapterId);
+        baseMapper.deleteScenes(chapterId);
+        baseMapper.deleteChapterSteps(chapterId);
+        baseMapper.markRejected(chapterId, reason);
+    }
+
+    @Override
+    public void clearRejectReason(long chapterId) {
+        baseMapper.clearRejectReason(chapterId);
+    }
+
+    @Override
     public void updatePlan(long chapterId, Integer volumeNo, String arc, String title,
                            String goal, String hook, String timeNote, int budgetMin, int budgetMax) {
         baseMapper.updatePlan(chapterId, volumeNo, arc, title, goal, hook, timeNote, budgetMin, budgetMax);

@@ -214,6 +214,28 @@
         </el-table>
         <div v-else style="color: #999; font-size: 13px">无漂移项。</div>
 
+        <div style="font-weight: bold; margin: 12px 0 6px">建议采纳（流 D）</div>
+        <el-table v-if="proposals.length" :data="proposals" border size="small">
+          <el-table-column prop="content" label="建议" min-width="320" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.status === 'ADOPTED' ? 'success' : row.status === 'REJECTED' ? 'info' : 'warning'">
+                {{ row.status === 'ADOPTED' ? '已采纳' : row.status === 'REJECTED' ? '已忽略' : '待决' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150">
+            <template #default="{ row }">
+              <template v-if="row.status === 'PROPOSED'">
+                <el-button size="small" type="success" plain @click="decideProposal(row, true)">采纳</el-button>
+                <el-button size="small" plain @click="decideProposal(row, false)">忽略</el-button>
+              </template>
+              <span v-else style="color:#999;font-size:12px">{{ row.decisionNote || '已决策' }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-else style="color: #999; font-size: 13px">本卷暂无提案（复盘生成后自动落入）。</div>
+
         <div v-if="(retro.review?.highlights || []).length" style="font-weight: bold; margin: 12px 0 6px">亮点</div>
         <ul v-if="(retro.review?.highlights || []).length" style="margin: 0 0 10px 18px; font-size: 13px">
           <li v-for="(h, i) in retro.review.highlights" :key="i">{{ h }}</li>
@@ -227,7 +249,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
@@ -251,6 +273,27 @@ const draft = ref({ arc: '', brief: '', rows: [] })
 const adoptBusy = ref(false)
 const retroBusy = ref(null)
 const retroOpen = ref(false)
+async function loadProposals(volNo) {
+  try {
+    proposals.value = await api.get(`/api/novels/${novelId.value}/planning/volumes/${volNo}/proposals`)
+  } catch {
+    proposals.value = []
+  }
+}
+
+async function decideProposal(row, adopt) {
+  try {
+    await api.post(`/api/retro/${row.id}/decision`, { adopt, note: adopt ? '采纳' : '忽略' })
+    ElMessage.success(adopt ? '已采纳：将在下卷规划上下文中生效' : '已忽略')
+    await loadProposals(row.volNo)
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+watch(retro, (r) => { if (r && r.vol_no != null) loadProposals(r.vol_no) })
+const proposals = ref([])
+
 const retro = ref(null)
 
 async function runReview(v) {
@@ -373,6 +416,16 @@ function openAutoPlan() {
 
 async function runAutoPlan() {
   autoPlanOpen.value = false
+  // ⑤ 任务化：auto 模式入队秒回（进度见工作台队列）；manual 模式保留同步草稿流
+  if (planMode.value !== 'manual') {
+    try {
+      await api.post(`/api/novels/${novelId.value}/planning/volume/auto-plan-async`, autoPlanForm.value)
+      ElMessage.success('规划任务已入队，进度见工作台队列；完成后本页刷新即可看到新卷')
+    } catch (e) {
+      ElMessage.error(e.message)
+    }
+    return
+  }
   autoPlanBusy.value = true
   ElMessage.info('AI 规划中，约 2-10 分钟，可去工作台看事件流水…')
   try {

@@ -32,15 +32,17 @@ public class OutlineService {
     private final ChapterDataService chapterData;
     private final SceneDataService sceneData;
     private final PromptTemplateService promptTemplates;
+    private final TuningService tuning;
 
     public OutlineService(LlmJson llmJson, ObjectMapper mapper,
                           ChapterDataService chapterData, SceneDataService sceneData,
-                          PromptTemplateService promptTemplates) {
+                          PromptTemplateService promptTemplates, TuningService tuning) {
         this.llmJson = llmJson;
         this.mapper = mapper;
         this.chapterData = chapterData;
         this.sceneData = sceneData;
         this.promptTemplates = promptTemplates;
+        this.tuning = tuning;
     }
 
     public ChapterDO loadChapter(long novelId, int chapterNo) {
@@ -51,6 +53,19 @@ public class OutlineService {
     public void generate(long novelId, ChapterDO ch, String world, String characters,
                          List<String> directives, List<String> digests, String prevTail,
                          String prevBrief) {
+        // 流 A：未消费的打回意见拼进卷纲目标行（不动提示词模板目录），章纲落库成功后清零；
+        // 长度护栏走调参键 reject_reason_max_len（默认 200），超长截断并标注
+        String goal = ch.goal();
+        String rejectReason = ch.getRejectReason();
+        if (rejectReason != null && !rejectReason.isBlank()) {
+            int maxLen = tuning.i("reject_reason_max_len", 200);
+            String trimmed = rejectReason.strip();
+            if (trimmed.length() > maxLen) {
+                trimmed = trimmed.substring(0, maxLen) + "…（意见超长已截断）";
+            }
+            goal = goal + "（上一版内容已被人工打回，打回意见：" + trimmed
+                    + "。本次规划必须针对性回应上述意见，调整场景设计）";
+        }
         String user = promptTemplates.format(LlmNode.OUTLINE, "user", """
                 任务：为第 %d 章《%s》编写场景级章纲。
                 本章卷纲目标：%s
@@ -76,7 +91,7 @@ public class OutlineService {
 
                 只输出 JSON，格式：
                 {"scenes":[{"no":1,"goal":"本场景目标","present":["出场人物"],"must_reveal":["必须让读者知道的信息"],"must_not":["禁止出现的内容"],"words":900}]}
-                """, ch.chapterNo(), ch.title(), ch.goal(), ch.hook(),
+                """, ch.chapterNo(), ch.title(), goal, ch.hook(),
                 Objects.toString(ch.timeNote(), "紧接上一章，无跳跃"),
                 Objects.toString(ch.ruleRefs(), "[]"), Objects.toString(ch.foreshadowRefs(), "[]"),
                 ch.budgetMin(), ch.budgetMax(), world, characters,
@@ -85,6 +100,9 @@ public class OutlineService {
                 prevTail == null ? "（无）" : prevTail);
 
         JsonNode scenes = askScenes(user, 2);
+        if (rejectReason != null && !rejectReason.isBlank()) {
+            chapterData.clearRejectReason(ch.id()); // 意见已注入本次章纲，消费清零
+        }
 
         List<String> goals = new ArrayList<>();
         List<String> present = new ArrayList<>();

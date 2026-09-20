@@ -5,12 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
+import com.zzdzz.novelgen.service.data.ChapterStepDataService;
 import com.zzdzz.novelgen.service.data.GateReportDataService;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.vo.ChapterDetailVO;
 import com.zzdzz.novelgen.model.vo.ChapterListItemVO;
+import com.zzdzz.novelgen.model.vo.ChapterStepVO;
 import com.zzdzz.novelgen.model.vo.GateReportVO;
 import com.zzdzz.novelgen.model.vo.LlmTotalsVO;
 import com.zzdzz.novelgen.model.vo.ReviewVO;
@@ -27,15 +29,17 @@ public class ChapterQueryService {
     private final SceneDataService sceneData;
     private final GateReportDataService gateReportData;
     private final LlmCallLogDataService llmCallLogData;
+    private final ChapterStepDataService stepData;
     private final ObjectMapper mapper;
 
     public ChapterQueryService(ChapterDataService chapterData, SceneDataService sceneData,
                                GateReportDataService gateReportData, LlmCallLogDataService llmCallLogData,
-                               ObjectMapper mapper) {
+                               ChapterStepDataService stepData, ObjectMapper mapper) {
         this.chapterData = chapterData;
         this.sceneData = sceneData;
         this.gateReportData = gateReportData;
         this.llmCallLogData = llmCallLogData;
+        this.stepData = stepData;
         this.mapper = mapper;
     }
 
@@ -46,6 +50,13 @@ public class ChapterQueryService {
                 .toList();
     }
 
+    /** 待审批聚合（流 A 插队/人工通道）：manual/auto 累积的 PENDING_APPROVAL 章。 */
+    public List<ChapterListItemVO> pendingApprovals(long novelId) {
+        return listByNovel(novelId).stream()
+                .filter(c -> "PENDING_APPROVAL".equals(c.status()))
+                .toList();
+    }
+
     public ChapterDetailVO detail(long chapterId) {
         ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
@@ -53,10 +64,32 @@ public class ChapterQueryService {
                 .map(s -> new SceneVO(s.id(), s.sceneNo(), s.goal(), s.draftText(),
                         s.gateStatus(), s.revisionRound()))
                 .toList();
+        // 流 B 一屏答案：步骤状态行 + 打回意见 + 失败摘要 + digest 进行中
+        List<ChapterStepVO> steps = stepData.listByChapter(chapterId).stream()
+                .map(s -> new ChapterStepVO(s.getStep(), s.getSubKey(),
+                        s.getAttempt() == null ? 1 : s.getAttempt(), s.getStatus(),
+                        s.getDetail(), String.valueOf(s.getUpdateTime())))
+                .toList();
         return new ChapterDetailVO(ch.id(), ch.chapterNo(), ch.title(), ch.status(), ch.round(),
                 ch.budgetMin(), ch.budgetMax(), ch.fullText(), scenes,
                 latestGateReport(chapterId), latestReview(chapterId),
-                toTotalsVO(llmCallLogData.totalsBy(null, chapterId)), ch.getReviewConfig());
+                toTotalsVO(llmCallLogData.totalsBy(null, chapterId)), ch.getReviewConfig(),
+                steps, ch.getRejectReason(), failureBrief(chapterId),
+                stepData.hasRunning(chapterId, "DIGEST"));
+    }
+
+    /** 最近一次失败/中断步骤的原因原文（流 B 一屏答案；无则 null）。 */
+    private String failureBrief(long chapterId) {
+        var row = stepData.latestUnsuccessful(chapterId);
+        if (row == null || row.getDetail() == null) return null;
+        try {
+            JsonNode node = mapper.readTree(row.getDetail());
+            String reason = node.path("reason").asText("");
+            return reason.isBlank() ? null : "[" + row.getStep()
+                    + (row.getSubKey() == null ? "" : " " + row.getSubKey()) + "] " + reason;
+        } catch (Exception e) {
+            return row.getDetail();
+        }
     }
 
     private GateReportVO latestGateReport(long chapterId) {
