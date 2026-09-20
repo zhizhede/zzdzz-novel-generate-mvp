@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.JwtService;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.LoginDTO;
@@ -17,15 +18,12 @@ import org.springframework.web.bind.annotation.RestController;
 /** 登录 / 登出 / 会话信息。登录态 = HttpOnly JWT Cookie，重启不失效。 */
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthController {
 
     private final AuthService authService;
     private final JwtService jwtService;
 
-    public AuthController(AuthService authService, JwtService jwtService) {
-        this.authService = authService;
-        this.jwtService = jwtService;
-    }
 
     @PostMapping("/login")
     public Result<LoginVO> login(@RequestBody LoginDTO dto, HttpServletResponse response) {

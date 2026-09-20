@@ -20,43 +20,15 @@ public class LlmNodeConfigDO {
     private String remark;
     private boolean isDeleted;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public String node() {
-        return getNode();
-    }
 
-    @Deprecated
-    public String model() {
-        return getModel();
-    }
 
-    @Deprecated
-    public Double temperature() {
-        return getTemperature();
-    }
 
-    @Deprecated
-    public Integer maxTokens() {
-        return getMaxTokens();
-    }
 
-    @Deprecated
-    public String extraJson() {
-        return getExtraJson();
-    }
 
     @Deprecated
     public boolean enabled() {
         return isEnabled();
     }
 
-    @Deprecated
-    public String remark() {
-        return getRemark();
-    }
 }

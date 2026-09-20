@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
@@ -18,6 +19,7 @@ import java.util.List;
 
 /** LLM 调用台账查询：分页列表 + think/正文分区详情（含完整 prompt 分段与单条成本）+ 管线事件流水。 */
 @Service
+@RequiredArgsConstructor
 public class LlmLogService {
 
     private final LlmCallLogDataService llmCallLogData;
@@ -25,23 +27,16 @@ public class LlmLogService {
     private final LlmNodeConfigService nodeConfig;
     private final ObjectMapper mapper;
 
-    public LlmLogService(LlmCallLogDataService llmCallLogData, PipelineEventDataService pipelineEventData,
-                         LlmNodeConfigService nodeConfig, ObjectMapper mapper) {
-        this.llmCallLogData = llmCallLogData;
-        this.pipelineEventData = pipelineEventData;
-        this.nodeConfig = nodeConfig;
-        this.mapper = mapper;
-    }
 
     public PageVO<LlmLogVO> page(Long novelId, Long chapterId, int page, int size) {
         int safePage = Math.max(1, page);
         int safeSize = Math.min(Math.max(1, size), 200);
         List<LlmLogVO> items = llmCallLogData
                 .findPage(novelId, chapterId, safeSize, (safePage - 1) * safeSize).stream()
-                .map(l -> new LlmLogVO(l.id(), l.node(), l.novelId(), l.chapterId(), l.model(),
-                        l.promptTokens(), l.completionTokens(), l.totalTokens(), l.getCachedTokens(),
-                        l.latencyMs(), l.status(), iso(l.getCreateTime()),
-                        l.reasoningText() == null ? 0 : l.reasoningText().length()))
+                .map(l -> new LlmLogVO(l.getId(), l.getNode(), l.getNovelId(), l.getChapterId(), l.getModel(),
+                        l.getPromptTokens(), l.getCompletionTokens(), l.getTotalTokens(), l.getCachedTokens(),
+                        l.getLatencyMs(), l.getStatus(), iso(l.getCreateTime()),
+                        l.getReasoningText() == null ? 0 : l.getReasoningText().length()))
                 .toList();
         return new PageVO<>(items, llmCallLogData.countBy(novelId, chapterId), safePage, safeSize);
     }
@@ -65,11 +60,11 @@ public class LlmLogService {
         if (log == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "调用记录不存在: " + id);
         }
-        return new LlmLogDetailVO(log.id(), log.node(), log.novelId(), log.chapterId(), log.model(),
-                log.promptTokens(), log.completionTokens(), log.totalTokens(), log.getCachedTokens(),
-                log.latencyMs(), log.status(), log.errorMsg(), iso(log.getCreateTime()),
-                nodeConfig.costOf(log), promptMessages(log.requestJson()),
-                log.reasoningText(), extractContent(log.responseJson()));
+        return new LlmLogDetailVO(log.getId(), log.getNode(), log.getNovelId(), log.getChapterId(), log.getModel(),
+                log.getPromptTokens(), log.getCompletionTokens(), log.getTotalTokens(), log.getCachedTokens(),
+                log.getLatencyMs(), log.getStatus(), log.getErrorMsg(), iso(log.getCreateTime()),
+                nodeConfig.costOf(log), promptMessages(log.getRequestJson()),
+                log.getReasoningText(), extractContent(log.getResponseJson()));
     }
 
     /** request_json.messages 逐条分段：完整 prompt（上下文包）可回放；解析失败回退空列表不拦展示。 */

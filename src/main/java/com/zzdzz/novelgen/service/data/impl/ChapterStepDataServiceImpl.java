@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service.data.impl;
 
+import com.zzdzz.novelgen.model.enums.StepStatus;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.ChapterStepMapper;
@@ -29,7 +30,7 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
         row.setStep(step);
         row.setSubKey(subKey);
         row.setAttempt(attempt);
-        row.setStatus("RUNNING");
+        row.setStatus(StepStatus.RUNNING.wire());
         save(row);
         return row.getId();
     }
@@ -58,7 +59,7 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
                     (a, b) -> b);
         }
         return latest.values().stream()
-                .filter(r -> "FAILED".equals(r.getStatus()) || "INTERRUPTED".equals(r.getStatus()))
+                .filter(r -> StepStatus.FAILED.is(r.getStatus()) || StepStatus.INTERRUPTED.is(r.getStatus()))
                 .reduce((a, b) -> b.getId() > a.getId() ? b : a)
                 .orElse(null);
     }
@@ -67,7 +68,7 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
     public boolean hasRunning(long chapterId, String step) {
         return count(whereChapter(chapterId)
                 .eq("step", step)
-                .eq("status", "RUNNING")) > 0;
+                .eq("status", StepStatus.RUNNING.wire())) > 0;
     }
 
     @Override
@@ -75,7 +76,7 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
         return java.util.Optional.ofNullable(getOne(new QueryWrapper<ChapterStepDO>()
                 .eq("novel_id", novelId)
                 .eq("chapter_no", chapterNo)
-                .eq("status", "RUNNING")
+                .eq("status", StepStatus.RUNNING.wire())
                 .eq("is_deleted", false)
                 .orderByDesc("id")
                 .last("LIMIT 1"), false));
@@ -85,7 +86,7 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
     public void finishRunningInterrupted(long chapterId) {
         update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<ChapterStepDO>()
                 .eq("chapter_id", chapterId)
-                .eq("status", "RUNNING")
+                .eq("status", StepStatus.RUNNING.wire())
                 .eq("is_deleted", false)
                 .set("status", "INTERRUPTED")
                 .set("detail", "{\"reason\": \"用户终止（硬中断）\"}")

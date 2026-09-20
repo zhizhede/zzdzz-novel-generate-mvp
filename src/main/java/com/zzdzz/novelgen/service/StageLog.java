@@ -1,8 +1,8 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.service.data.PipelineEventDataService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -14,9 +14,10 @@ import java.util.Map;
  * 各服务不再自持 emit 帮手、不再手拼事件名字符串。
  */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class StageLog {
 
-    private static final Logger log = LoggerFactory.getLogger(StageLog.class);
 
     /** 管线阶段（事件名）：wire 值与前端 SSE 事件名、pipeline_events.stage 逐字一致。 */
     public enum Stage {
@@ -69,10 +70,6 @@ public class StageLog {
     private final PipelineSseService sse;
     private final PipelineEventDataService eventDAO;
 
-    public StageLog(PipelineSseService sse, PipelineEventDataService eventDAO) {
-        this.sse = sse;
-        this.eventDAO = eventDAO;
-    }
 
     /** 卷级事件（无章号）。 */
     public void emit(Long novelId, Stage stage, Phase phase, Map<String, Object> extra) {

@@ -12,3 +12,14 @@ export const STEP_LABEL = {
   OUTLINE: 'AI 章纲', SCENE: '场景生成+门禁', ASSEMBLE: '拼章+章级门禁+修订',
   READER: '读者评审', AI_REVIEW: 'AI 语义审校', APPROVE: '审批', DIGEST: '事实账',
 }
+
+/** 队列任务状态文案与配色（GenerationQueueService/TaskStatus 口径）。 */
+export const TASK_TEXT = {
+  QUEUED: '排队中', RUNNING: '生成中', DONE: '完成', STOPPED: '已停止',
+  CANCELED: '已取消', INTERRUPTED: '已终止', PAUSED: '已暂停',
+}
+
+export const TASK_COLOR = {
+  QUEUED: 'info', RUNNING: 'warning', DONE: 'success', STOPPED: 'danger',
+  CANCELED: 'info', INTERRUPTED: 'danger', PAUSED: 'info',
+}

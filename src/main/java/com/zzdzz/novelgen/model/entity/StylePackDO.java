@@ -17,28 +17,8 @@ public class StylePackDO {
     private String fingerprint;
     private boolean isDeleted;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public String name() {
-        return getName();
-    }
 
-    @Deprecated
-    public String description() {
-        return getDescription();
-    }
 
-    @Deprecated
-    public String rulesMd() {
-        return getRulesMd();
-    }
 
-    @Deprecated
-    public String fingerprint() {
-        return getFingerprint();
-    }
 }

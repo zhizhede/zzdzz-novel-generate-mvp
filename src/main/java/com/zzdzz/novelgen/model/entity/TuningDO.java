@@ -18,23 +18,7 @@ public class TuningDO {
     private String value;
     private String description;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public String key() {
-        return getKey();
-    }
 
-    @Deprecated
-    public String value() {
-        return getValue();
-    }
 
-    @Deprecated
-    public String description() {
-        return getDescription();
-    }
 }

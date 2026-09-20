@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.common.web.Result;
@@ -28,6 +29,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/novels/{novelId}/planning")
+@RequiredArgsConstructor
 public class PlanningController {
 
     private final PlanningService planningService;
@@ -36,15 +38,6 @@ public class PlanningController {
     private final NovelDataService novelData;
     private final RetroProposalDataService proposalData;
 
-    public PlanningController(PlanningService planningService, VolumeReviewService volumeReviewService,
-                              GenerationQueueService queueService, NovelDataService novelData,
-                              RetroProposalDataService proposalData) {
-        this.planningService = planningService;
-        this.volumeReviewService = volumeReviewService;
-        this.queueService = queueService;
-        this.novelData = novelData;
-        this.proposalData = proposalData;
-    }
 
     // ===== 大纲 =====
 

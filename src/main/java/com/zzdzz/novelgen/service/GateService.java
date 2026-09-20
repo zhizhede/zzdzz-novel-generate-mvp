@@ -1,5 +1,7 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.model.enums.GateType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.GateReportDataService;
@@ -17,6 +19,7 @@ import java.util.regex.Pattern;
  * 指标计算为静态纯函数（可单测）；结果落 gate_reports 供断点重放与 M2 AI 评审对照。
  */
 @Service
+@RequiredArgsConstructor
 public class GateService {
 
     /** AI 腔黑名单兜底：风格包未配置 gate_config 时使用；正式值随包落库（V4 起）。 */
@@ -31,13 +34,6 @@ public class GateService {
     private final ChapterDataService chapterData;
     private final TuningService tuning;
 
-    public GateService(StylePackDataService stylePackData, GateReportDataService gateReportData,
-                       ChapterDataService chapterData, TuningService tuning) {
-        this.stylePackData = stylePackData;
-        this.gateReportData = gateReportData;
-        this.chapterData = chapterData;
-        this.tuning = tuning;
-    }
 
     @SuppressWarnings("unchecked")
     public boolean checkChapter(long novelId, long chapterId, int chapterNo, String text,
@@ -74,7 +70,7 @@ public class GateService {
         checks.add(check("banned_phrases", hits.size(), 0, 0, hits.isEmpty()));
 
         boolean passed = checks.stream().allMatch(c -> (Boolean) c.get("ok"));
-        gateReportData.insert(chapterId, null, "mechanical", 0, passed,
+        gateReportData.insert(chapterId, null, GateType.MECHANICAL.wire(), 0, passed,
                 Map.of("chapter_no", chapterNo, "words", words,
                         "banned_hits", hits, "checks", checks));
         return passed;
@@ -91,8 +87,8 @@ public class GateService {
         List<Map<String, Object>> checks = new ArrayList<>();
 
         // 场景长度：预算比例带（43 章超长实锤后新增）。场景超长若放行，章级修订受 ±10% 约束救不回来
-        double sceneLenMin = tuning.d("scene_len_min_ratio", 0.4);
-        double sceneLenMax = tuning.d("scene_len_max_ratio", 1.6);
+        double sceneLenMin = tuning.d("scene_len_min_ratio", TuningDefaults.SCENE_LEN_MIN_RATIO);
+        double sceneLenMax = tuning.d("scene_len_max_ratio", TuningDefaults.SCENE_LEN_MAX_RATIO);
         int cjk = ((Number) metrics.get("cjk")).intValue();
         boolean lenOk = cjk >= wordsBudget * sceneLenMin && cjk <= wordsBudget * sceneLenMax;
         checks.add(check("scene_length", cjk, (int) (wordsBudget * sceneLenMin),
@@ -124,7 +120,7 @@ public class GateService {
         checks.add(check("dialogue_density_per1k", dlg, null, dlgMax, dlg <= dlgMax));
 
         boolean passed = checks.stream().allMatch(c -> (Boolean) c.get("ok"));
-        gateReportData.insert(chapterId, sceneId, "mechanical", 0, passed,
+        gateReportData.insert(chapterId, sceneId, GateType.MECHANICAL.wire(), 0, passed,
                 Map.of("scene_no", sceneNo, "checks", checks));
         return passed;
     }
@@ -231,11 +227,11 @@ public class GateService {
     /** 有效评审标准五项（gate_config > tuning > 代码默认），工作台/风格包调参面板回显用。 */
     public java.util.LinkedHashMap<String, Double> readerStandards(long novelId) {
         java.util.LinkedHashMap<String, Double> m = new java.util.LinkedHashMap<>();
-        m.put("reader_fat_ratio_block", configValue(novelId, "reader_fat_ratio_block", tuning.d("reader_fat_ratio_block", 0.33)));
-        m.put("reader_fat_ratio_hard", configValue(novelId, "reader_fat_ratio_hard", tuning.d("reader_fat_ratio_hard", 0.50)));
-        m.put("reader_fix_len_min", configValue(novelId, "reader_fix_len_min", tuning.d("reader_fix_len_min", 0.75)));
-        m.put("reader_fix_len_max", configValue(novelId, "reader_fix_len_max", tuning.d("reader_fix_len_max", 1.15)));
-        m.put("ai_review_fix_floor", configValue(novelId, "ai_review_fix_floor", tuning.d("ai_review_fix_floor", 0.60)));
+        m.put("reader_fat_ratio_block", configValue(novelId, "reader_fat_ratio_block", tuning.d("reader_fat_ratio_block", TuningDefaults.READER_FAT_RATIO_BLOCK)));
+        m.put("reader_fat_ratio_hard", configValue(novelId, "reader_fat_ratio_hard", tuning.d("reader_fat_ratio_hard", TuningDefaults.READER_FAT_RATIO_HARD)));
+        m.put("reader_fix_len_min", configValue(novelId, "reader_fix_len_min", tuning.d("reader_fix_len_min", TuningDefaults.READER_FIX_LEN_MIN)));
+        m.put("reader_fix_len_max", configValue(novelId, "reader_fix_len_max", tuning.d("reader_fix_len_max", TuningDefaults.READER_FIX_LEN_MAX)));
+        m.put("ai_review_fix_floor", configValue(novelId, "ai_review_fix_floor", tuning.d("ai_review_fix_floor", TuningDefaults.AI_REVIEW_FIX_FLOOR)));
         return m;
     }
 

@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service.data.impl;
 
+import lombok.RequiredArgsConstructor;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.dao.GateReportMapper;
@@ -12,14 +13,12 @@ import java.util.Map;
 
 /** gate_reports 数据服务实现。 */
 @Service
+@RequiredArgsConstructor
 public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, GateReportDO>
         implements GateReportDataService {
 
     private final ObjectMapper mapper;
 
-    public GateReportDataServiceImpl(ObjectMapper mapper) {
-        this.mapper = mapper;
-    }
 
     @Override
     public void insert(long chapterId, Long sceneId, String gateType, int round,

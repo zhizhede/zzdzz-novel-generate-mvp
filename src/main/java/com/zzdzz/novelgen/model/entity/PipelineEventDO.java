@@ -23,48 +23,12 @@ public class PipelineEventDO {
     private java.time.OffsetDateTime updateTime;
     private java.time.OffsetDateTime deleteTime;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public Long novelId() {
-        return getNovelId();
-    }
 
-    @Deprecated
-    public Integer chapterNo() {
-        return getChapterNo();
-    }
 
-    @Deprecated
-    public String stage() {
-        return getStage();
-    }
 
-    @Deprecated
-    public String phase() {
-        return getPhase();
-    }
 
-    @Deprecated
-    public JsonNode payload() {
-        return getPayload();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime createTime() {
-        return getCreateTime();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime updateTime() {
-        return getUpdateTime();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime deleteTime() {
-        return getDeleteTime();
-    }
 }

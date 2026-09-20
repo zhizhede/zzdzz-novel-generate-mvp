@@ -1,5 +1,9 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import com.zzdzz.novelgen.llm.LlmTemps;
+import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
@@ -13,8 +17,6 @@ import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -34,9 +36,10 @@ import static com.zzdzz.novelgen.service.StageLog.Phase.START;
  * 机械对账不依赖模型；LLM 挂了报告仍含对账部分（fail-open）。
  */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class VolumeReviewService {
 
-    private static final Logger log = LoggerFactory.getLogger(VolumeReviewService.class);
 
     private final ChapterDataService chapterData;
     private final DigestDataService digestData;
@@ -49,23 +52,6 @@ public class VolumeReviewService {
     private final ObjectMapper mapper;
     private final PromptTemplateService promptTemplates;
 
-    public VolumeReviewService(ChapterDataService chapterData, DigestDataService digestData,
-                               ForeshadowDataService foreshadowData, WorldStateDataService worldStateData,
-                               VolumeReviewDataService reviewDAO,
-            com.zzdzz.novelgen.service.data.RetroProposalDataService proposalData, LlmJson llmJson,
-                               StageLog stageLog, ObjectMapper mapper,
-                               PromptTemplateService promptTemplates) {
-        this.chapterData = chapterData;
-        this.digestData = digestData;
-        this.foreshadowData = foreshadowData;
-        this.worldStateData = worldStateData;
-        this.reviewDAO = reviewDAO;
-        this.llmJson = llmJson;
-        this.stageLog = stageLog;
-        this.mapper = mapper;
-        this.promptTemplates = promptTemplates;
-        this.proposalData = proposalData;
-    }
 
     /** 复盘一卷（同步，约 1-3 分钟）：机械对账 + LLM 漂移分析，报告落库并返回。 */
     @SuppressWarnings("unchecked")
@@ -80,7 +66,7 @@ public class VolumeReviewService {
                 Map.of("volNo", volNo, "from", fromNo, "to", toNo));
 
         Map<String, ForeshadowDO> ledger = new HashMap<>();
-        for (ForeshadowDO f : foreshadowData.listByNovel(novelId)) ledger.put(f.code(), f);
+        for (ForeshadowDO f : foreshadowData.listByNovel(novelId)) ledger.put(f.getCode(), f);
         Map<String, Object> mechanical = mechanicalAudit(rows, ledger);
 
         Map<String, Object> review;
@@ -170,12 +156,12 @@ public class VolumeReviewService {
                     ForeshadowDO f = ledger.get(code);
                     if (f == null) {
                         item.put("verdict", "账本无此编码（异常）");
-                    } else if ("recovered".equals(f.status())) {
-                        item.put("verdict", "已回收 ✓（第" + f.recoveredIn() + "章）");
-                    } else if ("planted".equals(f.status())) {
-                        item.put("verdict", "已埋设，待回收（第" + f.plantedIn() + "章埋）");
+                    } else if (ForeshadowStatus.RECOVERED.is(f.getStatus())) {
+                        item.put("verdict", "已回收 ✓（第" + f.getRecoveredIn() + "章）");
+                    } else if (ForeshadowStatus.PLANTED.is(f.getStatus())) {
+                        item.put("verdict", "已埋设，待回收（第" + f.getPlantedIn() + "章埋）");
                     } else {
-                        item.put("verdict", "状态 " + f.status() + "，排期未兑现");
+                        item.put("verdict", "状态 " + f.getStatus() + "，排期未兑现");
                     }
                     foreshadowAudit.add(item);
                 }
@@ -252,7 +238,7 @@ public class VolumeReviewService {
                                         "你是资深网文责编，负责卷级复盘。只输出合法 JSON，"
                                                 + "字符串值内部禁止英文双引号，引用一律用「」。")),
                                 LlmPort.Message.user(user)),
-                        0.3),
+                        LlmTemps.VOLUME_REVIEW),
                 node -> {
                     String overall = node.path("overall").asText("");
                     if (!List.of("pass", "drift", "critical").contains(overall)) {

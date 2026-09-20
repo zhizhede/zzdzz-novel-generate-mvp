@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.UserDataService;
@@ -12,13 +13,11 @@ import java.security.MessageDigest;
 
 /** 登录鉴权：无状态 JWT（签发在 AuthController），密码哈希 = sha256(username:password)，与种子 SQL 口径一致。 */
 @Service
+@RequiredArgsConstructor
 public class AuthService {
 
     private final UserDataService userData;
 
-    public AuthService(UserDataService userData) {
-        this.userData = userData;
-    }
 
     /** 认证通过的用户（id/username/role），供签发 JWT。 */
     public record LoginUser(long id, String username, String role) {
@@ -30,10 +29,10 @@ public class AuthService {
         }
         UserDO user = userData.findAliveByUsername(dto.username().trim());
         String hash = sha256(dto.username().trim() + ":" + dto.password());
-        if (user == null || !hash.equals(user.passwordHash())) {
+        if (user == null || !hash.equals(user.getPasswordHash())) {
             throw new BizException(ErrorCode.LOGIN_FAILED, "用户名或密码错误");
         }
-        return new LoginUser(user.id(), user.username(), user.role());
+        return new LoginUser(user.getId(), user.getUsername(), user.getRole());
     }
 
     private static boolean isBlank(String s) {

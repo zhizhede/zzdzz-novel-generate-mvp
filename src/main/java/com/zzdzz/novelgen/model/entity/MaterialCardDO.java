@@ -35,55 +35,19 @@ public class MaterialCardDO {
     private Integer sourceChapter;
     private boolean isDeleted;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public long novelId() {
-        return getNovelId();
-    }
 
-    @Deprecated
-    public String kind() {
-        return getKind();
-    }
 
-    @Deprecated
-    public String name() {
-        return getName();
-    }
 
-    @Deprecated
-    public List<String> aliases() {
-        return getAliases();
-    }
 
-    @Deprecated
-    public String summary() {
-        return getSummary();
-    }
 
-    @Deprecated
-    public String contentMd() {
-        return getContentMd();
-    }
 
     @Deprecated
     public boolean pinned() {
         return isPinned();
     }
 
-    @Deprecated
-    public String status() {
-        return getStatus();
-    }
 
-    @Deprecated
-    public Integer sourceChapter() {
-        return getSourceChapter();
-    }
 
     public boolean active() {
         return !"dead".equals(status) && !"merged".equals(status) && !"retired".equals(status);

@@ -18,33 +18,9 @@ public class CanonDocDO {
     private int sortNo;
     private boolean isDeleted;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public long novelId() {
-        return getNovelId();
-    }
 
-    @Deprecated
-    public String kind() {
-        return getKind();
-    }
 
-    @Deprecated
-    public String name() {
-        return getName();
-    }
 
-    @Deprecated
-    public String content() {
-        return getContent();
-    }
 
-    @Deprecated
-    public int sortNo() {
-        return getSortNo();
-    }
 }

@@ -23,53 +23,13 @@ public class EmbeddingDO {
     private java.time.OffsetDateTime updateTime;
     private java.time.OffsetDateTime deleteTime;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public String sourceType() {
-        return getSourceType();
-    }
 
-    @Deprecated
-    public Long sourceId() {
-        return getSourceId();
-    }
 
-    @Deprecated
-    public Long novelId() {
-        return getNovelId();
-    }
 
-    @Deprecated
-    public Integer chapterNo() {
-        return getChapterNo();
-    }
 
-    @Deprecated
-    public String content() {
-        return getContent();
-    }
 
-    @Deprecated
-    public String embedding() {
-        return getEmbedding();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime createTime() {
-        return getCreateTime();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime updateTime() {
-        return getUpdateTime();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime deleteTime() {
-        return getDeleteTime();
-    }
 }

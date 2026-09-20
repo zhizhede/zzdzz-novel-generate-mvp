@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service.data.impl;
 
+import lombok.RequiredArgsConstructor;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.dao.WorldStateMapper;
@@ -12,14 +13,12 @@ import java.util.Map;
 
 /** world_states 数据服务实现。 */
 @Service
+@RequiredArgsConstructor
 public class WorldStateDataServiceImpl extends ServiceImpl<WorldStateMapper, WorldStateDO>
         implements WorldStateDataService {
 
     private final ObjectMapper mapper;
 
-    public WorldStateDataServiceImpl(ObjectMapper mapper) {
-        this.mapper = mapper;
-    }
 
     @Override
     public void upsert(long novelId, int chapterNo, Object state) {

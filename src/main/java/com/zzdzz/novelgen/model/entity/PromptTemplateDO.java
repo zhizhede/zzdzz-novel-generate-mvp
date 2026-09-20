@@ -23,40 +23,16 @@ public class PromptTemplateDO {
     private boolean isDeleted;
     private OffsetDateTime updateTime;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public String node() {
-        return getNode();
-    }
 
-    @Deprecated
-    public String phase() {
-        return getPhase();
-    }
 
-    @Deprecated
-    public String title() {
-        return getTitle();
-    }
 
-    @Deprecated
-    public String content() {
-        return getContent();
-    }
 
     @Deprecated
     public boolean exact() {
         return isExact();
     }
 
-    @Deprecated
-    public int version() {
-        return getVersion();
-    }
 
     @Deprecated
     public boolean custom() {
@@ -68,8 +44,4 @@ public class PromptTemplateDO {
         return isEnabled();
     }
 
-    @Deprecated
-    public OffsetDateTime updateTime() {
-        return getUpdateTime();
-    }
 }

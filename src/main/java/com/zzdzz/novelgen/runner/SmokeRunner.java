@@ -1,9 +1,8 @@
 package com.zzdzz.novelgen.runner;
 
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -21,9 +20,9 @@ import java.util.List;
  */
 @Component
 @ConditionalOnProperty(name = "smoke.enabled", havingValue = "true")
+@Slf4j
 public class SmokeRunner implements ApplicationRunner {
 
-    private static final Logger log = LoggerFactory.getLogger(SmokeRunner.class);
 
     private final LlmPort llm;
     private final String styleDir;

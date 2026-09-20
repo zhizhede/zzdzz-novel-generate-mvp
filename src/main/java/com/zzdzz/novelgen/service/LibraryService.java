@@ -1,5 +1,7 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
@@ -17,10 +19,11 @@ import java.util.Set;
 
 /** 素材库：正典文档（增删改查）、伏笔账本（人工修正）、事实账（查看修正）、风格包（规则正文修订）。 */
 @Service
+@RequiredArgsConstructor
 public class LibraryService {
 
     private static final Set<String> CANON_KINDS = Set.of("world", "character", "misc");
-    private static final Set<String> FORESHADOW_STATUSES = Set.of("proposed", "planned", "planted", "recovered", "dropped");
+    private static final Set<String> FORESHADOW_STATUSES = Set.of(ForeshadowStatus.PROPOSED.wire(), ForeshadowStatus.PLANNED.wire(), ForeshadowStatus.PLANTED.wire(), ForeshadowStatus.RECOVERED.wire(), ForeshadowStatus.DROPPED.wire());
 
     private final CanonDocDataService canonData;
     private final ForeshadowDataService foreshadowData;
@@ -29,17 +32,6 @@ public class LibraryService {
     private final WorldStateDataService worldStateData;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
-    public LibraryService(CanonDocDataService canonData, ForeshadowDataService foreshadowData,
-                          StylePackDataService stylePackData, DigestDataService digestData,
-                          WorldStateDataService worldStateData,
-                          com.fasterxml.jackson.databind.ObjectMapper mapper) {
-        this.canonData = canonData;
-        this.foreshadowData = foreshadowData;
-        this.stylePackData = stylePackData;
-        this.digestData = digestData;
-        this.worldStateData = worldStateData;
-        this.mapper = mapper;
-    }
 
     // ===== 正典文档 =====
 

@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.vo.LlmLogDetailVO;
 import com.zzdzz.novelgen.model.vo.LlmLogVO;
@@ -18,13 +19,11 @@ import java.util.List;
 /** LLM 调用台账：token 用量 / 耗时 / 模型；think 与正文在详情接口分区返回。另含管线事件流水。 */
 @RestController
 @RequestMapping("/api/llm-logs")
+@RequiredArgsConstructor
 public class LlmLogController {
 
     private final LlmLogService llmLogService;
 
-    public LlmLogController(LlmLogService llmLogService) {
-        this.llmLogService = llmLogService;
-    }
 
     @GetMapping
     public Result<PageVO<LlmLogVO>> page(@RequestParam(required = false) Long novelId,

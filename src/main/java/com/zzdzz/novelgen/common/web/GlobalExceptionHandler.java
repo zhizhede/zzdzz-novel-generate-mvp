@@ -1,9 +1,8 @@
 package com.zzdzz.novelgen.common.web;
 
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.llm.LlmException;
 import jakarta.servlet.http.HttpServletResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -15,9 +14,9 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
  * BizException 按码；LLM 调用失败归 C 类第三方；参数类异常归 A 类；其余兜底 B0001。
  */
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BizException.class)
     public Result<Void> handleBiz(BizException e, HttpServletResponse resp) {

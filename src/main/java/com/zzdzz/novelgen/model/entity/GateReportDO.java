@@ -20,38 +20,14 @@ public class GateReportDO {
     private boolean isDeleted;
     private java.time.OffsetDateTime createTime;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public long chapterId() {
-        return getChapterId();
-    }
 
-    @Deprecated
-    public Long sceneId() {
-        return getSceneId();
-    }
 
-    @Deprecated
-    public String gateType() {
-        return getGateType();
-    }
 
-    @Deprecated
-    public int round() {
-        return getRound();
-    }
 
     @Deprecated
     public boolean passed() {
         return isPassed();
     }
 
-    @Deprecated
-    public String result() {
-        return getResult();
-    }
 }

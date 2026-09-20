@@ -1,11 +1,11 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.MaterialCardDataService;
 import com.zzdzz.novelgen.model.entity.MaterialCardDO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -20,9 +20,10 @@ import java.util.Set;
  * 作品无卡时返回 null，由 ContextPacker 回退 canon 整文档（向下兼容）。
  */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class MaterialCardService {
 
-    private static final Logger log = LoggerFactory.getLogger(MaterialCardService.class);
 
     private static final Set<String> KINDS = Set.of(
             MaterialCardDO.KIND_CHARACTER, MaterialCardDO.KIND_ITEM, MaterialCardDO.KIND_LOCATION,
@@ -44,21 +45,17 @@ public class MaterialCardService {
     private final MaterialCardDataService cardDAO;
     private final TuningService tuning;
 
-    public MaterialCardService(MaterialCardDataService cardDAO, TuningService tuning) {
-        this.cardDAO = cardDAO;
-        this.tuning = tuning;
-    }
 
     /** 向量化文本（RAG 索引用）：类型标签 + 名 + 别名 + 摘要 + 正文。 */
     public String embeddingText(MaterialCardDO card) {
         StringBuilder sb = new StringBuilder("素材卡·")
-                .append(KIND_LABELS.getOrDefault(card.kind(), card.kind()))
-                .append("：").append(card.name());
-        if (card.aliases() != null && !card.aliases().isEmpty()) {
-            sb.append("（别名：").append(String.join("、", card.aliases())).append('）');
+                .append(KIND_LABELS.getOrDefault(card.getKind(), card.getKind()))
+                .append("：").append(card.getName());
+        if (card.getAliases() != null && !card.getAliases().isEmpty()) {
+            sb.append("（别名：").append(String.join("、", card.getAliases())).append('）');
         }
-        if (card.summary() != null && !card.summary().isBlank()) sb.append('\n').append(card.summary());
-        if (card.contentMd() != null && !card.contentMd().isBlank()) sb.append('\n').append(card.contentMd());
+        if (card.getSummary() != null && !card.getSummary().isBlank()) sb.append('\n').append(card.getSummary());
+        if (card.getContentMd() != null && !card.getContentMd().isBlank()) sb.append('\n').append(card.getContentMd());
         return sb.toString();
     }
 
@@ -89,9 +86,9 @@ public class MaterialCardService {
     public void update(long id, String name, List<String> aliases, String summary, String contentMd,
                        Boolean pinned, String status, Integer sourceChapter) {
         MaterialCardDO card = get(id);
-        validate(card.kind(), name, status);
+        validate(card.getKind(), name, status);
         cardDAO.update(id, name, aliases, summary, contentMd, pinned,
-                status == null ? card.status() : status, sourceChapter);
+                status == null ? card.getStatus() : status, sourceChapter);
     }
 
     public void delete(long id) {
@@ -165,11 +162,11 @@ public class MaterialCardService {
         if (text.isEmpty()) {
             return false;
         }
-        if (text.contains(card.name())) {
+        if (text.contains(card.getName())) {
             return true;
         }
-        if (card.aliases() != null) {
-            for (String alias : card.aliases()) {
+        if (card.getAliases() != null) {
+            for (String alias : card.getAliases()) {
                 if (alias != null && alias.length() >= 2 && text.contains(alias)) {
                     return true;
                 }
@@ -184,25 +181,25 @@ public class MaterialCardService {
         sb.append("【设定卡（人物/物品/地点设定，必须遵守，不得发明矛盾设定）】\n");
         Map<String, List<MaterialCardDO>> byKind = new LinkedHashMap<>();
         for (MaterialCardDO c : pinned) {
-            byKind.computeIfAbsent(c.kind(), k -> new ArrayList<>()).add(c);
+            byKind.computeIfAbsent(c.getKind(), k -> new ArrayList<>()).add(c);
         }
         for (MaterialCardDO c : rest) {
-            byKind.computeIfAbsent(c.kind(), k -> new ArrayList<>()).add(c);
+            byKind.computeIfAbsent(c.getKind(), k -> new ArrayList<>()).add(c);
         }
         for (Map.Entry<String, List<MaterialCardDO>> e : byKind.entrySet()) {
             for (MaterialCardDO c : e.getValue()) {
-                String label = KIND_LABELS.getOrDefault(c.kind(), c.kind());
-                sb.append("- ").append(c.name()).append("（").append(label);
+                String label = KIND_LABELS.getOrDefault(c.getKind(), c.getKind());
+                sb.append("- ").append(c.getName()).append("（").append(label);
                 if (c.pinned()) {
                     sb.append("，常驻");
                 }
-                if ("dead".equals(c.status())) {
+                if ("dead".equals(c.getStatus())) {
                     sb.append("，已死亡");
-                } else if ("retired".equals(c.status())) {
+                } else if ("retired".equals(c.getStatus())) {
                     sb.append("，已退场");
                 }
                 sb.append("）：");
-                String body = c.pinned() && notBlank(c.contentMd()) ? c.contentMd() : firstNonBlank(c.summary(), c.contentMd());
+                String body = c.pinned() && notBlank(c.getContentMd()) ? c.getContentMd() : firstNonBlank(c.getSummary(), c.getContentMd());
                 if (body == null) {
                     body = "";
                 }

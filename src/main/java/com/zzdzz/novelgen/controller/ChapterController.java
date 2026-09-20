@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.common.web.Result;
@@ -22,6 +23,7 @@ import java.util.List;
 /** 章查询、AI 审校触发与人工审批/打回。 */
 @RestController
 @RequestMapping("/api")
+@RequiredArgsConstructor
 public class ChapterController {
 
     private final ChapterQueryService chapterQueryService;
@@ -29,15 +31,6 @@ public class ChapterController {
     private final ReviewService reviewService;
     private final GenerationQueueService queueService;
 
-    public ChapterController(ChapterQueryService chapterQueryService,
-                             ChapterPipelineService pipelineService,
-                             ReviewService reviewService,
-                             GenerationQueueService queueService) {
-        this.chapterQueryService = chapterQueryService;
-        this.pipelineService = pipelineService;
-        this.reviewService = reviewService;
-        this.queueService = queueService;
-    }
 
     @GetMapping("/novels/{novelId}/chapters")
     public Result<List<ChapterListItemVO>> list(@PathVariable long novelId) {

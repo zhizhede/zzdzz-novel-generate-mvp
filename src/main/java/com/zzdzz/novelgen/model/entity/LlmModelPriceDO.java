@@ -26,68 +26,20 @@ public class LlmModelPriceDO {
     private String remark;
     private boolean isDeleted;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public String model() {
-        return getModel();
-    }
 
-    @Deprecated
-    public String currency() {
-        return getCurrency();
-    }
 
-    @Deprecated
-    public BigDecimal idleInputHit() {
-        return getIdleInputHit();
-    }
 
-    @Deprecated
-    public BigDecimal idleInputMiss() {
-        return getIdleInputMiss();
-    }
 
-    @Deprecated
-    public BigDecimal idleOutput() {
-        return getIdleOutput();
-    }
 
-    @Deprecated
-    public BigDecimal peakInputHit() {
-        return getPeakInputHit();
-    }
 
-    @Deprecated
-    public BigDecimal peakInputMiss() {
-        return getPeakInputMiss();
-    }
 
-    @Deprecated
-    public BigDecimal peakOutput() {
-        return getPeakOutput();
-    }
 
-    @Deprecated
-    public int peakStartHour() {
-        return getPeakStartHour();
-    }
 
-    @Deprecated
-    public int peakEndHour() {
-        return getPeakEndHour();
-    }
 
     @Deprecated
     public boolean enabled() {
         return isEnabled();
     }
 
-    @Deprecated
-    public String remark() {
-        return getRemark();
-    }
 }

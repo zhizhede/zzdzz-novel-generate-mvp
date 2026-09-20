@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.service.data.impl;
 
+import lombok.RequiredArgsConstructor;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.dao.PipelineEventMapper;
@@ -13,14 +14,12 @@ import java.util.Map;
 
 /** pipeline_events 数据服务实现。 */
 @Service
+@RequiredArgsConstructor
 public class PipelineEventDataServiceImpl extends ServiceImpl<PipelineEventMapper, PipelineEventDO>
         implements PipelineEventDataService {
 
     private final ObjectMapper mapper;
 
-    public PipelineEventDataServiceImpl(ObjectMapper mapper) {
-        this.mapper = mapper;
-    }
 
     @Override
     public void insert(Long novelId, Integer chapterNo, String stage, String phase, Object payload) {

@@ -1,13 +1,12 @@
 package com.zzdzz.novelgen.llm;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.springframework.stereotype.Component;
@@ -39,9 +38,9 @@ import java.util.function.BiConsumer;
  * 留空项走调用方或全局默认；配置查询失败不拦截调用。
  */
 @Component
+@Slf4j
+@RequiredArgsConstructor
 public class MiniMaxClient implements LlmPort {
-
-    private static final Logger log = LoggerFactory.getLogger(MiniMaxClient.class);
 
     private final LlmProperties props;
     private final ObjectMapper mapper;
@@ -50,34 +49,12 @@ public class MiniMaxClient implements LlmPort {
     private final RestClient restClient;
     private final HttpClient streamClient;
 
-    public MiniMaxClient(LlmProperties props, ObjectMapper mapper, LlmCallLogDataService callLogDAO,
-                         com.zzdzz.novelgen.service.data.LlmNodeConfigDataService nodeConfigDAO) {
-        this.props = props;
-        this.mapper = mapper;
-        this.callLogDAO = callLogDAO;
-        this.nodeConfigDAO = nodeConfigDAO;
-
-        HttpClient httpClient = HttpClient.newBuilder()
-                .connectTimeout(props.connectTimeout())
-                .build();
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(props.readTimeout());
-
-        this.restClient = RestClient.builder()
-                .baseUrl(props.baseUrl())
-                .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + props.apiKey())
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .requestFactory(requestFactory)
-                .build();
-        this.streamClient = httpClient;
-    }
-
     @Override
     public ChatResult chat(ChatRequest request) {
         long start = System.currentTimeMillis();
         com.zzdzz.novelgen.model.entity.LlmNodeConfigDO cfg = resolveConfig(request.node());
-        String model = cfg != null && cfg.model() != null && !cfg.model().isBlank()
-                ? cfg.model() : props.model();
+        String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
+                ? cfg.getModel() : props.model();
         Map<String, Object> body = buildBody(request, cfg, model);
         String requestJson = serialize(body);
 
@@ -135,8 +112,8 @@ public class MiniMaxClient implements LlmPort {
     public ChatResult chatStream(ChatRequest request, StreamDelta onDelta) {
         long start = System.currentTimeMillis();
         com.zzdzz.novelgen.model.entity.LlmNodeConfigDO cfg = resolveConfig(request.node());
-        String model = cfg != null && cfg.model() != null && !cfg.model().isBlank()
-                ? cfg.model() : props.model();
+        String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
+                ? cfg.getModel() : props.model();
         Map<String, Object> body = buildBody(request, cfg, model);
         body.put("stream", true);
         body.put("stream_options", Map.of("include_usage", true));
@@ -536,16 +513,16 @@ public class MiniMaxClient implements LlmPort {
             messages.add(Map.of("role", m.role(), "content", m.content()));
         }
         body.put("messages", messages);
-        Double temp = cfg != null && cfg.temperature() != null ? cfg.temperature() : request.temperature();
+        Double temp = cfg != null && cfg.getTemperature() != null ? cfg.getTemperature() : request.temperature();
         if (temp != null) {
             body.put("temperature", temp);
         }
-        if (cfg != null && cfg.maxTokens() != null) {
-            body.put("max_tokens", cfg.maxTokens());
+        if (cfg != null && cfg.getMaxTokens() != null) {
+            body.put("max_tokens", cfg.getMaxTokens());
         }
-        if (cfg != null && cfg.extraJson() != null && !cfg.extraJson().isBlank()) {
+        if (cfg != null && cfg.getExtraJson() != null && !cfg.getExtraJson().isBlank()) {
             try {
-                JsonNode extra = mapper.readTree(cfg.extraJson());
+                JsonNode extra = mapper.readTree(cfg.getExtraJson());
                 extra.fields().forEachRemaining(e ->
                         body.put(e.getKey(), mapper.convertValue(e.getValue(), Object.class)));
             } catch (Exception e) {

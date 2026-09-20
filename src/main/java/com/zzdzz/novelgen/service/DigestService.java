@@ -1,5 +1,9 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import com.zzdzz.novelgen.llm.LlmTemps;
+import com.zzdzz.novelgen.model.enums.ChapterStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
@@ -12,17 +16,16 @@ import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 /** 章摘要：定稿正文 → 事实账 + 世界状态快照；伏笔状态随章号确定性推进（不走模型）。 */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class DigestService {
 
-    private static final Logger log = LoggerFactory.getLogger(DigestService.class);
 
     private static final String STATE_SPEC = """
             "state":{"time":"本章结束时的时间点（故事内历法或相对事件表述）",
@@ -46,22 +49,11 @@ public class DigestService {
     private final WorldStateDataService worldStateData;
     private final PromptTemplateService promptTemplates;
 
-    public DigestService(LlmPort llm, LlmJson llmJson, DigestDataService digestData,
-                         ForeshadowDataService foreshadowData, ChapterDataService chapterData,
-                         WorldStateDataService worldStateData, PromptTemplateService promptTemplates) {
-        this.llm = llm;
-        this.llmJson = llmJson;
-        this.digestData = digestData;
-        this.foreshadowData = foreshadowData;
-        this.chapterData = chapterData;
-        this.worldStateData = worldStateData;
-        this.promptTemplates = promptTemplates;
-    }
 
     public void digest(long novelId, long chapterId, int chapterNo, String fullText) {
         if (digestData.existsByChapter(chapterId)) {
             log.info("第 {} 章事实账已存在，跳过", chapterNo);
-            chapterData.updateStatus(chapterId, "DIGESTED");
+            chapterData.updateStatus(chapterId, ChapterStatus.DIGESTED.wire());
             return;
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
@@ -77,7 +69,7 @@ public class DigestService {
                         new_threads 只提议真正的长线（需要多章才能回收的谜、承诺、关系变化），本章内已解决的不提；
                         与已有伏笔账本同义的不提；最多 2 条；没有就给空数组。
                         """, STATE_SPEC)),
-                        LlmPort.Message.user(digestUserPrompt(novelId, chapterId, fullText))), 0.3));
+                        LlmPort.Message.user(digestUserPrompt(novelId, chapterId, fullText))), LlmTemps.DIGEST));
         JsonNode node;
         try {
             node = llmJson.read(r.content());
@@ -96,7 +88,7 @@ public class DigestService {
         proposeThreads(novelId, chapterNo, node.path("new_threads"));
         foreshadowData.markPlanted(novelId, chapterNo);
         foreshadowData.markRecovered(novelId, chapterNo);
-        chapterData.updateStatus(chapterId, "DIGESTED");
+        chapterData.updateStatus(chapterId, ChapterStatus.DIGESTED.wire());
         log.info("第 {} 章事实账落库（{} tokens）", chapterNo, r.usage().totalTokens());
     }
 
@@ -104,8 +96,8 @@ public class DigestService {
     private String digestUserPrompt(long novelId, long chapterId, String fullText) {
         StringBuilder sb = new StringBuilder();
         chapterData.findById(chapterId).ifPresent(ch -> {
-            if (ch.timeNote() != null && !ch.timeNote().isBlank()) {
-                sb.append("【时间锚点】本章距上一章：").append(ch.timeNote())
+            if (ch.getTimeNote() != null && !ch.getTimeNote().isBlank()) {
+                sb.append("【时间锚点】本章距上一章：").append(ch.getTimeNote())
                         .append("（state.time 必须体现该推进）\n\n");
             }
         });
@@ -113,7 +105,7 @@ public class DigestService {
         if (!existing.isEmpty()) {
             sb.append("【已有伏笔账本（同义勿重复提议）】\n");
             for (ForeshadowDO f : existing) {
-                sb.append(f.code()).append('（').append(f.status()).append('）').append(f.content()).append('\n');
+                sb.append(f.getCode()).append('（').append(f.getStatus()).append('）').append(f.getContent()).append('\n');
             }
             sb.append('\n');
         }
@@ -127,6 +119,7 @@ public class DigestService {
             return;
         }
         int added = 0;
+        int skipped = 0;
         for (JsonNode t : threads) {
             String name = t.path("name").asText("").strip();
             String content = t.path("content").asText("").strip();
@@ -139,12 +132,15 @@ public class DigestService {
                 foreshadowData.insertProposal(novelId, foreshadowData.nextCode(novelId), full, chapterNo);
                 added++;
             } catch (Exception dup) {
-                // 编码唯一键冲突（部分失败的 digest 残留/并发提议）：跳过该条，不炸整个 digest
+                // 编码唯一键冲突（并发提议/残留脏行）：跳过该条，不炸整个 digest——但必须显性计数，
+                // 静默丢弃曾是伏笔丢失事故的形态（nextCode 已修根因，此处是最后防线）
+                skipped++;
                 log.warn("伏笔提议 {} 落库冲突，跳过：{}", name, dup.getMessage());
             }
         }
-        if (added > 0) {
-            log.info("第 {} 章自动提议 {} 条新伏笔（PROPOSED，待人工采纳）", chapterNo, added);
+        if (added > 0 || skipped > 0) {
+            log.info("第 {} 章伏笔提议：新增 {} 条（PROPOSED 待采纳）{}",
+                    chapterNo, added, skipped > 0 ? "，冲突跳过 " + skipped + " 条（编码冲突，需人工核查）" : "");
         }
     }
 
@@ -152,14 +148,14 @@ public class DigestService {
     public void backfillState(long novelId, int chapterNo) {
         ChapterDO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
-        if (ch.fullText() == null || ch.fullText().isBlank()) {
+        if (ch.getFullText() == null || ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法回填状态");
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
-                LlmNode.WORLD_STATE, novelId, ch.id(),
+                LlmNode.WORLD_STATE, novelId, ch.getId(),
                 List.of(LlmPort.Message.system(promptTemplates.format(
                                 LlmNode.WORLD_STATE, "system", STATE_SYSTEM, STATE_SPEC)),
-                        LlmPort.Message.user(ch.fullText() + "\n\n只输出 state JSON。")), 0.2));
+                        LlmPort.Message.user(ch.getFullText() + "\n\n只输出 state JSON。")), LlmTemps.WORLD_STATE));
         JsonNode node;
         try {
             node = llmJson.read(r.content());

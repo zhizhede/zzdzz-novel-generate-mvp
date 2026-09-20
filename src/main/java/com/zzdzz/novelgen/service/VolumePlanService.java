@@ -1,5 +1,11 @@
 package com.zzdzz.novelgen.service;
 
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import com.zzdzz.novelgen.llm.LlmTemps;
+import com.zzdzz.novelgen.model.enums.PlanMode;
+import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
@@ -14,8 +20,6 @@ import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -34,9 +38,10 @@ import java.util.StringJoiner;
  * planted 伏笔排期回收——伏笔自动提议由本 Agent 完成采纳闭环，不再等人工。
  */
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class VolumePlanService {
 
-    private static final Logger log = LoggerFactory.getLogger(VolumePlanService.class);
 
     public record PlanRow(int chapterNo, String title, String goal, String hook, String timeNote,
                           List<FsRef> foreshadows, int budgetMin, int budgetMax) {}
@@ -62,26 +67,14 @@ public class VolumePlanService {
     private final StageLog stageLog;
     private final TuningService tuning;
     private final ObjectMapper mapper;
-    private final TransactionTemplate tx;
+    private TransactionTemplate tx;
     private final PromptTemplateService promptTemplates;
+    private final PlatformTransactionManager txManager;
 
-    public VolumePlanService(LlmPort llm, LlmJson llmJson, ContextPackerService packer,
-                             ChapterDataService chapterData, ForeshadowDataService foreshadowData, NovelDataService novelData,
-                             CanonDocDataService canonData, StageLog stageLog, TuningService tuning,
-                             ObjectMapper mapper, PlatformTransactionManager txManager,
-                             PromptTemplateService promptTemplates) {
-        this.llm = llm;
-        this.llmJson = llmJson;
-        this.packer = packer;
-        this.chapterData = chapterData;
-        this.foreshadowData = foreshadowData;
-        this.novelData = novelData;
-        this.canonData = canonData;
-        this.stageLog = stageLog;
-        this.tuning = tuning;
-        this.mapper = mapper;
+    /** 事务模板随 Bean 启动装配（从构造器迁出，保持 @RequiredArgsConstructor 纯注入）。 */
+    @PostConstruct
+    void initTx() {
         this.tx = new TransactionTemplate(txManager);
-        this.promptTemplates = promptTemplates;
     }
 
     // ===== 规划一卷 =====
@@ -103,7 +96,7 @@ public class VolumePlanService {
                 Map.of("volNo", volNo, "from", fromNo, "to", Objects.toString(toNo, "auto")));
         PlanDraft draft = generateWithReview(novelId, volNo, fromNo, toNo, seedOutline);
         String planMode = novelData.findPlanMode(novelId);
-        AdoptResult result = "auto".equals(planMode) ? adopt(novelId, volNo, draft) : null;
+        AdoptResult result = PlanMode.AUTO.is(planMode) ? adopt(novelId, volNo, draft) : null;
         stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN,
                 result != null ? StageLog.Phase.ADOPTED : StageLog.Phase.DRAFT,
                 Map.of("volNo", volNo, "arc", Objects.toString(draft.arc(), ""),
@@ -131,7 +124,7 @@ public class VolumePlanService {
     private PlanDraft generateWithReview(long novelId, int volNo, int fromNo, Integer toNo, String seedOutline) {
         String context = packer.packVolumePlan(novelId, volNo, fromNo, seedOutline);
         String feedback = "";
-        int maxRounds = tuning.i("volume_plan_review_rounds", 3);
+        int maxRounds = tuning.i("volume_plan_review_rounds", TuningDefaults.VOLUME_PLAN_REVIEW_ROUNDS);
         for (int round = 1; round <= maxRounds; round++) {
             PlanDraft draft = askPlan(novelId, volNo, fromNo, toNo, context, feedback);
             String structural = structuralCheck(draft, fromNo, toNo);
@@ -193,7 +186,7 @@ public class VolumePlanService {
                                         "你是网文主编，负责整卷卷纲规划。只输出合法 JSON，不要任何解释或 markdown 代码块。"
                                                 + "字符串值内部禁止英文双引号，引用一律用「」。")),
                                 LlmPort.Message.user(user)),
-                        0.6),
+                        LlmTemps.VOLUME_PLAN),
                 node -> {
                     String arc = node.path("arc").asText("");
                     String brief = node.path("brief").asText("");
@@ -294,7 +287,7 @@ public class VolumePlanService {
                                             "你是网文规划审校员，在卷纲落库前把关。只输出合法 JSON。"
                                                     + "字符串值内部禁止英文双引号，引用一律用「」。")),
                                     LlmPort.Message.user(user)),
-                            0.2),
+                            LlmTemps.VOLUME_PLAN_REVIEW),
                     node -> {
                         String verdict = node.path("verdict").asText("PASS").strip().toUpperCase();
                         if ("BLOCKER".equals(verdict)) {
@@ -325,12 +318,12 @@ public class VolumePlanService {
         List<String> adopted = new ArrayList<>();
         tx.executeWithoutResult(status -> {
             for (ChapterDO c : chapterData.listSummariesByNovel(novelId)) {
-                if (c.chapterNo() >= fromNo) {
-                    if (c.fullText() != null && !c.fullText().isBlank()) {
+                if (c.getChapterNo() >= fromNo) {
+                    if (c.getFullText() != null && !c.getFullText().isBlank()) {
                         throw new BizException(ErrorCode.PARAM_ERROR,
-                                "第 " + c.chapterNo() + " 章已有正文，禁止覆盖其规划行");
+                                "第 " + c.getChapterNo() + " 章已有正文，禁止覆盖其规划行");
                     }
-                    chapterData.softDeletePlan(c.id());
+                    chapterData.softDeletePlan(c.getId());
                 }
             }
             // 先逐章解析伏笔引用（可能自动建账），再插规划行——refs 写最终编码，下游指令查询才有据
@@ -367,12 +360,12 @@ public class VolumePlanService {
         if (hasCode) {
             ForeshadowDO f = foreshadowData.findByCode(novelId, ref.code());
             if (f != null) {
-                if ("proposed".equals(f.status())) {
-                    foreshadowData.promoteProposal(f.id(), chapterNo);
+                if (ForeshadowStatus.PROPOSED.is(f.getStatus())) {
+                    foreshadowData.promoteProposal(f.getId(), chapterNo);
                     adopted.add(ref.code() + "（采纳，第" + chapterNo + "章" + action + "）");
-                } else if ("planted".equals(f.status()) && f.recoveredIn() == null
+                } else if (ForeshadowStatus.PLANTED.is(f.getStatus()) && f.getRecoveredIn() == null
                         && "recover".equals(ref.action())) {
-                    foreshadowData.scheduleRecovery(f.id(), chapterNo);
+                    foreshadowData.scheduleRecovery(f.getId(), chapterNo);
                     adopted.add(ref.code() + "（排期回收，第" + chapterNo + "章）");
                 }
                 return ref.code();
@@ -392,7 +385,7 @@ public class VolumePlanService {
                                     List<String> adopted) {
         if (foreshadowData.contentExists(novelId, content)) {
             for (ForeshadowDO f : foreshadowData.listByNovel(novelId)) {
-                if (f.content().equals(content)) return f.code();
+                if (f.getContent().equals(content)) return f.getCode();
             }
         }
         String code = wantedCode != null && wantedCode.matches("F\\d+")
@@ -437,7 +430,7 @@ public class VolumePlanService {
     public ChapterDO replanChapter(long novelId, int chapterNo, String failureReason) {
         ChapterDO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
-        if (ch.fullText() != null && !ch.fullText().isBlank()) {
+        if (ch.getFullText() != null && !ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + chapterNo + " 章已有正文，禁止重写其卷纲");
         }
         String user = promptTemplates.format(LlmNode.CHAPTER_REPLAN, "user", """
@@ -453,15 +446,15 @@ public class VolumePlanService {
 
                 【账本上下文】
                 %s
-                """, chapterNo, Objects.toString(ch.title(), ""), failureReason,
-                Objects.toString(ch.goal(), ""), Objects.toString(ch.hook(), ""),
+                """, chapterNo, Objects.toString(ch.getTitle(), ""), failureReason,
+                Objects.toString(ch.getGoal(), ""), Objects.toString(ch.getHook(), ""),
                 chapterNo - 1, chapterNo + 1, packer.characters(novelId),
                 packer.packLedgers(novelId, chapterNo));
-        Replan replan = llmJson.ask(new LlmPort.ChatRequest(LlmNode.CHAPTER_REPLAN, novelId, ch.id(),
+        Replan replan = llmJson.ask(new LlmPort.ChatRequest(LlmNode.CHAPTER_REPLAN, novelId, ch.getId(),
                         List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REPLAN, "system",
                                         "你是网文主编，只输出合法 JSON，字符串内禁英文双引号，引用一律用「」。")),
                                 LlmPort.Message.user(user)),
-                        0.6),
+                        LlmTemps.CHAPTER_REPLAN),
                 node -> {
                     String title = node.path("title").asText("");
                     String goal = node.path("goal").asText("");
@@ -470,16 +463,16 @@ public class VolumePlanService {
                     return new Replan(title, goal, node.path("hook").asText(""),
                             timeNote.isBlank() ? null : timeNote);
                 }, 2);
-        chapterData.updatePlan(ch.id(), ch.volumeNo(), ch.arc(),
+        chapterData.updatePlan(ch.getId(), ch.getVolumeNo(), ch.getArc(),
                 replan.title(), replan.goal(),
-                replan.hook().isBlank() ? ch.hook() : replan.hook(),
-                replan.timeNote() == null ? ch.timeNote() : replan.timeNote(),
-                ch.budgetMin(), ch.budgetMax());
+                replan.hook().isBlank() ? ch.getHook() : replan.hook(),
+                replan.timeNote() == null ? ch.getTimeNote() : replan.timeNote(),
+                ch.getBudgetMin(), ch.getBudgetMax());
         // 清场景与门禁报告：章纲将按新目标重出（runChapter 见场景数为 0 自动重生成）
-        chapterData.resetForReoutline(ch.id(), null);
+        chapterData.resetForReoutline(ch.getId(), null);
         stageLog.emit(novelId, chapterNo, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.CHAPTER_REPLAN,
                 Map.of("goal", replan.goal()));
         log.info("第 {} 章卷纲已重写：{}", chapterNo, replan.goal());
-        return chapterData.findById(ch.id()).orElseThrow();
+        return chapterData.findById(ch.getId()).orElseThrow();
     }
 }

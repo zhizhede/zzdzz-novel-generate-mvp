@@ -1,5 +1,8 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.model.enums.GateType;
+import com.zzdzz.novelgen.model.enums.ChapterStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
@@ -24,6 +27,7 @@ import java.util.Map;
 
 /** 章查询：列表摘要 + 详情聚合（正文/场景/最新章级门禁/本章 LLM 用量）+ 生成档案（trace）。 */
 @Service
+@RequiredArgsConstructor
 public class ChapterQueryService {
 
     private final ChapterDataService chapterData;
@@ -34,30 +38,18 @@ public class ChapterQueryService {
     private final LlmNodeConfigService nodeConfig;
     private final ObjectMapper mapper;
 
-    public ChapterQueryService(ChapterDataService chapterData, SceneDataService sceneData,
-                               GateReportDataService gateReportData, LlmCallLogDataService llmCallLogData,
-                               ChapterStepDataService stepData, LlmNodeConfigService nodeConfig,
-                               ObjectMapper mapper) {
-        this.chapterData = chapterData;
-        this.sceneData = sceneData;
-        this.gateReportData = gateReportData;
-        this.llmCallLogData = llmCallLogData;
-        this.stepData = stepData;
-        this.nodeConfig = nodeConfig;
-        this.mapper = mapper;
-    }
 
     public List<ChapterListItemVO> listByNovel(long novelId) {
         return chapterData.listSummariesByNovel(novelId).stream()
-                .map(c -> new ChapterListItemVO(c.id(), c.chapterNo(), c.title(), c.status(),
-                        c.round(), c.budgetMin(), c.budgetMax()))
+                .map(c -> new ChapterListItemVO(c.getId(), c.getChapterNo(), c.getTitle(), c.getStatus(),
+                        c.getRound(), c.getBudgetMin(), c.getBudgetMax()))
                 .toList();
     }
 
     /** 待审批聚合（流 A 插队/人工通道）：manual/auto 累积的 PENDING_APPROVAL 章。 */
     public List<ChapterListItemVO> pendingApprovals(long novelId) {
         return listByNovel(novelId).stream()
-                .filter(c -> "PENDING_APPROVAL".equals(c.status()))
+                .filter(c -> ChapterStatus.PENDING_APPROVAL.is(c.status()))
                 .toList();
     }
 
@@ -65,8 +57,8 @@ public class ChapterQueryService {
         ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         List<SceneVO> scenes = sceneData.findByChapter(chapterId).stream()
-                .map(s -> new SceneVO(s.id(), s.sceneNo(), s.goal(), s.draftText(),
-                        s.gateStatus(), s.revisionRound()))
+                .map(s -> new SceneVO(s.getId(), s.getSceneNo(), s.getGoal(), s.getDraftText(),
+                        s.getGateStatus(), s.getRevisionRound()))
                 .toList();
         // 流 B 一屏答案：步骤状态行 + 打回意见 + 失败摘要 + digest 进行中
         List<ChapterStepVO> steps = stepData.listByChapter(chapterId).stream()
@@ -74,8 +66,8 @@ public class ChapterQueryService {
                         s.getAttempt() == null ? 1 : s.getAttempt(), s.getStatus(),
                         s.getDetail(), String.valueOf(s.getUpdateTime())))
                 .toList();
-        return new ChapterDetailVO(ch.id(), ch.chapterNo(), ch.title(), ch.status(), ch.round(),
-                ch.budgetMin(), ch.budgetMax(), ch.fullText(), scenes,
+        return new ChapterDetailVO(ch.getId(), ch.getChapterNo(), ch.getTitle(), ch.getStatus(), ch.getRound(),
+                ch.getBudgetMin(), ch.getBudgetMax(), ch.getFullText(), scenes,
                 latestGateReport(chapterId), latestReview(chapterId),
                 toTotalsVO(llmCallLogData.totalsBy(null, chapterId)), ch.getReviewConfig(),
                 steps, ch.getRejectReason(), failureBrief(chapterId),
@@ -97,9 +89,9 @@ public class ChapterQueryService {
         List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.CallItem> calls = new java.util.ArrayList<>(
                 llmCallLogData.findPage(null, chapterId, 500, 0).stream()
                         .map(l -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.CallItem(
-                                l.id(), l.node(), l.model(), l.status(),
-                                l.promptTokens(), l.completionTokens(), l.totalTokens(), l.getCachedTokens(),
-                                l.latencyMs(), nodeConfig.costOf(l), iso(l.getCreateTime())))
+                                l.getId(), l.getNode(), l.getModel(), l.getStatus(),
+                                l.getPromptTokens(), l.getCompletionTokens(), l.getTotalTokens(), l.getCachedTokens(),
+                                l.getLatencyMs(), nodeConfig.costOf(l), iso(l.getCreateTime())))
                         .toList());
         java.util.Collections.reverse(calls);   // findPage 为 id DESC，档案要时间正序
 
@@ -127,8 +119,8 @@ public class ChapterQueryService {
                         cost.containsKey(e.getKey()) ? Math.round(cost.get(e.getKey())[0] * 1e6) / 1e6 : null))
                 .toList();
 
-        return new com.zzdzz.novelgen.model.vo.ChapterTraceVO(ch.id(), ch.chapterNo(), ch.title(),
-                ch.status(), steps, calls, checks, nodeStats);
+        return new com.zzdzz.novelgen.model.vo.ChapterTraceVO(ch.getId(), ch.getChapterNo(), ch.getTitle(),
+                ch.getStatus(), steps, calls, checks, nodeStats);
     }
 
     private JsonNode parseJson(String raw) {
@@ -167,7 +159,7 @@ public class ChapterQueryService {
                     node.path("checks"),
                     new com.fasterxml.jackson.core.type.TypeReference<List<java.util.Map<String, Object>>>() {
                     });
-            return new GateReportVO("mechanical", row.passed(),
+            return new GateReportVO(GateType.MECHANICAL.wire(), row.passed(),
                     row.createTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
                     checks);
         } catch (Exception e) {

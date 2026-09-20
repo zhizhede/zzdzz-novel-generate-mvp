@@ -1,5 +1,7 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.llm.LlmTemps;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.service.data.SceneDataService;
@@ -9,15 +11,12 @@ import java.util.List;
 
 /** 场景草稿生成：temperature 0.9（要味道），产物直接落库；失败带门禁意见定点重写。 */
 @Service
+@RequiredArgsConstructor
 public class SceneService {
 
     private final LlmPort llm;
     private final SceneDataService sceneData;
 
-    public SceneService(LlmPort llm, SceneDataService sceneData) {
-        this.llm = llm;
-        this.sceneData = sceneData;
-    }
 
     public String generate(long novelId, long chapterId, int chapterNo,
                            ContextPackerService.Pack pack, int sceneNo) {
@@ -30,7 +29,7 @@ public class SceneService {
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(
                 LlmNode.SCENE_DRAFT, novelId, chapterId,
                 List.of(LlmPort.Message.system(pack.system()), LlmPort.Message.user(pack.user())),
-                0.9);
+                LlmTemps.SCENE_DRAFT);
         LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
         String text = cleanDraft(r.content());
         sceneData.saveDraft(chapterId, sceneNo, text);
@@ -45,7 +44,7 @@ public class SceneService {
                         LlmPort.Message.user(pack.user() + "\n\n【你上一稿】\n" + draft
                                 + "\n\n【门禁意见（只改被点名的问题，保持其余原样）】\n" + gateFeedback
                                 + "\n\n只输出修订后的完整正文。")),
-                0.8));
+                LlmTemps.SCENE_REVISE));
         String text = cleanDraft(r.content());
         sceneData.applyRevise(sceneId, text);
         return text;

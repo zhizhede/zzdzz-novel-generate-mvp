@@ -16,23 +16,7 @@ public class UserDO {
     private String role;
     private boolean isDeleted;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public String username() {
-        return getUsername();
-    }
 
-    @Deprecated
-    public String passwordHash() {
-        return getPasswordHash();
-    }
 
-    @Deprecated
-    public String role() {
-        return getRole();
-    }
 }

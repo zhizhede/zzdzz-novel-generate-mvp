@@ -199,7 +199,7 @@ import { onMounted, onUnmounted, ref, nextTick, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
-import { NODE_LABEL, GATE_LABEL, STEP_LABEL } from '../labels'
+import { NODE_LABEL, GATE_LABEL, STEP_LABEL, TASK_TEXT, TASK_COLOR } from '../labels'
 
 const novel = ref(null)
 const novels = ref([])
@@ -210,8 +210,6 @@ const to = ref(2)
 const running = ref(false)
 const lastMessage = ref('')
 const queue = ref([])
-const TASK_TEXT = { QUEUED: '排队中', RUNNING: '生成中', DONE: '完成', STOPPED: '已停止', CANCELED: '已取消', INTERRUPTED: '已终止', PAUSED: '已暂停' }
-const TASK_COLOR = { QUEUED: 'info', RUNNING: 'warning', DONE: 'success', STOPPED: 'danger', CANCELED: 'info', INTERRUPTED: 'danger', PAUSED: 'info' }
 const pendingCount = ref(0)
 const pendingList = ref([])
 const logs = ref([])
@@ -300,7 +298,9 @@ function pushTranscript(event, d) {
       }
     }
   } else if (event === 'scene') {
-    if (d.phase === 'start') {
+    if (d.reason === 'rag_degraded') {
+      transcript.value.push({ type: 'line', title: 'RAG 召回失败，本场景降级不注入', reason: d.message, color: '#e6a23c' })
+    } else if (d.phase === 'start') {
       transcript.value.push({ type: 'scene', chapterNo: d.chapterNo, sceneNo: d.sceneNo, goal: d.goal,
         text: '', think: '', thinkOpen: false, streaming: true, phase: d.phase })
     } else if (d.phase === 'draft' || d.phase === 'reused') {
@@ -394,7 +394,7 @@ function log(event, data) {
   }
   else if (event === 'chapter') text += d.phase === 'start' ? `《${d.title}》开始` : d.phase === 'done' ? `完成（${d.chars} 字符）` : `失败：${d.reason}`
   else if (event === 'outline') text += `章纲 ${d.phase}${d.sceneCount ? '，' + d.sceneCount + ' 个场景' : ''}`
-  else if (event === 'scene') text += `场景 ${d.sceneNo} ${d.phase}`
+  else if (event === 'scene') text += d.reason === 'rag_degraded' ? `RAG 召回失败降级（${d.message || ''}）` : `场景 ${d.sceneNo} ${d.phase}`
   else if (event === 'gate') text += `场景 ${d.sceneNo} 门禁${d.passed ? '通过' : '未过' + (d.rewrite ? '，重写中' : '')}`
   else if (event === 'assemble') text += `拼章完成（${d.chars} 字符），章级门禁检测中`
   else if (event === 'chapter_gate') text += `章级门禁${d.passed ? '通过' : '未过'}`

@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.AuthInterceptor;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
@@ -23,15 +24,12 @@ import java.util.Map;
 /** 管线触发（异步队列）、队列查询/取消、运行状态与 SSE 流。 */
 @RestController
 @RequestMapping("/api/pipeline")
+@RequiredArgsConstructor
 public class PipelineController {
 
     private final GenerationQueueService queueService;
     private final PipelineSseService sseService;
 
-    public PipelineController(GenerationQueueService queueService, PipelineSseService sseService) {
-        this.queueService = queueService;
-        this.sseService = sseService;
-    }
 
     /** 入队异步生成，立即返回任务 id；运行中提交不再 409，排队等待。 */
     @PostMapping("/run")

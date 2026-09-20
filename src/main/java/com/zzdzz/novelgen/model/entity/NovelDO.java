@@ -19,38 +19,10 @@ public class NovelDO {
     private String status;
     private boolean isDeleted;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public long userId() {
-        return getUserId();
-    }
 
-    @Deprecated
-    public String title() {
-        return getTitle();
-    }
 
-    @Deprecated
-    public String description() {
-        return getDescription();
-    }
 
-    @Deprecated
-    public Long stylePackId() {
-        return getStylePackId();
-    }
 
-    @Deprecated
-    public String approvalMode() {
-        return getApprovalMode();
-    }
 
-    @Deprecated
-    public String status() {
-        return getStatus();
-    }
 }

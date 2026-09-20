@@ -32,63 +32,15 @@ public class GenerationTaskDO {
     private java.time.OffsetDateTime updateTime;
     private java.time.OffsetDateTime deleteTime;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public Long novelId() {
-        return getNovelId();
-    }
 
-    @Deprecated
-    public Integer fromChapter() {
-        return getFromChapter();
-    }
 
-    @Deprecated
-    public Integer toChapter() {
-        return getToChapter();
-    }
 
-    @Deprecated
-    public String status() {
-        return getStatus();
-    }
 
-    @Deprecated
-    public Integer doneChapters() {
-        return getDoneChapters();
-    }
 
-    @Deprecated
-    public Integer currentChapter() {
-        return getCurrentChapter();
-    }
 
-    @Deprecated
-    public String lastMessage() {
-        return getLastMessage();
-    }
 
-    @Deprecated
-    public Long submittedBy() {
-        return getSubmittedBy();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime createTime() {
-        return getCreateTime();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime updateTime() {
-        return getUpdateTime();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime deleteTime() {
-        return getDeleteTime();
-    }
 }

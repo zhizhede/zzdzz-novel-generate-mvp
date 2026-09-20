@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.runner;
 
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
@@ -9,8 +10,6 @@ import com.zzdzz.novelgen.service.data.StylePackDataService;
 import com.zzdzz.novelgen.service.data.UserDataService;
 import com.zzdzz.novelgen.service.DigestService;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -36,9 +35,9 @@ import java.util.stream.Stream;
  */
 @Component
 @ConditionalOnProperty(name = "import.enabled", havingValue = "true")
+@Slf4j
 public class ImportRunner implements ApplicationRunner {
 
-    private static final Logger log = LoggerFactory.getLogger(ImportRunner.class);
     private static final Pattern CHAPTER_FILE = Pattern.compile("第(\\d+)章");
 
     private final UserDataService userData;
@@ -134,9 +133,9 @@ public class ImportRunner implements ApplicationRunner {
         // 从最新章往回数，只为有正文的 recent 章补事实账（卷纲规划行没有正文，跳过）
         int done = 0;
         for (int i = all.size() - 1; i >= 0 && done < recent; i--) {
-            ChapterDO full = chapterData.find(novelId, all.get(i).chapterNo()).orElse(null);
-            if (full == null || full.fullText() == null) continue;
-            digestService.digest(novelId, full.id(), full.chapterNo(), full.fullText());
+            ChapterDO full = chapterData.find(novelId, all.get(i).getChapterNo()).orElse(null);
+            if (full == null || full.getFullText() == null) continue;
+            digestService.digest(novelId, full.getId(), full.getChapterNo(), full.getFullText());
             done++;
         }
     }
@@ -156,8 +155,8 @@ public class ImportRunner implements ApplicationRunner {
             }
             chapterData.insertPlan(novelId, no, null, null, title, null, null, null, "[]", "[]", 0, 0);
             ChapterDO ch = chapterData.find(novelId, no).orElseThrow();
-            chapterData.saveFullText(ch.id(), content);
-            chapterData.updateStatus(ch.id(), "FINAL");
+            chapterData.saveFullText(ch.getId(), content);
+            chapterData.updateStatus(ch.getId(), "FINAL");
             log.info("现成正文入库：第 {} 章 {}", no, title);
         } catch (Exception e) {
             throw new IllegalStateException("现成正文导入失败: " + file, e);

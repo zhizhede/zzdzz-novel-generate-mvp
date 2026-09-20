@@ -1,11 +1,11 @@
 package com.zzdzz.novelgen.llm;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -17,6 +17,8 @@ import java.util.function.Function;
  * + 校验失败带原因喂回重试。新节点一律经此调用；outline/digest/review 的内联副本待顺手迁移。
  */
 @Component
+@Slf4j
+@RequiredArgsConstructor
 public class LlmJson {
 
     /** 校验不合规：message 即喂回给模型的重试原因。 */
@@ -24,7 +26,6 @@ public class LlmJson {
         public Bad(String reason) { super(reason); }
     }
 
-    private static final Logger log = LoggerFactory.getLogger(LlmJson.class);
 
     private final LlmPort llm;
     /** LLM 输出专用：容忍字符串内的裸换行/Tab 等控制字符 */
@@ -32,9 +33,6 @@ public class LlmJson {
             .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
             .build();
 
-    public LlmJson(LlmPort llm) {
-        this.llm = llm;
-    }
 
     /**
      * 调 LLM 并解析 JSON：parse 抛 Bad（或解析异常）即把原因拼到末条 user 消息后重试，共 tries 轮。

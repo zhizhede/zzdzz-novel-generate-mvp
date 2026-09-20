@@ -28,73 +28,17 @@ public class LlmCallLogDO {
     private boolean isDeleted;
     private java.time.OffsetDateTime createTime;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public String node() {
-        return getNode();
-    }
 
-    @Deprecated
-    public Long novelId() {
-        return getNovelId();
-    }
 
-    @Deprecated
-    public Long chapterId() {
-        return getChapterId();
-    }
 
-    @Deprecated
-    public String model() {
-        return getModel();
-    }
 
-    @Deprecated
-    public int promptTokens() {
-        return getPromptTokens();
-    }
 
-    @Deprecated
-    public int completionTokens() {
-        return getCompletionTokens();
-    }
 
-    @Deprecated
-    public int totalTokens() {
-        return getTotalTokens();
-    }
 
-    @Deprecated
-    public int latencyMs() {
-        return getLatencyMs();
-    }
 
-    @Deprecated
-    public String status() {
-        return getStatus();
-    }
 
-    @Deprecated
-    public String errorMsg() {
-        return getErrorMsg();
-    }
 
-    @Deprecated
-    public String reasoningText() {
-        return getReasoningText();
-    }
 
-    @Deprecated
-    public String requestJson() {
-        return getRequestJson();
-    }
 
-    @Deprecated
-    public String responseJson() {
-        return getResponseJson();
-    }
 }

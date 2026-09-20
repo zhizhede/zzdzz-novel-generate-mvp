@@ -163,7 +163,7 @@ function eventText(e) {
       : d.phase === 'done' ? `完成（${d.chars} 字符）` : `失败：${d.reason}`
     case 'outline': return d.phase === 'start' ? '章纲生成中' : '章纲落库'
     case 'scene': return d.phase === 'draft' ? `场景${d.sceneNo} 产出草稿`
-      : d.phase === 'reused' ? `场景${d.sceneNo} 复用已过草稿` : `场景${d.sceneNo} ${d.phase || ''}`
+      : d.phase === 'reused' ? `场景${d.sceneNo} 复用已过草稿` : d.reason === 'rag_degraded' ? `RAG 召回失败，本场景降级不注入：${d.message || ''}` : `场景${d.sceneNo} ${d.phase || ''}`
     case 'gate': return `场景${d.sceneNo} 门禁${d.passed ? '通过' : '未过'}${d.round ? `（重写第${d.round}轮）` : ''}${d.reason ? '：' + d.reason : ''}`
     case 'assemble': return `拼章完成（${d.chars} 字符）`
     case 'chapter_gate': return `章级门禁${d.passed ? '通过' : '未过'}${d.reason ? '：' + d.reason : ''}`

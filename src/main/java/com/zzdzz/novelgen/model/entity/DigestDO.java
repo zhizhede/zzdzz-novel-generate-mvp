@@ -16,23 +16,7 @@ public class DigestDO {
     private String facts;
     private boolean isDeleted;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public long chapterId() {
-        return getChapterId();
-    }
 
-    @Deprecated
-    public String contentMd() {
-        return getContentMd();
-    }
 
-    @Deprecated
-    public String facts() {
-        return getFacts();
-    }
 }

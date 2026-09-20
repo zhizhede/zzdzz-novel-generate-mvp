@@ -21,38 +21,10 @@ public class WorldStateDO {
     private java.time.OffsetDateTime updateTime;
     private java.time.OffsetDateTime deleteTime;
 
-    @Deprecated
-    public Long id() {
-        return getId();
-    }
 
-    @Deprecated
-    public Long novelId() {
-        return getNovelId();
-    }
 
-    @Deprecated
-    public Integer chapterNo() {
-        return getChapterNo();
-    }
 
-    @Deprecated
-    public JsonNode state() {
-        return getState();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime createTime() {
-        return getCreateTime();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime updateTime() {
-        return getUpdateTime();
-    }
 
-    @Deprecated
-    public java.time.OffsetDateTime deleteTime() {
-        return getDeleteTime();
-    }
 }

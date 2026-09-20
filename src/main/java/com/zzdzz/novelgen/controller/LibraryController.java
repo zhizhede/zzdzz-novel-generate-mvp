@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
@@ -32,6 +33,7 @@ import java.util.Map;
 /** 素材库：正典文档（增删改）/ 素材卡（增删改）/ 伏笔账本（修正）/ 事实账（修正）/ 风格包（规则正文修订）/ 世界状态账（查看纠偏回填）/ 调参（平台级行为参数）。 */
 @RestController
 @RequestMapping("/api")
+@RequiredArgsConstructor
 public class LibraryController {
 
     private final LibraryService libraryService;
@@ -43,19 +45,6 @@ public class LibraryController {
     private final PromptTemplateService promptService;
     private final GateService gateService;
 
-    public LibraryController(LibraryService libraryService, DigestService digestService,
-                             MaterialCardService cardService, LlmNodeConfigService nodeConfigService,
-                             TuningService tuningService, EmbeddingService embeddingService,
-                             PromptTemplateService promptService, GateService gateService) {
-        this.libraryService = libraryService;
-        this.digestService = digestService;
-        this.cardService = cardService;
-        this.nodeConfigService = nodeConfigService;
-        this.tuningService = tuningService;
-        this.embeddingService = embeddingService;
-        this.promptService = promptService;
-        this.gateService = gateService;
-    }
 
     // ===== 提示词注册表（平台级只读；阶段二开放从库读取与编辑） =====
 

@@ -1,9 +1,10 @@
 package com.zzdzz.novelgen.service;
 
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -20,9 +21,13 @@ import java.util.concurrent.TimeUnit;
  * 每 20s 推一行注释帧心跳：EventSource 忽略注释行，但代理/网关看到流量不会掐空闲连接。
  */
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class PipelineSseService {
 
-    private static final Logger log = LoggerFactory.getLogger(PipelineSseService.class);
+    /** 心跳间隔：EventSource 忽略注释行，但代理/网关看到流量不掐空闲连接。 */
+    private static final long HEARTBEAT_SECONDS = 20;
+
 
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
     private final ObjectMapper mapper;
@@ -33,9 +38,10 @@ public class PipelineSseService {
                 return t;
             });
 
-    public PipelineSseService(ObjectMapper mapper) {
-        this.mapper = mapper;
-        heartbeater.scheduleWithFixedDelay(this::beat, 20, 20, TimeUnit.SECONDS);
+    /** 心跳调度随 Bean 启动（从构造器迁出，保持 @RequiredArgsConstructor 纯注入）。 */
+    @PostConstruct
+    void startHeartbeat() {
+        heartbeater.scheduleWithFixedDelay(this::beat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
     }
 
     private void beat() {

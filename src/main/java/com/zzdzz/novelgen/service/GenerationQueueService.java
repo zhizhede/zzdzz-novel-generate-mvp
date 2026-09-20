@@ -1,17 +1,20 @@
 package com.zzdzz.novelgen.service;
 
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
+import com.zzdzz.novelgen.model.enums.TaskKind;
+import com.zzdzz.novelgen.model.enums.TaskStatus;
 import com.zzdzz.novelgen.model.vo.GenerationTaskVO;
 import com.zzdzz.novelgen.model.vo.PipelineStatusVO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.ChapterStepDataService;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -29,9 +32,15 @@ import java.util.concurrent.TimeUnit;
  * 逐章回写进度；RUNNING 任务支持章间协作取消；应用重启时 RUNNING 任务自动重新排队。
  */
 @Service
+@RequiredArgsConstructor
+@Slf4j
 public class GenerationQueueService {
 
-    private static final Logger log = LoggerFactory.getLogger(GenerationQueueService.class);
+    /** 队列列表最多返回行数 */
+    private static final int QUEUE_ROW_LIMIT = 30;
+    /** 分道调度器扫描间隔（秒） */
+    private static final long DISPATCH_INTERVAL_SECONDS = 2;
+
 
     private final GenerationTaskDataService taskDAO;
     private final NovelDataService novelData;
@@ -58,21 +67,10 @@ public class GenerationQueueService {
         return t;
     });
 
-    public GenerationQueueService(GenerationTaskDataService taskDAO, NovelDataService novelData,
-                                  ChapterDataService chapterData,
-                                  ChapterPipelineService pipeline, ChapterStepDataService stepData,
-                                  StageLog stageLog, PlanningService planningService, TuningService tuning,
-                                  LlmCallLogDataService llmCallLogData) {
-        this.taskDAO = taskDAO;
-        this.novelData = novelData;
-        this.chapterData = chapterData;
-        this.pipeline = pipeline;
-        this.stepData = stepData;
-        this.stageLog = stageLog;
-        this.planningService = planningService;
-        this.tuning = tuning;
-        this.llmCallLogData = llmCallLogData;
-        dispatcher.scheduleWithFixedDelay(this::pump, 2, 2, TimeUnit.SECONDS);
+    /** 分道调度器随 Bean 启动（从构造器迁出，保持 @RequiredArgsConstructor 纯注入）。 */
+    @PostConstruct
+    void startDispatcher() {
+        dispatcher.scheduleWithFixedDelay(this::pump, DISPATCH_INTERVAL_SECONDS, DISPATCH_INTERVAL_SECONDS, TimeUnit.SECONDS);
     }
 
     /** 重启恢复：带取消标记的 RUNNING 任务直接 CANCELED（流 0 取消落库不丢），其余重新排队接续。 */
@@ -98,7 +96,7 @@ public class GenerationQueueService {
     /** 取消：仅排队中；运行中请用 {@link #stop}（流 0 硬停止）。返回是否受理。 */
     public boolean cancel(long taskId) {
         String status = taskDAO.findStatus(taskId);
-        if ("QUEUED".equals(status)) {
+        if (TaskStatus.QUEUED.is(status)) {
             return taskDAO.cancelQueued(taskId) > 0;
         }
         return false;
@@ -108,7 +106,7 @@ public class GenerationQueueService {
      * 在飞调用的 token 已花、结果丢弃；已完成场景/正文保留。 */
     public boolean stop(long taskId) {
         String status = taskDAO.findStatus(taskId);
-        if (!"RUNNING".equals(status)) {
+        if (!TaskStatus.RUNNING.is(status)) {
             return false;
         }
         taskDAO.requestCancel(taskId);
@@ -133,7 +131,7 @@ public class GenerationQueueService {
 
     /** 按作品 id 入队（打回/否决重排队用，避免按标题反查）。 */
     public long submitById(long novelId, String novelTitle, int from, int to, Long userId) {
-        return enqueue(novelId, novelTitle, from, to, userId, "CHAPTERS", null);
+        return enqueue(novelId, novelTitle, from, to, userId, TaskKind.CHAPTERS.wire(), null);
     }
 
     /** ⑤ 任务化：卷纲自动规划入队（原同步 2-10 分钟 HTTP）。 */
@@ -150,7 +148,7 @@ public class GenerationQueueService {
         } catch (Exception e) {
             payload = null;
         }
-        return enqueue(novelId, novelTitle, from, to == null ? from : to, userId, "PLAN", payload);
+        return enqueue(novelId, novelTitle, from, to == null ? from : to, userId, TaskKind.PLAN.wire(), payload);
     }
 
     private long enqueue(long novelId, String novelTitle, int from, int to, Long userId, String kind, String payload) {
@@ -161,19 +159,19 @@ public class GenerationQueueService {
     }
 
     public List<GenerationTaskVO> list() {
-        return taskDAO.list(30).stream()
+        return taskDAO.list(QUEUE_ROW_LIMIT).stream()
                 .map(t -> {
                     String currentStep = null;
                     Long chapterTokens = null;
-                    if ("RUNNING".equals(t.status())) {
-                        currentStep = "PLAN".equals(t.kind()) ? "卷纲规划中"
+                    if (TaskStatus.RUNNING.is(t.status())) {
+                        currentStep = TaskKind.PLAN.is(t.kind()) ? "卷纲规划中"
                                 : currentStepLabel(t.novelId(), t.currentChapter());
                         if (t.currentChapter() != null) {
                             chapterTokens = chapterTokens(t.novelId(), t.currentChapter());
                         }
                     }
                     return new GenerationTaskVO(t.id(), t.novelTitle(),
-                            t.kind() == null ? "CHAPTERS" : t.kind(),
+                            t.kind() == null ? TaskKind.CHAPTERS.wire() : t.kind(),
                             t.fromChapter(), t.toChapter(),
                             t.status(), t.doneChapters(), t.toChapter() - t.fromChapter() + 1,
                             t.currentChapter(), t.lastMessage(), t.createTime(), currentStep, chapterTokens);
@@ -206,7 +204,7 @@ public class GenerationQueueService {
     private Long chapterTokens(long novelId, int chapterNo) {
         try {
             return chapterData.find(novelId, chapterNo)
-                    .map(ch -> llmCallLogData.totalsBy(null, ch.id()).totalTokens())
+                    .map(ch -> llmCallLogData.totalsBy(null, ch.getId()).totalTokens())
                     .orElse(null);
         } catch (Exception e) {
             return null;
@@ -231,7 +229,7 @@ public class GenerationQueueService {
 
     private void pump() {
         try {
-            int maxParallel = Math.max(1, tuning.i("max_parallel_novels", 2));
+            int maxParallel = Math.max(1, tuning.i("max_parallel_novels", TuningDefaults.MAX_PARALLEL_NOVELS));
             if (taskDAO.countRunningNovels() >= maxParallel) {
                 return; // 并行度已满，等下一轮
             }
@@ -250,7 +248,7 @@ public class GenerationQueueService {
                     runTask(task);
                 } catch (Exception e) {
                     log.error("任务 #{} 执行异常：{}", task.id(), e.getMessage(), e);
-                    taskDAO.updateStatus(task.id(), "STOPPED", "执行异常：" + e.getMessage());
+                    taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "执行异常：" + e.getMessage());
                 }
             });
         } catch (Exception e) {
@@ -266,7 +264,7 @@ public class GenerationQueueService {
         taskThreads.put(task.id(), Thread.currentThread());
 
         // ⑤ 任务化：卷纲自动规划走队列（原同步 2-10 分钟 HTTP）
-        if ("PLAN".equals(task.kind())) {
+        if (TaskKind.PLAN.is(task.kind())) {
             try {
                 runPlanTask(task);
             } finally {
@@ -297,9 +295,9 @@ public class GenerationQueueService {
                     @Override
                     public void onPauseHit() {
                         if (task.currentChapter() != null && task.currentChapter() >= task.toChapter()) {
-                            taskDAO.updateStatus(task.id(), "DONE", "全部完成（末章后暂停点，直接收尾）");
+                            taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), "全部完成（末章后暂停点，直接收尾）");
                         } else {
-                            taskDAO.updateStatus(task.id(), "PAUSED",
+                            taskDAO.updateStatus(task.id(), TaskStatus.PAUSED.wire(),
                                     "已暂停（第 " + task.currentChapter() + " 章后，点继续接跑）");
                         }
                     }
@@ -307,19 +305,19 @@ public class GenerationQueueService {
         StageLog.Phase endPhase;
         if (taskDAO.isCancelRequested(task.id())) {
             // 流 0：用户硬停——章节已标 INTERRUPTED，任务如实记终止
-            taskDAO.updateStatus(task.id(), "INTERRUPTED", "用户终止（已完成 " + passed + " 章）");
+            taskDAO.updateStatus(task.id(), TaskStatus.INTERRUPTED.wire(), "用户终止（已完成 " + passed + " 章）");
             endPhase = StageLog.Phase.STOPPED;
-        } else if ("PAUSED".equals(taskDAO.findStatus(task.id()))) {
+        } else if (TaskStatus.PAUSED.is(taskDAO.findStatus(task.id()))) {
             // 插队暂停：保留任务行等 [继续]
             endPhase = StageLog.Phase.NONE;
         } else if (cancelRequested.remove(task.id())) {
-            taskDAO.updateStatus(task.id(), "CANCELED", "运行中取消（已完成 " + passed + " 章）");
+            taskDAO.updateStatus(task.id(), TaskStatus.CANCELED.wire(), "运行中取消（已完成 " + passed + " 章）");
             endPhase = StageLog.Phase.CANCELED;
         } else if (passed >= total) {
-            taskDAO.updateStatus(task.id(), "DONE", "全部完成（" + passed + " 章）");
+            taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), "全部完成（" + passed + " 章）");
             endPhase = StageLog.Phase.DONE;
         } else {
-            taskDAO.updateStatus(task.id(), "STOPPED", "第 " + (task.fromChapter() + passed)
+            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "第 " + (task.fromChapter() + passed)
                     + " 章失败停止，可断点重跑");
             endPhase = StageLog.Phase.STOPPED;
         }
@@ -350,11 +348,11 @@ public class GenerationQueueService {
                 throw new BizException(ErrorCode.PARAM_ERROR, "PLAN 任务缺 volNo/from");
             }
             planningService.autoPlan(task.novelId(), volNo, from, to, seed);
-            taskDAO.updateStatus(task.id(), "DONE", "卷纲规划完成并落库");
+            taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), "卷纲规划完成并落库");
             emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
                     StageLog.Phase.DONE, "卷纲规划完成");
         } catch (Exception e) {
-            taskDAO.updateStatus(task.id(), "STOPPED", "卷纲规划失败：" + e.getMessage());
+            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "卷纲规划失败：" + e.getMessage());
             emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
                     StageLog.Phase.STOPPED, "卷纲规划失败：" + e.getMessage());
         }
@@ -363,7 +361,7 @@ public class GenerationQueueService {
     /** 插队暂停后继续（④）：PAUSED → QUEUED，从暂停点下一章接跑。 */
     public boolean resume(long taskId) {
         String status = taskDAO.findStatus(taskId);
-        if (!"PAUSED".equals(status)) {
+        if (!TaskStatus.PAUSED.is(status)) {
             return false;
         }
         return taskDAO.resumePaused(taskId) > 0;
