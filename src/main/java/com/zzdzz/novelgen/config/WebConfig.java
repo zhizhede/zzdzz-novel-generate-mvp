@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.config;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.AuthInterceptor;
 import com.zzdzz.novelgen.common.web.JwtService;
 import org.springframework.context.annotation.Bean;
@@ -10,13 +11,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /** Web 层装配：JWT 登录拦截 + Vue 开发服务器跨域（生产走 Nginx 同源，不需要 CORS）。 */
 @Configuration
+@RequiredArgsConstructor
 public class WebConfig implements WebMvcConfigurer {
 
     private final JwtService jwtService;
 
-    public WebConfig(JwtService jwtService) {
-        this.jwtService = jwtService;
-    }
 
     @Bean
     public AuthInterceptor authInterceptor() {

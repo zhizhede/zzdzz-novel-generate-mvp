@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.DigestDO;
+import com.zzdzz.novelgen.model.dto.DigestDTO;
 
 import java.util.List;
 
 /** digests 数据服务接口（原 DigestDAO）。 */
-public interface DigestDataService extends IService<DigestDO> {
+public interface DigestDataService extends IService<DigestDTO> {
 
     /** 素材库行：带章号（内部模型，非表行）。 */
     record DigestItem(long id, int chapterNo, String contentMd, String facts, String updateTime) {

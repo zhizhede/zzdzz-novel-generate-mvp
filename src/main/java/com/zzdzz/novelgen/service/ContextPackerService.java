@@ -1,8 +1,10 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.zzdzz.novelgen.llm.LlmNode;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.DigestDataService;
@@ -21,6 +23,7 @@ import java.util.Objects;
  * 量化风格画像与 style-metrics.json 基线同口径——生成时约束，门禁按同口径验收。
  */
 @Service
+@RequiredArgsConstructor
 public class ContextPackerService {
 
     private static final String STYLE_REDLINES = """
@@ -48,31 +51,6 @@ public class ContextPackerService {
     private final VolumeReviewDataService volumeReviewData;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
-    public ContextPackerService(StylePackDataService stylePackData,
-                                CanonDocDataService canonData,
-                                DigestDataService digestData,
-                                ForeshadowDataService foreshadowData,
-                                ChapterDataService chapterData,
-                                WorldStateDataService worldStateData,
-                                MaterialCardService cardService,
-                                TuningService tuning,
-                                EmbeddingService embeddingService,
-                                PromptTemplateService promptTemplates,
-                                VolumeReviewDataService volumeReviewData,
-                                com.fasterxml.jackson.databind.ObjectMapper mapper) {
-        this.stylePackData = stylePackData;
-        this.canonData = canonData;
-        this.digestData = digestData;
-        this.foreshadowData = foreshadowData;
-        this.chapterData = chapterData;
-        this.worldStateData = worldStateData;
-        this.cardService = cardService;
-        this.tuning = tuning;
-        this.embeddingService = embeddingService;
-        this.promptTemplates = promptTemplates;
-        this.volumeReviewData = volumeReviewData;
-        this.mapper = mapper;
-    }
 
     public record Pack(String system, String user) {}
 
@@ -141,13 +119,13 @@ public class ContextPackerService {
      */
     public String prevChapterBrief(long novelId, int chapterNo) {
         if (chapterNo <= 1) return null;
-        ChapterDO prev = chapterData.find(novelId, chapterNo - 1).orElse(null);
+        ChapterDTO prev = chapterData.find(novelId, chapterNo - 1).orElse(null);
         if (prev == null) return null;
         List<String> summaries = digestData.findRecent(novelId, chapterNo - 1, 1);
         String outcome = summaries.isEmpty() ? prevTail(novelId, chapterNo)
                 : summaries.get(summaries.size() - 1);
-        return "上一章目标：" + Objects.toString(prev.goal(), "（无）")
-                + "\n上一章章末钩子：" + Objects.toString(prev.hook(), "（无）")
+        return "上一章目标：" + Objects.toString(prev.getGoal(), "（无）")
+                + "\n上一章章末钩子：" + Objects.toString(prev.getHook(), "（无）")
                 + "\n上一章实际收束：" + (outcome == null || outcome.isBlank() ? "（无）" : outcome.strip());
     }
 
@@ -193,15 +171,15 @@ public class ContextPackerService {
      */
     public String packLedgers(long novelId, int fromNo) {
         StringBuilder sb = new StringBuilder();
-        List<ChapterDO> plans = chapterData.listSummariesByNovel(novelId);
+        List<ChapterDTO> plans = chapterData.listSummariesByNovel(novelId);
         if (!plans.isEmpty()) {
             sb.append("【已有卷纲（往卷已写与当前规划；不得重复其桥段，须衔接其走向）】\n");
-            for (ChapterDO c : plans) {
-                sb.append("第").append(c.chapterNo()).append("章《").append(Objects.toString(c.title(), ""))
-                        .append("》目标：").append(Objects.toString(c.goal(), ""))
-                        .append(" 钩子：").append(Objects.toString(c.hook(), ""))
-                        .append(" 时间：").append(Objects.toString(c.timeNote(), "紧接"))
-                        .append("（状态 ").append(c.status()).append("）\n");
+            for (ChapterDTO c : plans) {
+                sb.append("第").append(c.getChapterNo()).append("章《").append(Objects.toString(c.getTitle(), ""))
+                        .append("》目标：").append(Objects.toString(c.getGoal(), ""))
+                        .append(" 钩子：").append(Objects.toString(c.getHook(), ""))
+                        .append(" 时间：").append(Objects.toString(c.getTimeNote(), "紧接"))
+                        .append("（状态 ").append(c.getStatus()).append("）\n");
             }
             sb.append('\n');
         }
@@ -214,17 +192,17 @@ public class ContextPackerService {
             sb.append("【世界状态（截至第 ").append(fromNo - 1).append(" 章结束，必须遵守——物品归属与位置不得凭空变化）】\n")
                     .append(ws).append("\n\n");
         }
-        List<ForeshadowDO> fss = foreshadowData.listByNovel(novelId).stream()
-                .filter(f -> !"recovered".equals(f.status()) && !"dropped".equals(f.status()))
-                .filter(f -> f.recoveredIn() == null || f.recoveredIn() >= fromNo)
+        List<ForeshadowDTO> fss = foreshadowData.listByNovel(novelId).stream()
+                .filter(f -> !ForeshadowStatus.RECOVERED.is(f.getStatus()) && !ForeshadowStatus.DROPPED.is(f.getStatus()))
+                .filter(f -> f.getRecoveredIn() == null || f.getRecoveredIn() >= fromNo)
                 .toList();
         if (!fss.isEmpty()) {
             sb.append("【伏笔账本（未回收项；proposed=自动提议待排期，被引用即采纳；planted=已埋待回收，被引用即安排回收）】\n");
-            for (ForeshadowDO f : fss) {
-                sb.append(f.code()).append("（").append(f.status());
-                if (f.plantedIn() != null) sb.append("，埋于第").append(f.plantedIn()).append("章");
-                if (f.proposedIn() != null) sb.append("，提议于第").append(f.proposedIn()).append("章");
-                sb.append("）").append(f.content()).append('\n');
+            for (ForeshadowDTO f : fss) {
+                sb.append(f.getCode()).append("（").append(f.getStatus());
+                if (f.getPlantedIn() != null) sb.append("，埋于第").append(f.getPlantedIn()).append("章");
+                if (f.getProposedIn() != null) sb.append("，提议于第").append(f.getProposedIn()).append("章");
+                sb.append("）").append(f.getContent()).append('\n');
             }
             sb.append('\n');
         }
@@ -342,7 +320,7 @@ public class ContextPackerService {
         return sb.toString().strip();
     }
 
-    public Pack packScene(long novelId, int chapterNo, ChapterDO ch, OutlineService.SceneSpec spec,
+    public Pack packScene(long novelId, int chapterNo, ChapterDTO ch, OutlineService.SceneSpec spec,
                           List<String> digests, String prevTail, List<String> foreshadows,
                           String prevSceneText) {
         List<String> ctx = new ArrayList<>();
@@ -360,7 +338,7 @@ public class ContextPackerService {
         // 设定卡匹配文本：本章目标/钩子 + 场景目标 + 前文 + 事实账近况 + 上一章后果（命中才注入对应卡，省上下文）
         String prevBrief = prevChapterBrief(novelId, chapterNo);
         String matchText = String.join("\n",
-                String.valueOf(ch.title()), String.valueOf(ch.goal()), String.valueOf(ch.hook()),
+                String.valueOf(ch.getTitle()), String.valueOf(ch.getGoal()), String.valueOf(ch.getHook()),
                 spec.goal(), prevSceneText == null ? String.valueOf(prevTail) : prevSceneText,
                 prevBrief == null ? "" : prevBrief,
                 String.join("\n", ctx));
@@ -369,7 +347,7 @@ public class ContextPackerService {
                 .valueOf(tuning.d("prompt_simile_per1k", 3.0)).stripTrailingZeros().toPlainString();
         // RAG 语义召回：本章目标+钩子+场景目标 作查询，近三章事实账已在摘要里故不重复召回
         String ragSection = embeddingService.searchSection(novelId, chapterNo,
-                Objects.toString(ch.goal(), "") + "\n" + Objects.toString(ch.hook(), "") + "\n" + spec.goal(),
+                Objects.toString(ch.getGoal(), "") + "\n" + Objects.toString(ch.getHook(), "") + "\n" + spec.goal(),
                 chapterNo - 3);
         String user = promptTemplates.format(LlmNode.SCENE_DRAFT, "user", """
                 任务：写第 %d 章场景 %d。
@@ -411,7 +389,7 @@ public class ContextPackerService {
 
                 【上一场景已写内容（紧接其后继续写；禁止复述其中任何句子——你的第一行必须是全新的句子；禁止重复情节与时间点）】
                 %s
-                """, chapterNo, spec.sceneNo(), ch.title(), spec.goal(),
+                """, chapterNo, spec.sceneNo(), ch.getTitle(), spec.goal(),
                 spec.present(), spec.mustReveal(), spec.mustNot(), spec.words(),
                 simileRedline,
                 craft,

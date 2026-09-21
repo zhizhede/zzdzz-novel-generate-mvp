@@ -1,5 +1,9 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.model.enums.GateType;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.GateReportDataService;
@@ -17,7 +21,26 @@ import java.util.regex.Pattern;
  * 指标计算为静态纯函数（可单测）；结果落 gate_reports 供断点重放与 M2 AI 评审对照。
  */
 @Service
+@RequiredArgsConstructor
 public class GateService {
+
+    /**
+     * 单条门禁检查。序列化形状与历史 Map 落库逐键一致：check/value/baseline/abs_max/ok，
+     * abs_max 可空且为 null 时不出现（_gate_reports 存量数据与档案页兼容线）。
+     */
+    public record GateCheck(String check, Object value, Object baseline,
+                            @JsonProperty("abs_max") @JsonInclude(JsonInclude.Include.NON_NULL) Object absMax,
+                            boolean ok) {
+    }
+
+    /** 一次门禁判定：是否通过 + 全量检查条目。 */
+    public record GateVerdict(boolean passed, List<GateCheck> checks) {
+
+        /** 未过的条目（编辑反馈/重写喂回用）。 */
+        public List<GateCheck> failedChecks() {
+            return checks.stream().filter(c -> !c.ok()).toList();
+        }
+    }
 
     /** AI 腔黑名单兜底：风格包未配置 gate_config 时使用；正式值随包落库（V4 起）。 */
     private static final List<String> BANNED_FALLBACK = List.of(
@@ -31,20 +54,13 @@ public class GateService {
     private final ChapterDataService chapterData;
     private final TuningService tuning;
 
-    public GateService(StylePackDataService stylePackData, GateReportDataService gateReportData,
-                       ChapterDataService chapterData, TuningService tuning) {
-        this.stylePackData = stylePackData;
-        this.gateReportData = gateReportData;
-        this.chapterData = chapterData;
-        this.tuning = tuning;
-    }
 
     @SuppressWarnings("unchecked")
-    public boolean checkChapter(long novelId, long chapterId, int chapterNo, String text,
+    public GateVerdict checkChapter(long novelId, long chapterId, int chapterNo, String text,
                                 int budgetMin, int budgetMax) {
         Map<String, Object> base = fingerprint(novelId);
         Map<String, Object> metrics = computeMetrics(text);
-        List<Map<String, Object>> checks = new ArrayList<>();
+        List<GateCheck> checks = new ArrayList<>();
 
         int words = ((Number) metrics.get("cjk")).intValue();
         Map<String, Object> gateCfg = gateConfig(novelId);
@@ -73,11 +89,11 @@ public class GateService {
         }
         checks.add(check("banned_phrases", hits.size(), 0, 0, hits.isEmpty()));
 
-        boolean passed = checks.stream().allMatch(c -> (Boolean) c.get("ok"));
-        gateReportData.insert(chapterId, null, "mechanical", 0, passed,
+        boolean passed = checks.stream().allMatch(GateCheck::ok);
+        gateReportData.insert(chapterId, null, GateType.MECHANICAL.wire(), 0, passed,
                 Map.of("chapter_no", chapterNo, "words", words,
                         "banned_hits", hits, "checks", checks));
-        return passed;
+        return new GateVerdict(passed, checks);
     }
 
     /**
@@ -85,14 +101,14 @@ public class GateService {
      * 破折号等稀疏统计留到章级判定——几百字样本上单场景方差过大。
      */
     @SuppressWarnings("unchecked")
-    public boolean checkScene(long novelId, long chapterId, long sceneId, int sceneNo, String text, int wordsBudget) {
+    public GateVerdict checkScene(long novelId, long chapterId, long sceneId, int sceneNo, String text, int wordsBudget) {
         Map<String, Object> base = fingerprint(novelId);
         Map<String, Object> metrics = computeMetrics(text);
-        List<Map<String, Object>> checks = new ArrayList<>();
+        List<GateCheck> checks = new ArrayList<>();
 
         // 场景长度：预算比例带（43 章超长实锤后新增）。场景超长若放行，章级修订受 ±10% 约束救不回来
-        double sceneLenMin = tuning.d("scene_len_min_ratio", 0.4);
-        double sceneLenMax = tuning.d("scene_len_max_ratio", 1.6);
+        double sceneLenMin = tuning.d("scene_len_min_ratio", TuningDefaults.SCENE_LEN_MIN_RATIO);
+        double sceneLenMax = tuning.d("scene_len_max_ratio", TuningDefaults.SCENE_LEN_MAX_RATIO);
         int cjk = ((Number) metrics.get("cjk")).intValue();
         boolean lenOk = cjk >= wordsBudget * sceneLenMin && cjk <= wordsBudget * sceneLenMax;
         checks.add(check("scene_length", cjk, (int) (wordsBudget * sceneLenMin),
@@ -123,10 +139,10 @@ public class GateService {
         // 对话密度：场景级只防灌水（上界）；低界留章级——叙事型场景天然低对话，几百字样本下界误杀
         checks.add(check("dialogue_density_per1k", dlg, null, dlgMax, dlg <= dlgMax));
 
-        boolean passed = checks.stream().allMatch(c -> (Boolean) c.get("ok"));
-        gateReportData.insert(chapterId, sceneId, "mechanical", 0, passed,
+        boolean passed = checks.stream().allMatch(GateCheck::ok);
+        gateReportData.insert(chapterId, sceneId, GateType.MECHANICAL.wire(), 0, passed,
                 Map.of("scene_no", sceneNo, "checks", checks));
-        return passed;
+        return new GateVerdict(passed, checks);
     }
 
     public String failureSummary(long chapterId) {
@@ -175,9 +191,9 @@ public class GateService {
 
     /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance；abs_min 显式下界（对话密度防叙述铺场）。 */
     @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> fingerprintChecks(Map<String, Object> base,
+    private List<GateCheck> fingerprintChecks(Map<String, Object> base,
                                                         Map<String, Object> metrics) {
-        List<Map<String, Object>> checks = new ArrayList<>();
+        List<GateCheck> checks = new ArrayList<>();
         for (Map.Entry<String, Object> e : metrics.entrySet()) {
             String key = e.getKey();
             if (key.equals("cjk")) continue;
@@ -231,11 +247,11 @@ public class GateService {
     /** 有效评审标准五项（gate_config > tuning > 代码默认），工作台/风格包调参面板回显用。 */
     public java.util.LinkedHashMap<String, Double> readerStandards(long novelId) {
         java.util.LinkedHashMap<String, Double> m = new java.util.LinkedHashMap<>();
-        m.put("reader_fat_ratio_block", configValue(novelId, "reader_fat_ratio_block", tuning.d("reader_fat_ratio_block", 0.33)));
-        m.put("reader_fat_ratio_hard", configValue(novelId, "reader_fat_ratio_hard", tuning.d("reader_fat_ratio_hard", 0.50)));
-        m.put("reader_fix_len_min", configValue(novelId, "reader_fix_len_min", tuning.d("reader_fix_len_min", 0.75)));
-        m.put("reader_fix_len_max", configValue(novelId, "reader_fix_len_max", tuning.d("reader_fix_len_max", 1.15)));
-        m.put("ai_review_fix_floor", configValue(novelId, "ai_review_fix_floor", tuning.d("ai_review_fix_floor", 0.60)));
+        m.put("reader_fat_ratio_block", configValue(novelId, "reader_fat_ratio_block", tuning.d("reader_fat_ratio_block", TuningDefaults.READER_FAT_RATIO_BLOCK)));
+        m.put("reader_fat_ratio_hard", configValue(novelId, "reader_fat_ratio_hard", tuning.d("reader_fat_ratio_hard", TuningDefaults.READER_FAT_RATIO_HARD)));
+        m.put("reader_fix_len_min", configValue(novelId, "reader_fix_len_min", tuning.d("reader_fix_len_min", TuningDefaults.READER_FIX_LEN_MIN)));
+        m.put("reader_fix_len_max", configValue(novelId, "reader_fix_len_max", tuning.d("reader_fix_len_max", TuningDefaults.READER_FIX_LEN_MAX)));
+        m.put("ai_review_fix_floor", configValue(novelId, "ai_review_fix_floor", tuning.d("ai_review_fix_floor", TuningDefaults.AI_REVIEW_FIX_FLOOR)));
         return m;
     }
 
@@ -285,14 +301,8 @@ public class GateService {
         }
     }
 
-    private Map<String, Object> check(String name, Object value, Object expect, Object absMax, boolean ok) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("check", name);
-        m.put("value", value);
-        m.put("baseline", expect);
-        if (absMax != null) m.put("abs_max", absMax);
-        m.put("ok", ok);
-        return m;
+    private GateCheck check(String name, Object value, Object expect, Object absMax, boolean ok) {
+        return new GateCheck(name, value, expect, absMax, ok);
     }
 
     // ===== 纯函数指标计算（静态，供单测） =====

@@ -1,13 +1,16 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
-import com.zzdzz.novelgen.model.entity.CanonDocDO;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
-import com.zzdzz.novelgen.model.entity.MaterialCardDO;
+import com.zzdzz.novelgen.model.vo.CanonDocVO;
+import com.zzdzz.novelgen.model.vo.ForeshadowVO;
+import com.zzdzz.novelgen.model.vo.LlmModelPriceVO;
+import com.zzdzz.novelgen.model.vo.MaterialCardVO;
 import com.zzdzz.novelgen.model.vo.PromptDetailVO;
 import com.zzdzz.novelgen.model.vo.PromptTemplateVO;
+import com.zzdzz.novelgen.model.vo.TuningVO;
 import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.GateService;
 import com.zzdzz.novelgen.service.LibraryService;
@@ -26,12 +29,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
 /** 素材库：正典文档（增删改）/ 素材卡（增删改）/ 伏笔账本（修正）/ 事实账（修正）/ 风格包（规则正文修订）/ 世界状态账（查看纠偏回填）/ 调参（平台级行为参数）。 */
 @RestController
 @RequestMapping("/api")
+@RequiredArgsConstructor
 public class LibraryController {
 
     private final LibraryService libraryService;
@@ -43,117 +48,92 @@ public class LibraryController {
     private final PromptTemplateService promptService;
     private final GateService gateService;
 
-    public LibraryController(LibraryService libraryService, DigestService digestService,
-                             MaterialCardService cardService, LlmNodeConfigService nodeConfigService,
-                             TuningService tuningService, EmbeddingService embeddingService,
-                             PromptTemplateService promptService, GateService gateService) {
-        this.libraryService = libraryService;
-        this.digestService = digestService;
-        this.cardService = cardService;
-        this.nodeConfigService = nodeConfigService;
-        this.tuningService = tuningService;
-        this.embeddingService = embeddingService;
-        this.promptService = promptService;
-        this.gateService = gateService;
-    }
 
     // ===== 提示词注册表（平台级只读；阶段二开放从库读取与编辑） =====
 
     @GetMapping("/prompts")
     public Result<List<PromptTemplateVO>> prompts() {
-        return Result.ok(promptService.list());
+        return Result.success(promptService.list());
     }
 
     @GetMapping("/prompts/{id}")
     public Result<PromptDetailVO> promptDetail(@PathVariable long id) {
-        return Result.ok(promptService.detail(id));
+        return Result.success(promptService.detail(id));
     }
 
     /** 人工编辑模板（置 custom；占位符序列须与代码目录一致）。 */
     @PutMapping("/prompts/{id}")
-    public Result<PromptDetailVO> updatePrompt(@PathVariable long id, @RequestBody Map<String, String> body) {
-        return Result.ok(promptService.updateContent(id, body == null ? null : body.get("content")));
+    public Result<PromptDetailVO> updatePrompt(@PathVariable long id, @RequestBody PromptUpdateVO dto) {
+        return Result.success(promptService.updateContent(id, dto.content()));
     }
 
     /** 重置回代码目录版本（清 custom）。 */
     @PostMapping("/prompts/{id}/reset")
     public Result<PromptDetailVO> resetPrompt(@PathVariable long id) {
-        return Result.ok(promptService.reset(id));
+        return Result.success(promptService.reset(id));
     }
 
     // ===== 调参（平台级行为参数，改后 30s 内生效） =====
 
     @GetMapping("/tuning")
-    public Result<List<com.zzdzz.novelgen.model.entity.TuningDO>> tuning() {
-        return Result.ok(tuningService.list());
+    public Result<List<TuningVO>> tuning() {
+        return Result.success(tuningService.list());
     }
 
     @PutMapping("/tuning/{key}")
-    public Result<Void> updateTuning(@PathVariable String key, @RequestBody Map<String, Object> body) {
-        tuningService.update(key, String.valueOf(body.get("value")));
-        return Result.ok();
+    public Result<Void> updateTuning(@PathVariable String key, @RequestBody TuningUpdateVO dto) {
+        tuningService.update(key, String.valueOf(dto.value()));
+        return Result.success();
     }
 
     // ===== 模型路由（平台级，所有作品共用） =====
 
     @GetMapping("/llm-nodes")
     public Result<List<LlmNodeConfigService.NodeVO>> llmNodes() {
-        return Result.ok(nodeConfigService.list());
+        return Result.success(nodeConfigService.list());
     }
 
     @PostMapping("/llm-nodes")
-    public Result<Void> createLlmNode(@RequestBody Map<String, Object> body) {
-        nodeConfigService.create((String) body.get("node"), (String) body.get("model"),
-                body.get("temperature") instanceof Number n ? n.doubleValue() : null,
-                body.get("maxTokens") instanceof Number n ? n.intValue() : null,
-                (String) body.get("extraJson"),
-                body.get("enabled") instanceof Boolean b ? b : null,
-                (String) body.get("remark"));
-        return Result.ok();
+    public Result<Void> createLlmNode(@RequestBody LlmNodeCreateVO dto) {
+        nodeConfigService.create(dto.node(), dto.model(), dto.temperature(), dto.maxTokens(),
+                dto.extraJson(), dto.enabled(), dto.remark());
+        return Result.success();
     }
 
     @PutMapping("/llm-nodes/{id}")
-    public Result<Void> updateLlmNode(@PathVariable long id, @RequestBody Map<String, Object> body) {
-        nodeConfigService.update(id, (String) body.get("model"),
-                body.get("temperature") instanceof Number n ? n.doubleValue() : null,
-                body.get("maxTokens") instanceof Number n ? n.intValue() : null,
-                (String) body.get("extraJson"),
-                body.get("enabled") instanceof Boolean b ? b : null,
-                (String) body.get("remark"));
-        return Result.ok();
+    public Result<Void> updateLlmNode(@PathVariable long id, @RequestBody LlmNodeUpdateVO dto) {
+        nodeConfigService.update(id, dto.model(), dto.temperature(), dto.maxTokens(),
+                dto.extraJson(), dto.enabled(), dto.remark());
+        return Result.success();
     }
 
     @DeleteMapping("/llm-nodes/{id}")
     public Result<Void> deleteLlmNode(@PathVariable long id) {
         nodeConfigService.delete(id);
-        return Result.ok();
+        return Result.success();
     }
 
     @GetMapping("/llm-prices")
-    public Result<List<com.zzdzz.novelgen.model.entity.LlmModelPriceDO>> llmPrices() {
-        return Result.ok(nodeConfigService.prices());
+    public Result<List<LlmModelPriceVO>> llmPrices() {
+        return Result.success(nodeConfigService.prices());
     }
 
     @PutMapping("/llm-prices/{id}")
-    public Result<Void> updateLlmPrice(@PathVariable long id, @RequestBody Map<String, Object> body) {
+    public Result<Void> updateLlmPrice(@PathVariable long id, @RequestBody LlmPriceUpdateVO dto) {
         nodeConfigService.updatePrice(id,
-                decimal(body.get("idleInputHit")), decimal(body.get("idleInputMiss")), decimal(body.get("idleOutput")),
-                decimal(body.get("peakInputHit")), decimal(body.get("peakInputMiss")), decimal(body.get("peakOutput")),
-                body.get("peakStartHour") instanceof Number n ? n.intValue() : 14,
-                body.get("peakEndHour") instanceof Number n ? n.intValue() : 18,
-                (String) body.get("remark"));
-        return Result.ok();
-    }
-
-    private static java.math.BigDecimal decimal(Object value) {
-        return value instanceof Number n ? java.math.BigDecimal.valueOf(n.doubleValue()) : null;
+                dto.idleInputHit(), dto.idleInputMiss(), dto.idleOutput(),
+                dto.peakInputHit(), dto.peakInputMiss(), dto.peakOutput(),
+                dto.peakStartHour() != null ? dto.peakStartHour() : 14,
+                dto.peakEndHour() != null ? dto.peakEndHour() : 18,
+                dto.remark());
+        return Result.success();
     }
 
     // ===== 向量索引（RAG 语义检索） =====
 
     @GetMapping("/novels/{novelId}/embeddings/status")
     public Result<Map<String, Object>> embeddingStatus(@PathVariable long novelId) {
-        return Result.ok(Map.of("indexed", embeddingService.countByNovel(novelId),
+        return Result.success(Map.of("indexed", embeddingService.countByNovel(novelId),
                 "enabled", embeddingService.enabled()));
     }
 
@@ -161,139 +141,127 @@ public class LibraryController {
     @PostMapping("/novels/{novelId}/embeddings/backfill")
     public Result<Map<String, Object>> embeddingBackfill(@PathVariable long novelId) {
         int added = embeddingService.backfillNovel(novelId);
-        return Result.ok(Map.of("added", added, "indexed", embeddingService.countByNovel(novelId)));
+        return Result.success(Map.of("added", added, "indexed", embeddingService.countByNovel(novelId)));
     }
 
     // ===== 素材卡 =====
 
     @GetMapping("/novels/{novelId}/cards")
-    public Result<List<MaterialCardDO>> cards(@PathVariable long novelId,
+    public Result<List<MaterialCardVO>> cards(@PathVariable long novelId,
                                               @RequestParam(required = false) String kind) {
-        return Result.ok(cardService.list(novelId, kind));
+        return Result.success(cardService.list(novelId, kind));
     }
 
     @GetMapping("/cards/{id}")
-    public Result<MaterialCardDO> card(@PathVariable long id) {
-        return Result.ok(cardService.get(id));
+    public Result<MaterialCardVO> card(@PathVariable long id) {
+        return Result.success(cardService.vo(id));
     }
 
     @PostMapping("/novels/{novelId}/cards")
-    public Result<Void> createCard(@PathVariable long novelId, @RequestBody Map<String, Object> body) {
-        cardService.create(novelId, (String) body.get("kind"), (String) body.get("name"),
-                strList(body.get("aliases")), (String) body.get("summary"), (String) body.get("contentMd"),
-                body.get("pinned") instanceof Boolean b ? b : null, (String) body.get("status"),
-                body.get("sourceChapter") instanceof Number n ? n.intValue() : null);
-        return Result.ok();
+    public Result<Void> createCard(@PathVariable long novelId, @RequestBody CardSaveVO dto) {
+        cardService.create(novelId, dto.kind(), dto.name(), dto.aliases(), dto.summary(), dto.contentMd(),
+                dto.pinned(), dto.status(), dto.sourceChapter());
+        return Result.success();
     }
 
     @PutMapping("/cards/{id}")
-    public Result<Void> updateCard(@PathVariable long id, @RequestBody Map<String, Object> body) {
-        cardService.update(id, (String) body.get("name"), strList(body.get("aliases")),
-                (String) body.get("summary"), (String) body.get("contentMd"),
-                body.get("pinned") instanceof Boolean b ? b : null, (String) body.get("status"),
-                body.get("sourceChapter") instanceof Number n ? n.intValue() : null);
-        return Result.ok();
+    public Result<Void> updateCard(@PathVariable long id, @RequestBody CardSaveVO dto) {
+        cardService.update(id, dto.name(), dto.aliases(), dto.summary(), dto.contentMd(),
+                dto.pinned(), dto.status(), dto.sourceChapter());
+        return Result.success();
     }
 
     @DeleteMapping("/cards/{id}")
     public Result<Void> deleteCard(@PathVariable long id) {
         cardService.delete(id);
-        return Result.ok();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<String> strList(Object value) {
-        return value instanceof List<?> l ? (List<String>) l : List.of();
+        return Result.success();
     }
 
     // ===== 正典 =====
 
     @GetMapping("/novels/{novelId}/canon")
-    public Result<List<CanonDocDO>> canonList(@PathVariable long novelId) {
-        return Result.ok(libraryService.listCanon(novelId));
+    public Result<List<CanonDocVO>> canonList(@PathVariable long novelId) {
+        return Result.success(libraryService.listCanon(novelId));
     }
 
     @GetMapping("/canon/{id}")
-    public Result<CanonDocDO> canonDoc(@PathVariable long id) {
-        return Result.ok(libraryService.canonDoc(id));
+    public Result<CanonDocVO> canonDoc(@PathVariable long id) {
+        return Result.success(libraryService.canonDocVO(id));
     }
 
     @PostMapping("/novels/{novelId}/canon")
-    public Result<Void> createCanon(@PathVariable long novelId, @RequestBody Map<String, String> body) {
-        libraryService.createCanon(novelId, body.get("kind"), body.get("name"), body.get("content"));
-        return Result.ok();
+    public Result<Void> createCanon(@PathVariable long novelId, @RequestBody CanonCreateVO dto) {
+        libraryService.createCanon(novelId, dto.kind(), dto.name(), dto.content());
+        return Result.success();
     }
 
     @PutMapping("/canon/{id}")
-    public Result<Void> updateCanon(@PathVariable long id, @RequestBody Map<String, String> body) {
-        libraryService.updateCanon(id, body.get("content"));
-        return Result.ok();
+    public Result<Void> updateCanon(@PathVariable long id, @RequestBody CanonUpdateVO dto) {
+        libraryService.updateCanon(id, dto.content());
+        return Result.success();
     }
 
     @DeleteMapping("/canon/{id}")
     public Result<Void> deleteCanon(@PathVariable long id) {
         libraryService.deleteCanon(id);
-        return Result.ok();
+        return Result.success();
     }
 
     // ===== 伏笔 =====
 
     @GetMapping("/novels/{novelId}/foreshadows")
-    public Result<List<ForeshadowDO>> foreshadows(@PathVariable long novelId) {
-        return Result.ok(libraryService.listForeshadows(novelId));
+    public Result<List<ForeshadowVO>> foreshadows(@PathVariable long novelId) {
+        return Result.success(libraryService.listForeshadows(novelId));
     }
 
     @PutMapping("/foreshadows/{id}")
-    public Result<Void> updateForeshadow(@PathVariable long id, @RequestBody Map<String, Object> body) {
-        Integer plantedIn = body.get("plantedIn") instanceof Number n ? n.intValue() : null;
-        Integer recoveredIn = body.get("recoveredIn") instanceof Number n ? n.intValue() : null;
-        libraryService.updateForeshadow(id, (String) body.get("content"),
-                plantedIn, recoveredIn, (String) body.get("status"));
-        return Result.ok();
+    public Result<Void> updateForeshadow(@PathVariable long id, @RequestBody ForeshadowUpdateVO dto) {
+        libraryService.updateForeshadow(id, dto.content(), dto.plantedIn(), dto.recoveredIn(), dto.status());
+        return Result.success();
     }
 
     // ===== 事实账 =====
 
     @GetMapping("/novels/{novelId}/digests")
     public Result<List<DigestDataService.DigestItem>> digests(@PathVariable long novelId) {
-        return Result.ok(libraryService.listDigests(novelId));
+        return Result.success(libraryService.listDigests(novelId));
     }
 
     @PutMapping("/digests/{id}")
-    public Result<Void> updateDigest(@PathVariable long id, @RequestBody Map<String, String> body) {
-        libraryService.updateDigest(id, body.get("contentMd"), body.get("facts"));
-        return Result.ok();
+    public Result<Void> updateDigest(@PathVariable long id, @RequestBody DigestUpdateVO dto) {
+        libraryService.updateDigest(id, dto.contentMd(), dto.facts());
+        return Result.success();
     }
 
     // ===== 风格包 =====
 
     @GetMapping("/novels/{novelId}/style")
     public Result<LibraryService.StylePackVO> style(@PathVariable long novelId) {
-        return Result.ok(libraryService.styleByNovel(novelId));
+        return Result.success(libraryService.styleByNovel(novelId));
     }
 
     @PutMapping("/novels/{novelId}/style")
-    public Result<Void> updateStyle(@PathVariable long novelId, @RequestBody Map<String, String> body) {
-        libraryService.updateStyleRules(novelId, body.get("rulesMd"));
-        return Result.ok();
+    public Result<Void> updateStyle(@PathVariable long novelId, @RequestBody StyleUpdateVO dto) {
+        libraryService.updateStyleRules(novelId, dto.rulesMd());
+        return Result.success();
     }
 
     @PutMapping("/novels/{novelId}/gate-config")
-    public Result<Void> updateGateConfig(@PathVariable long novelId, @RequestBody Map<String, String> body) {
-        libraryService.updateGateConfig(novelId, body.get("gateConfig"));
-        return Result.ok();
+    public Result<Void> updateGateConfig(@PathVariable long novelId, @RequestBody GateConfigUpdateVO dto) {
+        libraryService.updateGateConfig(novelId, dto.gateConfig());
+        return Result.success();
     }
 
     /** 原始门禁配置 JSON（前端合并评审标准后保存）。 */
     @GetMapping("/novels/{novelId}/gate-config")
     public Result<String> gateConfig(@PathVariable long novelId) {
-        return Result.ok(libraryService.gateConfigJson(novelId));
+        return Result.success(libraryService.gateConfigJson(novelId));
     }
 
     /** 有效评审标准五项（gate_config > tuning > 代码默认），工作台/风格包调参面板回显。 */
     @GetMapping("/novels/{novelId}/reader-standards")
     public Result<Map<String, Double>> readerStandards(@PathVariable long novelId) {
-        return Result.ok(gateService.readerStandards(novelId));
+        return Result.success(gateService.readerStandards(novelId));
     }
 
     // ===== 世界状态账 =====
@@ -301,21 +269,61 @@ public class LibraryController {
     @GetMapping("/novels/{novelId}/world-states")
     public Result<List<WorldStateDataService.StateRow>> worldStates(@PathVariable long novelId,
                                                             @RequestParam(defaultValue = "50") int limit) {
-        return Result.ok(libraryService.listWorldStates(novelId, limit));
+        return Result.success(libraryService.listWorldStates(novelId, limit));
     }
 
     /** 人工纠偏某章快照：body.state 为 JSON 字符串。 */
     @PutMapping("/novels/{novelId}/world-states/{chapterNo}")
     public Result<Void> saveWorldState(@PathVariable long novelId, @PathVariable int chapterNo,
-                                       @RequestBody Map<String, String> body) {
-        libraryService.saveWorldState(novelId, chapterNo, body.get("state"));
-        return Result.ok();
+                                       @RequestBody WorldStateSaveVO dto) {
+        libraryService.saveWorldState(novelId, chapterNo, dto.state());
+        return Result.success();
     }
 
     /** 存量回填：对已有正文但无快照的章做一次轻量状态抽取（同步，约 30-60 秒/章）。 */
     @PostMapping("/novels/{novelId}/world-states/backfill/{chapterNo}")
     public Result<Void> backfillWorldState(@PathVariable long novelId, @PathVariable int chapterNo) {
         digestService.backfillState(novelId, chapterNo);
-        return Result.ok();
+        return Result.success();
     }
+
+    // ===== 请求 DTO（字段名与前端 payload 逐字对齐；后缀规约）=====
+
+    public record PromptUpdateVO(String content) {}
+
+    /** tuning 值库存为字符串，数字/文本都可能，绑定保持 Object。 */
+    public record TuningUpdateVO(Object value) {}
+
+    public record LlmNodeCreateVO(String node, String model, Double temperature, Integer maxTokens,
+                                   String extraJson, Boolean enabled, String remark) {}
+
+    public record LlmNodeUpdateVO(String model, Double temperature, Integer maxTokens,
+                                   String extraJson, Boolean enabled, String remark) {}
+
+    public record LlmPriceUpdateVO(BigDecimal idleInputHit, BigDecimal idleInputMiss,
+                                     BigDecimal idleOutput, BigDecimal peakInputHit,
+                                     BigDecimal peakInputMiss, BigDecimal peakOutput,
+                                     Integer peakStartHour, Integer peakEndHour, String remark) {}
+
+    /** 素材卡新增/更新共用；缺省 aliases 归一为空表。 */
+    public record CardSaveVO(String kind, String name, List<String> aliases, String summary, String contentMd,
+                              Boolean pinned, String status, Integer sourceChapter) {
+        public CardSaveVO {
+            if (aliases == null) aliases = List.of();
+        }
+    }
+
+    public record CanonCreateVO(String kind, String name, String content) {}
+
+    public record CanonUpdateVO(String content) {}
+
+    public record ForeshadowUpdateVO(String content, Integer plantedIn, Integer recoveredIn, String status) {}
+
+    public record DigestUpdateVO(String contentMd, String facts) {}
+
+    public record StyleUpdateVO(String rulesMd) {}
+
+    public record GateConfigUpdateVO(String gateConfig) {}
+
+    public record WorldStateSaveVO(String state) {}
 }

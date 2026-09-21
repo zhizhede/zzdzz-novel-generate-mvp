@@ -1,8 +1,7 @@
 package com.zzdzz.novelgen.runner;
 
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.service.ChapterPipelineService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -12,9 +11,9 @@ import org.springframework.stereotype.Component;
 /** 自动连跑入口：参数解析与结果日志，编排逻辑在 ChapterPipelineService。 */
 @Component
 @ConditionalOnProperty(name = "pipeline.enabled", havingValue = "true")
+@Slf4j
 public class AutoRunRunner implements ApplicationRunner {
 
-    private static final Logger log = LoggerFactory.getLogger(AutoRunRunner.class);
 
     private final ChapterPipelineService pipeline;
     private final String novelTitle;

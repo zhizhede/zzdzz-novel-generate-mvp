@@ -17,7 +17,7 @@ INSERT INTO canon_docs (novel_id, kind, name, content) VALUES (#{novelId}, #{kin
                 
     </select>
 
-    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.CanonDocDO">
+    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.dto.CanonDocDTO">
 
                 SELECT id, novel_id, kind, name, NULL AS content, sort_no, is_deleted
                 FROM canon_docs WHERE novel_id=#{novelId} AND is_deleted=false ORDER BY kind, sort_no, id
@@ -35,7 +35,7 @@ SELECT id FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{
                 
     </select>
 
-    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.CanonDocDO">
+    <select id="findById" resultType="com.zzdzz.novelgen.model.dto.CanonDocDTO">
 
                 SELECT id, novel_id, kind, name, content, sort_no, is_deleted
                 FROM canon_docs WHERE id=#{id} AND is_deleted=false

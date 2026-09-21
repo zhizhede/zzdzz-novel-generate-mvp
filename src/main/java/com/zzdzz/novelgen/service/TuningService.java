@@ -1,12 +1,14 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.service.data.TuningDataService;
-import com.zzdzz.novelgen.model.entity.TuningDO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.zzdzz.novelgen.model.dto.TuningDTO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import com.zzdzz.novelgen.model.vo.TuningVO;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -17,9 +19,10 @@ import java.util.function.Function;
  * 新调参键先在 V15 种子与调用方默认里登记，改值走素材库「调参」页。
  */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class TuningService {
 
-    private static final Logger log = LoggerFactory.getLogger(TuningService.class);
 
     private static final long TTL_MS = 30_000;
 
@@ -27,9 +30,6 @@ public class TuningService {
     private final Map<String, String> cache = new ConcurrentHashMap<>();
     private volatile long loadedAt = 0;
 
-    public TuningService(TuningDataService dao) {
-        this.dao = dao;
-    }
 
     public double d(String key, double fallback) {
         return parse(key, fallback, Double::parseDouble);
@@ -61,8 +61,8 @@ public class TuningService {
     public synchronized void refresh() {
         try {
             Map<String, String> next = new ConcurrentHashMap<>();
-            for (TuningDO row : dao.findAll()) {
-                next.put(row.key(), row.value());
+            for (TuningDTO row : dao.findAll()) {
+                next.put(row.getKey(), row.getValue());
             }
             cache.clear();
             cache.putAll(next);
@@ -73,8 +73,8 @@ public class TuningService {
         }
     }
 
-    public List<TuningDO> list() {
-        return dao.findAll();
+    public List<TuningVO> list() {
+        return dao.findAll().stream().map(TuningVO::from).toList();
     }
 
     public void update(String key, String value) {

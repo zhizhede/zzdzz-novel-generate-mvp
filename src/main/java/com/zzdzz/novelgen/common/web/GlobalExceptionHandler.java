@@ -1,13 +1,13 @@
 package com.zzdzz.novelgen.common.web;
 
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.llm.LlmException;
 import jakarta.servlet.http.HttpServletResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -15,9 +15,9 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
  * BizException 按码；LLM 调用失败归 C 类第三方；参数类异常归 A 类；其余兜底 B0001。
  */
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
-    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(BizException.class)
     public Result<Void> handleBiz(BizException e, HttpServletResponse resp) {
@@ -27,7 +27,7 @@ public class GlobalExceptionHandler {
             log.warn("业务异常 code={}：{}", e.errorCode().code(), e.getMessage());
         }
         resp.setStatus(e.errorCode().httpStatus().value());
-        return Result.fail(e.errorCode(), e.getMessage());
+        return Result.fail(e.errorCode(), e.getMessage(), e.detail());
     }
 
     /** LLM（第三方）调用失败：C 类，保留原始错误信息供溯源。 */
@@ -49,6 +49,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public Result<Void> handleOther(Exception e, HttpServletResponse resp) {
+        // SSE/长连接客户端断开后，异步响应体的迟到写失败——响应已提交，无事可做，静默即可
+        if (e instanceof java.net.SocketTimeoutException
+                || e instanceof AsyncRequestNotUsableException
+                || "ClientAbortException".equals(e.getClass().getSimpleName())) {
+            log.debug("客户端连接已断开，响应写失败忽略：{}", e.getMessage());
+            resp.setStatus(200);
+            return null;
+        }
         log.error("未捕获异常", e);
         resp.setStatus(ErrorCode.SYSTEM_ERROR.httpStatus().value());
         return Result.fail(ErrorCode.SYSTEM_ERROR, "系统错误：" + e.getMessage());

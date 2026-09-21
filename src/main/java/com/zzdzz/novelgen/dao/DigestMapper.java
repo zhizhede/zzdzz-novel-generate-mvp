@@ -1,13 +1,14 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.entity.DigestDO;
+import com.zzdzz.novelgen.model.dto.DigestDTO;
+import com.zzdzz.novelgen.service.data.DigestDataService;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
 /** digests 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/DigestMapper.xml。 */
-public interface DigestMapper extends BaseMapper<DigestDO> {
+public interface DigestMapper extends BaseMapper<DigestDTO> {
 
     int updateContent(@Param("id") long id, @Param("contentMd") String contentMd, @Param("factsJson") String factsJson);
 
@@ -17,5 +18,5 @@ public interface DigestMapper extends BaseMapper<DigestDO> {
 
     boolean existsByChapter(@Param("chapterId") long chapterId);
 
-    java.util.List<java.util.Map<String, Object>> listByNovel(@Param("novelId") long novelId);
+    List<DigestDataService.DigestItem> listByNovel(@Param("novelId") long novelId);
 }

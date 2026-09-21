@@ -1,13 +1,15 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.model.enums.PlanMode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
-import com.zzdzz.novelgen.model.entity.CanonDocDO;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.CanonDocDTO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -22,6 +24,7 @@ import java.util.Map;
  * 以及 AI 卷纲规划（委托 VolumePlanService，含模式切换）。
  */
 @Service
+@RequiredArgsConstructor
 public class PlanningService {
 
     private static final String STORY_KIND = "misc";
@@ -35,18 +38,6 @@ public class PlanningService {
     private final NovelDataService novelData;
     private final ObjectMapper mapper;
 
-    public PlanningService(CanonDocDataService canonData, ChapterDataService chapterData,
-                           SceneDataService sceneData, ChapterPipelineService pipelineService,
-                           VolumePlanService volumePlanService, NovelDataService novelData,
-                           ObjectMapper mapper) {
-        this.canonData = canonData;
-        this.chapterData = chapterData;
-        this.sceneData = sceneData;
-        this.pipelineService = pipelineService;
-        this.volumePlanService = volumePlanService;
-        this.novelData = novelData;
-        this.mapper = mapper;
-    }
 
     // ===== 大纲 =====
 
@@ -69,52 +60,52 @@ public class PlanningService {
     // ===== 卷纲 =====
 
     public List<Map<String, Object>> volumes(long novelId) {
-        List<ChapterDO> chapters = chapterData.listSummariesByNovel(novelId);
-        Map<Integer, List<ChapterDO>> byVolume = new LinkedHashMap<>();
-        for (ChapterDO c : chapters) {
-            byVolume.computeIfAbsent(c.volumeNo() == null ? 0 : c.volumeNo(), k -> new ArrayList<>()).add(c);
+        List<ChapterDTO> chapters = chapterData.listSummariesByNovel(novelId);
+        Map<Integer, List<ChapterDTO>> byVolume = new LinkedHashMap<>();
+        for (ChapterDTO c : chapters) {
+            byVolume.computeIfAbsent(c.getVolumeNo() == null ? 0 : c.getVolumeNo(), k -> new ArrayList<>()).add(c);
         }
         List<Map<String, Object>> volumes = new ArrayList<>();
         for (var e : byVolume.entrySet()) {
-            ChapterDO first = e.getValue().get(0);
+            ChapterDTO first = e.getValue().get(0);
             Map<String, Object> v = new LinkedHashMap<>();
             v.put("volNo", e.getKey());
-            v.put("arc", e.getKey() == 0 ? "未分卷" : first.arc());
+            v.put("arc", e.getKey() == 0 ? "未分卷" : first.getArc());
             v.put("chapters", e.getValue().stream().map(this::toPlanVO).toList());
             volumes.add(v);
         }
         return volumes;
     }
 
-    private Map<String, Object> toPlanVO(ChapterDO c) {
+    private Map<String, Object> toPlanVO(ChapterDTO c) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("id", c.id());
-        m.put("chapterNo", c.chapterNo());
-        m.put("title", c.title());
-        m.put("goal", c.goal());
-        m.put("hook", c.hook());
-        m.put("timeNote", c.timeNote());
-        m.put("status", c.status());
-        m.put("hasText", c.fullText() != null && !c.fullText().isBlank());
-        m.put("budgetMin", c.budgetMin());
-        m.put("budgetMax", c.budgetMax());
-        m.put("sceneCount", sceneData.countByChapter(c.id()));
+        m.put("id", c.getId());
+        m.put("chapterNo", c.getChapterNo());
+        m.put("title", c.getTitle());
+        m.put("goal", c.getGoal());
+        m.put("hook", c.getHook());
+        m.put("timeNote", c.getTimeNote());
+        m.put("status", c.getStatus());
+        m.put("hasText", c.getFullText() != null && !c.getFullText().isBlank());
+        m.put("budgetMin", c.getBudgetMin());
+        m.put("budgetMax", c.getBudgetMax());
+        m.put("sceneCount", sceneData.countByChapter(c.getId()));
         return m;
     }
 
     public void updatePlan(long chapterId, Integer volNo, String arc, String title,
                            String goal, String hook, String timeNote, Integer budgetMin, Integer budgetMax) {
-        ChapterDO ch = chapterData.findById(chapterId)
+        ChapterDTO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         chapterData.updatePlan(chapterId,
-                volNo != null ? volNo : ch.volumeNo(),
-                arc != null ? arc : ch.arc(),
-                title != null ? title : ch.title(),
-                goal != null ? goal : ch.goal(),
-                hook != null ? hook : ch.hook(),
-                timeNote != null ? timeNote : ch.timeNote(),
-                budgetMin != null ? budgetMin : ch.budgetMin(),
-                budgetMax != null ? budgetMax : ch.budgetMax());
+                volNo != null ? volNo : ch.getVolumeNo(),
+                arc != null ? arc : ch.getArc(),
+                title != null ? title : ch.getTitle(),
+                goal != null ? goal : ch.getGoal(),
+                hook != null ? hook : ch.getHook(),
+                timeNote != null ? timeNote : ch.getTimeNote(),
+                budgetMin != null ? budgetMin : ch.getBudgetMin(),
+                budgetMax != null ? budgetMax : ch.getBudgetMax());
     }
 
     public void addPlan(long novelId, int chapterNo, int volNo, String arc, String title,
@@ -127,10 +118,10 @@ public class PlanningService {
     }
 
     public void deletePlan(long chapterId) {
-        ChapterDO ch = chapterData.findById(chapterId)
+        ChapterDTO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
-        if (ch.fullText() != null && !ch.fullText().isBlank()) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "第 " + ch.chapterNo() + " 章已有正文，禁止删除");
+        if (ch.getFullText() != null && !ch.getFullText().isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "第 " + ch.getChapterNo() + " 章已有正文，禁止删除");
         }
         chapterData.softDeletePlan(chapterId);
     }
@@ -144,7 +135,7 @@ public class PlanningService {
     }
 
     public void setPlanMode(long novelId, String mode) {
-        if (!"auto".equals(mode) && !"manual".equals(mode)) {
+        if (!PlanMode.AUTO.is(mode) && !PlanMode.MANUAL.is(mode)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "规划模式只支持 auto / manual");
         }
         novelData.updatePlanMode(novelId, mode);
@@ -195,14 +186,14 @@ public class PlanningService {
 
     /** 单章卷纲重写（人工纠偏 / 管线自愈共用）：返回重写后的规划行。 */
     public Map<String, Object> replanChapter(long novelId, int chapterNo, String reason) {
-        ChapterDO ch = volumePlanService.replanChapter(novelId, chapterNo,
+        ChapterDTO ch = volumePlanService.replanChapter(novelId, chapterNo,
                 reason == null || reason.isBlank() ? "人工触发重写" : reason);
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("chapterNo", ch.chapterNo());
-        m.put("title", ch.title());
-        m.put("goal", ch.goal());
-        m.put("hook", ch.hook());
-        m.put("timeNote", ch.timeNote());
+        m.put("chapterNo", ch.getChapterNo());
+        m.put("title", ch.getTitle());
+        m.put("goal", ch.getGoal());
+        m.put("hook", ch.getHook());
+        m.put("timeNote", ch.getTimeNote());
         return m;
     }
 
@@ -230,9 +221,9 @@ public class PlanningService {
     // ===== 章纲 =====
 
     public List<OutlineService.SceneSpec> scenes(long novelId, int chapterNo) {
-        ChapterDO ch = chapterData.find(novelId, chapterNo)
+        ChapterDTO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
-        return outlineSpecs(ch.id());
+        return outlineSpecs(ch.getId());
     }
 
     public List<OutlineService.SceneSpec> regenerate(long novelId, int chapterNo) {
@@ -241,9 +232,9 @@ public class PlanningService {
 
     private List<OutlineService.SceneSpec> outlineSpecs(long chapterId) {
         return sceneData.findByChapter(chapterId).stream()
-                .map(s -> new OutlineService.SceneSpec(s.sceneNo(), s.goal(),
-                        toList(s.present()), toList(s.mustReveal()), toList(s.mustNot()),
-                        s.wordsBudget()))
+                .map(s -> new OutlineService.SceneSpec(s.getSceneNo(), s.getGoal(),
+                        toList(s.getPresent()), toList(s.getMustReveal()), toList(s.getMustNot()),
+                        s.getWordsBudget()))
                 .toList();
     }
 

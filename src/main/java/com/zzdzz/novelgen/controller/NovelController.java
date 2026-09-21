@@ -1,7 +1,8 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.dto.ApprovalModeDTO;
+import com.zzdzz.novelgen.model.vo.ApprovalModeVO;
 import com.zzdzz.novelgen.model.vo.NovelVO;
 import com.zzdzz.novelgen.service.NovelService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,22 +17,20 @@ import java.util.List;
 /** 作品列表与审批模式切换（auto 直过 / manual 人工）。 */
 @RestController
 @RequestMapping("/api/novels")
+@RequiredArgsConstructor
 public class NovelController {
 
     private final NovelService novelService;
 
-    public NovelController(NovelService novelService) {
-        this.novelService = novelService;
-    }
 
     @GetMapping
     public Result<List<NovelVO>> list() {
-        return Result.ok(novelService.list());
+        return Result.success(novelService.list());
     }
 
     @PutMapping("/{id}/approval-mode")
-    public Result<Void> setApprovalMode(@PathVariable long id, @RequestBody ApprovalModeDTO dto) {
+    public Result<Void> setApprovalMode(@PathVariable long id, @RequestBody ApprovalModeVO dto) {
         novelService.setApprovalMode(id, dto.mode());
-        return Result.ok();
+        return Result.success();
     }
 }

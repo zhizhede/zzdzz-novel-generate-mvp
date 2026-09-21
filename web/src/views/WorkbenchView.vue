@@ -19,11 +19,24 @@
         <el-tag :type="running ? 'warning' : 'info'" size="small">{{ running ? '运行中' : '空闲' }}</el-tag>
         <span style="color:#999;font-size:12px">{{ lastMessage }}</span>
         <el-badge :value="pendingCount" :hidden="!pendingCount" style="margin-left: auto">
-          <el-button size="small" plain @click="goPending">待审批{{ pendingCount ? ` ${pendingCount} 章` : '' }}</el-button>
+          <el-button size="small" plain @click="openPending">待审批{{ pendingCount ? ` ${pendingCount} 章` : '' }}</el-button>
         </el-badge>
         <router-link to="/chapters" style="font-size: 12px; margin-left: 12px">去章节页阅读 →</router-link>
       </div>
     </el-card>
+
+    <!-- 待审批明细（此前只有计数，章列表接口一直有数据没展示） -->
+    <el-dialog v-model="pendingOpen" title="待审批章节" width="480px">
+      <el-table v-if="pendingList.length" :data="pendingList" border size="small" @row-click="goPending">
+        <el-table-column prop="chapterNo" label="章号" width="70" />
+        <el-table-column prop="title" label="标题" min-width="160" />
+        <el-table-column label="预算" width="120">
+          <template #default="{ row }">{{ row.budgetMin }}-{{ row.budgetMax }} 字</template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-else description="当前无待审批章节" :image-size="50" />
+      <div style="font-size: 12px; color: #999; margin-top: 8px">点行跳转章节页审批</div>
+    </el-dialog>
 
     <el-card shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
@@ -48,7 +61,10 @@
         <el-table-column prop="id" label="#" width="50" />
         <el-table-column prop="novelTitle" label="作品" width="150" show-overflow-tooltip />
         <el-table-column label="范围" width="80">
-          <template #default="{ row }">{{ row.fromChapter }}-{{ row.toChapter }}</template>
+          <template #default="{ row }">
+            <span v-if="row.kind === 'PLAN'">卷纲规划</span>
+            <span v-else>{{ row.fromChapter }}-{{ row.toChapter }}</span>
+          </template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
@@ -66,7 +82,7 @@
         </el-table-column>
         <el-table-column label="当前阶段" min-width="140">
           <template #default="{ row }">
-            <span v-if="row.status === 'RUNNING'" style="color:#e6a23c;font-size:12px">{{ row.currentStep || '准备中' }}</span>
+            <el-link v-if="row.status === 'RUNNING'" type="primary" :underline="false" style="font-size:12px;color:#e6a23c" @click="openSession(row)">{{ row.currentStep || '准备中' }} ⤢</el-link>
             <span v-else style="color:#bbb">-</span>
           </template>
         </el-table-column>
@@ -78,8 +94,9 @@
         </el-table-column>
         <el-table-column prop="lastMessage" label="消息" min-width="150" show-overflow-tooltip />
         <el-table-column prop="createTime" label="提交时间" width="110" />
-        <el-table-column label="操作" width="80">
+        <el-table-column label="操作" width="130">
           <template #default="{ row }">
+            <el-button v-if="row.status === 'RUNNING'" size="small" type="primary" plain @click="openSession(row)">会话</el-button>
             <el-button v-if="row.status === 'QUEUED'" size="small" type="danger" plain @click="cancelTask(row)">取消</el-button>
             <el-button v-else-if="row.status === 'RUNNING'" size="small" type="danger" @click="stopTask(row)">停止</el-button>
             <el-button v-else-if="row.status === 'PAUSED'" size="small" type="success" @click="resumeTask(row)">继续</el-button>
@@ -98,17 +115,82 @@
         </el-card>
       </el-col>
       <el-col :span="14">
-        <el-card shadow="never" header="生成输出（场景流式块）">
-          <div style="height: 560px; overflow-y: auto">
+        <el-card shadow="never" header="生成输出（实时流式）">
+          <div ref="outBox" style="height: 560px; overflow-y: auto">
             <div v-for="s in scenes" :key="s.key" style="margin-bottom: 16px">
-              <div style="color:#999;font-size:12px;margin-bottom:4px">{{ s.title }}（{{ s.phase === 'reused' ? '复用缓存' : '新生成' }}）</div>
-              <div style="white-space: pre-wrap; border-left: 3px solid #ddd; padding-left: 10px">{{ s.text }}</div>
+              <div style="color:#999;font-size:12px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+                <span>{{ s.title }}</span>
+                <el-tag v-if="s.streaming" type="warning" size="small" effect="plain">
+                  {{ s.text ? '正文流式生成中' : (s.think ? '思考中…' : '检索上下文中…') }}
+                </el-tag>
+                <el-tag v-else size="small" effect="plain" type="info">{{ s.phase === 'reused' ? '复用缓存' : '已完成' }}</el-tag>
+                <el-link v-if="s.think" type="info" :underline="false" style="font-size:12px" @click="s.thinkOpen = !s.thinkOpen">
+                  {{ s.thinkOpen ? '收起思考' : `思考过程（${s.think.length}字）` }}
+                </el-link>
+              </div>
+              <div v-if="s.streaming && !s.think && !s.text" style="color:#b0b3ba;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px">
+                ⏳ 检索与打包上下文（世界状态/事实账/RAG 召回，约 10-20 秒后开始逐字输出）…
+              </div>
+              <div v-if="s.think && (s.thinkOpen || (s.streaming && !s.text))"
+                   style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:220px;overflow-y:auto">{{ s.think }}</div>
+              <div style="white-space: pre-wrap; border-left: 3px solid #409eff; padding-left: 10px">{{ s.text }}<span v-if="s.streaming && s.text" style="color:#409eff">▍</span></div>
             </div>
-            <el-empty v-if="!scenes.length" description="启动生成后在此实时显示场景文本" :image-size="60" />
+            <el-empty v-if="!scenes.length" description="启动生成后在此实时看到 AI 的思考与正文逐字流出" :image-size="60" />
           </div>
         </el-card>
       </el-col>
     </el-row>
+
+    <!-- 会话视图：agent-IDE 式实时转录（RUNNING 任务点 [会话] 进入；断线/错过的历史见章节抽屉·档案） -->
+    <el-dialog v-model="sessionOpen" fullscreen top="0" :show-close="true"
+      :title="sessionTask ? `会话 · 任务 #${sessionTask.id} ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '会话'">
+      <template #header>
+        <div style="display:flex; align-items:center; gap:12px; padding-right: 32px">
+          <b>{{ sessionTask ? `任务 #${sessionTask.id} · ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '' }}</b>
+          <el-tag v-if="sessionTask" size="small" :type="TASK_COLOR[sessionTask.status] || 'info'">{{ TASK_TEXT[sessionTask.status] || sessionTask.status }}</el-tag>
+          <span v-if="sessionTask?.status === 'RUNNING'" style="color:#e6a23c;font-size:13px">{{ sessionTask.currentStep || '准备中' }}</span>
+          <span v-if="sessionTask?.status === 'RUNNING' && sessionTask.chapterTokens != null" style="font-size:13px;color:#606266">本章 {{ sessionTask.chapterTokens.toLocaleString() }} tokens</span>
+          <span style="flex:1"></span>
+          <el-button v-if="sessionTask?.status === 'RUNNING'" size="small" type="danger" @click="stopTask(sessionTask)">停止</el-button>
+        </div>
+      </template>
+      <div ref="sessBox" style="height: calc(100vh - 110px); overflow-y: auto; max-width: 880px; margin: 0 auto; padding: 0 8px"
+        @scroll="onSessionScroll">
+        <div v-for="(t, i) in transcript" :key="i" style="margin-bottom: 14px">
+          <!-- 章节分节头 -->
+          <div v-if="t.type === 'header'" style="border-bottom: 1px solid #e4e7ed; padding-bottom: 6px; margin: 18px 0 10px">
+            <b style="font-size: 15px">第{{ t.chapterNo }}章 {{ t.title }}</b>
+            <el-tag v-if="t.state" size="small" style="margin-left:8px" :type="t.state === '完成' ? 'success' : 'danger'">{{ t.state }}</el-tag>
+          </div>
+          <!-- 场景：流式思考/正文块 -->
+          <div v-else-if="t.type === 'scene'">
+            <div style="color:#67c23a;font-size:13px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+              <b>场景 {{ t.sceneNo }}</b>
+              <span style="color:#999;font-size:12px">{{ t.goal }}</span>
+              <el-tag v-if="t.streaming" type="warning" size="small" effect="plain">{{ t.text ? '正文流式生成中' : (t.think ? '思考中…' : '检索上下文中…') }}</el-tag>
+              <el-tag v-else size="small" effect="plain" type="info">{{ t.phase === 'reused' ? '复用缓存' : '完成' }}</el-tag>
+              <el-link v-if="t.think" type="info" :underline="false" style="font-size:12px" @click="t.thinkOpen = !t.thinkOpen">
+                {{ t.thinkOpen ? '收起思考' : `思考（${t.think.length}字）` }}
+              </el-link>
+            </div>
+            <div v-if="t.streaming && !t.think && !t.text" style="color:#b0b3ba;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px">
+              ⏳ 检索与打包上下文（约 10-20 秒后开始逐字输出）…
+            </div>
+            <div v-if="t.think && (t.thinkOpen || (t.streaming && !t.text))"
+                 style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
+            <div style="white-space:pre-wrap; border-left: 3px solid #409eff; padding-left: 10px; font-size: 14px; line-height: 1.9">{{ t.text }}<span v-if="t.streaming && t.text" style="color:#409eff">▍</span></div>
+          </div>
+          <!-- 通用步骤/判定行 -->
+          <div v-else style="font-size: 13px; display: flex; align-items: baseline; gap: 8px">
+            <span :style="{ color: t.color || '#606266' }">▸ {{ t.title }}</span>
+            <span v-if="t.note" style="color:#999;font-size:12px">{{ t.note }}</span>
+            <el-link v-if="t.reason" type="danger" :underline="false" style="font-size:12px" @click="t.open = !t.open">{{ t.open ? '收起原因' : '原因' }}</el-link>
+            <div v-if="t.reason && t.open" style="width:100%; white-space:pre-wrap; color:#c45656; font-size:12px; background:#fef0f0; padding:6px 10px; border-radius:4px; margin-top:4px">{{ t.reason }}</div>
+          </div>
+        </div>
+        <el-empty v-if="!transcript.length" description="暂无转录事件（打开后自动读取本章已完成部分，新事件实时追加）" :image-size="60" />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -117,6 +199,7 @@ import { onMounted, onUnmounted, ref, nextTick, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
+import { NODE_LABEL, GATE_LABEL, STEP_LABEL, TASK_TEXT, TASK_COLOR } from '../labels'
 
 const novel = ref(null)
 const novels = ref([])
@@ -127,12 +210,139 @@ const to = ref(2)
 const running = ref(false)
 const lastMessage = ref('')
 const queue = ref([])
-const TASK_TEXT = { QUEUED: '排队中', RUNNING: '生成中', DONE: '完成', STOPPED: '已停止', CANCELED: '已取消', INTERRUPTED: '已终止', PAUSED: '已暂停' }
-const TASK_COLOR = { QUEUED: 'info', RUNNING: 'warning', DONE: 'success', STOPPED: 'danger', CANCELED: 'info', INTERRUPTED: 'danger', PAUSED: 'info' }
 const pendingCount = ref(0)
+const pendingList = ref([])
 const logs = ref([])
 const scenes = ref([])
 const logBox = ref(null)
+const outBox = ref(null)
+
+// ===== 会话视图（agent-IDE 式转录）=====
+const sessionOpen = ref(false)
+const sessionTask = ref(null)
+const transcript = ref([])
+const sessBox = ref(null)
+let followSession = true
+
+function onSessionScroll() {
+  const el = sessBox.value
+  if (!el) return
+  // 滚到底部附近才跟随；用户上翻即暂停，翻回底部恢复
+  followSession = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+}
+
+function scrollSession() {
+  if (!followSession) return
+  nextTick(() => { if (sessBox.value) sessBox.value.scrollTop = sessBox.value.scrollHeight })
+}
+
+function openSession(row) {
+  sessionTask.value = row
+  sessionOpen.value = true
+  followSession = true
+  scrollSession()
+  seedSession(row)
+}
+
+/** 会话打底：中途打开/刷新后打开也不是空的——把当前章已完成的部分（步骤/调用/判定）从 trace 读回来。
+ *  每章只打一次底；之后的增量继续走 SSE。 */
+let sessionSeededKey = ''
+async function seedSession(row) {
+  if (!row || row.kind === 'PLAN' || !row.currentChapter || !novelId.value) return
+  const seedKey = `${row.id}-${row.currentChapter}`
+  if (seedKey === sessionSeededKey) return
+  try {
+    const chapters = await api.get(`/api/novels/${novelId.value}/chapters`)
+    const ch = chapters.find((c) => c.chapterNo === row.currentChapter)
+    if (!ch) return
+    const t = await api.get(`/api/chapters/${ch.id}/trace`)
+    const seed = []
+    seed.push({ type: 'header', chapterNo: t.chapterNo, title: t.title,
+      state: t.status === 'PENDING_APPROVAL' ? '待审批' : null })
+    const entries = []
+    for (const s of t.steps || []) entries.push({ time: s.updateTime || s.createTime,
+      line: { type: 'line', title: `${STEP_LABEL[s.step] || s.step}${s.subKey ? ' · 场景 ' + s.subKey : ''} · ${s.status}`,
+        note: s.attempt > 1 ? `第 ${s.attempt} 次尝试` : '', color: s.status === 'DONE' ? '#67c23a' : s.status === 'RUNNING' ? '#e6a23c' : '#c45656' } })
+    for (const c of t.calls || []) entries.push({ time: c.createTime,
+      line: { type: 'line', title: `${NODE_LABEL[c.node] || c.node}${c.status === 'error' ? '（失败）' : ''}`,
+        note: `${(c.totalTokens || 0).toLocaleString()} tok · ${(c.latencyMs / 1000).toFixed(0)}s${c.cost != null ? ' · ¥' + c.cost.toFixed(4) : ''}`,
+        color: c.status === 'error' ? '#c45656' : '#606266' } })
+    for (const k of t.checks || []) entries.push({ time: k.createTime,
+      line: { type: 'line', title: `${GATE_LABEL[k.gateType] || k.gateType}${k.sceneId ? ' · 场景级' : ''} · 第 ${k.round || 1} 轮 · ${k.passed ? '通过' : '未过'}`,
+        color: k.passed ? '#67c23a' : '#e6a23c' } })
+    entries.sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
+    for (const e of entries) seed.push(e.line)
+    // 历史打底放在已有实时条目之前（本页若已积累 live 事件）
+    transcript.value = [...seed, ...transcript.value]
+    sessionSeededKey = seedKey
+    scrollSession()
+  } catch { /* 打底失败不拦实时视图 */ }
+}
+
+function findTranscriptScene(d) {
+  return [...transcript.value].reverse().find((t) => t.type === 'scene' && t.chapterNo === d.chapterNo && t.sceneNo === d.sceneNo)
+}
+
+/** SSE 事件 → 转录条目（与日志并行累积；本页会话期间有效，历史回溯走章节抽屉·档案）。 */
+function pushTranscript(event, d) {
+  if (event === 'run') {
+    transcript.value.push({ type: 'line', title: `任务 ${d.phase}`, note: d.message, color: '#909399' })
+  } else if (event === 'chapter') {
+    if (d.phase === 'start') {
+      transcript.value.push({ type: 'header', chapterNo: d.chapterNo, title: d.title, state: null })
+    } else {
+      const h = [...transcript.value].reverse().find((t) => t.type === 'header' && t.chapterNo === d.chapterNo)
+      if (h) h.state = d.phase === 'done' ? `完成（${d.chars} 字）` : d.phase === 'stopped' ? '终止' : '失败'
+      if (d.phase !== 'done') {
+        transcript.value.push({ type: 'line', title: d.phase === 'stopped' ? '用户终止' : '章失败', reason: d.reason, color: '#c45656' })
+      }
+    }
+  } else if (event === 'scene') {
+    if (d.reason === 'rag_degraded') {
+      transcript.value.push({ type: 'line', title: 'RAG 召回失败，本场景降级不注入', reason: d.message, color: '#e6a23c' })
+    } else if (d.phase === 'start') {
+      transcript.value.push({ type: 'scene', chapterNo: d.chapterNo, sceneNo: d.sceneNo, goal: d.goal,
+        text: '', think: '', thinkOpen: false, streaming: true, phase: d.phase })
+    } else if (d.phase === 'draft' || d.phase === 'reused') {
+      const s = findTranscriptScene(d)
+      if (s) { s.text = d.text; s.streaming = false; s.phase = d.phase }
+      else transcript.value.push({ type: 'scene', chapterNo: d.chapterNo, sceneNo: d.sceneNo, goal: '',
+        text: d.text, think: '', thinkOpen: false, streaming: false, phase: d.phase })
+    }
+  } else if (event === 'gate' || event === 'chapter_gate') {
+    transcript.value.push({
+      type: 'line', open: false,
+      title: `${event === 'gate' ? '场景 ' + d.sceneNo + ' 门禁' : '章级门禁'}${d.passed ? '通过' : '未过'}${d.rewrite ? '，重写' : ''}`,
+      reason: d.reason || undefined, color: d.passed ? '#67c23a' : '#e6a23c' })
+  } else if (event === 'revise') {
+    transcript.value.push({ type: 'line', title: `修订 ${d.phase}`, note: d.chars ? d.chars + ' 字' : '', color: '#e6a23c' })
+  } else if (event === 'reader') {
+    transcript.value.push({ type: 'line', title: `读者评审 ${d.phase}`, note: d.verdict ? `verdict=${d.verdict}` : '', color: '#e6a23c' })
+  } else if (event === 'review') {
+    const t = d.phase === 'start' ? 'AI 审校中'
+      : d.phase === 'done' ? `AI 审校：${d.verdict}${d.blocked ? '（转人工）' : ''}` : 'AI 审校异常（fail-open）'
+    transcript.value.push({ type: 'line', title: t, color: '#e6a23c' })
+  } else if (event === 'digest') {
+    transcript.value.push({ type: 'line', title: '事实账落库（digest）', color: '#67c23a' })
+  } else if (event === 'approve') {
+    transcript.value.push({ type: 'line', title: `待人工审批${d.reason === 'review_blocker' ? '（审校硬伤未清）' : ''}`, color: '#e6a23c' })
+  } else if (event === 'heal') {
+    transcript.value.push({ type: 'line', title: '自愈', note: d.message, color: '#e6a23c' })
+  } else if (event === 'outline') {
+    transcript.value.push({ type: 'line', title: `章纲 ${d.phase}`, note: d.sceneCount ? d.sceneCount + ' 个场景' : '', color: '#67c23a' })
+  } else if (event === 'assemble') {
+    transcript.value.push({ type: 'line', title: `拼章完成（${d.chars} 字），章级门禁检测中`, color: '#909399' })
+  } else if (event === 'volume_plan') {
+    if (d.phase === 'retry') transcript.value.push({ type: 'line', title: `卷纲规划第 ${d.round} 轮重写（${d.check}）`, reason: d.reason, color: '#e6a23c' })
+    else if (d.phase === 'failed') transcript.value.push({ type: 'line', title: '卷纲规划放弃（轮次用尽）', reason: d.reason, color: '#c45656' })
+    else if (d.phase === 'start') transcript.value.push({ type: 'line', title: `卷纲规划开始（第 ${d.volNo} 卷，从第 ${d.from} 章）`, color: '#67c23a' })
+    else if (d.phase === 'adopted') transcript.value.push({ type: 'line', title: `卷纲落库（${d.chapters} 章）`, color: '#67c23a' })
+    else if (d.phase === 'draft') transcript.value.push({ type: 'line', title: '卷纲草稿完成（manual 待采纳）', color: '#67c23a' })
+  } else if (event === 'volume_retro') {
+    transcript.value.push({ type: 'line', title: `卷级复盘 ${d.phase}`, color: '#909399' })
+  }
+  scrollSession()
+}
 let es = null
 let poll = null
 
@@ -169,6 +379,9 @@ const COLORS = {
 
 function log(event, data) {
   const d = typeof data === 'string' ? JSON.parse(data) : data
+  // 流式增量不进日志列表（高频），直接喂给实时输出区与会话转录
+  if (event === 'scene' && d.phase === 'chunk') { applyChunk(d); return }
+  try { pushTranscript(event, d) } catch { /* 转录渲染不牢靠时不影响日志主链路 */ }
   let text = `[${event}] `
   if (d.chapterNo !== undefined) text += `第${d.chapterNo}章 `
   if (event === 'run') {
@@ -181,7 +394,7 @@ function log(event, data) {
   }
   else if (event === 'chapter') text += d.phase === 'start' ? `《${d.title}》开始` : d.phase === 'done' ? `完成（${d.chars} 字符）` : `失败：${d.reason}`
   else if (event === 'outline') text += `章纲 ${d.phase}${d.sceneCount ? '，' + d.sceneCount + ' 个场景' : ''}`
-  else if (event === 'scene') text += `场景 ${d.sceneNo} ${d.phase}`
+  else if (event === 'scene') text += d.reason === 'rag_degraded' ? `RAG 召回失败降级（${d.message || ''}）` : `场景 ${d.sceneNo} ${d.phase}`
   else if (event === 'gate') text += `场景 ${d.sceneNo} 门禁${d.passed ? '通过' : '未过' + (d.rewrite ? '，重写中' : '')}`
   else if (event === 'assemble') text += `拼章完成（${d.chars} 字符），章级门禁检测中`
   else if (event === 'chapter_gate') text += `章级门禁${d.passed ? '通过' : '未过'}`
@@ -193,27 +406,76 @@ function log(event, data) {
   }
   else if (event === 'digest') text += `事实账落库`
   else if (event === 'approve') text += `待人工审批${d.reason === 'review_blocker' ? '（审校硬伤未清）' : ''}`
+  else if (event === 'reader') text += `读者评审 ${d.phase}${d.verdict ? '：' + d.verdict : ''}`
+  else if (event === 'heal') text += `自愈：${d.message || d.phase}`
+  else if (event === 'volume_plan') {
+    if (d.phase === 'retry') text += `卷纲第 ${d.round} 轮重写（${d.check}）：${(d.reason || '').slice(0, 60)}`
+    else if (d.phase === 'failed') text += `卷纲规划放弃：${d.reason || ''}`
+    else if (d.phase === 'adopted') text += `卷纲落库（${d.chapters} 章）`
+    else text += `卷纲规划 ${d.phase}（第 ${d.volNo} 卷）`
+  }
+  else if (event === 'volume_plan_review') text += `卷纲审校 ${d.phase}`
+  else if (event === 'volume_retro') text += `卷级复盘 ${d.phase}`
   logs.value.push({ text, color: COLORS[event] || '#303133' })
   scrollLog()
   if (event === 'run') running.value = d.phase === 'start'
+  if (event === 'scene' && d.phase === 'start') previewScene(d)
   if (event === 'scene' && (d.phase === 'draft' || d.phase === 'reused')) pushScene(d)
+}
+
+/** 场景开始即建条目：检索/打包上下文阶段就有可见占位（此前要等第一个 chunk 才有内容）。 */
+function previewScene(d) {
+  const key = `${d.chapterNo}-${d.sceneNo}`
+  if (!scenes.value.find((x) => x.key === key)) {
+    scenes.value.push({ key, title: `第${d.chapterNo}章 场景${d.sceneNo}`, phase: 'start',
+      text: '', think: '', thinkOpen: false, streaming: true })
+  }
+  scrollOut()
 }
 
 function pushScene(d) {
   const key = `${d.chapterNo}-${d.sceneNo}`
   const found = scenes.value.find((s) => s.key === key)
-  const item = { key, title: `第${d.chapterNo}章 场景${d.sceneNo}`, phase: d.phase, text: d.text }
+  const item = { key, title: `第${d.chapterNo}章 场景${d.sceneNo}`, phase: d.phase, text: d.text,
+    think: found?.think || '', thinkOpen: false, streaming: false }
   if (found) Object.assign(found, item)
   else scenes.value.push(item)
+  scrollOut()
+}
+
+/** 流式增量：思考/正文逐字追加到对应场景块（entry 不存在则新建）。 */
+function applyChunk(d) {
+  const key = `${d.chapterNo}-${d.sceneNo}`
+  let s = scenes.value.find((x) => x.key === key)
+  if (!s) {
+    s = { key, title: `第${d.chapterNo}章 场景${d.sceneNo}`, phase: 'chunk', text: '', think: '', thinkOpen: false, streaming: true }
+    scenes.value.push(s)
+  }
+  s.streaming = true
+  if (d.type === 'think') s.think += d.delta || ''
+  else s.text += d.delta || ''
+  const t = findTranscriptScene(d)
+  if (t) {
+    t.streaming = true
+    if (d.type === 'think') t.think += d.delta || ''
+    else t.text += d.delta || ''
+  }
+  scrollOut()
+  scrollSession()
 }
 
 function scrollLog() {
   nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
 }
 
+function scrollOut() {
+  nextTick(() => { if (outBox.value) outBox.value.scrollTop = outBox.value.scrollHeight })
+}
+
 function connect() {
   es = new EventSource('/api/pipeline/stream')
-  for (const ev of ['run', 'chapter', 'outline', 'scene', 'gate', 'assemble', 'chapter_gate', 'revise', 'review', 'digest', 'approve']) {
+  for (const ev of ['run', 'chapter', 'outline', 'scene', 'gate', 'assemble', 'chapter_gate', 'revise',
+    'reader', 'review', 'digest', 'approve', 'heal', 'volume_plan', 'volume_plan_review', 'volume_retro']) {
     es.addEventListener(ev, (e) => log(ev, e.data))
   }
   es.onerror = () => { /* 断线后 EventSource 自动重连 */ }
@@ -232,6 +494,8 @@ async function run() {
   try {
     await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value })
     scenes.value = []
+    transcript.value = []
+    sessionSeededKey = ''
     ElMessage.success('已加入生成队列，进度见上方队列面板')
     await loadQueue()
   } catch (e) {
@@ -242,6 +506,10 @@ async function run() {
 async function loadQueue() {
   try {
     queue.value = await api.get('/api/pipeline/queue')
+    // 会话视图开着时同步头部状态（阶段/tokens/状态随轮询刷新）
+    if (sessionOpen.value && sessionTask.value) {
+      sessionTask.value = queue.value.find((r) => r.id === sessionTask.value.id) || sessionTask.value
+    }
   } catch { /* 忽略轮询错误 */ }
 }
 
@@ -295,11 +563,19 @@ async function resumeTask(row) {
 async function loadPending() {
   if (!novelId.value) return
   try {
-    pendingCount.value = (await api.get(`/api/novels/${novelId.value}/pending-approvals`)).length
+    pendingList.value = await api.get(`/api/novels/${novelId.value}/pending-approvals`)
+    pendingCount.value = pendingList.value.length
   } catch { /* 忽略轮询错误 */ }
 }
 
+const pendingOpen = ref(false)
+
+function openPending() {
+  pendingOpen.value = true
+}
+
 function goPending() {
+  pendingOpen.value = false
   setSelectedNovelId(novelId.value)
   window.location.hash = '#/chapters'
 }

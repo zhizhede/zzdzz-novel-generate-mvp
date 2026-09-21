@@ -1,14 +1,14 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.NovelDO;
+import com.zzdzz.novelgen.model.dto.NovelDTO;
 
 import java.util.List;
 
 /** novels 数据服务接口（原 NovelDAO）。 */
-public interface NovelDataService extends IService<NovelDO> {
+public interface NovelDataService extends IService<NovelDTO> {
 
-    List<NovelDO> listAlive();
+    List<NovelDTO> listAlive();
 
     Long findIdByTitle(String title);
 

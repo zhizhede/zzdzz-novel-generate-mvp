@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.StylePackDO;
+import com.zzdzz.novelgen.model.dto.StylePackDTO;
 
 import java.util.List;
 
 /** style_packs 数据服务接口（原 StylePackDAO）。 */
-public interface StylePackDataService extends IService<StylePackDO> {
+public interface StylePackDataService extends IService<StylePackDTO> {
 
     Long findIdByName(String name);
 

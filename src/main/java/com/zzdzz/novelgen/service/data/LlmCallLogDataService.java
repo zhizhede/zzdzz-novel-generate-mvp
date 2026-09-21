@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.LlmCallLogDO;
+import com.zzdzz.novelgen.model.dto.LlmCallLogDTO;
 
 import java.util.List;
 
 /** llm_call_log 数据服务接口（原 LlmCallLogDAO）。 */
-public interface LlmCallLogDataService extends IService<LlmCallLogDO> {
+public interface LlmCallLogDataService extends IService<LlmCallLogDTO> {
 
     record Totals(long calls, long promptTokens, long completionTokens, long totalTokens, long avgLatencyMs) {
     }
@@ -20,9 +20,9 @@ public interface LlmCallLogDataService extends IService<LlmCallLogDO> {
                 long latencyMs, String status, String errorMsg, String reasoningText,
                 String requestJson, String responseJson);
 
-    List<LlmCallLogDO> findPage(Long novelId, Long chapterId, int limit, int offset);
+    List<LlmCallLogDTO> findPage(Long novelId, Long chapterId, int limit, int offset);
 
-    LlmCallLogDO findById(long id);
+    LlmCallLogDTO findById(long id);
 
     long countBy(Long novelId, Long chapterId);
 

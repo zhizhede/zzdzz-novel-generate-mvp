@@ -6,7 +6,7 @@
 SELECT COUNT(*) FROM chapter_scenes WHERE chapter_id=#{chapterId} AND is_deleted=false
     </select>
 
-    <select id="findByChapter" resultType="com.zzdzz.novelgen.model.entity.SceneDO">
+    <select id="findByChapter" resultType="com.zzdzz.novelgen.model.dto.SceneDTO">
 
                 SELECT * FROM chapter_scenes WHERE chapter_id=#{chapterId} AND is_deleted=false ORDER BY scene_no
                 

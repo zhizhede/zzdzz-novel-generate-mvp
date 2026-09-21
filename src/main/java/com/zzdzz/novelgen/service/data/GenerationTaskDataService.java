@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.GenerationTaskDO;
+import com.zzdzz.novelgen.model.dto.GenerationTaskDTO;
 
 import java.util.List;
 
 /** generation_tasks 数据服务接口（原 GenerationTaskDAO）。 */
-public interface GenerationTaskDataService extends IService<GenerationTaskDO> {
+public interface GenerationTaskDataService extends IService<GenerationTaskDTO> {
 
     /** 列表行：联作品表带标题，active（排队/运行中）置顶。 */
     record TaskRow(long id, long novelId, String novelTitle, int fromChapter, int toChapter,

@@ -1,17 +1,17 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.entity.MaterialCardDO;
+import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
 /** material_cards 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/MaterialCardMapper.xml。 */
-public interface MaterialCardMapper extends BaseMapper<MaterialCardDO> {
+public interface MaterialCardMapper extends BaseMapper<MaterialCardDTO> {
 
-    List<MaterialCardDO> listByNovel(@Param("novelId") long novelId, @Param("kind") String kind);
+    List<MaterialCardDTO> listByNovel(@Param("novelId") long novelId, @Param("kind") String kind);
 
-    MaterialCardDO findById(@Param("id") long id);
+    MaterialCardDTO findById(@Param("id") long id);
 
     boolean exists(@Param("novelId") long novelId, @Param("kind") String kind, @Param("name") String name);
 

@@ -75,6 +75,21 @@
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="`审校（${reviewLabel}）`" name="review">
+            <div v-if="readerReviews.length" style="margin-bottom: 18px">
+              <div style="font-weight: bold; margin-bottom: 8px">读者评审（全轮次，生成时随章快照口径）</div>
+              <div v-for="(r, i) in readerReviews" :key="i"
+                style="border: 1px solid #ebeef5; border-radius: 4px; padding: 10px; margin-bottom: 8px">
+                <el-tag size="small" :type="r.passed ? 'success' : 'danger'">第 {{ r.round || 1 }} 轮 · {{ r.passed ? '通过' : '未过' }}</el-tag>
+                <span style="color: #999; font-size: 12px; margin-left: 6px">{{ fmtTime(r.createTime) }}</span>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px">
+                  <el-tag v-for="q in fiveQuestions(r)" :key="q.label" size="small" effect="plain"
+                    :type="q.value === 'pass' ? 'success' : 'danger'">{{ q.label }}：{{ q.value === 'pass' ? '过' : q.value }}</el-tag>
+                </div>
+                <div v-if="fatRatio(r) != null" style="font-size: 12px; color: #999; margin-top: 6px">注水比 {{ fatRatio(r) }}</div>
+                <el-button link size="small" @click="r.open = !r.open">{{ r.open ? '收起' : '展开原文' }}</el-button>
+                <pre v-if="r.open" class="call-pre">{{ prettyJson(r.result) }}</pre>
+              </div>
+            </div>
             <div v-if="!detail.review" style="color: #999; font-size: 13px">
               尚未审校。点击上方「AI 审校」对当前正文跑一次语义审校（连续性/逻辑/错字/格式）。
             </div>
@@ -118,12 +133,52 @@
           </el-tab-pane>
           <el-tab-pane label="流水" name="events">
             <el-table v-if="events.length" :data="events" border size="small">
+              <el-table-column type="expand">
+                <template #default="{ row }">
+                  <pre class="call-pre">{{ prettyJson(parsedJson(row.payloadJson)) }}</pre>
+                </template>
+              </el-table-column>
               <el-table-column prop="stage" label="阶段" width="120" />
               <el-table-column prop="phase" label="相位" width="100" />
               <el-table-column prop="payloadJson" label="内容" min-width="320" show-overflow-tooltip />
               <el-table-column prop="createTime" label="时间" width="180" />
             </el-table>
             <el-empty v-else description="暂无事件" :image-size="50" />
+          </el-tab-pane>
+          <el-tab-pane :label="`档案（${(trace?.calls || []).length} 次调用）`" name="trace">
+            <div v-if="trace" style="max-height: 620px; overflow-y: auto">
+              <div v-if="trace.nodeStats?.length" style="margin-bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap">
+                <el-tag v-for="s in trace.nodeStats" :key="s.node" size="small" effect="plain">
+                  {{ NODE_LABEL[s.node] || s.node }}：{{ s.calls }} 次 / {{ (s.totalTokens || 0).toLocaleString() }} tok<span v-if="s.cost != null"> / ¥{{ s.cost.toFixed(4) }}</span>
+                </el-tag>
+              </div>
+              <el-timeline v-if="traceTimeline.length">
+                <el-timeline-item v-for="(it, i) in traceTimeline" :key="i" :timestamp="fmtTime(it.time)" placement="top"
+                  :type="it.kind === 'call' ? 'primary' : it.kind === 'check' ? (it.passed ? 'success' : 'danger') : (it.status === 'DONE' ? 'success' : it.status === 'RUNNING' ? 'warning' : 'danger')">
+                  <div v-if="it.kind === 'step'">
+                    <b>{{ STEP_LABEL[it.step] || it.step }}</b><span v-if="it.subKey"> · 场景 {{ it.subKey }}</span>
+                    <el-tag size="small" style="margin-left: 6px" :type="it.status === 'DONE' ? 'success' : it.status === 'RUNNING' ? 'warning' : 'danger'">{{ it.status }}</el-tag>
+                    <span v-if="it.attempt > 1" style="color: #999; font-size: 12px; margin-left: 4px">第 {{ it.attempt }} 次尝试</span>
+                    <div v-if="it.detail" style="font-size: 12px; color: #999; margin-top: 2px">{{ it.detail }}</div>
+                  </div>
+                  <div v-else-if="it.kind === 'call'">
+                    <b>{{ NODE_LABEL[it.node] || it.node }}</b>
+                    <span style="color: #999; font-size: 12px">
+                      {{ (it.totalTokens || 0).toLocaleString() }} tok · {{ (it.latencyMs / 1000).toFixed(1) }}s<span v-if="it.cost != null"> · ¥{{ it.cost.toFixed(4) }}</span><span v-if="it.status === 'error'"> · 失败</span>
+                    </span>
+                    <el-button link type="primary" size="small" @click="openCall(it.id)">查看 prompt / 输出</el-button>
+                  </div>
+                  <div v-else>
+                    <b>{{ GATE_LABEL[it.gateType] || it.gateType }}</b><span v-if="it.sceneId"> · 场景级</span> · 第 {{ it.round || 1 }} 轮
+                    <el-tag size="small" style="margin-left: 6px" :type="it.passed ? 'success' : 'danger'">{{ it.passed ? '通过' : '未过' }}</el-tag>
+                    <el-button link size="small" @click="it.open = !it.open">{{ it.open ? '收起' : '展开明细' }}</el-button>
+                    <pre v-if="it.open" style="white-space: pre-wrap; font-size: 12px; color: #666; background: #fafafa; padding: 8px; margin-top: 6px; max-height: 300px; overflow-y: auto">{{ prettyJson(it.result) }}</pre>
+                  </div>
+                </el-timeline-item>
+              </el-timeline>
+              <el-empty v-else description="本章无档案数据" :image-size="50" />
+            </div>
+            <el-empty v-else description="加载中…" :image-size="50" />
           </el-tab-pane>
         </el-tabs>
       </template>
@@ -163,6 +218,32 @@
         <el-button type="primary" :loading="savingEdit" :disabled="!fullDraft.trim()" @click="saveFullEdit">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 档案 tab：单次 LLM 调用详情（完整 prompt 分段 + 思考 + 输出，即「AI 当时看到/说了什么」） -->
+    <el-dialog v-model="callDialog" top="4vh" width="860px"
+      :title="callDetail ? `${NODE_LABEL[callDetail.node] || callDetail.node} · 调用 #${callDetail.id}` : ''">
+      <div v-if="callDetail" style="max-height: 72vh; overflow-y: auto">
+        <div style="color: #999; font-size: 12px; margin-bottom: 8px">
+          {{ callDetail.model }} · {{ (callDetail.totalTokens || 0).toLocaleString() }} tok（缓存命中 {{ callDetail.cachedTokens || 0 }}）·
+          {{ (callDetail.latencyMs / 1000).toFixed(1) }}s<span v-if="callDetail.cost != null"> · ¥{{ callDetail.cost.toFixed(4) }}</span> · {{ fmtTime(callDetail.createTime) }}
+        </div>
+        <el-collapse>
+          <el-collapse-item v-for="(m, i) in callDetail.promptMessages || []" :key="'p' + i"
+            :title="`Prompt · ${m.role}（${(m.content || '').length} 字）`">
+            <pre class="call-pre">{{ m.content }}</pre>
+          </el-collapse-item>
+          <el-collapse-item v-if="callDetail.reasoningText" :title="`思考过程（${callDetail.reasoningText.length} 字）`">
+            <pre class="call-pre" style="color: #8a8f99">{{ callDetail.reasoningText }}</pre>
+          </el-collapse-item>
+          <el-collapse-item v-if="callDetail.content" :title="`输出正文（${callDetail.content.length} 字）`">
+            <pre class="call-pre">{{ callDetail.content }}</pre>
+          </el-collapse-item>
+          <el-collapse-item v-if="callDetail.errorMsg" title="错误信息">
+            <pre class="call-pre" style="color: #c45656">{{ callDetail.errorMsg }}</pre>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -171,6 +252,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
+import { NODE_LABEL, GATE_LABEL, STEP_LABEL } from '../labels'
 
 const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', OUTLINE_APPROVED: 'success', GATE_MECHANICAL: '', GATE_AI_REVIEW: 'warning', INTERRUPTED: 'info' }
 const VERDICT_TEXT = { pass: '通过', minor: '轻微', blocker: '严重', skipped: '跳过' }
@@ -186,6 +268,78 @@ const activeTab = ref('text')
 const reviewing = ref(false)
 const approving = ref(false)
 const events = ref([])
+
+// ===== 档案 tab：章生成档案（trace）=====
+const trace = ref(null)
+const callDialog = ref(false)
+const callDetail = ref(null)
+/** 三路数据源按时间合并成一条时间线（ISO 字符串可直接字典序排序）。 */
+const traceTimeline = computed(() => {
+  if (!trace.value) return []
+  const items = []
+  for (const s of trace.value.steps || []) {
+    items.push({ kind: 'step', time: s.updateTime || s.createTime, ...s })
+  }
+  for (const c of trace.value.calls || []) {
+    items.push({ kind: 'call', time: c.createTime, ...c })
+  }
+  for (const k of trace.value.checks || []) {
+    items.push({ kind: 'check', time: k.createTime, open: false, ...k })
+  }
+  items.sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
+  return items
+})
+
+async function loadTrace() {
+  if (!detail.value) return
+  try {
+    trace.value = await api.get(`/api/chapters/${detail.value.id}/trace`)
+  } catch {
+    trace.value = null
+  }
+}
+
+async function openCall(id) {
+  try {
+    callDetail.value = await api.get(`/api/llm-logs/${id}`)
+    callDialog.value = true
+  } catch (e) {
+    ElMessage.error('调用详情加载失败：' + e.message)
+  }
+}
+
+function prettyJson(v) {
+  if (v == null) return ''
+  return typeof v === 'string' ? v : JSON.stringify(v, null, 2)
+}
+
+function parsedJson(s) {
+  try { return JSON.parse(s) } catch { return s }
+}
+
+/** 读者评审五问（hook/stakes/continuity/consequence）摘要标签。 */
+function fiveQuestions(r) {
+  const res = r.result || {}
+  return [
+    { label: '开场钩子', value: String(res.hook ?? '-') },
+    { label: '利害赌注', value: String(res.stakes ?? '-') },
+    { label: '连贯性', value: String(res.continuity ?? '-') },
+    { label: '后果承接', value: String(res.consequence ?? '-') },
+  ]
+}
+
+function fatRatio(r) {
+  const v = r.result?.fat_ratio
+  return v == null ? null : (typeof v === 'number' ? v.toFixed(2) : v)
+}
+
+const readerReviews = computed(() => (trace.value?.checks || []).filter((c) => c.gateType === 'reader_review'))
+
+function fmtTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d) ? iso : d.toLocaleString('zh-CN', { hour12: false })
+}
 
 const reviewLabel = computed(() => {
   const r = detail.value?.review
@@ -214,9 +368,17 @@ function openSceneEdit(s) {
 async function saveSceneEdit() {
   savingEdit.value = true
   try {
-    const passed = await api.put(`/api/scenes/${editingScene.value.id}/edit`, { reason: sceneDraft.value })
-    ElMessage.success(passed ? '场景已保存，机械门禁通过' : '场景已保存，机械门禁未过（门禁状态已回写，可继续修改）')
-    sceneDialog.value = false
+    const res = await api.put(`/api/scenes/${editingScene.value.id}/edit`, { draftText: sceneDraft.value })
+    if (res.passed) {
+      ElMessage.success('场景已保存，机械门禁通过')
+      sceneDialog.value = false
+    } else {
+      // 未过条目随响应带回：check=value（上限 absMax），编辑框保持打开继续改
+      const why = (res.failedChecks || [])
+        .map((c) => `${c.check}=${c.value}${c.absMax != null ? `（上限 ${c.absMax}）` : ''}`)
+        .join('；')
+      ElMessage.warning(`场景已保存，机械门禁未过：${why || '见章节档案'}`)
+    }
     detail.value = await api.get(`/api/chapters/${detail.value.id}`)
   } catch (e) {
     ElMessage.error(e.message)
@@ -234,7 +396,7 @@ async function saveFullEdit() {
   savingEdit.value = true
   try {
     const wasDigested = detail.value.status === 'DIGESTED'
-    await api.put(`/api/chapters/${detail.value.id}/fulltext`, { reason: fullDraft.value })
+    await api.put(`/api/chapters/${detail.value.id}/fulltext`, { fullText: fullDraft.value })
     ElMessage.success(wasDigested ? '正文已保存；旧事实账作废，章节回到待审批' : '正文已保存')
     fullDialog.value = false
     detail.value = await api.get(`/api/chapters/${detail.value.id}`)
@@ -338,6 +500,7 @@ async function loadEvents() {
 
 watch(activeTab, (tab) => {
   if (tab === 'events' && detail.value && !events.value.length) loadEvents()
+  if ((tab === 'trace' || tab === 'review') && detail.value && !trace.value) loadTrace()
 })
 
 async function runReview() {
@@ -366,6 +529,7 @@ async function open(row) {
     ElMessage.error('章节详情加载失败：' + e.message)
     return
   }
+  trace.value = null // 换章后档案重新懒加载
   activeTab.value = detail.value.fullText ? 'text' : 'scenes'
   drawer.value = true
 }
@@ -392,3 +556,17 @@ onMounted(async () => {
   await loadChapters()
 })
 </script>
+
+<style scoped>
+.call-pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.8;
+  font-family: inherit;
+  background: #fafafa;
+  padding: 8px;
+  margin: 4px 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+</style>

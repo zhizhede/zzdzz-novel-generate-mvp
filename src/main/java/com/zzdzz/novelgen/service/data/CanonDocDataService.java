@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.CanonDocDO;
+import com.zzdzz.novelgen.model.dto.CanonDocDTO;
 
 import java.util.List;
 
 /** canon_docs 数据服务接口（原 CanonDocDAO）。 */
-public interface CanonDocDataService extends IService<CanonDocDO> {
+public interface CanonDocDataService extends IService<CanonDocDTO> {
 
     boolean exists(long novelId, String kind, String name);
 
@@ -14,13 +14,13 @@ public interface CanonDocDataService extends IService<CanonDocDO> {
 
     String findFirstByKind(long novelId, String kind);
 
-    List<CanonDocDO> listByNovel(long novelId);
+    List<CanonDocDTO> listByNovel(long novelId);
 
     Long findId(long novelId, String kind, String name);
 
     String findContentByKindName(long novelId, String kind, String name);
 
-    CanonDocDO findById(long id);
+    CanonDocDTO findById(long id);
 
     int updateContent(long id, String content);
 

@@ -2,11 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.LlmModelPriceMapper">
 
-    <select id="listAll" resultType="com.zzdzz.novelgen.model.entity.LlmModelPriceDO">
+    <select id="listAll" resultType="com.zzdzz.novelgen.model.dto.LlmModelPriceDTO">
 SELECT * FROM llm_model_price WHERE is_deleted=false ORDER BY id
     </select>
 
-    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.LlmModelPriceDO">
+    <select id="findById" resultType="com.zzdzz.novelgen.model.dto.LlmModelPriceDTO">
 SELECT * FROM llm_model_price WHERE id=#{id} AND is_deleted=false
     </select>
     <update id="update">

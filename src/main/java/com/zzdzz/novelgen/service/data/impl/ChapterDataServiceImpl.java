@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.ChapterMapper;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import org.springframework.stereotype.Service;
 
@@ -13,26 +13,26 @@ import java.util.Optional;
 
 /** chapters 数据服务实现。 */
 @Service
-public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO>
+public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDTO>
         implements ChapterDataService {
 
     @Override
-    public Optional<ChapterDO> find(long novelId, int chapterNo) {
+    public Optional<ChapterDTO> find(long novelId, int chapterNo) {
         return Optional.ofNullable(baseMapper.findByNovelAndNo(novelId, chapterNo));
     }
 
     @Override
-    public Optional<ChapterDO> findById(long chapterId) {
+    public Optional<ChapterDTO> findById(long chapterId) {
         return Optional.ofNullable(getById(chapterId));
     }
 
     @Override
-    public List<ChapterDO> listSummariesByNovel(long novelId) {
+    public List<ChapterDTO> listSummariesByNovel(long novelId) {
         return baseMapper.listSummaries(novelId);
     }
 
     @Override
-    public List<Map<String, Object>> listVolumeFacts(long novelId, int volNo) {
+    public List<ChapterDataService.VolumeFactRow> listVolumeFacts(long novelId, int volNo) {
         return baseMapper.listVolumeFacts(novelId, volNo);
     }
 
@@ -116,9 +116,8 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO
     @Override
     public List<Opening> findOpeningLines(long novelId, int maxChapterNo) {
         List<Opening> out = new ArrayList<>();
-        for (Map<String, Object> m : baseMapper.findOpeningRows(novelId, maxChapterNo)) {
-            out.add(new Opening(((Number) m.get("chapter_no")).intValue(),
-                    firstLines((String) m.get("full_text"))));
+        for (var r : baseMapper.findOpeningRows(novelId, maxChapterNo)) {
+            out.add(new Opening(r.chapterNo(), firstLines(r.fullText())));
         }
         return out;
     }
@@ -127,8 +126,8 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO
     public Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines) {
         record Row(int no, String text) {}
         List<Row> rows = new ArrayList<>();
-        for (Map<String, Object> m : baseMapper.findDialogueRows(novelId, maxChapterNo)) {
-            rows.add(new Row(((Number) m.get("chapter_no")).intValue(), (String) m.get("full_text")));
+        for (var m : baseMapper.findDialogueRows(novelId, maxChapterNo)) {
+            rows.add(new Row(m.chapterNo(), m.fullText()));
         }
         Opening best = null;
         long bestScore = -1;
@@ -155,13 +154,7 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO
 
     @Override
     public List<ApprovedNoDigest> findApprovedWithoutDigest() {
-        List<ApprovedNoDigest> out = new ArrayList<>();
-        for (Map<String, Object> m : baseMapper.findApprovedWithoutDigest()) {
-            out.add(new ApprovedNoDigest(((Number) m.get("id")).longValue(),
-                    ((Number) m.get("novel_id")).longValue(),
-                    ((Number) m.get("chapter_no")).intValue()));
-        }
-        return out;
+        return baseMapper.findApprovedWithoutDigest();
     }
 
     private static String firstLines(String fullText) {

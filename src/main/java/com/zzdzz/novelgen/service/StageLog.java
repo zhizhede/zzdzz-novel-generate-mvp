@@ -1,8 +1,8 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.service.data.PipelineEventDataService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -14,9 +14,10 @@ import java.util.Map;
  * 各服务不再自持 emit 帮手、不再手拼事件名字符串。
  */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class StageLog {
 
-    private static final Logger log = LoggerFactory.getLogger(StageLog.class);
 
     /** 管线阶段（事件名）：wire 值与前端 SSE 事件名、pipeline_events.stage 逐字一致。 */
     public enum Stage {
@@ -55,7 +56,9 @@ public class StageLog {
         ERROR("error"), RETRY("retry"), REPLAN("replan"), PENDING("pending"), REUSE("reuse"),
         REJECTED("rejected"), READER_FIX("reader_fix"), REVIEW_FIX("review_fix"),
         CHAPTER_REPLAN("chapter_replan"), ADOPTED("adopted"),
-        CANCELED("canceled"), STOPPED("stopped"), QUEUED("queued"), NONE("");
+        CANCELED("canceled"), STOPPED("stopped"), QUEUED("queued"),
+        /** 流式增量（emitLive 专用，不落 pipeline_events）。 */
+        CHUNK("chunk"), NONE("");
 
         private final String wire;
 
@@ -67,10 +70,6 @@ public class StageLog {
     private final PipelineSseService sse;
     private final PipelineEventDataService eventDAO;
 
-    public StageLog(PipelineSseService sse, PipelineEventDataService eventDAO) {
-        this.sse = sse;
-        this.eventDAO = eventDAO;
-    }
 
     /** 卷级事件（无章号）。 */
     public void emit(Long novelId, Stage stage, Phase phase, Map<String, Object> extra) {
@@ -79,13 +78,27 @@ public class StageLog {
 
     /** 章级事件：chapterNo 同时进 payload（SSE/流水口径与旧 emit 一致）。 */
     public void emit(Long novelId, Integer chapterNo, Stage stage, Phase phase, Map<String, Object> extra) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        if (chapterNo != null) payload.put("chapterNo", chapterNo);
-        if (phase != Phase.NONE) payload.put("phase", phase.wire());
-        if (extra != null) payload.putAll(extra);
+        Map<String, Object> payload = buildPayload(chapterNo, phase, extra);
         sse.send(stage.wire(), payload);
         eventDAO.insert(novelId, chapterNo, stage.wire(), phase.wire(), payload);
         log.debug("[novel={}][chapter={}][{}/{}] {}",
                 novelId, chapterNo, stage.wire(), phase.wire(), stage.label());
+    }
+
+    /**
+     * 纯实时展示事件（流式 CHUNK 等高频增量）：只推 SSE，不落 pipeline_events——
+     * 落库会以每秒数行的速度撑爆流水表，而增量本身在 llm_call_log 有全量存档。
+     */
+    public void emitLive(Long novelId, Integer chapterNo, Stage stage, Phase phase, Map<String, Object> extra) {
+        Map<String, Object> payload = buildPayload(chapterNo, phase, extra);
+        sse.send(stage.wire(), payload);
+    }
+
+    private Map<String, Object> buildPayload(Integer chapterNo, Phase phase, Map<String, Object> extra) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (chapterNo != null) payload.put("chapterNo", chapterNo);
+        if (phase != Phase.NONE) payload.put("phase", phase.wire());
+        if (extra != null) payload.putAll(extra);
+        return payload;
     }
 }

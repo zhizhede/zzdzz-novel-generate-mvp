@@ -1,32 +1,41 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 /** chapters 数据服务接口（原 ChapterDAO）。 */
-public interface ChapterDataService extends IService<ChapterDO> {
+public interface ChapterDataService extends IService<ChapterDTO> {
 
     /** 开篇样本行（非表行）：章节号 + 该章前 3 个非空行（人类手稿审美基准，注入第一场景用）。 */
     record Opening(int chapterNo, String firstLines) {
+    }
+
+    /** 章文本行（开场相似度/对话密度统计用）。 */
+    record ChapterTextRow(int chapterNo, String fullText) {
+    }
+
+    /** 卷级复盘的事实行（规划 + 实际产出）。 */
+    record VolumeFactRow(int chapterNo, String title, String goal, String hook, String status,
+                         int budgetMin, int budgetMax, long textLen, String refs) {
     }
 
     /** 异步审批占位后未落 digest 的章（进程重启遗留），启动自愈补跑用。 */
     record ApprovedNoDigest(long id, long novelId, int chapterNo) {
     }
 
-    Optional<ChapterDO> find(long novelId, int chapterNo);
+    Optional<ChapterDTO> find(long novelId, int chapterNo);
 
-    Optional<ChapterDO> findById(long chapterId);
+    Optional<ChapterDTO> findById(long chapterId);
 
     /** 列表页摘要：full_text 不取（DO 中置 null）。 */
-    List<ChapterDO> listSummariesByNovel(long novelId);
+    List<ChapterDTO> listSummariesByNovel(long novelId);
 
     /** 卷级复盘用：一卷各章的事实行（规划 + 实际产出）。 */
-    List<Map<String, Object>> listVolumeFacts(long novelId, int volNo);
+    List<VolumeFactRow> listVolumeFacts(long novelId, int volNo);
 
     /** 已有正文的最末章号（无任何正文时为 null）：卷纲规划必须接续其后来。 */
     Integer maxChapterWithText(long novelId);

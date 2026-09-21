@@ -22,15 +22,24 @@
                 ORDER BY id DESC LIMIT 1
     </select>
 
-    <select id="findLatestChapterReport" resultType="map">
+    <select id="findLatestChapterReport" resultType="com.zzdzz.novelgen.model.dto.GateReportDTO">
                 SELECT passed, create_time, result::text FROM gate_reports
                 WHERE chapter_id=#{chapterId} AND scene_id IS NULL AND gate_type='mechanical'
                 ORDER BY id DESC LIMIT 1
     </select>
 
-    <select id="findLatestChapterReview" resultType="map">
+    <select id="findLatestChapterReview" resultType="com.zzdzz.novelgen.model.dto.GateReportDTO">
                 SELECT passed, create_time, result::text FROM gate_reports
                 WHERE chapter_id=#{chapterId} AND scene_id IS NULL AND gate_type='ai_review'
                 ORDER BY id DESC LIMIT 1
+    </select>
+
+    <!-- 章生成档案：全轮次全类型（场景级机械门禁/章级/读者评审/AI 审校）按时间序 -->
+    <select id="listByChapter" resultType="com.zzdzz.novelgen.model.dto.GateReportDTO">
+                SELECT id, chapter_id, scene_id, gate_type, round, passed, result::text AS result,
+                       is_deleted, create_time, update_time
+                FROM gate_reports
+                WHERE chapter_id=#{chapterId} AND is_deleted=false
+                ORDER BY id ASC
     </select>
 </mapper>

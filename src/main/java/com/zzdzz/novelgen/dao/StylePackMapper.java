@@ -1,13 +1,13 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.entity.StylePackDO;
+import com.zzdzz.novelgen.model.dto.StylePackDTO;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
 /** style_packs 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/StylePackMapper.xml。 */
-public interface StylePackMapper extends BaseMapper<StylePackDO> {
+public interface StylePackMapper extends BaseMapper<StylePackDTO> {
 
     Long findIdByName(@Param("name") String name);
 

@@ -1,9 +1,10 @@
 package com.zzdzz.novelgen.service.data.impl;
 
+import lombok.RequiredArgsConstructor;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.dao.WorldStateMapper;
-import com.zzdzz.novelgen.model.entity.WorldStateDO;
+import com.zzdzz.novelgen.model.dto.WorldStateDTO;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import org.springframework.stereotype.Service;
 
@@ -12,14 +13,12 @@ import java.util.Map;
 
 /** world_states 数据服务实现。 */
 @Service
-public class WorldStateDataServiceImpl extends ServiceImpl<WorldStateMapper, WorldStateDO>
+@RequiredArgsConstructor
+public class WorldStateDataServiceImpl extends ServiceImpl<WorldStateMapper, WorldStateDTO>
         implements WorldStateDataService {
 
     private final ObjectMapper mapper;
 
-    public WorldStateDataServiceImpl(ObjectMapper mapper) {
-        this.mapper = mapper;
-    }
 
     @Override
     public void upsert(long novelId, int chapterNo, Object state) {
@@ -37,13 +36,7 @@ public class WorldStateDataServiceImpl extends ServiceImpl<WorldStateMapper, Wor
 
     @Override
     public List<StateRow> listByNovel(long novelId, int limit) {
-        List<StateRow> out = new java.util.ArrayList<>();
-        for (Map<String, Object> m : baseMapper.listByNovel(novelId, limit)) {
-            out.add(new StateRow(((Number) m.get("chapter_no")).intValue(),
-                    (String) m.get("state"),
-                    String.valueOf(m.get("update_time"))));
-        }
-        return out;
+        return baseMapper.listByNovel(novelId, limit);
     }
 
     @Override

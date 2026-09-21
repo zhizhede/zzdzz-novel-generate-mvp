@@ -1,8 +1,9 @@
 package com.zzdzz.novelgen.controller;
 
+import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.JwtService;
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.dto.LoginDTO;
+import com.zzdzz.novelgen.model.vo.LoginVO;
 import com.zzdzz.novelgen.model.vo.LoginVO;
 import com.zzdzz.novelgen.service.AuthService;
 import jakarta.servlet.http.Cookie;
@@ -17,25 +18,22 @@ import org.springframework.web.bind.annotation.RestController;
 /** 登录 / 登出 / 会话信息。登录态 = HttpOnly JWT Cookie，重启不失效。 */
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthController {
 
     private final AuthService authService;
     private final JwtService jwtService;
 
-    public AuthController(AuthService authService, JwtService jwtService) {
-        this.authService = authService;
-        this.jwtService = jwtService;
-    }
 
     @PostMapping("/login")
-    public Result<LoginVO> login(@RequestBody LoginDTO dto, HttpServletResponse response) {
+    public Result<LoginVO> login(@RequestBody LoginVO dto, HttpServletResponse response) {
         AuthService.LoginUser user = authService.authenticate(dto);
         Cookie cookie = new Cookie(JwtService.TOKEN_COOKIE, jwtService.issue(user.id(), user.username(), user.role()));
         cookie.setHttpOnly(true);
         cookie.setPath("/");
         cookie.setMaxAge((int) jwtService.ttlSeconds());
         response.addCookie(cookie);
-        return Result.ok(new LoginVO(user.username(), user.role()));
+        return Result.success(new LoginVO(user.username(), user.role()));
     }
 
     @PostMapping("/logout")
@@ -45,12 +43,12 @@ public class AuthController {
         cookie.setPath("/");
         cookie.setMaxAge(0);
         response.addCookie(cookie);
-        return Result.ok();
+        return Result.success();
     }
 
     @GetMapping("/me")
     public Result<LoginVO> me(HttpServletRequest request) {
-        return Result.ok(new LoginVO(
+        return Result.success(new LoginVO(
                 (String) request.getAttribute("username"),
                 (String) request.getAttribute("role")));
     }

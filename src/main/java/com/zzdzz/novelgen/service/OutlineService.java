@@ -1,5 +1,8 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import com.zzdzz.novelgen.llm.LlmTemps;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
@@ -7,11 +10,9 @@ import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -20,9 +21,10 @@ import java.util.Objects;
 
 /** AI 章纲生成：卷纲行 + 世界观 + 前情 → 场景列表（严格 JSON，失败原因喂回重试）。 */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class OutlineService {
 
-    private static final Logger log = LoggerFactory.getLogger(OutlineService.class);
 
     public record SceneSpec(int sceneNo, String goal, List<String> present,
                             List<String> mustReveal, List<String> mustNot, int words) {}
@@ -34,31 +36,21 @@ public class OutlineService {
     private final PromptTemplateService promptTemplates;
     private final TuningService tuning;
 
-    public OutlineService(LlmJson llmJson, ObjectMapper mapper,
-                          ChapterDataService chapterData, SceneDataService sceneData,
-                          PromptTemplateService promptTemplates, TuningService tuning) {
-        this.llmJson = llmJson;
-        this.mapper = mapper;
-        this.chapterData = chapterData;
-        this.sceneData = sceneData;
-        this.promptTemplates = promptTemplates;
-        this.tuning = tuning;
-    }
 
-    public ChapterDO loadChapter(long novelId, int chapterNo) {
+    public ChapterDTO loadChapter(long novelId, int chapterNo) {
         return chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
     }
 
-    public void generate(long novelId, ChapterDO ch, String world, String characters,
+    public void generate(long novelId, ChapterDTO ch, String world, String characters,
                          List<String> directives, List<String> digests, String prevTail,
                          String prevBrief) {
         // 流 A：未消费的打回意见拼进卷纲目标行（不动提示词模板目录），章纲落库成功后清零；
         // 长度护栏走调参键 reject_reason_max_len（默认 200），超长截断并标注
-        String goal = ch.goal();
+        String goal = ch.getGoal();
         String rejectReason = ch.getRejectReason();
         if (rejectReason != null && !rejectReason.isBlank()) {
-            int maxLen = tuning.i("reject_reason_max_len", 200);
+            int maxLen = tuning.i("reject_reason_max_len", TuningDefaults.REJECT_REASON_MAX_LEN);
             String trimmed = rejectReason.strip();
             if (trimmed.length() > maxLen) {
                 trimmed = trimmed.substring(0, maxLen) + "…（意见超长已截断）";
@@ -91,17 +83,17 @@ public class OutlineService {
 
                 只输出 JSON，格式：
                 {"scenes":[{"no":1,"goal":"本场景目标","present":["出场人物"],"must_reveal":["必须让读者知道的信息"],"must_not":["禁止出现的内容"],"words":900}]}
-                """, ch.chapterNo(), ch.title(), goal, ch.hook(),
-                Objects.toString(ch.timeNote(), "紧接上一章，无跳跃"),
-                Objects.toString(ch.ruleRefs(), "[]"), Objects.toString(ch.foreshadowRefs(), "[]"),
-                ch.budgetMin(), ch.budgetMax(), world, characters,
+                """, ch.getChapterNo(), ch.getTitle(), goal, ch.getHook(),
+                Objects.toString(ch.getTimeNote(), "紧接上一章，无跳跃"),
+                Objects.toString(ch.getRuleRefs(), "[]"), Objects.toString(ch.getForeshadowRefs(), "[]"),
+                ch.getBudgetMin(), ch.getBudgetMax(), world, characters,
                 digests == null || digests.isEmpty() ? "（本章是第一章，无前情）" : String.join("\n---\n", digests),
                 prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，无上一章后果）" : prevBrief,
                 prevTail == null ? "（无）" : prevTail);
 
-        JsonNode scenes = askScenes(user, 2);
+        JsonNode scenes = askScenes(novelId, ch.getId(), user, 2);
         if (rejectReason != null && !rejectReason.isBlank()) {
-            chapterData.clearRejectReason(ch.id()); // 意见已注入本次章纲，消费清零
+            chapterData.clearRejectReason(ch.getId()); // 意见已注入本次章纲，消费清零
         }
 
         List<String> goals = new ArrayList<>();
@@ -117,26 +109,27 @@ public class OutlineService {
             words.add(s.path("words").asInt(900));
         }
         // 先清旧场景与门禁报告（外键顺序在 repository 内处理），再物化新场景
-        chapterData.resetForReoutline(ch.id(), scenes.toString());
-        sceneData.replaceAll(ch.id(), goals, present, reveal, not, words);
+        chapterData.resetForReoutline(ch.getId(), scenes.toString());
+        sceneData.replaceAll(ch.getId(), goals, present, reveal, not, words);
         log.info("章纲落库: scenes={}", scenes.size());
     }
 
     public List<SceneSpec> loadSpecs(long chapterId) {
         return sceneData.findByChapter(chapterId).stream()
-                .map(s -> new SceneSpec(s.sceneNo(), s.goal() == null ? "" : s.goal(),
-                        toStringList(s.present()), toStringList(s.mustReveal()),
-                        toStringList(s.mustNot()), s.wordsBudget()))
+                .map(s -> new SceneSpec(s.getSceneNo(), s.getGoal() == null ? "" : s.getGoal(),
+                        toStringList(s.getPresent()), toStringList(s.getMustReveal()),
+                        toStringList(s.getMustNot()), s.getWordsBudget()))
                 .toList();
     }
 
-    private JsonNode askScenes(String user, int tries) {
+    /** novelId/chapterId 必传：章纲调用归章（台账按章回放/档案聚合依赖此前修的双空归属缺口）。 */
+    private JsonNode askScenes(long novelId, long chapterId, String user, int tries) {
         return llmJson.ask(new LlmPort.ChatRequest(
-                        LlmNode.OUTLINE, null, null,
+                        LlmNode.OUTLINE, novelId, chapterId,
                         List.of(LlmPort.Message.system("你是网文章纲规划器，只输出合法 JSON，不要任何解释或 markdown 代码块。"
                                 + "字符串值内部禁止英文双引号，引用一律用「」。"),
                                 LlmPort.Message.user(user)),
-                        0.3),
+                        LlmTemps.OUTLINE),
                 node -> {
                     JsonNode arr = node.path("scenes");
                     if (!arr.isArray() || arr.size() < 2 || arr.size() > 3) {

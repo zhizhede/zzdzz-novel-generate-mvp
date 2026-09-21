@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.GenerationTaskMapper;
-import com.zzdzz.novelgen.model.entity.GenerationTaskDO;
+import com.zzdzz.novelgen.model.dto.GenerationTaskDTO;
 import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
 import org.springframework.stereotype.Service;
 
@@ -11,26 +11,8 @@ import java.util.Map;
 
 /** generation_tasks 数据服务实现。 */
 @Service
-public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMapper, GenerationTaskDO>
+public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMapper, GenerationTaskDTO>
         implements GenerationTaskDataService {
-
-    private TaskRow toRow(Map<String, Object> m) {
-        if (m == null) {
-            return null;
-        }
-        return new TaskRow(((Number) m.get("id")).longValue(),
-                ((Number) m.get("novel_id")).longValue(),
-                (String) m.get("title"),
-                ((Number) m.get("from_chapter")).intValue(),
-                ((Number) m.get("to_chapter")).intValue(),
-                (String) m.get("status"),
-                ((Number) m.get("done_chapters")).intValue(),
-                m.get("current_chapter") == null ? null : ((Number) m.get("current_chapter")).intValue(),
-                (String) m.get("last_message"),
-                String.valueOf(m.get("create_time")),
-                m.get("kind") == null ? "CHAPTERS" : (String) m.get("kind"),
-                m.get("payload") == null ? null : String.valueOf(m.get("payload")));
-    }
 
     @Override
     public long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload) {
@@ -47,8 +29,8 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
         if (claimed == 0) {
             return null;
         }
-        List<Map<String, Object>> rows = baseMapper.findRunningById(queuedId);
-        return toRow(rows.isEmpty() ? null : rows.get(0));
+        var rows = baseMapper.findRunningById(queuedId);
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     @Override
@@ -59,11 +41,7 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
 
     @Override
     public List<TaskRow> list(int limit) {
-        List<TaskRow> out = new java.util.ArrayList<>();
-        for (Map<String, Object> m : baseMapper.list(limit)) {
-            out.add(toRow(m));
-        }
-        return out;
+        return baseMapper.list(limit);
     }
 
     @Override
@@ -76,23 +54,19 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
         if (claimed == 0) {
             return null;
         }
-        List<Map<String, Object>> rows = baseMapper.findRunningById(queuedId);
-        return toRow(rows.isEmpty() ? null : rows.get(0));
+        var rows = baseMapper.findRunningById(queuedId);
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     @Override
     public TaskRow findRunning() {
-        List<Map<String, Object>> rows = baseMapper.findRunning();
-        return toRow(rows.isEmpty() ? null : rows.get(0));
+        var rows = baseMapper.findRunning();
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     @Override
     public List<TaskRow> listRunning() {
-        List<TaskRow> out = new java.util.ArrayList<>();
-        for (Map<String, Object> m : baseMapper.listRunning()) {
-            out.add(toRow(m));
-        }
-        return out;
+        return baseMapper.listRunning();
     }
 
     @Override

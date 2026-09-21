@@ -1,5 +1,7 @@
 package com.zzdzz.novelgen.service;
 
+import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
@@ -7,20 +9,24 @@ import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.StylePackDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
-import com.zzdzz.novelgen.model.entity.CanonDocDO;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.dto.CanonDocDTO;
+import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import com.zzdzz.novelgen.model.vo.CanonDocVO;
+import com.zzdzz.novelgen.model.vo.ForeshadowVO;
+
 import java.util.Map;
 import java.util.Set;
 
 /** 素材库：正典文档（增删改查）、伏笔账本（人工修正）、事实账（查看修正）、风格包（规则正文修订）。 */
 @Service
+@RequiredArgsConstructor
 public class LibraryService {
 
     private static final Set<String> CANON_KINDS = Set.of("world", "character", "misc");
-    private static final Set<String> FORESHADOW_STATUSES = Set.of("proposed", "planned", "planted", "recovered", "dropped");
+    private static final Set<String> FORESHADOW_STATUSES = Set.of(ForeshadowStatus.PROPOSED.wire(), ForeshadowStatus.PLANNED.wire(), ForeshadowStatus.PLANTED.wire(), ForeshadowStatus.RECOVERED.wire(), ForeshadowStatus.DROPPED.wire());
 
     private final CanonDocDataService canonData;
     private final ForeshadowDataService foreshadowData;
@@ -29,26 +35,22 @@ public class LibraryService {
     private final WorldStateDataService worldStateData;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
-    public LibraryService(CanonDocDataService canonData, ForeshadowDataService foreshadowData,
-                          StylePackDataService stylePackData, DigestDataService digestData,
-                          WorldStateDataService worldStateData,
-                          com.fasterxml.jackson.databind.ObjectMapper mapper) {
-        this.canonData = canonData;
-        this.foreshadowData = foreshadowData;
-        this.stylePackData = stylePackData;
-        this.digestData = digestData;
-        this.worldStateData = worldStateData;
-        this.mapper = mapper;
-    }
 
     // ===== 正典文档 =====
 
-    public List<CanonDocDO> listCanon(long novelId) {
-        return canonData.listByNovel(novelId);
+    public List<CanonDocVO> listCanon(long novelId) {
+        return canonData.listByNovel(novelId).stream()
+                .map(CanonDocVO::from).toList();
     }
 
-    public CanonDocDO canonDoc(long id) {
-        CanonDocDO doc = canonData.findById(id);
+    /** 详情（API 用）：DO 不出 service 层。 */
+    public CanonDocVO canonDocVO(long id) {
+        return CanonDocVO.from(canonDoc(id));
+    }
+
+    /** 内部校验沿用 DO。 */
+    public CanonDocDTO canonDoc(long id) {
+        CanonDocDTO doc = canonData.findById(id);
         if (doc == null) throw new BizException(ErrorCode.NOT_FOUND, "正典文档不存在: " + id);
         return doc;
     }
@@ -78,8 +80,9 @@ public class LibraryService {
 
     // ===== 伏笔账本 =====
 
-    public List<ForeshadowDO> listForeshadows(long novelId) {
-        return foreshadowData.listByNovel(novelId);
+    public List<ForeshadowVO> listForeshadows(long novelId) {
+        return foreshadowData.listByNovel(novelId).stream()
+                .map(ForeshadowVO::from).toList();
     }
 
     public void updateForeshadow(long id, String content, Integer plantedIn, Integer recoveredIn, String status) {

@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.ForeshadowMapper">
 
-    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.dto.ForeshadowDTO">
 
                 SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
                 FROM foreshadows WHERE novel_id=#{novelId} AND is_deleted=false ORDER BY code
@@ -24,14 +24,14 @@ INSERT INTO foreshadows (novel_id, code, content, planted_in, recovered_in) VALU
                 
     </update>
 
-    <select id="findByCode" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+    <select id="findByCode" resultType="com.zzdzz.novelgen.model.dto.ForeshadowDTO">
 
                 SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
                 FROM foreshadows WHERE novel_id=#{novelId} AND code=#{code} AND is_deleted=false
                 
     </select>
 
-    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+    <select id="findById" resultType="com.zzdzz.novelgen.model.dto.ForeshadowDTO">
 
                 SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
                 FROM foreshadows WHERE id=#{id} AND is_deleted=false
@@ -51,9 +51,11 @@ SELECT COUNT(*) FROM foreshadows WHERE novel_id=#{novelId} AND content=#{content
 
     <select id="nextCode" resultType="string">
 
-                SELECT COALESCE(MAX(SUBSTRING(code FROM 2)::INT), 0) FROM foreshadows
-                WHERE novel_id=#{novelId} AND is_deleted=false AND code ~ '^F[0-9]+$'
-                
+                <!-- 返回可直接落库的下一编码 'F'+最大+1；regexp_match 对不匹配行返回 NULL 被 MAX 忽略，
+                     兼容历史裸数字脏行（如 ch62 时代误插的 '72'），避免分配回退导致连环撞键丢提议 -->
+                SELECT 'F' || (COALESCE(MAX((REGEXP_MATCH(code, '^(F)?([0-9]+)$'))[2]::INT), 0) + 1) FROM foreshadows
+                WHERE novel_id=#{novelId} AND is_deleted=false
+
     </select>
 
     <update id="insertPlanned">

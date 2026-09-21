@@ -35,13 +35,16 @@
           <el-table-column prop="promptTokens" label="Prompt" width="90" />
           <el-table-column prop="completionTokens" label="Completion" width="110" />
           <el-table-column prop="totalTokens" label="总tokens" width="90" />
-          <el-table-column prop="latencyMs" label="耗时ms" width="90" />
-          <el-table-column prop="status" label="状态" width="80">
+          <el-table-column label="耗时ms" prop="latencyMs" width="90" />
+          <el-table-column label="状态" width="80">
             <template #default="{ row }">
               <el-tag size="small" :type="row.status === 'ok' ? 'success' : 'danger'">{{ row.status }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="reasoningChars" label="think字符" width="90" />
+          <el-table-column label="时间" width="150">
+            <template #default="{ row }">{{ fmtTime(row.createTime) }}</template>
+          </el-table-column>
         </el-table>
         <el-pagination style="margin-top: 10px" layout="prev, pager, next" :total="total"
           :page-size="size" v-model:current-page="page" @current-change="load" />
@@ -73,9 +76,13 @@
     <el-drawer v-model="drawer" :title="detail ? `#${detail.id} ${detail.node}` : ''" size="55%">
       <template v-if="detail">
         <div style="font-size: 12px; color: #999; margin-bottom: 8px">
-          {{ detail.model }}｜prompt {{ detail.promptTokens }} + completion {{ detail.completionTokens }} = {{ detail.totalTokens }} tokens｜{{ detail.latencyMs }}ms｜{{ detail.status }}
+          {{ detail.model }}｜prompt {{ detail.promptTokens }}（缓存 {{ detail.cachedTokens || 0 }}）+ completion {{ detail.completionTokens }} = {{ detail.totalTokens }} tokens｜{{ detail.latencyMs }}ms<template v-if="detail.cost != null">｜¥{{ detail.cost.toFixed(4) }}</template>｜{{ detail.status }}｜{{ fmtTime(detail.createTime) }}
         </div>
         <el-collapse>
+          <el-collapse-item v-for="(m, i) in detail.promptMessages || []" :key="'p' + i"
+            :title="`Prompt · ${m.role}（${(m.content || '').length} 字）——AI 当时看到的完整输入`">
+            <div style="white-space: pre-wrap; font-size: 12px; color: #849aa9; max-height: 420px; overflow-y: auto; background: #fafcfe; padding: 8px">{{ m.content }}</div>
+          </el-collapse-item>
           <el-collapse-item title="AI 思考过程（think）">
             <div style="white-space: pre-wrap; font-size: 12px; color: #666; max-height: 400px; overflow-y: auto">{{ detail.reasoningText || '（无）' }}</div>
           </el-collapse-item>
@@ -140,6 +147,12 @@ function pretty(p) {
   try { return JSON.stringify(JSON.parse(p), null, 2) } catch { return p }
 }
 
+function fmtTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return isNaN(d) ? iso : d.toLocaleString('zh-CN', { hour12: false })
+}
+
 function eventText(e) {
   let d = {}
   try { d = JSON.parse(e.payloadJson) } catch { return '' }
@@ -150,7 +163,7 @@ function eventText(e) {
       : d.phase === 'done' ? `完成（${d.chars} 字符）` : `失败：${d.reason}`
     case 'outline': return d.phase === 'start' ? '章纲生成中' : '章纲落库'
     case 'scene': return d.phase === 'draft' ? `场景${d.sceneNo} 产出草稿`
-      : d.phase === 'reused' ? `场景${d.sceneNo} 复用已过草稿` : `场景${d.sceneNo} ${d.phase || ''}`
+      : d.phase === 'reused' ? `场景${d.sceneNo} 复用已过草稿` : d.reason === 'rag_degraded' ? `RAG 召回失败，本场景降级不注入：${d.message || ''}` : `场景${d.sceneNo} ${d.phase || ''}`
     case 'gate': return `场景${d.sceneNo} 门禁${d.passed ? '通过' : '未过'}${d.round ? `（重写第${d.round}轮）` : ''}${d.reason ? '：' + d.reason : ''}`
     case 'assemble': return `拼章完成（${d.chars} 字符）`
     case 'chapter_gate': return `章级门禁${d.passed ? '通过' : '未过'}${d.reason ? '：' + d.reason : ''}`

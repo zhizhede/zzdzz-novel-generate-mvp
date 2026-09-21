@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.EmbeddingMapper;
-import com.zzdzz.novelgen.model.entity.EmbeddingDO;
+import com.zzdzz.novelgen.model.dto.EmbeddingDTO;
 import com.zzdzz.novelgen.service.data.EmbeddingDataService;
 import org.springframework.stereotype.Service;
 
@@ -12,7 +12,7 @@ import java.util.Map;
 
 /** embeddings 数据服务实现。 */
 @Service
-public class EmbeddingDataServiceImpl extends ServiceImpl<EmbeddingMapper, EmbeddingDO>
+public class EmbeddingDataServiceImpl extends ServiceImpl<EmbeddingMapper, EmbeddingDTO>
         implements EmbeddingDataService {
 
     @Override
@@ -23,15 +23,7 @@ public class EmbeddingDataServiceImpl extends ServiceImpl<EmbeddingMapper, Embed
 
     @Override
     public List<Hit> search(long novelId, float[] queryVec, int limit) {
-        List<Hit> out = new ArrayList<>();
-        for (Map<String, Object> m : baseMapper.search(novelId, vectorLiteral(queryVec), limit)) {
-            out.add(new Hit((String) m.get("source_type"),
-                    ((Number) m.get("source_id")).longValue(),
-                    m.get("chapter_no") == null ? null : ((Number) m.get("chapter_no")).intValue(),
-                    (String) m.get("content"),
-                    ((Number) m.get("distance")).doubleValue()));
-        }
-        return out;
+        return baseMapper.search(novelId, vectorLiteral(queryVec), limit);
     }
 
     private static String vectorLiteral(float[] vec) {
@@ -45,12 +37,12 @@ public class EmbeddingDataServiceImpl extends ServiceImpl<EmbeddingMapper, Embed
     }
 
     @Override
-    public List<Map<String, Object>> findMissingDigests(long novelId, int limit) {
+    public List<MissingRow> findMissingDigests(long novelId, int limit) {
         return baseMapper.findMissingDigests(novelId, limit);
     }
 
     @Override
-    public List<Map<String, Object>> findMissingCards(long novelId, int limit) {
+    public List<MissingRow> findMissingCards(long novelId, int limit) {
         return baseMapper.findMissingCards(novelId, limit);
     }
 

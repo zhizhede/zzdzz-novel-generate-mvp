@@ -2,11 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.ChapterMapper">
 
-    <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
+    <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.dto.ChapterDTO">
                 SELECT * FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
     </select>
 
-    <select id="listSummaries" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
+    <select id="listSummaries" resultType="com.zzdzz.novelgen.model.dto.ChapterDTO">
                 SELECT id, novel_id, chapter_no, volume_no, arc, title, pov, outline_yaml,
                        NULL AS full_text, goal, hook, time_note, rule_refs, foreshadow_refs,
                        budget_min, budget_max, status, round, is_deleted
@@ -18,8 +18,8 @@
                 WHERE novel_id=#{novelId} AND is_deleted=false AND full_text IS NOT NULL AND full_text != ''
     </select>
 
-    <select id="findOpeningRows" resultType="map">
-                SELECT chapter_no, full_text FROM chapters
+    <select id="findOpeningRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
+                SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
                 WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo} AND is_deleted=false
                   AND full_text IS NOT NULL AND full_text!=''
                 ORDER BY chapter_no
@@ -30,17 +30,17 @@
                 WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false AND full_text IS NOT NULL
     </select>
 
-    <select id="findApprovedWithoutDigest" resultType="map">
-                SELECT c.id, c.novel_id, c.chapter_no FROM chapters c
+    <select id="findApprovedWithoutDigest" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ApprovedNoDigest">
+                SELECT c.id, c.novel_id AS "novelId", c.chapter_no AS "chapterNo" FROM chapters c
                 LEFT JOIN digests d ON d.chapter_id = c.id AND d.is_deleted = FALSE
                 WHERE c.status = 'DIGESTED' AND c.is_deleted = FALSE AND d.id IS NULL
                 ORDER BY c.novel_id, c.chapter_no
     </select>
 
-    <select id="listVolumeFacts" resultType="map">
-                SELECT chapter_no, title, goal, hook, status, budget_min, budget_max,
-                       COALESCE(LENGTH(full_text), 0) AS text_len,
-                       COALESCE(foreshadow_refs::text, '[]') AS refs
+    <select id="listVolumeFacts" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$VolumeFactRow">
+                SELECT chapter_no AS "chapterNo", title, goal, hook, status, budget_min AS "budgetMin", budget_max AS "budgetMax",
+                       COALESCE(LENGTH(full_text), 0)::bigint AS "textLen",
+                       COALESCE(foreshadow_refs::text, '[]') AS "refs"
                 FROM chapters
                 WHERE novel_id = #{novelId} AND volume_no = #{volNo} AND is_deleted = false
                 ORDER BY chapter_no
@@ -114,8 +114,8 @@
                 UPDATE chapters SET review_config=#{reviewConfig}::jsonb, update_time=NOW() WHERE id=#{chapterId} AND is_deleted=false
     </update>
 
-    <select id="findDialogueRows" resultType="map">
-                SELECT chapter_no, full_text FROM chapters
+    <select id="findDialogueRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
+                SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
                 WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo} AND is_deleted=false
                   AND full_text IS NOT NULL AND full_text!=''
                 ORDER BY chapter_no
