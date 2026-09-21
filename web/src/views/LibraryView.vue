@@ -79,6 +79,13 @@
 
       <!-- 伏笔 -->
       <el-tab-pane :label="`伏笔账本（${foreshadows.length}）`">
+        <el-alert v-if="health && (health.proposedCount || health.plantOverdue?.length || health.recoverOverdue?.length)"
+                  type="warning" :closable="false" style="margin-bottom: 8px"
+                  :title="`账本健康度（截至第 ${health.currentChapter} 章）：待采纳 ${health.proposedCount} 条` +
+                    (health.oldestProposed ? `（最老 ${health.oldestProposed} 已停 ${health.oldestProposedAge} 章）` : '') +
+                    (health.plantOverdue?.length ? `；埋设逾期：${health.plantOverdue.join('、')}` : '') +
+                    (health.recoverOverdue?.length ? `；回收逾期：${health.recoverOverdue.join('、')}` : '') +
+                    `；事实账 ${health.digestCount} 条（至第 ${health.digestLatestChapter} 章）、世界状态 ${health.worldStateCount} 份（至第 ${health.worldStateLatestChapter} 章）`" />
         <div v-if="foreshadows.some((f) => f.status === 'proposed')" style="margin-bottom: 8px; font-size: 12px; color: #e6a23c">
           有 AI 自动提议的新伏笔待处理——采纳后进入埋设编排，忽略则弃用
         </div>
@@ -474,6 +481,7 @@ import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 
 const novels = ref([])
 const novelId = ref(null)
+const health = ref(null)
 const canon = ref([])
 const foreshadows = ref([])
 const digests = ref([])
@@ -740,6 +748,7 @@ async function saveTuning(row) {
 
 async function loadAll() {
   if (!novelId.value) return
+  health.value = await api.get(`/api/novels/${novelId.value}/ledger-health`).catch(() => null)
   canon.value = await api.get(`/api/novels/${novelId.value}/canon`)
   cards.value = await api.get(`/api/novels/${novelId.value}/cards`)
   llmNodes.value = await api.get('/api/llm-nodes')

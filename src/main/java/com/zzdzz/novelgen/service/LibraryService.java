@@ -13,9 +13,11 @@ import com.zzdzz.novelgen.model.dto.CanonDocDTO;
 import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 import org.springframework.stereotype.Service;
 
+import java.util.Comparator;
 import java.util.List;
 import com.zzdzz.novelgen.model.vo.CanonDocVO;
 import com.zzdzz.novelgen.model.vo.ForeshadowVO;
+import com.zzdzz.novelgen.model.vo.LedgerHealthVO;
 
 import java.util.Map;
 import java.util.Set;
@@ -83,6 +85,37 @@ public class LibraryService {
     public List<ForeshadowVO> listForeshadows(long novelId) {
         return foreshadowData.listByNovel(novelId).stream()
                 .map(ForeshadowVO::from).toList();
+    }
+
+    // ===== 账本健康度（量产阶段二·自动园艺的可见性地基） =====
+
+    /** 四层记忆体检：伏笔待采纳停留章龄 / 埋设逾期 / 回收逾期 + 事实账与世界状态覆盖进度。
+     *  时间基线 = 事实账最新章（已完稿落账的章），不含未生成的规划行——否则对着没写的章算逾期是误报。 */
+    public LedgerHealthVO ledgerHealth(long novelId) {
+        List<DigestDataService.DigestItem> digests = digestData.listByNovel(novelId);
+        int current = digests.stream().mapToInt(DigestDataService.DigestItem::chapterNo).max().orElse(0);
+        List<ForeshadowDTO> all = foreshadowData.listByNovel(novelId);
+        List<ForeshadowDTO> proposed = all.stream()
+                .filter(f -> ForeshadowStatus.PROPOSED.is(f.getStatus())).toList();
+        ForeshadowDTO oldest = proposed.stream()
+                .filter(f -> f.getProposedIn() != null)
+                .min(Comparator.comparingInt(ForeshadowDTO::getProposedIn)).orElse(null);
+        List<String> plantOverdue = all.stream()
+                .filter(f -> ForeshadowStatus.PLANNED.is(f.getStatus())
+                        && f.getPlantedIn() != null && f.getPlantedIn() < current)
+                .map(ForeshadowDTO::getCode).toList();
+        List<String> recoverOverdue = all.stream()
+                .filter(f -> ForeshadowStatus.PLANTED.is(f.getStatus())
+                        && f.getRecoveredIn() != null && f.getRecoveredIn() < current)
+                .map(ForeshadowDTO::getCode).toList();
+        List<WorldStateDataService.StateRow> states = worldStateData.listByNovel(novelId, 1000);
+        return new LedgerHealthVO(current,
+                proposed.size(),
+                oldest != null ? oldest.getCode() : null,
+                oldest != null ? current - oldest.getProposedIn() : 0,
+                plantOverdue, recoverOverdue,
+                digests.size(), digests.isEmpty() ? 0 : digests.get(digests.size() - 1).chapterNo(),
+                states.size(), states.stream().mapToInt(WorldStateDataService.StateRow::chapterNo).max().orElse(0));
     }
 
     public void updateForeshadow(long id, String content, Integer plantedIn, Integer recoveredIn, String status) {
