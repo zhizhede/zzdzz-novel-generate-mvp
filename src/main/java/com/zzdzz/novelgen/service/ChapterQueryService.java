@@ -16,12 +16,15 @@ import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.vo.ChapterDetailVO;
 import com.zzdzz.novelgen.model.vo.ChapterListItemVO;
 import com.zzdzz.novelgen.model.vo.ChapterStepVO;
+import com.zzdzz.novelgen.model.vo.ChapterTraceVO;
 import com.zzdzz.novelgen.model.vo.GateReportVO;
 import com.zzdzz.novelgen.model.vo.LlmTotalsVO;
 import com.zzdzz.novelgen.model.vo.ReviewVO;
 import com.zzdzz.novelgen.model.vo.SceneVO;
 import org.springframework.stereotype.Service;
 
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -75,28 +78,28 @@ public class ChapterQueryService {
     }
 
     /** 章生成档案：steps + calls（仅元数据，全文走台账详情）+ checks 全轮次 + 按节点小计。 */
-    public com.zzdzz.novelgen.model.vo.ChapterTraceVO trace(long chapterId) {
+    public ChapterTraceVO trace(long chapterId) {
         ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
 
-        List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.StepItem> steps = stepData.listByChapter(chapterId).stream()
-                .map(s -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.StepItem(
+        List<ChapterTraceVO.StepItem> steps = stepData.listByChapter(chapterId).stream()
+                .map(s -> new ChapterTraceVO.StepItem(
                         s.getStep(), s.getSubKey(),
                         s.getAttempt() == null ? 1 : s.getAttempt(), s.getStatus(), s.getDetail(),
                         iso(s.getCreateTime()), iso(s.getUpdateTime())))
                 .toList();
 
-        List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.CallItem> calls = new java.util.ArrayList<>(
+        List<ChapterTraceVO.CallItem> calls = new ArrayList<>(
                 llmCallLogData.findPage(null, chapterId, 500, 0).stream()
-                        .map(l -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.CallItem(
+                        .map(l -> new ChapterTraceVO.CallItem(
                                 l.getId(), l.getNode(), l.getModel(), l.getStatus(),
                                 l.getPromptTokens(), l.getCompletionTokens(), l.getTotalTokens(), l.getCachedTokens(),
                                 l.getLatencyMs(), nodeConfig.costOf(l), iso(l.getCreateTime())))
                         .toList());
         java.util.Collections.reverse(calls);   // findPage 为 id DESC，档案要时间正序
 
-        List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.CheckItem> checks = gateReportData.listByChapter(chapterId).stream()
-                .map(g -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.CheckItem(
+        List<ChapterTraceVO.CheckItem> checks = gateReportData.listByChapter(chapterId).stream()
+                .map(g -> new ChapterTraceVO.CheckItem(
                         g.getSceneId(), g.getGateType(), g.getRound(), g.isPassed(),
                         parseJson(g.getResult()), iso(g.getCreateTime())))
                 .toList();
@@ -113,13 +116,13 @@ public class ChapterQueryService {
                 cc[0] += c.cost();
             }
         }
-        List<com.zzdzz.novelgen.model.vo.ChapterTraceVO.NodeStatItem> nodeStats = acc.entrySet().stream()
-                .map(e -> new com.zzdzz.novelgen.model.vo.ChapterTraceVO.NodeStatItem(
+        List<ChapterTraceVO.NodeStatItem> nodeStats = acc.entrySet().stream()
+                .map(e -> new ChapterTraceVO.NodeStatItem(
                         e.getKey(), (int) e.getValue()[0], e.getValue()[1],
                         cost.containsKey(e.getKey()) ? Math.round(cost.get(e.getKey())[0] * 1e6) / 1e6 : null))
                 .toList();
 
-        return new com.zzdzz.novelgen.model.vo.ChapterTraceVO(ch.getId(), ch.getChapterNo(), ch.getTitle(),
+        return new ChapterTraceVO(ch.getId(), ch.getChapterNo(), ch.getTitle(),
                 ch.getStatus(), steps, calls, checks, nodeStats);
     }
 
@@ -160,7 +163,7 @@ public class ChapterQueryService {
                     new com.fasterxml.jackson.core.type.TypeReference<List<java.util.Map<String, Object>>>() {
                     });
             return new GateReportVO(GateType.MECHANICAL.wire(), row.passed(),
-                    row.createTime().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                    row.createTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
                     checks);
         } catch (Exception e) {
             throw new IllegalStateException("门禁报告不可解析", e);
@@ -172,7 +175,7 @@ public class ChapterQueryService {
         GateReportDataService.LatestReview row = gateReportData.findLatestChapterReview(chapterId);
         if (row == null) return null;
         String time = row.createTime().format(
-                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         try {
             JsonNode node = mapper.readTree(row.resultJson());
             if (node.has("skipped")) {

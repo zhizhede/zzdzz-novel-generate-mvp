@@ -7,6 +7,8 @@ import com.zzdzz.novelgen.model.entity.TuningDO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import com.zzdzz.novelgen.model.vo.TuningVO;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -71,8 +73,8 @@ public class TuningService {
         }
     }
 
-    public List<TuningDO> list() {
-        return dao.findAll();
+    public List<TuningVO> list() {
+        return dao.findAll().stream().map(TuningVO::from).toList();
     }
 
     public void update(String key, String value) {

@@ -4,11 +4,13 @@ import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
-import com.zzdzz.novelgen.model.entity.CanonDocDO;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
-import com.zzdzz.novelgen.model.entity.MaterialCardDO;
+import com.zzdzz.novelgen.model.vo.CanonDocVO;
+import com.zzdzz.novelgen.model.vo.ForeshadowVO;
+import com.zzdzz.novelgen.model.vo.LlmModelPriceVO;
+import com.zzdzz.novelgen.model.vo.MaterialCardVO;
 import com.zzdzz.novelgen.model.vo.PromptDetailVO;
 import com.zzdzz.novelgen.model.vo.PromptTemplateVO;
+import com.zzdzz.novelgen.model.vo.TuningVO;
 import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.GateService;
 import com.zzdzz.novelgen.service.LibraryService;
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -73,7 +76,7 @@ public class LibraryController {
     // ===== 调参（平台级行为参数，改后 30s 内生效） =====
 
     @GetMapping("/tuning")
-    public Result<List<com.zzdzz.novelgen.model.entity.TuningDO>> tuning() {
+    public Result<List<TuningVO>> tuning() {
         return Result.success(tuningService.list());
     }
 
@@ -111,7 +114,7 @@ public class LibraryController {
     }
 
     @GetMapping("/llm-prices")
-    public Result<List<com.zzdzz.novelgen.model.entity.LlmModelPriceDO>> llmPrices() {
+    public Result<List<LlmModelPriceVO>> llmPrices() {
         return Result.success(nodeConfigService.prices());
     }
 
@@ -144,14 +147,14 @@ public class LibraryController {
     // ===== 素材卡 =====
 
     @GetMapping("/novels/{novelId}/cards")
-    public Result<List<MaterialCardDO>> cards(@PathVariable long novelId,
+    public Result<List<MaterialCardVO>> cards(@PathVariable long novelId,
                                               @RequestParam(required = false) String kind) {
         return Result.success(cardService.list(novelId, kind));
     }
 
     @GetMapping("/cards/{id}")
-    public Result<MaterialCardDO> card(@PathVariable long id) {
-        return Result.success(cardService.get(id));
+    public Result<MaterialCardVO> card(@PathVariable long id) {
+        return Result.success(cardService.vo(id));
     }
 
     @PostMapping("/novels/{novelId}/cards")
@@ -177,13 +180,13 @@ public class LibraryController {
     // ===== 正典 =====
 
     @GetMapping("/novels/{novelId}/canon")
-    public Result<List<CanonDocDO>> canonList(@PathVariable long novelId) {
+    public Result<List<CanonDocVO>> canonList(@PathVariable long novelId) {
         return Result.success(libraryService.listCanon(novelId));
     }
 
     @GetMapping("/canon/{id}")
-    public Result<CanonDocDO> canonDoc(@PathVariable long id) {
-        return Result.success(libraryService.canonDoc(id));
+    public Result<CanonDocVO> canonDoc(@PathVariable long id) {
+        return Result.success(libraryService.canonDocVO(id));
     }
 
     @PostMapping("/novels/{novelId}/canon")
@@ -207,7 +210,7 @@ public class LibraryController {
     // ===== 伏笔 =====
 
     @GetMapping("/novels/{novelId}/foreshadows")
-    public Result<List<ForeshadowDO>> foreshadows(@PathVariable long novelId) {
+    public Result<List<ForeshadowVO>> foreshadows(@PathVariable long novelId) {
         return Result.success(libraryService.listForeshadows(novelId));
     }
 
@@ -297,9 +300,9 @@ public class LibraryController {
     public record LlmNodeUpdateDTO(String model, Double temperature, Integer maxTokens,
                                    String extraJson, Boolean enabled, String remark) {}
 
-    public record LlmPriceUpdateDTO(java.math.BigDecimal idleInputHit, java.math.BigDecimal idleInputMiss,
-                                     java.math.BigDecimal idleOutput, java.math.BigDecimal peakInputHit,
-                                     java.math.BigDecimal peakInputMiss, java.math.BigDecimal peakOutput,
+    public record LlmPriceUpdateDTO(BigDecimal idleInputHit, BigDecimal idleInputMiss,
+                                     BigDecimal idleOutput, BigDecimal peakInputHit,
+                                     BigDecimal peakInputMiss, BigDecimal peakOutput,
                                      Integer peakStartHour, Integer peakEndHour, String remark) {}
 
     /** 素材卡新增/更新共用；缺省 aliases 归一为空表。 */

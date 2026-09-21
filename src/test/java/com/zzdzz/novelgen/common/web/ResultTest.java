@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Result 通道分工与序列化形状基线：success 响应 JSON 必须与旧 ok() 形状逐字段一致（前端零感知）。 */
@@ -32,7 +34,7 @@ class ResultTest {
     @Test
     void failWithDetailSerializesIt() throws Exception {
         Result<Void> r = Result.fail(ErrorCode.STATE_CONFLICT, "任务状态为 DONE，不能取消",
-                java.util.Map.of("actualStatus", "DONE"));
+                Map.of("actualStatus", "DONE"));
         JsonNode n = mapper.readTree(mapper.writeValueAsString(r));
         assertThat(n.get("code").asText()).isEqualTo("A0006");
         assertThat(n.get("detail").get("actualStatus").asText()).isEqualTo("DONE");

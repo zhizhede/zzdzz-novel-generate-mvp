@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.zzdzz.novelgen.model.entity.RetroProposalDO;
+import com.zzdzz.novelgen.model.vo.RetroProposalVO;
 
 import java.util.List;
 
@@ -12,6 +13,9 @@ public interface RetroProposalDataService extends IService<RetroProposalDO> {
     void propose(long novelId, int volNo, String kind, String content);
 
     List<RetroProposalDO> listByVolume(long novelId, int volNo);
+
+    /** 提案列表（API 用）：DO 不出 service 层。 */
+    List<RetroProposalVO> listByVolumeVO(long novelId, int volNo);
 
     /** 采纳/忽略；返回是否生效（未决→已决）。 */
     boolean decide(long id, boolean adopt, String note);

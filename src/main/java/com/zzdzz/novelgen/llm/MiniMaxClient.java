@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import com.zzdzz.novelgen.model.entity.LlmNodeConfigDO;
 import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.springframework.stereotype.Component;
@@ -24,12 +25,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * MiniMax OpenAI 兼容协议实现。除返回结果外，把请求/响应全量写入 llm_call_log，
@@ -45,14 +49,14 @@ public class MiniMaxClient implements LlmPort {
     private final LlmProperties props;
     private final ObjectMapper mapper;
     private final LlmCallLogDataService callLogDAO;
-    private final com.zzdzz.novelgen.service.data.LlmNodeConfigDataService nodeConfigDAO;
+    private final LlmNodeConfigDataService nodeConfigDAO;
     private final RestClient restClient;
     private final HttpClient streamClient;
 
     @Override
     public ChatResult chat(ChatRequest request) {
         long start = System.currentTimeMillis();
-        com.zzdzz.novelgen.model.entity.LlmNodeConfigDO cfg = resolveConfig(request.node());
+        LlmNodeConfigDO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
                 ? cfg.getModel() : props.model();
         Map<String, Object> body = buildBody(request, cfg, model);
@@ -111,7 +115,7 @@ public class MiniMaxClient implements LlmPort {
     @Override
     public ChatResult chatStream(ChatRequest request, StreamDelta onDelta) {
         long start = System.currentTimeMillis();
-        com.zzdzz.novelgen.model.entity.LlmNodeConfigDO cfg = resolveConfig(request.node());
+        LlmNodeConfigDO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
                 ? cfg.getModel() : props.model();
         Map<String, Object> body = buildBody(request, cfg, model);
@@ -283,7 +287,7 @@ public class MiniMaxClient implements LlmPort {
 
         /** 帧与终止信号经队列传回调用线程，body future 无用武之地（规范允许 null）。 */
         @Override
-        public java.util.concurrent.CompletionStage<Void> getBody() {
+        public CompletionStage<Void> getBody() {
             return null;
         }
 
@@ -389,7 +393,7 @@ public class MiniMaxClient implements LlmPort {
 
         /** 中断/失败留痕用：已收思考的近似值（闭合块走正则，未闭合回退全文）。 */
         String reasoningSoFar() {
-            java.util.regex.Matcher m = THINK_BLOCK.matcher(content.toString());
+            Matcher m = THINK_BLOCK.matcher(content.toString());
             if (m.find()) return m.group(1);
             return reasoningContent.length() > 0 ? reasoningContent.toString() : null;
         }
@@ -487,7 +491,7 @@ public class MiniMaxClient implements LlmPort {
 
 
     /** 节点路由配置：查询失败不拦截调用（走全局默认）。 */
-    private com.zzdzz.novelgen.model.entity.LlmNodeConfigDO resolveConfig(String node) {
+    private LlmNodeConfigDO resolveConfig(String node) {
         try {
             return nodeConfigDAO.findEnabled(node);
         } catch (Exception e) {
@@ -505,7 +509,7 @@ public class MiniMaxClient implements LlmPort {
     }
 
     private Map<String, Object> buildBody(ChatRequest request,
-                                          com.zzdzz.novelgen.model.entity.LlmNodeConfigDO cfg, String model) {
+                                          LlmNodeConfigDO cfg, String model) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         List<Map<String, String>> messages = new ArrayList<>();
@@ -548,15 +552,15 @@ public class MiniMaxClient implements LlmPort {
     static String extractReasoning(JsonNode response) {
         JsonNode choice = response.path("choices").path(0);
         String message = choice.path("message").path("content").asText("");
-        java.util.regex.Matcher m = THINK_BLOCK.matcher(message);
+        Matcher m = THINK_BLOCK.matcher(message);
         if (m.find()) {
             return m.group(1).strip();
         }
         return choice.path("message").path("reasoning_content").asText(null);
     }
 
-    private static final java.util.regex.Pattern THINK_BLOCK =
-            java.util.regex.Pattern.compile("(?s)<think>(.*?)</think>");
+    private static final Pattern THINK_BLOCK =
+            Pattern.compile("(?s)<think>(.*?)</think>");
 
     /** 台账先行入库（SQL 在 LlmCallLogDataService），失败也留痕，调用方据此可重放。 */
     private long insertLog(ChatRequest request, String model, String requestJson, JsonNode response, String reasoning,

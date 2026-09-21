@@ -7,6 +7,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -50,7 +51,7 @@ public class GlobalExceptionHandler {
     public Result<Void> handleOther(Exception e, HttpServletResponse resp) {
         // SSE/长连接客户端断开后，异步响应体的迟到写失败——响应已提交，无事可做，静默即可
         if (e instanceof java.net.SocketTimeoutException
-                || e instanceof org.springframework.web.context.request.async.AsyncRequestNotUsableException
+                || e instanceof AsyncRequestNotUsableException
                 || "ClientAbortException".equals(e.getClass().getSimpleName())) {
             log.debug("客户端连接已断开，响应写失败忽略：{}", e.getMessage());
             resp.setStatus(200);

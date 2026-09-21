@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.vo.ChapterDetailVO;
 import com.zzdzz.novelgen.model.vo.ChapterListItemVO;
+import com.zzdzz.novelgen.model.vo.ChapterTraceVO;
 import com.zzdzz.novelgen.model.vo.ReviewVO;
 import com.zzdzz.novelgen.service.ChapterQueryService;
 import com.zzdzz.novelgen.service.ChapterPipelineService;
@@ -14,6 +15,7 @@ import com.zzdzz.novelgen.service.ReviewService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -50,7 +52,7 @@ public class ChapterController {
 
     /** 章生成档案：步骤状态行 + 按章 LLM 台账（元数据）+ 全轮次门禁/评审判定 + 节点小计。 */
     @GetMapping("/chapters/{id}/trace")
-    public Result<com.zzdzz.novelgen.model.vo.ChapterTraceVO> trace(@PathVariable long id) {
+    public Result<ChapterTraceVO> trace(@PathVariable long id) {
         return Result.success(chapterQueryService.trace(id));
     }
 
@@ -105,9 +107,9 @@ public class ChapterController {
                 target.chapterNo(), target.chapterNo(), null));
     }
 
-    /** 人工编辑场景草稿（Q5a）：保存后立即重过该场景机械门禁；仅生成前状态可用。 */
-    @org.springframework.web.bind.annotation.PutMapping("/scenes/{id}/edit")
-    public Result<Boolean> editScene(@PathVariable long id, @RequestBody(required = false) SceneEditDTO req) {
+    /** 人工编辑场景草稿（Q5a）：保存后立即重过该场景机械门禁（未过条目随响应返回）；仅生成前状态可用。 */
+    @PutMapping("/scenes/{id}/edit")
+    public Result<ChapterPipelineService.SceneEditResult> editScene(@PathVariable long id, @RequestBody(required = false) SceneEditDTO req) {
         String text = req == null || req.draftText() == null ? "" : req.draftText().strip();
         if (text.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "场景内容不能为空");
@@ -116,7 +118,7 @@ public class ChapterController {
     }
 
     /** 人工编辑正文（Q5b）：仅 PENDING_APPROVAL/DIGESTED；DIGESTED 编辑后回待审批、digest 重算。 */
-    @org.springframework.web.bind.annotation.PutMapping("/chapters/{id}/fulltext")
+    @PutMapping("/chapters/{id}/fulltext")
     public Result<Void> editFullText(@PathVariable long id, @RequestBody(required = false) FullTextEditDTO req) {
         String text = req == null || req.fullText() == null ? "" : req.fullText();
         if (text.strip().isEmpty()) {

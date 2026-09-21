@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -56,7 +57,7 @@ public class GenerationQueueService {
     private final Set<Long> cancelRequested = ConcurrentHashMap.newKeySet();
 
     /** 契约③：每本书一个单线程 worker（书内串行保因果），调度器跨书分道（并行度=max_parallel_novels）。 */
-    private final Map<Long, java.util.concurrent.ExecutorService> novelWorkers = new ConcurrentHashMap<>();
+    private final Map<Long, ExecutorService> novelWorkers = new ConcurrentHashMap<>();
 
     /** 流 0 v2：运行中任务的 worker 线程句柄（停止时中断在飞 LLM 调用，JDK HttpClient 响应中断）。 */
     private final Map<Long, Thread> taskThreads = new ConcurrentHashMap<>();
@@ -93,21 +94,45 @@ public class GenerationQueueService {
         return submitById(novelId, title, from, to, userId);
     }
 
-    /** 取消：仅排队中；运行中请用 {@link #stop}（流 0 硬停止）。返回是否受理。 */
-    public boolean cancel(long taskId) {
-        String status = taskDAO.findStatus(taskId);
-        if (TaskStatus.QUEUED.is(status)) {
-            return taskDAO.cancelQueued(taskId) > 0;
+    /** 队列动作受理结果：已受理 / 任务不存在 / 状态不符（附实际状态，供如实报错与 detail 透出）。 */
+    public record ActionOutcome(boolean accepted, Denial denial, String actualStatus) {
+
+        public enum Denial { NONE, NOT_FOUND, WRONG_STATE }
+
+        static ActionOutcome accept() {
+            return new ActionOutcome(true, Denial.NONE, null);
         }
-        return false;
+
+        static ActionOutcome notFound() {
+            return new ActionOutcome(false, Denial.NOT_FOUND, null);
+        }
+
+        static ActionOutcome wrongState(String actual) {
+            return new ActionOutcome(false, Denial.WRONG_STATE, actual);
+        }
+    }
+
+    /** 取消：仅排队中；运行中请用 {@link #stop}（流 0 硬停止）。 */
+    public ActionOutcome cancel(long taskId) {
+        String status = taskDAO.findStatus(taskId);
+        if (status == null) {
+            return ActionOutcome.notFound();
+        }
+        if (!TaskStatus.QUEUED.is(status)) {
+            return ActionOutcome.wrongState(status);
+        }
+        return taskDAO.cancelQueued(taskId) > 0 ? ActionOutcome.accept() : ActionOutcome.wrongState(status);
     }
 
     /** 流 0 v2 硬停止：落库取消标记 + 中断在飞调用（JDK HttpClient 响应中断，毫秒级生效）。
      * 在飞调用的 token 已花、结果丢弃；已完成场景/正文保留。 */
-    public boolean stop(long taskId) {
+    public ActionOutcome stop(long taskId) {
         String status = taskDAO.findStatus(taskId);
+        if (status == null) {
+            return ActionOutcome.notFound();
+        }
         if (!TaskStatus.RUNNING.is(status)) {
-            return false;
+            return ActionOutcome.wrongState(status);
         }
         taskDAO.requestCancel(taskId);
         cancelRequested.add(taskId);
@@ -115,14 +140,14 @@ public class GenerationQueueService {
         if (worker != null) {
             worker.interrupt();
         }
-        return true;
+        return ActionOutcome.accept();
     }
 
     /** 全局急停：终止所有 RUNNING 任务（跑批失控的最后闸门）。 */
     public int stopAll() {
         int n = 0;
         for (GenerationTaskDataService.TaskRow t : taskDAO.listRunning()) {
-            if (stop(t.id())) {
+            if (stop(t.id()).accepted()) {
                 n++;
             }
         }
@@ -237,7 +262,7 @@ public class GenerationQueueService {
             if (task == null) {
                 return;
             }
-            java.util.concurrent.ExecutorService lane = novelWorkers.computeIfAbsent(task.novelId(), k ->
+            ExecutorService lane = novelWorkers.computeIfAbsent(task.novelId(), k ->
                     Executors.newSingleThreadExecutor(r -> {
                         Thread t = new Thread(r, "novel-worker-" + k);
                         t.setDaemon(true);
@@ -359,12 +384,15 @@ public class GenerationQueueService {
     }
 
     /** 插队暂停后继续（④）：PAUSED → QUEUED，从暂停点下一章接跑。 */
-    public boolean resume(long taskId) {
+    public ActionOutcome resume(long taskId) {
         String status = taskDAO.findStatus(taskId);
-        if (!TaskStatus.PAUSED.is(status)) {
-            return false;
+        if (status == null) {
+            return ActionOutcome.notFound();
         }
-        return taskDAO.resumePaused(taskId) > 0;
+        if (!TaskStatus.PAUSED.is(status)) {
+            return ActionOutcome.wrongState(status);
+        }
+        return taskDAO.resumePaused(taskId) > 0 ? ActionOutcome.accept() : ActionOutcome.wrongState(status);
     }
 
     /** 队列级事件：入事件流水并推 SSE（工作台日志面板直接可见）。 */
@@ -380,6 +408,6 @@ public class GenerationQueueService {
     @PreDestroy
     public void shutdown() {
         dispatcher.shutdownNow();
-        novelWorkers.values().forEach(java.util.concurrent.ExecutorService::shutdownNow);
+        novelWorkers.values().forEach(ExecutorService::shutdownNow);
     }
 }

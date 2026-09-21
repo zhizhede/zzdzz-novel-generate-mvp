@@ -11,6 +11,7 @@ import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
+import com.zzdzz.novelgen.service.data.RetroProposalDataService;
 import com.zzdzz.novelgen.service.data.VolumeReviewDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
@@ -46,7 +47,7 @@ public class VolumeReviewService {
     private final ForeshadowDataService foreshadowData;
     private final WorldStateDataService worldStateData;
     private final VolumeReviewDataService reviewDAO;
-    private final com.zzdzz.novelgen.service.data.RetroProposalDataService proposalData;
+    private final RetroProposalDataService proposalData;
     private final LlmJson llmJson;
     private final StageLog stageLog;
     private final ObjectMapper mapper;

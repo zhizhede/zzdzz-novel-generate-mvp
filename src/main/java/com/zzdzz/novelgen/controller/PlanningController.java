@@ -5,7 +5,7 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.PlanModeDTO;
-import com.zzdzz.novelgen.model.entity.RetroProposalDO;
+import com.zzdzz.novelgen.model.vo.RetroProposalVO;
 import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.OutlineService;
 import com.zzdzz.novelgen.service.PlanningService;
@@ -115,8 +115,8 @@ public class PlanningController {
 
     /** 流 D：某卷复盘建议/提案列表（含采纳状态）。 */
     @GetMapping("/volumes/{volNo}/proposals")
-    public Result<List<RetroProposalDO>> proposals(@PathVariable long novelId, @PathVariable int volNo) {
-        return Result.success(proposalData.listByVolume(novelId, volNo));
+    public Result<List<RetroProposalVO>> proposals(@PathVariable long novelId, @PathVariable int volNo) {
+        return Result.success(proposalData.listByVolumeVO(novelId, volNo));
     }
 
     /** 流 D：提案决策（采纳/忽略）。 */

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.RetroProposalMapper;
 import com.zzdzz.novelgen.model.entity.RetroProposalDO;
+import com.zzdzz.novelgen.model.vo.RetroProposalVO;
 import com.zzdzz.novelgen.service.data.RetroProposalDataService;
 import org.springframework.stereotype.Service;
 
@@ -48,6 +49,12 @@ public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMappe
                 .eq("is_deleted", false)
                 .orderByAsc("status")
                 .orderByDesc("id"));
+    }
+
+    @Override
+    public List<RetroProposalVO> listByVolumeVO(long novelId, int volNo) {
+        return listByVolume(novelId, volNo).stream()
+                .map(RetroProposalVO::from).toList();
     }
 
     @Override

@@ -9,7 +9,9 @@ import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import com.zzdzz.novelgen.service.data.LlmModelPriceDataService;
 import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
 import com.zzdzz.novelgen.model.entity.LlmModelPriceDO;
+import com.zzdzz.novelgen.model.entity.LlmCallLogDO;
 import com.zzdzz.novelgen.model.entity.LlmNodeConfigDO;
+import com.zzdzz.novelgen.model.vo.LlmModelPriceVO;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -47,7 +49,7 @@ public class LlmNodeConfigService {
 
     /** 单条调用成本（元）：按价目峰谷（Asia/Shanghai 时区口径与 usageByNodeSince SQL 一致）折算；
      * 无价目行或价目查询失败返回 null（fail-open，不拦台账/档案展示）。 */
-    public Double costOf(com.zzdzz.novelgen.model.entity.LlmCallLogDO call) {
+    public Double costOf(LlmCallLogDO call) {
         try {
             LlmModelPriceDO p = priceMap().get(call.getModel());
             if (p == null) return null;
@@ -132,8 +134,8 @@ public class LlmNodeConfigService {
 
     // ===== 价目与成本 =====
 
-    public List<LlmModelPriceDO> prices() {
-        return priceDAO.listAll();
+    public List<LlmModelPriceVO> prices() {
+        return priceDAO.listAll().stream().map(LlmModelPriceVO::from).toList();
     }
 
     public void updatePrice(long id, BigDecimal idleInputHit, BigDecimal idleInputMiss, BigDecimal idleOutput,

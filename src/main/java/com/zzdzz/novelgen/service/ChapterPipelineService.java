@@ -15,11 +15,15 @@ import com.zzdzz.novelgen.service.data.ChapterStepDataService;
 import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
@@ -323,7 +327,7 @@ public class ChapterPipelineService {
      * 启动自愈：异步审批占位后若进程重启，章会停留在「DIGESTED 但无事实账」——这里统一补跑。
      * 管线内自动审批保持同步（下一章上下文依赖本章 digest），仅人工审批走异步，故缺口只会来自人工路径。
      */
-    @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    @EventListener(ApplicationReadyEvent.class)
     public void healOrphanedApproved() {
         List<ChapterDataService.ApprovedNoDigest> orphans = chapterData.findApprovedWithoutDigest();
         for (ChapterDataService.ApprovedNoDigest o : orphans) {
@@ -369,7 +373,7 @@ public class ChapterPipelineService {
 
     /** 人工编辑场景草稿（Q5a）：仅未在生成中的章；保存后立即重过该场景机械门禁。
      * 续跑时 PASSED 场景复用编辑稿，FAILED 场景继续人工改或重生成。 */
-    public boolean editSceneDraft(long sceneId, String draftText) {
+    public SceneEditResult editSceneDraft(long sceneId, String draftText) {
         SceneDO scene = sceneData.getById(sceneId);
         if (scene == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "场景不存在: " + sceneId);
@@ -386,12 +390,16 @@ public class ChapterPipelineService {
         int words = outlineService.loadSpecs(ch.getId()).stream()
                 .filter(spec -> spec.sceneNo() == scene.getSceneNo())
                 .findFirst().map(OutlineService.SceneSpec::words).orElse(900);
-        boolean passed = gateService.checkScene(ch.getNovelId(), ch.getId(), sceneId, scene.getSceneNo(),
+        GateService.GateVerdict verdict = gateService.checkScene(ch.getNovelId(), ch.getId(), sceneId, scene.getSceneNo(),
                 draftText, words);
-        sceneData.updateGateStatus(sceneId, passed ? SceneGateStatus.PASSED.wire() : SceneGateStatus.FAILED.wire());
+        sceneData.updateGateStatus(sceneId, verdict.passed() ? SceneGateStatus.PASSED.wire() : SceneGateStatus.FAILED.wire());
         stageLog.emit(ch.getNovelId(), ch.getChapterNo(), SCENE, DRAFT,
-                Map.of("sceneNo", scene.getSceneNo(), "edited", true, "gatePassed", passed));
-        return passed;
+                Map.of("sceneNo", scene.getSceneNo(), "edited", true, "gatePassed", verdict.passed()));
+        return new SceneEditResult(verdict.passed(), verdict.failedChecks());
+    }
+
+    /** 场景编辑保存结果：门禁判定 + 未过条目（编辑框直接展示原因，不必翻档案）。 */
+    public record SceneEditResult(boolean passed, List<GateService.GateCheck> failedChecks) {
     }
 
     /** 人工编辑正文（Q5b）：仅 PENDING_APPROVAL/DIGESTED（生成后静态态，不会被管线覆盖）。
@@ -456,8 +464,8 @@ public class ChapterPipelineService {
         return s.length() <= 200 ? s : s.substring(0, 200) + "…";
     }
 
-    private final java.util.concurrent.ExecutorService digestExecutor =
-            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+    private final ExecutorService digestExecutor =
+            Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "digest-async");
                 t.setDaemon(true);
                 return t;
@@ -624,7 +632,7 @@ public class ChapterPipelineService {
             }
             stageLog.emit(novelId, chapterNo, SCENE, DRAFT,
                     Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(draft)));
-            boolean ok = gateService.checkScene(novelId, ch.getId(), sceneId, spec.sceneNo(), draft, spec.words());
+            boolean ok = gateService.checkScene(novelId, ch.getId(), sceneId, spec.sceneNo(), draft, spec.words()).passed();
             // 带意见重写（密度类指标一轮修订常按下葫芦浮起瓢），轮数走 tuning
             int maxRewrites = tuning.i("scene_revise_rounds", TuningDefaults.SCENE_REVISE_ROUNDS);
             for (int round = 1; round <= maxRewrites && !ok; round++) {
@@ -640,7 +648,7 @@ public class ChapterPipelineService {
                         draft, gateService.failureSummary(ch.getId(), sceneId), pack);
                 stageLog.emit(novelId, chapterNo, SCENE, DRAFT,
                         Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(draft)));
-                ok = gateService.checkScene(novelId, ch.getId(), sceneId, spec.sceneNo(), draft, spec.words());
+                ok = gateService.checkScene(novelId, ch.getId(), sceneId, spec.sceneNo(), draft, spec.words()).passed();
             }
             stageLog.emit(novelId, chapterNo, SCENE_GATE, NONE,
                     Map.of("sceneNo", spec.sceneNo(), "passed", ok,
@@ -677,7 +685,7 @@ public class ChapterPipelineService {
         chapterData.saveFullText(ch.getId(), fullText);
         chapterData.updateStatus(ch.getId(), ChapterStatus.GATE_MECHANICAL.wire());
         stageLog.emit(novelId, chapterNo, ASSEMBLE, NONE, Map.of("chars", fullText.length()));
-        if (gateService.checkChapter(novelId, ch.getId(), chapterNo, fullText, ch.getBudgetMin(), ch.getBudgetMax())) {
+        if (gateService.checkChapter(novelId, ch.getId(), chapterNo, fullText, ch.getBudgetMin(), ch.getBudgetMax()).passed()) {
             stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("chars", fullText.length())));
             stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
             return ChapterOutcome.DONE;
@@ -687,7 +695,7 @@ public class ChapterPipelineService {
         // 断点重跑场景：库里已有上一轮修订过、且能过检的正文，直接复用，省一轮修订调用
         String stored = ch.getFullText();
         if (stored != null && !stored.equals(fullText)
-                && gateService.checkChapter(novelId, ch.getId(), chapterNo, stored, ch.getBudgetMin(), ch.getBudgetMax())) {
+                && gateService.checkChapter(novelId, ch.getId(), chapterNo, stored, ch.getBudgetMin(), ch.getBudgetMax()).passed()) {
             log.info("第 {} 章复用已修订正文（{} 字符）", chapterNo, stored.length());
             stageLog.emit(novelId, chapterNo, REVISE, REUSE, Map.of("chars", stored.length()));
             chapterData.saveFullText(ch.getId(), stored);
@@ -721,7 +729,7 @@ public class ChapterPipelineService {
             stageLog.emit(novelId, chapterNo, REVISE, DONE,
                     Map.of("round", round, "chars", fullText.length()));
             chapterData.saveFullText(ch.getId(), fullText);
-            if (gateService.checkChapter(novelId, ch.getId(), chapterNo, fullText, ch.getBudgetMin(), ch.getBudgetMax())) {
+            if (gateService.checkChapter(novelId, ch.getId(), chapterNo, fullText, ch.getBudgetMin(), ch.getBudgetMax()).passed()) {
                 stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("chars", fullText.length(), "rounds", round)));
                 stageLog.emit(novelId, chapterNo, CHAPTER_GATE, NONE, Map.of("passed", true));
                 return ChapterOutcome.DONE;

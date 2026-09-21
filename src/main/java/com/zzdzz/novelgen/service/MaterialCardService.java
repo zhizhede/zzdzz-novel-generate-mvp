@@ -8,6 +8,8 @@ import com.zzdzz.novelgen.service.data.MaterialCardDataService;
 import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 import org.springframework.stereotype.Service;
 
+import com.zzdzz.novelgen.model.vo.MaterialCardVO;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,10 +63,17 @@ public class MaterialCardService {
 
     // ===== CRUD =====
 
-    public List<MaterialCardDO> list(long novelId, String kind) {
-        return cardDAO.listByNovel(novelId, kind);
+    public List<MaterialCardVO> list(long novelId, String kind) {
+        return cardDAO.listByNovel(novelId, kind).stream()
+                .map(MaterialCardVO::from).toList();
     }
 
+    /** 详情（API 用）：DO 不出 service 层。 */
+    public MaterialCardVO vo(long id) {
+        return MaterialCardVO.from(get(id));
+    }
+
+    /** 内部沿用 DO（EmbeddingService 向量化等）。 */
     public MaterialCardDO get(long id) {
         MaterialCardDO card = cardDAO.findById(id);
         if (card == null) {

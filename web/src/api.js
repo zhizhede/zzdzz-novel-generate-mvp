@@ -1,4 +1,5 @@
-// 统一请求封装：Result{code,message,data}（code='00000' 为成功），HTTP 401 跳登录
+// 统一请求封装：Result{code,message,data,detail}（code='00000' 为成功；detail 为失败结构化明细）
+// 失败抛出的 Error 附 code/detail 供界面程序化判断；HTTP 401 跳登录
 const OK_CODE = '00000'
 
 async function req(method, url, body) {
@@ -13,7 +14,12 @@ async function req(method, url, body) {
     throw new Error('未登录')
   }
   const j = await resp.json()
-  if (j.code !== OK_CODE) throw new Error(j.message || '请求失败')
+  if (j.code !== OK_CODE) {
+    const e = new Error(j.message || '请求失败')
+    e.code = j.code
+    e.detail = j.detail
+    throw e
+  }
   return j.data
 }
 

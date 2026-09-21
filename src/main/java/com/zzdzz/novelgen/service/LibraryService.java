@@ -14,6 +14,9 @@ import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import com.zzdzz.novelgen.model.vo.CanonDocVO;
+import com.zzdzz.novelgen.model.vo.ForeshadowVO;
+
 import java.util.Map;
 import java.util.Set;
 
@@ -35,10 +38,17 @@ public class LibraryService {
 
     // ===== 正典文档 =====
 
-    public List<CanonDocDO> listCanon(long novelId) {
-        return canonData.listByNovel(novelId);
+    public List<CanonDocVO> listCanon(long novelId) {
+        return canonData.listByNovel(novelId).stream()
+                .map(CanonDocVO::from).toList();
     }
 
+    /** 详情（API 用）：DO 不出 service 层。 */
+    public CanonDocVO canonDocVO(long id) {
+        return CanonDocVO.from(canonDoc(id));
+    }
+
+    /** 内部校验沿用 DO。 */
     public CanonDocDO canonDoc(long id) {
         CanonDocDO doc = canonData.findById(id);
         if (doc == null) throw new BizException(ErrorCode.NOT_FOUND, "正典文档不存在: " + id);
@@ -70,8 +80,9 @@ public class LibraryService {
 
     // ===== 伏笔账本 =====
 
-    public List<ForeshadowDO> listForeshadows(long novelId) {
-        return foreshadowData.listByNovel(novelId);
+    public List<ForeshadowVO> listForeshadows(long novelId) {
+        return foreshadowData.listByNovel(novelId).stream()
+                .map(ForeshadowVO::from).toList();
     }
 
     public void updateForeshadow(long id, String content, Integer plantedIn, Integer recoveredIn, String status) {

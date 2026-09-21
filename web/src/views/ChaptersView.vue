@@ -368,9 +368,17 @@ function openSceneEdit(s) {
 async function saveSceneEdit() {
   savingEdit.value = true
   try {
-    const passed = await api.put(`/api/scenes/${editingScene.value.id}/edit`, { draftText: sceneDraft.value })
-    ElMessage.success(passed ? '场景已保存，机械门禁通过' : '场景已保存，机械门禁未过（门禁状态已回写，可继续修改）')
-    sceneDialog.value = false
+    const res = await api.put(`/api/scenes/${editingScene.value.id}/edit`, { draftText: sceneDraft.value })
+    if (res.passed) {
+      ElMessage.success('场景已保存，机械门禁通过')
+      sceneDialog.value = false
+    } else {
+      // 未过条目随响应带回：check=value（上限 absMax），编辑框保持打开继续改
+      const why = (res.failedChecks || [])
+        .map((c) => `${c.check}=${c.value}${c.absMax != null ? `（上限 ${c.absMax}）` : ''}`)
+        .join('；')
+      ElMessage.warning(`场景已保存，机械门禁未过：${why || '见章节档案'}`)
+    }
     detail.value = await api.get(`/api/chapters/${detail.value.id}`)
   } catch (e) {
     ElMessage.error(e.message)
