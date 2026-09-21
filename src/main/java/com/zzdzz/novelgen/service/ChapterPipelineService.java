@@ -485,7 +485,7 @@ public class ChapterPipelineService {
     }
 
     /** 章级机械门禁未过时的修订轮：外科手术式——只修被点名的指标，不动情节与分行节奏。 */
-    private String reviseChapter(long novelId, ChapterDTO ch, String fullText) {
+    private String reviseChapter(long novelId, ChapterDTO ch, String fullText, LlmPort.StreamDelta onDelta) {
         String feedback = gateService.failureSummary(ch.getId());
         int curWords = ((Number) GateService.computeMetrics(fullText).get("cjk")).intValue();
         int cap = (int) (ch.getBudgetMax() * 1.05);
@@ -505,12 +505,13 @@ public class ChapterPipelineService {
                 【第 %d 章全文（在此版本上修改）】
                 %s
                 """, ch.getChapterNo(), feedback, lengthRule, ch.getChapterNo(), fullText);
-        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
+        LlmPort.ChatRequest req = new LlmPort.ChatRequest(
                 LlmNode.CHAPTER_REVISE, novelId, ch.getId(),
                 List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REVISE, "system",
                                 "你是执行门禁修订的网文编辑，只做被点名的最小修改。")),
                         LlmPort.Message.user(user)),
-                LlmTemps.CHAPTER_REVISE));
+                LlmTemps.CHAPTER_REVISE);
+        LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
         return SceneService.cleanDraft(r.content());
     }
 
@@ -557,6 +558,13 @@ public class ChapterPipelineService {
         public void accept(boolean think, String piece) {
             (think ? thinkBuf : textBuf).append(piece);
             if (System.currentTimeMillis() - lastFlush >= FLUSH_INTERVAL_MS) flush();
+        }
+
+        /** 修订轮开始：通知前端清空该块旧稿——重写文本是替换不是拼接。 */
+        void reset() {
+            flush();
+            stageLog.emitLive(novelId, chapterNo, SCENE, CHUNK,
+                    Map.of("sceneNo", sceneNo, "type", "reset"));
         }
 
         void flush() {
@@ -644,8 +652,9 @@ public class ChapterPipelineService {
                 stageLog.emit(novelId, chapterNo, SCENE_GATE, NONE,
                         Map.of("sceneNo", spec.sceneNo(), "passed", false, "rewrite", true, "round", round,
                                 "reason", gateService.failedChecksText(ch.getId(), sceneId)));
+                if (relay != null) relay.reset(); // 重写流式：清旧稿再逐字
                 draft = sceneService.revise(novelId, ch.getId(), sceneId, spec.sceneNo(),
-                        draft, gateService.failureSummary(ch.getId(), sceneId), pack);
+                        draft, gateService.failureSummary(ch.getId(), sceneId), pack, relay);
                 stageLog.emit(novelId, chapterNo, SCENE, DRAFT,
                         Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(draft)));
                 ok = gateService.checkScene(novelId, ch.getId(), sceneId, spec.sceneNo(), draft, spec.words()).passed();
@@ -716,7 +725,15 @@ public class ChapterPipelineService {
             }
             log.warn("第 {} 章章级门禁未过，带意见修订（第 {}/{} 轮）", chapterNo, round, maxRounds);
             stageLog.emit(novelId, chapterNo, REVISE, START, Map.of("round", round));
-            String revised = reviseChapter(novelId, ch, fullText);
+            // 章级修订流式：sceneNo=0 专用块（前端题为「章级修订」），每轮 reset 清旧稿
+            SceneChunkRelay chapterRelay = streamLongText() ? new SceneChunkRelay(novelId, chapterNo, 0) : null;
+            String revised;
+            try {
+                if (chapterRelay != null) chapterRelay.reset();
+                revised = reviseChapter(novelId, ch, fullText, chapterRelay);
+            } finally {
+                if (chapterRelay != null) chapterRelay.close();
+            }
             if (revised == null || revised.length() < fullText.length() * lenMin
                     || revised.length() > fullText.length() * lenMax) {
                 log.error("第 {} 章修订稿长度异常（{} 字符），弃用本轮", chapterNo,

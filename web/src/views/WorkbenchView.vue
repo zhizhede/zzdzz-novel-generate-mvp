@@ -443,15 +443,27 @@ function pushScene(d) {
   scrollOut()
 }
 
-/** 流式增量：思考/正文逐字追加到对应场景块（entry 不存在则新建）。 */
+/** 流式块标题：sceneNo=0 是章级修订专用通道。 */
+function chunkTitle(d) {
+  return d.sceneNo === 0 ? `第${d.chapterNo}章 章级修订` : `第${d.chapterNo}章 场景${d.sceneNo}`
+}
+
+/** 流式增量：思考/正文逐字追加到对应场景块（entry 不存在则新建）；reset 清旧稿（修订是替换不是拼接）。 */
 function applyChunk(d) {
   const key = `${d.chapterNo}-${d.sceneNo}`
   let s = scenes.value.find((x) => x.key === key)
   if (!s) {
-    s = { key, title: `第${d.chapterNo}章 场景${d.sceneNo}`, phase: 'chunk', text: '', think: '', thinkOpen: false, streaming: true }
+    s = { key, title: chunkTitle(d), phase: 'chunk', text: '', think: '', thinkOpen: false, streaming: true }
     scenes.value.push(s)
   }
   s.streaming = true
+  if (d.type === 'reset') {
+    s.text = ''
+    s.think = ''
+    const tr = findTranscriptScene(d)
+    if (tr) { tr.text = ''; tr.think = '' }
+    return
+  }
   if (d.type === 'think') s.think += d.delta || ''
   else s.text += d.delta || ''
   const t = findTranscriptScene(d)
@@ -472,13 +484,40 @@ function scrollOut() {
   nextTick(() => { if (outBox.value) outBox.value.scrollTop = outBox.value.scrollHeight })
 }
 
+let esEverConnected = false
+
 function connect() {
   es = new EventSource('/api/pipeline/stream')
   for (const ev of ['run', 'chapter', 'outline', 'scene', 'gate', 'assemble', 'chapter_gate', 'revise',
     'reader', 'review', 'digest', 'approve', 'heal', 'volume_plan', 'volume_plan_review', 'volume_retro']) {
     es.addEventListener(ev, (e) => log(ev, e.data))
   }
-  es.onerror = () => { /* 断线后 EventSource 自动重连 */ }
+  es.onopen = () => {
+    // 断线期间的事件不可回放：重连后按 trace 重建转录、用章详情愈合输出区的半截流式块
+    if (esEverConnected) rebuildAfterReconnect()
+    esEverConnected = true
+  }
+  es.onerror = () => { /* 断线后 EventSource 自动重连，重连善后在 onopen */ }
+}
+
+/** 断线重连善后：错过的 SCENE/DRAFT 事件导致输出区停在半截、转录缺段——从 trace 与章详情重建。 */
+async function rebuildAfterReconnect() {
+  try {
+    const row = sessionTask.value || queue.value.find((r) => r.status === 'RUNNING')
+    if (!row || row.kind === 'PLAN' || !row.currentChapter || !novelId.value) return
+    const chapters = await api.get(`/api/novels/${novelId.value}/chapters`)
+    const ch = chapters.find((c) => c.chapterNo === row.currentChapter)
+    if (!ch) return
+    // 转录重建：清空后按 trace 重新打底（seedSession 去重键一并复位）
+    transcript.value = []
+    sessionSeededKey = ''
+    if (sessionOpen.value) await seedSession(row)
+    // 输出区愈合：断线期间完成的场景用库里的最终稿替换半截流式块
+    const detail = await api.get(`/api/chapters/${ch.id}`)
+    for (const sc of detail.scenes || []) {
+      pushScene({ chapterNo: detail.chapterNo, sceneNo: sc.sceneNo, text: sc.draftText || '', phase: 'draft' })
+    }
+  } catch { /* 重建失败保持现状，不拦实时链路 */ }
 }
 
 async function switchMode() {
