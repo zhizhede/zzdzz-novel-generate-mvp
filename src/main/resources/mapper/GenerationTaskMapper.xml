@@ -11,7 +11,8 @@
     <select id="list" resultType="com.zzdzz.novelgen.service.data.GenerationTaskDataService$TaskRow">
                 SELECT t.id, t.novel_id AS "novelId", n.title AS "novelTitle", t.from_chapter AS "fromChapter", t.to_chapter AS "toChapter", t.status,
                        t.done_chapters AS "doneChapters", t.current_chapter AS "currentChapter", t.last_message AS "lastMessage",
-                       to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload"
+                       to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
+                       t.retry_count AS "retryCount"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id
                 WHERE t.is_deleted = FALSE
                 ORDER BY CASE WHEN t.status IN ('QUEUED', 'RUNNING') THEN 0 ELSE 1 END, t.id DESC
@@ -29,7 +30,8 @@
     <select id="findRunning" resultType="com.zzdzz.novelgen.service.data.GenerationTaskDataService$TaskRow">
                 SELECT t.id, t.novel_id AS "novelId", n.title AS "novelTitle", t.from_chapter AS "fromChapter", t.to_chapter AS "toChapter", t.status,
                        t.done_chapters AS "doneChapters", t.current_chapter AS "currentChapter", t.last_message AS "lastMessage",
-                       to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload"
+                       to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
+                       t.retry_count AS "retryCount"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.status = 'RUNNING'
                 ORDER BY t.id LIMIT 1
     </select>
@@ -37,7 +39,8 @@
     <select id="listRunning" resultType="com.zzdzz.novelgen.service.data.GenerationTaskDataService$TaskRow">
                 SELECT t.id, t.novel_id AS "novelId", n.title AS "novelTitle", t.from_chapter AS "fromChapter", t.to_chapter AS "toChapter", t.status,
                        t.done_chapters AS "doneChapters", t.current_chapter AS "currentChapter", t.last_message AS "lastMessage",
-                       to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload"
+                       to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
+                       t.retry_count AS "retryCount"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.status = 'RUNNING'
                 ORDER BY t.id
     </select>
@@ -58,7 +61,8 @@
     <select id="findRunningById" resultType="com.zzdzz.novelgen.service.data.GenerationTaskDataService$TaskRow">
                 SELECT t.id, t.novel_id AS "novelId", n.title AS "novelTitle", t.from_chapter AS "fromChapter", t.to_chapter AS "toChapter", t.status,
                        t.done_chapters AS "doneChapters", t.current_chapter AS "currentChapter", t.last_message AS "lastMessage",
-                       to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload"
+                       to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
+                       t.retry_count AS "retryCount"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.id = #{id}
     </select>
 
@@ -106,5 +110,14 @@
                        from_chapter=COALESCE(current_chapter, from_chapter - 1) + 1,
                        pause_requested=FALSE, cancel_requested=FALSE, last_message='暂停后继续', update_time=now()
                 WHERE id=#{id} AND status='PAUSED'
+    </update>
+
+    <!-- 失败自动重试：RUNNING→QUEUED 原子翻转，从失败章断点续跑；守卫 RUNNING 防与取消/停止竞态 -->
+    <update id="requeueForRetry">
+                UPDATE generation_tasks SET status='QUEUED',
+                       from_chapter=#{fromChapter}, current_chapter=#{fromChapter},
+                       retry_count=#{retryCount}, cancel_requested=FALSE, pause_requested=FALSE,
+                       last_message=#{message}, update_time=now()
+                WHERE id=#{id} AND status='RUNNING' AND cancel_requested=FALSE
     </update>
 </mapper>

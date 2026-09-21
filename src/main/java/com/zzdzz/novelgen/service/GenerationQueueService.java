@@ -199,7 +199,8 @@ public class GenerationQueueService {
                             t.kind() == null ? TaskKind.CHAPTERS.wire() : t.kind(),
                             t.fromChapter(), t.toChapter(),
                             t.status(), t.doneChapters(), t.toChapter() - t.fromChapter() + 1,
-                            t.currentChapter(), t.lastMessage(), t.createTime(), currentStep, chapterTokens);
+                            t.currentChapter(), t.lastMessage(), t.createTime(), currentStep, chapterTokens,
+                            t.retryCount());
                 })
                 .toList();
     }
@@ -342,8 +343,22 @@ public class GenerationQueueService {
             taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), "全部完成（" + passed + " 章）");
             endPhase = StageLog.Phase.DONE;
         } else {
-            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "第 " + (task.fromChapter() + passed)
-                    + " 章失败停止，可断点重跑");
+            // 量产阶段二：失败自动重试——仅此分支（用户停/暂停/取消绝不重试）；断点续跑使重试只补失败章
+            int failedChapter = task.fromChapter() + passed;
+            int maxRetries = tuning.i("task_auto_retry_times", TuningDefaults.TASK_AUTO_RETRY_TIMES);
+            if (task.retryCount() < maxRetries && taskDAO.requeueForRetry(task.id(), failedChapter,
+                    task.retryCount() + 1, "第 " + failedChapter + " 章失败，自动重试（断点续跑）") > 0) {
+                log.warn("任务 #{} 第 {} 章失败，自动重排队重试（{}/{}）", task.id(), failedChapter,
+                        task.retryCount() + 1, maxRetries);
+                taskThreads.remove(task.id());
+                Thread.interrupted();
+                emitTask(task.novelId(), task.id(), task.novelTitle(), failedChapter, task.toChapter(),
+                        StageLog.Phase.QUEUED, "第 " + failedChapter + " 章失败，自动重试 "
+                                + (task.retryCount() + 1) + "/" + maxRetries);
+                return;
+            }
+            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "第 " + failedChapter
+                    + " 章失败停止（自动重试已用尽），可断点重跑");
             endPhase = StageLog.Phase.STOPPED;
         }
         taskThreads.remove(task.id());
