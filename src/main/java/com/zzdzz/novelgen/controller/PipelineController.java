@@ -40,13 +40,13 @@ public class PipelineController {
         }
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
         long taskId = queueService.submit(dto.novel(), dto.from(), dto.to(), userId);
-        return Result.ok(Map.of("taskId", taskId));
+        return Result.success(Map.of("taskId", taskId));
     }
 
     /** 生成队列：排队/运行中置顶，其后为近期已完成任务。 */
     @GetMapping("/queue")
     public Result<List<GenerationTaskVO>> queue() {
-        return Result.ok(queueService.list());
+        return Result.success(queueService.list());
     }
 
     /** 取消任务：仅排队中。运行中停止请用 /stop（流 0 硬中断）。 */
@@ -56,7 +56,7 @@ public class PipelineController {
         if (!accepted) {
             throw new BizException(ErrorCode.PARAM_ERROR, "任务不在排队状态；运行中请使用 /stop");
         }
-        return Result.ok(true);
+        return Result.success(true);
     }
 
     /** 流 0 停止：运行中任务在下一个场景/步骤边界立即终止（章节 INTERRUPTED，已完成产物保留）。 */
@@ -66,13 +66,13 @@ public class PipelineController {
         if (!accepted) {
             throw new BizException(ErrorCode.PARAM_ERROR, "任务不在运行状态");
         }
-        return Result.ok(true);
+        return Result.success(true);
     }
 
     /** 全局急停：终止所有 RUNNING 任务（跑批失控的最后闸门）。 */
     @PostMapping("/queue/stop-all")
     public Result<Integer> stopAll() {
-        return Result.ok(queueService.stopAll());
+        return Result.success(queueService.stopAll());
     }
 
     /** 插队暂停后继续（④）：PAUSED 任务从暂停点下一章接跑。 */
@@ -82,12 +82,12 @@ public class PipelineController {
         if (!accepted) {
             throw new BizException(ErrorCode.PARAM_ERROR, "任务不在暂停状态");
         }
-        return Result.ok(true);
+        return Result.success(true);
     }
 
     @GetMapping("/status")
     public Result<PipelineStatusVO> status() {
-        return Result.ok(queueService.status());
+        return Result.success(queueService.status());
     }
 
     /** 管线进度 SSE 流：进程事件 + 场景文本块级推送（前端 EventSource 订阅）。 */

@@ -26,7 +26,7 @@ public class GlobalExceptionHandler {
             log.warn("业务异常 code={}：{}", e.errorCode().code(), e.getMessage());
         }
         resp.setStatus(e.errorCode().httpStatus().value());
-        return Result.fail(e.errorCode(), e.getMessage());
+        return Result.fail(e.errorCode(), e.getMessage(), e.detail());
     }
 
     /** LLM（第三方）调用失败：C 类，保留原始错误信息供溯源。 */

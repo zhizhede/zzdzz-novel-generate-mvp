@@ -25,12 +25,12 @@ public class NovelController {
 
     @GetMapping
     public Result<List<NovelVO>> list() {
-        return Result.ok(novelService.list());
+        return Result.success(novelService.list());
     }
 
     @PutMapping("/{id}/approval-mode")
     public Result<Void> setApprovalMode(@PathVariable long id, @RequestBody ApprovalModeDTO dto) {
         novelService.setApprovalMode(id, dto.mode());
-        return Result.ok();
+        return Result.success();
     }
 }

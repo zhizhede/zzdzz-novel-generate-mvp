@@ -33,7 +33,7 @@ public class AuthController {
         cookie.setPath("/");
         cookie.setMaxAge((int) jwtService.ttlSeconds());
         response.addCookie(cookie);
-        return Result.ok(new LoginVO(user.username(), user.role()));
+        return Result.success(new LoginVO(user.username(), user.role()));
     }
 
     @PostMapping("/logout")
@@ -43,12 +43,12 @@ public class AuthController {
         cookie.setPath("/");
         cookie.setMaxAge(0);
         response.addCookie(cookie);
-        return Result.ok();
+        return Result.success();
     }
 
     @GetMapping("/me")
     public Result<LoginVO> me(HttpServletRequest request) {
-        return Result.ok(new LoginVO(
+        return Result.success(new LoginVO(
                 (String) request.getAttribute("username"),
                 (String) request.getAttribute("role")));
     }

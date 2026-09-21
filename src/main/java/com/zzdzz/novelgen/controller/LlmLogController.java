@@ -30,13 +30,13 @@ public class LlmLogController {
                                          @RequestParam(required = false) Long chapterId,
                                          @RequestParam(defaultValue = "1") int page,
                                          @RequestParam(defaultValue = "20") int size) {
-        return Result.ok(llmLogService.page(novelId, chapterId, page, size));
+        return Result.success(llmLogService.page(novelId, chapterId, page, size));
     }
 
     @GetMapping("/totals")
     public Result<LlmTotalsVO> totals(@RequestParam(required = false) Long novelId,
                                       @RequestParam(required = false) Long chapterId) {
-        return Result.ok(llmLogService.totals(novelId, chapterId));
+        return Result.success(llmLogService.totals(novelId, chapterId));
     }
 
     /** 事件流水：生成履历回放（章纲→场景→门禁→修订→审校→落账），payload 含失败原因与轮次。 */
@@ -44,11 +44,11 @@ public class LlmLogController {
     public Result<List<PipelineEventVO>> events(@RequestParam Long novelId,
                                                 @RequestParam(required = false) Integer chapterNo,
                                                 @RequestParam(defaultValue = "200") int limit) {
-        return Result.ok(llmLogService.events(novelId, chapterNo, limit));
+        return Result.success(llmLogService.events(novelId, chapterNo, limit));
     }
 
     @GetMapping("/{id}")
     public Result<LlmLogDetailVO> detail(@PathVariable long id) {
-        return Result.ok(llmLogService.detail(id));
+        return Result.success(llmLogService.detail(id));
     }
 }

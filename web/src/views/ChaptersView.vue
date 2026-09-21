@@ -368,7 +368,7 @@ function openSceneEdit(s) {
 async function saveSceneEdit() {
   savingEdit.value = true
   try {
-    const passed = await api.put(`/api/scenes/${editingScene.value.id}/edit`, { reason: sceneDraft.value })
+    const passed = await api.put(`/api/scenes/${editingScene.value.id}/edit`, { draftText: sceneDraft.value })
     ElMessage.success(passed ? '场景已保存，机械门禁通过' : '场景已保存，机械门禁未过（门禁状态已回写，可继续修改）')
     sceneDialog.value = false
     detail.value = await api.get(`/api/chapters/${detail.value.id}`)
@@ -388,7 +388,7 @@ async function saveFullEdit() {
   savingEdit.value = true
   try {
     const wasDigested = detail.value.status === 'DIGESTED'
-    await api.put(`/api/chapters/${detail.value.id}/fulltext`, { reason: fullDraft.value })
+    await api.put(`/api/chapters/${detail.value.id}/fulltext`, { fullText: fullDraft.value })
     ElMessage.success(wasDigested ? '正文已保存；旧事实账作废，章节回到待审批' : '正文已保存')
     fullDialog.value = false
     detail.value = await api.get(`/api/chapters/${detail.value.id}`)
