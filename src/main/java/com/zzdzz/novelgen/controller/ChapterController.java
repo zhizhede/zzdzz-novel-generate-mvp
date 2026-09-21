@@ -65,7 +65,7 @@ public class ChapterController {
 
     /** 流 A 终稿打回：意见原文落库并注入下次章纲重写；清场后自动重新入队。 */
     @PostMapping("/chapters/{id}/reject")
-    public Result<Long> reject(@PathVariable long id, @RequestBody(required = false) RejectDTO req) {
+    public Result<Long> reject(@PathVariable long id, @RequestBody(required = false) RejectVO req) {
         String reason = req == null || req.reason() == null ? "" : req.reason().strip();
         if (reason.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "打回意见不能为空");
@@ -77,7 +77,7 @@ public class ChapterController {
 
     /** 流 A 章纲卡点（manual 模式）：批准放行 / 打回带意见重出章纲。 */
     @PostMapping("/chapters/{id}/outline-decision")
-    public Result<Long> outlineDecision(@PathVariable long id, @RequestBody OutlineDecisionDTO req) {
+    public Result<Long> outlineDecision(@PathVariable long id, @RequestBody OutlineDecisionVO req) {
         if (req == null || req.action() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "action 必填（APPROVE/REJECT）");
         }
@@ -97,7 +97,7 @@ public class ChapterController {
 
     /** 流 A 扩展·事后否决：DIGESTED 章打回——清除本章事实账，重生成后 digest 重算；伏笔 flips 保留。 */
     @PostMapping("/chapters/{id}/veto")
-    public Result<Long> veto(@PathVariable long id, @RequestBody(required = false) RejectDTO req) {
+    public Result<Long> veto(@PathVariable long id, @RequestBody(required = false) RejectVO req) {
         String reason = req == null || req.reason() == null ? "" : req.reason().strip();
         if (reason.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "否决意见不能为空");
@@ -109,7 +109,7 @@ public class ChapterController {
 
     /** 人工编辑场景草稿（Q5a）：保存后立即重过该场景机械门禁（未过条目随响应返回）；仅生成前状态可用。 */
     @PutMapping("/scenes/{id}/edit")
-    public Result<ChapterPipelineService.SceneEditResult> editScene(@PathVariable long id, @RequestBody(required = false) SceneEditDTO req) {
+    public Result<ChapterPipelineService.SceneEditResult> editScene(@PathVariable long id, @RequestBody(required = false) SceneEditVO req) {
         String text = req == null || req.draftText() == null ? "" : req.draftText().strip();
         if (text.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "场景内容不能为空");
@@ -119,7 +119,7 @@ public class ChapterController {
 
     /** 人工编辑正文（Q5b）：仅 PENDING_APPROVAL/DIGESTED；DIGESTED 编辑后回待审批、digest 重算。 */
     @PutMapping("/chapters/{id}/fulltext")
-    public Result<Void> editFullText(@PathVariable long id, @RequestBody(required = false) FullTextEditDTO req) {
+    public Result<Void> editFullText(@PathVariable long id, @RequestBody(required = false) FullTextEditVO req) {
         String text = req == null || req.fullText() == null ? "" : req.fullText();
         if (text.strip().isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "正文不能为空");
@@ -136,13 +136,13 @@ public class ChapterController {
     }
 
     /** 打回/否决意见。 */
-    public record RejectDTO(String reason) {}
+    public record RejectVO(String reason) {}
 
-    public record OutlineDecisionDTO(String action, String reason) {}
+    public record OutlineDecisionVO(String action, String reason) {}
 
     /** 场景草稿编辑：字段名即语义（此前借 RejectReq.reason 装正文，一名三义已拆）。 */
-    public record SceneEditDTO(String draftText) {}
+    public record SceneEditVO(String draftText) {}
 
     /** 章正文编辑。 */
-    public record FullTextEditDTO(String fullText) {}
+    public record FullTextEditVO(String fullText) {}
 }

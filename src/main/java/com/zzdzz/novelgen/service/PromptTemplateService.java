@@ -6,7 +6,7 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.PromptTemplateDataService;
 import com.zzdzz.novelgen.llm.PromptCatalog;
-import com.zzdzz.novelgen.model.entity.PromptTemplateDO;
+import com.zzdzz.novelgen.model.dto.PromptTemplateDTO;
 import com.zzdzz.novelgen.model.vo.PromptDetailVO;
 import com.zzdzz.novelgen.model.vo.PromptTemplateVO;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -73,7 +73,7 @@ public class PromptTemplateService {
 
     /** 人工编辑：仅 exact 行可编辑，占位符序列必须与代码目录一致（防坏模板；运行时另有 fail-open 兜底）。 */
     public PromptDetailVO updateContent(long id, String content) {
-        PromptTemplateDO t = require(id);
+        PromptTemplateDTO t = require(id);
         PromptCatalog.TemplateDef def = catalogDef(t.getNode(), t.getPhase())
                 .orElseThrow(() -> new IllegalArgumentException("该条为运行时拼接骨架，未接入库读取，不可编辑"));
         if (content == null || content.isBlank()) {
@@ -91,7 +91,7 @@ public class PromptTemplateService {
 
     /** 重置：清 custom、内容对齐代码目录。 */
     public PromptDetailVO reset(long id) {
-        PromptTemplateDO t = require(id);
+        PromptTemplateDTO t = require(id);
         PromptCatalog.TemplateDef def = catalogDef(t.getNode(), t.getPhase())
                 .orElseThrow(() -> new IllegalArgumentException("目录中不存在该节点，无法重置"));
         dao.reset(id, def.content(), md5(def.content()));
@@ -107,12 +107,12 @@ public class PromptTemplateService {
     }
 
     public PromptDetailVO detail(long id) {
-        PromptTemplateDO t = require(id);
+        PromptTemplateDTO t = require(id);
         return new PromptDetailVO(t.getId(), t.getNode(), t.getPhase(), t.getTitle(),
                 t.getContent(), t.exact(), t.getVersion(), t.custom(), t.enabled());
     }
 
-    private PromptTemplateDO require(long id) {
+    private PromptTemplateDTO require(long id) {
         return dao.findById(id).orElseThrow(() -> new NoSuchElementException("提示词不存在: " + id));
     }
 
@@ -128,7 +128,7 @@ public class PromptTemplateService {
             synchronized (this) {
                 if (cache.isEmpty() || System.currentTimeMillis() - cacheLoadedAt > CACHE_TTL_MS) {
                     Map<String, String> fresh = new HashMap<>();
-                    for (PromptTemplateDO t : dao.findAll()) {
+                    for (PromptTemplateDTO t : dao.findAll()) {
                         if (t.enabled()) fresh.put(t.getNode() + "|" + t.getPhase(), t.getContent());
                     }
                     cache.clear();

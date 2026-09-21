@@ -4,8 +4,8 @@ import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.UserDataService;
-import com.zzdzz.novelgen.model.dto.LoginDTO;
-import com.zzdzz.novelgen.model.entity.UserDO;
+import com.zzdzz.novelgen.model.vo.LoginVO;
+import com.zzdzz.novelgen.model.dto.UserDTO;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -23,11 +23,11 @@ public class AuthService {
     public record LoginUser(long id, String username, String role) {
     }
 
-    public LoginUser authenticate(LoginDTO dto) {
+    public LoginUser authenticate(LoginVO dto) {
         if (dto == null || isBlank(dto.username()) || isBlank(dto.password())) {
             throw new BizException(ErrorCode.PARAM_ERROR, "用户名和密码不能为空");
         }
-        UserDO user = userData.findAliveByUsername(dto.username().trim());
+        UserDTO user = userData.findAliveByUsername(dto.username().trim());
         String hash = sha256(dto.username().trim() + ":" + dto.password());
         if (user == null || !hash.equals(user.getPasswordHash())) {
             throw new BizException(ErrorCode.LOGIN_FAILED, "用户名或密码错误");

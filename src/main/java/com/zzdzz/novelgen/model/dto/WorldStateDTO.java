@@ -1,4 +1,4 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.baomidou.mybatisplus.annotation.TableField;
@@ -8,14 +8,14 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 @Data
-@TableName(value = "volume_reviews", autoResultMap = true)
-public class VolumeReviewDO {
+@TableName(value = "world_states", autoResultMap = true)
+public class WorldStateDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long novelId;
-    private Integer volNo;
+    private Integer chapterNo;
     @TableField(typeHandler = com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler.class)
-    private JsonNode report;
+    private JsonNode state;
     private boolean isDeleted;
     private java.time.OffsetDateTime createTime;
     private java.time.OffsetDateTime updateTime;

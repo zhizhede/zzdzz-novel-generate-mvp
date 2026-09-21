@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.entity.LlmCallLogDO;
+import com.zzdzz.novelgen.model.dto.LlmCallLogDTO;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.apache.ibatis.annotations.Param;
 
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /** llm_call_log 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/LlmCallLogMapper.xml。 */
-public interface LlmCallLogMapper extends BaseMapper<LlmCallLogDO> {
+public interface LlmCallLogMapper extends BaseMapper<LlmCallLogDTO> {
 
     Long insert(@Param("node") String node, @Param("novelId") Long novelId, @Param("chapterId") Long chapterId,
                 @Param("model") String model, @Param("promptTokens") int promptTokens,
@@ -19,10 +19,10 @@ public interface LlmCallLogMapper extends BaseMapper<LlmCallLogDO> {
                 @Param("reasoningText") String reasoningText, @Param("requestJson") String requestJson,
                 @Param("responseJson") String responseJson);
 
-    List<LlmCallLogDO> findPage(@Param("novelId") Long novelId, @Param("chapterId") Long chapterId,
+    List<LlmCallLogDTO> findPage(@Param("novelId") Long novelId, @Param("chapterId") Long chapterId,
                                 @Param("limit") int limit, @Param("offset") int offset);
 
-    LlmCallLogDO findById(@Param("id") long id);
+    LlmCallLogDTO findById(@Param("id") long id);
 
     Long countBy(@Param("novelId") Long novelId, @Param("chapterId") Long chapterId);
 

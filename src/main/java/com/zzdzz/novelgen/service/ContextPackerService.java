@@ -3,8 +3,8 @@ package com.zzdzz.novelgen.service;
 import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.zzdzz.novelgen.llm.LlmNode;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.DigestDataService;
@@ -119,7 +119,7 @@ public class ContextPackerService {
      */
     public String prevChapterBrief(long novelId, int chapterNo) {
         if (chapterNo <= 1) return null;
-        ChapterDO prev = chapterData.find(novelId, chapterNo - 1).orElse(null);
+        ChapterDTO prev = chapterData.find(novelId, chapterNo - 1).orElse(null);
         if (prev == null) return null;
         List<String> summaries = digestData.findRecent(novelId, chapterNo - 1, 1);
         String outcome = summaries.isEmpty() ? prevTail(novelId, chapterNo)
@@ -171,10 +171,10 @@ public class ContextPackerService {
      */
     public String packLedgers(long novelId, int fromNo) {
         StringBuilder sb = new StringBuilder();
-        List<ChapterDO> plans = chapterData.listSummariesByNovel(novelId);
+        List<ChapterDTO> plans = chapterData.listSummariesByNovel(novelId);
         if (!plans.isEmpty()) {
             sb.append("【已有卷纲（往卷已写与当前规划；不得重复其桥段，须衔接其走向）】\n");
-            for (ChapterDO c : plans) {
+            for (ChapterDTO c : plans) {
                 sb.append("第").append(c.getChapterNo()).append("章《").append(Objects.toString(c.getTitle(), ""))
                         .append("》目标：").append(Objects.toString(c.getGoal(), ""))
                         .append(" 钩子：").append(Objects.toString(c.getHook(), ""))
@@ -192,13 +192,13 @@ public class ContextPackerService {
             sb.append("【世界状态（截至第 ").append(fromNo - 1).append(" 章结束，必须遵守——物品归属与位置不得凭空变化）】\n")
                     .append(ws).append("\n\n");
         }
-        List<ForeshadowDO> fss = foreshadowData.listByNovel(novelId).stream()
+        List<ForeshadowDTO> fss = foreshadowData.listByNovel(novelId).stream()
                 .filter(f -> !ForeshadowStatus.RECOVERED.is(f.getStatus()) && !ForeshadowStatus.DROPPED.is(f.getStatus()))
                 .filter(f -> f.getRecoveredIn() == null || f.getRecoveredIn() >= fromNo)
                 .toList();
         if (!fss.isEmpty()) {
             sb.append("【伏笔账本（未回收项；proposed=自动提议待排期，被引用即采纳；planted=已埋待回收，被引用即安排回收）】\n");
-            for (ForeshadowDO f : fss) {
+            for (ForeshadowDTO f : fss) {
                 sb.append(f.getCode()).append("（").append(f.getStatus());
                 if (f.getPlantedIn() != null) sb.append("，埋于第").append(f.getPlantedIn()).append("章");
                 if (f.getProposedIn() != null) sb.append("，提议于第").append(f.getProposedIn()).append("章");
@@ -320,7 +320,7 @@ public class ContextPackerService {
         return sb.toString().strip();
     }
 
-    public Pack packScene(long novelId, int chapterNo, ChapterDO ch, OutlineService.SceneSpec spec,
+    public Pack packScene(long novelId, int chapterNo, ChapterDTO ch, OutlineService.SceneSpec spec,
                           List<String> digests, String prevTail, List<String> foreshadows,
                           String prevSceneText) {
         List<String> ctx = new ArrayList<>();

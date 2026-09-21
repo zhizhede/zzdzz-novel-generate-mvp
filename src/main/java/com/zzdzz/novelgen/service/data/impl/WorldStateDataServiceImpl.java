@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.dao.WorldStateMapper;
-import com.zzdzz.novelgen.model.entity.WorldStateDO;
+import com.zzdzz.novelgen.model.dto.WorldStateDTO;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import org.springframework.stereotype.Service;
 
@@ -14,7 +14,7 @@ import java.util.Map;
 /** world_states 数据服务实现。 */
 @Service
 @RequiredArgsConstructor
-public class WorldStateDataServiceImpl extends ServiceImpl<WorldStateMapper, WorldStateDO>
+public class WorldStateDataServiceImpl extends ServiceImpl<WorldStateMapper, WorldStateDTO>
         implements WorldStateDataService {
 
     private final ObjectMapper mapper;

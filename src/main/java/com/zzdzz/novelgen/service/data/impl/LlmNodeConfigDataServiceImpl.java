@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.LlmNodeConfigMapper;
-import com.zzdzz.novelgen.model.entity.LlmNodeConfigDO;
+import com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO;
 import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
 import org.springframework.stereotype.Service;
 
@@ -10,20 +10,20 @@ import java.util.List;
 
 /** llm_node_configs 数据服务实现。 */
 @Service
-public class LlmNodeConfigDataServiceImpl extends ServiceImpl<LlmNodeConfigMapper, LlmNodeConfigDO> implements LlmNodeConfigDataService {
+public class LlmNodeConfigDataServiceImpl extends ServiceImpl<LlmNodeConfigMapper, LlmNodeConfigDTO> implements LlmNodeConfigDataService {
 
     @Override
-    public LlmNodeConfigDO findEnabled(String node) {
+    public LlmNodeConfigDTO findEnabled(String node) {
         return baseMapper.findEnabled(node);
     }
 
     @Override
-    public List<LlmNodeConfigDO> listAll() {
+    public List<LlmNodeConfigDTO> listAll() {
         return baseMapper.listAll();
     }
 
     @Override
-    public LlmNodeConfigDO findById(long id) {
+    public LlmNodeConfigDTO findById(long id) {
         return baseMapper.findById(id);
     }
 

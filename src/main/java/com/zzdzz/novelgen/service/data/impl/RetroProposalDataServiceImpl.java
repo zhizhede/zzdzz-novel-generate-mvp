@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.RetroProposalMapper;
-import com.zzdzz.novelgen.model.entity.RetroProposalDO;
+import com.zzdzz.novelgen.model.dto.RetroProposalDTO;
 import com.zzdzz.novelgen.model.vo.RetroProposalVO;
 import com.zzdzz.novelgen.service.data.RetroProposalDataService;
 import org.springframework.stereotype.Service;
@@ -13,7 +13,7 @@ import java.util.List;
 
 /** 复盘建议/提案数据服务实现。查询用列名 Wrapper（boolean isDeleted 不入 MP lambda 缓存）。 */
 @Service
-public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMapper, RetroProposalDO>
+public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMapper, RetroProposalDTO>
         implements RetroProposalDataService {
 
     @Override
@@ -22,7 +22,7 @@ public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMappe
         if (trimmed.isEmpty()) {
             return;
         }
-        Long dup = getObj(new QueryWrapper<RetroProposalDO>()
+        Long dup = getObj(new QueryWrapper<RetroProposalDTO>()
                 .select("id")
                 .eq("novel_id", novelId)
                 .eq("vol_no", volNo)
@@ -32,7 +32,7 @@ public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMappe
         if (dup != null) {
             return;
         }
-        RetroProposalDO row = new RetroProposalDO();
+        RetroProposalDTO row = new RetroProposalDTO();
         row.setNovelId(novelId);
         row.setVolNo(volNo);
         row.setKind(kind);
@@ -42,8 +42,8 @@ public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMappe
     }
 
     @Override
-    public List<RetroProposalDO> listByVolume(long novelId, int volNo) {
-        return list(new QueryWrapper<RetroProposalDO>()
+    public List<RetroProposalDTO> listByVolume(long novelId, int volNo) {
+        return list(new QueryWrapper<RetroProposalDTO>()
                 .eq("novel_id", novelId)
                 .eq("vol_no", volNo)
                 .eq("is_deleted", false)
@@ -59,7 +59,7 @@ public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMappe
 
     @Override
     public boolean decide(long id, boolean adopt, String note) {
-        return update(new UpdateWrapper<RetroProposalDO>()
+        return update(new UpdateWrapper<RetroProposalDTO>()
                 .eq("id", id)
                 .eq("status", "PROPOSED")
                 .set("status", adopt ? "ADOPTED" : "REJECTED")

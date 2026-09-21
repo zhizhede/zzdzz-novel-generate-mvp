@@ -5,7 +5,7 @@ import com.zzdzz.novelgen.common.web.AuthInterceptor;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.dto.PipelineRunDTO;
+import com.zzdzz.novelgen.model.vo.PipelineRunVO;
 import com.zzdzz.novelgen.model.vo.GenerationTaskVO;
 import com.zzdzz.novelgen.model.vo.PipelineStatusVO;
 import com.zzdzz.novelgen.service.GenerationQueueService;
@@ -35,7 +35,7 @@ public class PipelineController {
 
     /** 入队异步生成，立即返回任务 id；运行中提交不再 409，排队等待。 */
     @PostMapping("/run")
-    public Result<Map<String, Object>> run(@RequestBody PipelineRunDTO dto, HttpServletRequest request) {
+    public Result<Map<String, Object>> run(@RequestBody PipelineRunVO dto, HttpServletRequest request) {
         if (dto == null || dto.novel() == null || dto.from() == null || dto.to() == null
                 || dto.from() < 1 || dto.to() < dto.from()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "参数不合法：novel/from/to 必填，from ≤ to");

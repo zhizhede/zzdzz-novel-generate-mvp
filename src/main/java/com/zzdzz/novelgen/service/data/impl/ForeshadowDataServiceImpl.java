@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.ForeshadowMapper;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import org.springframework.stereotype.Service;
 
@@ -10,10 +10,10 @@ import java.util.List;
 
 /** foreshadows 数据服务实现。 */
 @Service
-public class ForeshadowDataServiceImpl extends ServiceImpl<ForeshadowMapper, ForeshadowDO> implements ForeshadowDataService {
+public class ForeshadowDataServiceImpl extends ServiceImpl<ForeshadowMapper, ForeshadowDTO> implements ForeshadowDataService {
 
     @Override
-    public List<ForeshadowDO> listByNovel(long novelId) {
+    public List<ForeshadowDTO> listByNovel(long novelId) {
         return baseMapper.listByNovel(novelId);
     }
 
@@ -33,12 +33,12 @@ public class ForeshadowDataServiceImpl extends ServiceImpl<ForeshadowMapper, For
     }
 
     @Override
-    public ForeshadowDO findByCode(long novelId, String code) {
+    public ForeshadowDTO findByCode(long novelId, String code) {
         return baseMapper.findByCode(novelId, code);
     }
 
     @Override
-    public ForeshadowDO findById(long id) {
+    public ForeshadowDTO findById(long id) {
         return baseMapper.findById(id);
     }
 

@@ -63,7 +63,7 @@ public class LibraryController {
 
     /** 人工编辑模板（置 custom；占位符序列须与代码目录一致）。 */
     @PutMapping("/prompts/{id}")
-    public Result<PromptDetailVO> updatePrompt(@PathVariable long id, @RequestBody PromptUpdateDTO dto) {
+    public Result<PromptDetailVO> updatePrompt(@PathVariable long id, @RequestBody PromptUpdateVO dto) {
         return Result.success(promptService.updateContent(id, dto.content()));
     }
 
@@ -81,7 +81,7 @@ public class LibraryController {
     }
 
     @PutMapping("/tuning/{key}")
-    public Result<Void> updateTuning(@PathVariable String key, @RequestBody TuningUpdateDTO dto) {
+    public Result<Void> updateTuning(@PathVariable String key, @RequestBody TuningUpdateVO dto) {
         tuningService.update(key, String.valueOf(dto.value()));
         return Result.success();
     }
@@ -94,14 +94,14 @@ public class LibraryController {
     }
 
     @PostMapping("/llm-nodes")
-    public Result<Void> createLlmNode(@RequestBody LlmNodeCreateDTO dto) {
+    public Result<Void> createLlmNode(@RequestBody LlmNodeCreateVO dto) {
         nodeConfigService.create(dto.node(), dto.model(), dto.temperature(), dto.maxTokens(),
                 dto.extraJson(), dto.enabled(), dto.remark());
         return Result.success();
     }
 
     @PutMapping("/llm-nodes/{id}")
-    public Result<Void> updateLlmNode(@PathVariable long id, @RequestBody LlmNodeUpdateDTO dto) {
+    public Result<Void> updateLlmNode(@PathVariable long id, @RequestBody LlmNodeUpdateVO dto) {
         nodeConfigService.update(id, dto.model(), dto.temperature(), dto.maxTokens(),
                 dto.extraJson(), dto.enabled(), dto.remark());
         return Result.success();
@@ -119,7 +119,7 @@ public class LibraryController {
     }
 
     @PutMapping("/llm-prices/{id}")
-    public Result<Void> updateLlmPrice(@PathVariable long id, @RequestBody LlmPriceUpdateDTO dto) {
+    public Result<Void> updateLlmPrice(@PathVariable long id, @RequestBody LlmPriceUpdateVO dto) {
         nodeConfigService.updatePrice(id,
                 dto.idleInputHit(), dto.idleInputMiss(), dto.idleOutput(),
                 dto.peakInputHit(), dto.peakInputMiss(), dto.peakOutput(),
@@ -158,14 +158,14 @@ public class LibraryController {
     }
 
     @PostMapping("/novels/{novelId}/cards")
-    public Result<Void> createCard(@PathVariable long novelId, @RequestBody CardSaveDTO dto) {
+    public Result<Void> createCard(@PathVariable long novelId, @RequestBody CardSaveVO dto) {
         cardService.create(novelId, dto.kind(), dto.name(), dto.aliases(), dto.summary(), dto.contentMd(),
                 dto.pinned(), dto.status(), dto.sourceChapter());
         return Result.success();
     }
 
     @PutMapping("/cards/{id}")
-    public Result<Void> updateCard(@PathVariable long id, @RequestBody CardSaveDTO dto) {
+    public Result<Void> updateCard(@PathVariable long id, @RequestBody CardSaveVO dto) {
         cardService.update(id, dto.name(), dto.aliases(), dto.summary(), dto.contentMd(),
                 dto.pinned(), dto.status(), dto.sourceChapter());
         return Result.success();
@@ -190,13 +190,13 @@ public class LibraryController {
     }
 
     @PostMapping("/novels/{novelId}/canon")
-    public Result<Void> createCanon(@PathVariable long novelId, @RequestBody CanonCreateDTO dto) {
+    public Result<Void> createCanon(@PathVariable long novelId, @RequestBody CanonCreateVO dto) {
         libraryService.createCanon(novelId, dto.kind(), dto.name(), dto.content());
         return Result.success();
     }
 
     @PutMapping("/canon/{id}")
-    public Result<Void> updateCanon(@PathVariable long id, @RequestBody CanonUpdateDTO dto) {
+    public Result<Void> updateCanon(@PathVariable long id, @RequestBody CanonUpdateVO dto) {
         libraryService.updateCanon(id, dto.content());
         return Result.success();
     }
@@ -215,7 +215,7 @@ public class LibraryController {
     }
 
     @PutMapping("/foreshadows/{id}")
-    public Result<Void> updateForeshadow(@PathVariable long id, @RequestBody ForeshadowUpdateDTO dto) {
+    public Result<Void> updateForeshadow(@PathVariable long id, @RequestBody ForeshadowUpdateVO dto) {
         libraryService.updateForeshadow(id, dto.content(), dto.plantedIn(), dto.recoveredIn(), dto.status());
         return Result.success();
     }
@@ -228,7 +228,7 @@ public class LibraryController {
     }
 
     @PutMapping("/digests/{id}")
-    public Result<Void> updateDigest(@PathVariable long id, @RequestBody DigestUpdateDTO dto) {
+    public Result<Void> updateDigest(@PathVariable long id, @RequestBody DigestUpdateVO dto) {
         libraryService.updateDigest(id, dto.contentMd(), dto.facts());
         return Result.success();
     }
@@ -241,13 +241,13 @@ public class LibraryController {
     }
 
     @PutMapping("/novels/{novelId}/style")
-    public Result<Void> updateStyle(@PathVariable long novelId, @RequestBody StyleUpdateDTO dto) {
+    public Result<Void> updateStyle(@PathVariable long novelId, @RequestBody StyleUpdateVO dto) {
         libraryService.updateStyleRules(novelId, dto.rulesMd());
         return Result.success();
     }
 
     @PutMapping("/novels/{novelId}/gate-config")
-    public Result<Void> updateGateConfig(@PathVariable long novelId, @RequestBody GateConfigUpdateDTO dto) {
+    public Result<Void> updateGateConfig(@PathVariable long novelId, @RequestBody GateConfigUpdateVO dto) {
         libraryService.updateGateConfig(novelId, dto.gateConfig());
         return Result.success();
     }
@@ -275,7 +275,7 @@ public class LibraryController {
     /** 人工纠偏某章快照：body.state 为 JSON 字符串。 */
     @PutMapping("/novels/{novelId}/world-states/{chapterNo}")
     public Result<Void> saveWorldState(@PathVariable long novelId, @PathVariable int chapterNo,
-                                       @RequestBody WorldStateSaveDTO dto) {
+                                       @RequestBody WorldStateSaveVO dto) {
         libraryService.saveWorldState(novelId, chapterNo, dto.state());
         return Result.success();
     }
@@ -289,41 +289,41 @@ public class LibraryController {
 
     // ===== 请求 DTO（字段名与前端 payload 逐字对齐；后缀规约）=====
 
-    public record PromptUpdateDTO(String content) {}
+    public record PromptUpdateVO(String content) {}
 
     /** tuning 值库存为字符串，数字/文本都可能，绑定保持 Object。 */
-    public record TuningUpdateDTO(Object value) {}
+    public record TuningUpdateVO(Object value) {}
 
-    public record LlmNodeCreateDTO(String node, String model, Double temperature, Integer maxTokens,
+    public record LlmNodeCreateVO(String node, String model, Double temperature, Integer maxTokens,
                                    String extraJson, Boolean enabled, String remark) {}
 
-    public record LlmNodeUpdateDTO(String model, Double temperature, Integer maxTokens,
+    public record LlmNodeUpdateVO(String model, Double temperature, Integer maxTokens,
                                    String extraJson, Boolean enabled, String remark) {}
 
-    public record LlmPriceUpdateDTO(BigDecimal idleInputHit, BigDecimal idleInputMiss,
+    public record LlmPriceUpdateVO(BigDecimal idleInputHit, BigDecimal idleInputMiss,
                                      BigDecimal idleOutput, BigDecimal peakInputHit,
                                      BigDecimal peakInputMiss, BigDecimal peakOutput,
                                      Integer peakStartHour, Integer peakEndHour, String remark) {}
 
     /** 素材卡新增/更新共用；缺省 aliases 归一为空表。 */
-    public record CardSaveDTO(String kind, String name, List<String> aliases, String summary, String contentMd,
+    public record CardSaveVO(String kind, String name, List<String> aliases, String summary, String contentMd,
                               Boolean pinned, String status, Integer sourceChapter) {
-        public CardSaveDTO {
+        public CardSaveVO {
             if (aliases == null) aliases = List.of();
         }
     }
 
-    public record CanonCreateDTO(String kind, String name, String content) {}
+    public record CanonCreateVO(String kind, String name, String content) {}
 
-    public record CanonUpdateDTO(String content) {}
+    public record CanonUpdateVO(String content) {}
 
-    public record ForeshadowUpdateDTO(String content, Integer plantedIn, Integer recoveredIn, String status) {}
+    public record ForeshadowUpdateVO(String content, Integer plantedIn, Integer recoveredIn, String status) {}
 
-    public record DigestUpdateDTO(String contentMd, String facts) {}
+    public record DigestUpdateVO(String contentMd, String facts) {}
 
-    public record StyleUpdateDTO(String rulesMd) {}
+    public record StyleUpdateVO(String rulesMd) {}
 
-    public record GateConfigUpdateDTO(String gateConfig) {}
+    public record GateConfigUpdateVO(String gateConfig) {}
 
-    public record WorldStateSaveDTO(String state) {}
+    public record WorldStateSaveVO(String state) {}
 }

@@ -10,7 +10,7 @@ import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
 import org.springframework.stereotype.Service;
@@ -37,12 +37,12 @@ public class OutlineService {
     private final TuningService tuning;
 
 
-    public ChapterDO loadChapter(long novelId, int chapterNo) {
+    public ChapterDTO loadChapter(long novelId, int chapterNo) {
         return chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
     }
 
-    public void generate(long novelId, ChapterDO ch, String world, String characters,
+    public void generate(long novelId, ChapterDTO ch, String world, String characters,
                          List<String> directives, List<String> digests, String prevTail,
                          String prevBrief) {
         // 流 A：未消费的打回意见拼进卷纲目标行（不动提示词模板目录），章纲落库成功后清零；

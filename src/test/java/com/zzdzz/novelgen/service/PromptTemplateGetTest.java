@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.service.data.PromptTemplateDataService;
-import com.zzdzz.novelgen.model.entity.PromptTemplateDO;
+import com.zzdzz.novelgen.model.dto.PromptTemplateDTO;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
@@ -14,8 +14,8 @@ import static org.mockito.Mockito.when;
 /** 库值优先与 fail-open：enabled 行覆盖代码模板；禁用/损坏行回退代码模板。 */
 class PromptTemplateGetTest {
 
-    private static PromptTemplateDO row(String content, boolean enabled) {
-        PromptTemplateDO row = new PromptTemplateDO();
+    private static PromptTemplateDTO row(String content, boolean enabled) {
+        PromptTemplateDTO row = new PromptTemplateDTO();
         row.setId(1L);
         row.setNode("outline");
         row.setPhase("user");

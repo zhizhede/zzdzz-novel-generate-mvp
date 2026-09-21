@@ -1,4 +1,4 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -8,7 +8,7 @@ import lombok.Data;
 /** 章节步骤状态行（契约②）：每步每次尝试一行，断点/问责/一屏答案的读模型。 */
 @Data
 @TableName("chapter_steps")
-public class ChapterStepDO {
+public class ChapterStepDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long novelId;

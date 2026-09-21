@@ -1,14 +1,14 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 
 import java.util.List;
 
 /** foreshadows 数据服务接口（原 ForeshadowDAO）。 */
-public interface ForeshadowDataService extends IService<ForeshadowDO> {
+public interface ForeshadowDataService extends IService<ForeshadowDTO> {
 
-    List<ForeshadowDO> listByNovel(long novelId);
+    List<ForeshadowDTO> listByNovel(long novelId);
 
     boolean exists(long novelId, String code);
 
@@ -16,9 +16,9 @@ public interface ForeshadowDataService extends IService<ForeshadowDO> {
 
     int update(long id, String content, Integer plantedIn, Integer recoveredIn, String status);
 
-    ForeshadowDO findByCode(long novelId, String code);
+    ForeshadowDTO findByCode(long novelId, String code);
 
-    ForeshadowDO findById(long id);
+    ForeshadowDTO findById(long id);
 
     int insertProposal(long novelId, String code, String content, int proposedIn);
 

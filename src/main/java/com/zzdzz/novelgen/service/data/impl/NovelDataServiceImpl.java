@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.NovelMapper;
-import com.zzdzz.novelgen.model.entity.NovelDO;
+import com.zzdzz.novelgen.model.dto.NovelDTO;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import org.springframework.stereotype.Service;
 
@@ -10,10 +10,10 @@ import java.util.List;
 
 /** novels 数据服务实现。 */
 @Service
-public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDO> implements NovelDataService {
+public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDTO> implements NovelDataService {
 
     @Override
-    public List<NovelDO> listAlive() {
+    public List<NovelDTO> listAlive() {
         return baseMapper.listAlive();
     }
 

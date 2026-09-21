@@ -17,7 +17,7 @@ import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -66,8 +66,8 @@ public class VolumeReviewService {
         stageLog.emit(novelId, StageLog.Stage.VOLUME_RETRO, START,
                 Map.of("volNo", volNo, "from", fromNo, "to", toNo));
 
-        Map<String, ForeshadowDO> ledger = new HashMap<>();
-        for (ForeshadowDO f : foreshadowData.listByNovel(novelId)) ledger.put(f.getCode(), f);
+        Map<String, ForeshadowDTO> ledger = new HashMap<>();
+        for (ForeshadowDTO f : foreshadowData.listByNovel(novelId)) ledger.put(f.getCode(), f);
         Map<String, Object> mechanical = mechanicalAudit(rows, ledger);
 
         Map<String, Object> review;
@@ -126,7 +126,7 @@ public class VolumeReviewService {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> mechanicalAudit(List<ChapterDataService.VolumeFactRow> rows,
-                                                Map<String, ForeshadowDO> ledger) {
+                                                Map<String, ForeshadowDTO> ledger) {
         List<Map<String, Object>> foreshadowAudit = new ArrayList<>();
         List<Map<String, Object>> budgetAudit = new ArrayList<>();
         Map<String, Integer> statusCount = new LinkedHashMap<>();
@@ -154,7 +154,7 @@ public class VolumeReviewService {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("chapter_no", no);
                     item.put("code", code);
-                    ForeshadowDO f = ledger.get(code);
+                    ForeshadowDTO f = ledger.get(code);
                     if (f == null) {
                         item.put("verdict", "账本无此编码（异常）");
                     } else if (ForeshadowStatus.RECOVERED.is(f.getStatus())) {

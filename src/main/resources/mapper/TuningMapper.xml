@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.TuningMapper">
 
-    <resultMap id="doMap" type="com.zzdzz.novelgen.model.entity.TuningDO">
+    <resultMap id="doMap" type="com.zzdzz.novelgen.model.dto.TuningDTO">
         <id property="id" column="id"/>
         <result property="key" column="tkey"/>
         <result property="value" column="tvalue"/>

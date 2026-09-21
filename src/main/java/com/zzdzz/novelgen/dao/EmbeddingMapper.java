@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.entity.EmbeddingDO;
+import com.zzdzz.novelgen.model.dto.EmbeddingDTO;
 import com.zzdzz.novelgen.service.data.EmbeddingDataService;
 import org.apache.ibatis.annotations.Param;
 
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /** embeddings 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/EmbeddingMapper.xml。 */
-public interface EmbeddingMapper extends BaseMapper<EmbeddingDO> {
+public interface EmbeddingMapper extends BaseMapper<EmbeddingDTO> {
 
     int upsert(@Param("sourceType") String sourceType, @Param("sourceId") long sourceId,
                @Param("novelId") long novelId, @Param("chapterNo") Integer chapterNo,

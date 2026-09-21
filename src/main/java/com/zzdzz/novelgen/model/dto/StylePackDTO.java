@@ -1,20 +1,22 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-/** DigestDO。 */
+/** StylePackDTO。 */
 @Data
-@TableName(value = "digests")
-public class DigestDO {
+@TableName(value = "style_packs")
+public class StylePackDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private long chapterId;
-    private String contentMd;
-    private String facts;
+    private String name;
+    private String description;
+    private String rulesMd;
+    private String fingerprint;
     private boolean isDeleted;
+
 
 
 

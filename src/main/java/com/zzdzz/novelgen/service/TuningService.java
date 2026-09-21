@@ -3,7 +3,7 @@ package com.zzdzz.novelgen.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.service.data.TuningDataService;
-import com.zzdzz.novelgen.model.entity.TuningDO;
+import com.zzdzz.novelgen.model.dto.TuningDTO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -61,7 +61,7 @@ public class TuningService {
     public synchronized void refresh() {
         try {
             Map<String, String> next = new ConcurrentHashMap<>();
-            for (TuningDO row : dao.findAll()) {
+            for (TuningDTO row : dao.findAll()) {
                 next.put(row.getKey(), row.getValue());
             }
             cache.clear();

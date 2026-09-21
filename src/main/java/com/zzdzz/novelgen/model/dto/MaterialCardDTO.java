@@ -1,4 +1,4 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -10,7 +10,7 @@ import lombok.Data;
 /** 素材卡：设定层结构化实体（kind 区分角色/物品/地点/现象/地标/灾害/组织）。 */
 @Data
 @TableName(value = "material_cards")
-public class MaterialCardDO {
+public class MaterialCardDTO {
 
     public static final String KIND_CHARACTER = "character";
     public static final String KIND_ITEM = "item";

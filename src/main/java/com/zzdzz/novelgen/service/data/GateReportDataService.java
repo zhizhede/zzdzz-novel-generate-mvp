@@ -1,10 +1,10 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.GateReportDO;
+import com.zzdzz.novelgen.model.dto.GateReportDTO;
 
 /** gate_reports 数据服务接口（原 GateReportDAO）。 */
-public interface GateReportDataService extends IService<GateReportDO> {
+public interface GateReportDataService extends IService<GateReportDTO> {
 
     record LatestChapterReport(boolean passed, java.time.OffsetDateTime createTime, String resultJson) {
     }
@@ -26,5 +26,5 @@ public interface GateReportDataService extends IService<GateReportDO> {
     LatestReview findLatestChapterReview(long chapterId);
 
     /** 章生成档案：全轮次全类型报告（含场景级与读者评审），按 id 升序。 */
-    java.util.List<GateReportDO> listByChapter(long chapterId);
+    java.util.List<GateReportDTO> listByChapter(long chapterId);
 }

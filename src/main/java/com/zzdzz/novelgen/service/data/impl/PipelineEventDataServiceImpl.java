@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.dao.PipelineEventMapper;
-import com.zzdzz.novelgen.model.entity.PipelineEventDO;
+import com.zzdzz.novelgen.model.dto.PipelineEventDTO;
 import com.zzdzz.novelgen.service.data.PipelineEventDataService;
 import org.springframework.stereotype.Service;
 
@@ -15,7 +15,7 @@ import java.util.Map;
 /** pipeline_events 数据服务实现。 */
 @Service
 @RequiredArgsConstructor
-public class PipelineEventDataServiceImpl extends ServiceImpl<PipelineEventMapper, PipelineEventDO>
+public class PipelineEventDataServiceImpl extends ServiceImpl<PipelineEventMapper, PipelineEventDTO>
         implements PipelineEventDataService {
 
     private final ObjectMapper mapper;

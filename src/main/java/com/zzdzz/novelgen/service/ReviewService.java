@@ -13,7 +13,7 @@ import com.zzdzz.novelgen.service.data.GateReportDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -85,7 +85,7 @@ public class ReviewService {
     }
 
     /** 管线闭环：审校 → BLOCKER 则带清单修订一轮 → 复审。 */
-    public Outcome reviewAndFix(long novelId, ChapterDO ch, String fullText) {
+    public Outcome reviewAndFix(long novelId, ChapterDTO ch, String fullText) {
         JsonNode r1 = reviewOnce(novelId, ch, fullText, 1);
         String verdict = r1.path("verdict").asText("skipped");
         if (!"blocker".equals(verdict)) {
@@ -105,7 +105,7 @@ public class ReviewService {
      * BLOCKER 带清单重写一轮并复审；复审仍 BLOCKER 交人工（auto 不过稿）。
      * 报告落 gate_reports（gate_type='reader_review'），解析失败 fail-open。
      */
-    public Outcome readerReviewAndFix(long novelId, ChapterDO ch, String fullText) {
+    public Outcome readerReviewAndFix(long novelId, ChapterDTO ch, String fullText) {
         JsonNode r1 = readerOnce(novelId, ch, fullText, 1);
         if (!"blocker".equals(r1.path("verdict").asText())) {
             return new Outcome(null, r1.path("verdict").asText("pass"), false);
@@ -123,7 +123,7 @@ public class ReviewService {
     }
 
     /** 单轮读者评审：解析失败重试 1 次，仍失败 fail-open 落 skipped 报告。 */
-    private JsonNode readerOnce(long novelId, ChapterDO ch, String text, int round) {
+    private JsonNode readerOnce(long novelId, ChapterDTO ch, String text, int round) {
         String prevTail = packer.prevTail(novelId, ch.getChapterNo());
         String prevBrief = packer.prevChapterBrief(novelId, ch.getChapterNo());
         String user = "【上一章结尾（衔接定位基准）】\n" + (prevTail == null || prevTail.isBlank() ? "（无）" : prevTail)
@@ -162,7 +162,7 @@ public class ReviewService {
     }
 
     /** 连贯性优先（本书标准）：四个结构性维度全过、仅 fat_ratio 超软阈值时降级为 pass；超硬上限仍拦。 */
-    private JsonNode downgradeFatOnly(ChapterDO ch, JsonNode node, double fatHard) {
+    private JsonNode downgradeFatOnly(ChapterDTO ch, JsonNode node, double fatHard) {
         if (!"blocker".equals(node.path("verdict").asText()) || !(node instanceof com.fasterxml.jackson.databind.node.ObjectNode obj)) {
             return node;
         }
@@ -178,7 +178,7 @@ public class ReviewService {
     }
 
     /** 读者评审重写轮：保留情节/信息/对白立场，删纯装饰描写；修订稿异常时保留原文（返回 null）。 */
-    private String readerFix(long novelId, ChapterDO ch, String fullText, JsonNode review) {
+    private String readerFix(long novelId, ChapterDTO ch, String fullText, JsonNode review) {
         StringBuilder fb = new StringBuilder();
         for (JsonNode q : review.path("skip_quotes")) {
             fb.append("- 可整段删除：").append(q.asText()).append('\n');
@@ -236,7 +236,7 @@ public class ReviewService {
     }
 
     /** 恢复扩写：把被过度删除的情节节拍以对白/动作形式扩回预算带；结果仍异常则返回扩写前文本。 */
-    private String recoverLength(long novelId, ChapterDO ch, String cleaned, StringBuilder fb) {
+    private String recoverLength(long novelId, ChapterDTO ch, String cleaned, StringBuilder fb) {
         int floor = ch.getBudgetMin();
         int cap = (int) (ch.getBudgetMax() * 1.05);
         String user = """
@@ -270,13 +270,13 @@ public class ReviewService {
         return cleaned;
     }
 
-    private int fullTextLimit(ChapterDO ch) {
+    private int fullTextLimit(ChapterDTO ch) {
         double lenMax = perNovel(ch.getNovelId(), "reader_fix_len_max", 1.15);
         return (int) (ch.getBudgetMax() * 1.05 * lenMax);
     }
 
     /** 回溯/UI 用：对已有正文的章跑一次审校，只落报告，不动正文与状态。 */
-    public void reviewExisting(long chapterId) {        ChapterDO ch = chapterData.findById(chapterId)
+    public void reviewExisting(long chapterId) {        ChapterDTO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (ch.getFullText() == null || ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法审校");
@@ -285,7 +285,7 @@ public class ReviewService {
     }
 
     /** 单轮审校：解析失败重试 1 次（原因喂回），仍失败 fail-open 落 skipped 报告。 */
-    private JsonNode reviewOnce(long novelId, ChapterDO ch, String text, int round) {
+    private JsonNode reviewOnce(long novelId, ChapterDTO ch, String text, int round) {
         String user = userPrompt(novelId, ch, text);
         try {
             JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
@@ -316,7 +316,7 @@ public class ReviewService {
         }
     }
 
-    private String userPrompt(long novelId, ChapterDO ch, String text) {
+    private String userPrompt(long novelId, ChapterDTO ch, String text) {
         List<String> digests = packer.recentDigests(novelId, ch.getChapterNo(), 3);
         String prevTail = packer.prevTail(novelId, ch.getChapterNo());
         StringBuilder sb = new StringBuilder();
@@ -334,7 +334,7 @@ public class ReviewService {
     }
 
     /** 带问题清单的修订轮：外科手术式，只修 BLOCKER 条目；修订稿异常时保留原文（返回 null）。 */
-    private String reviseForIssues(long novelId, ChapterDO ch, String fullText, JsonNode review) {
+    private String reviseForIssues(long novelId, ChapterDTO ch, String fullText, JsonNode review) {
         StringBuilder fb = new StringBuilder();
         for (JsonNode i : review.path("issues")) {
             if (!"blocker".equals(i.path("severity").asText("blocker"))) continue;

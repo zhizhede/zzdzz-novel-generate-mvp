@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.dao.GateReportMapper;
-import com.zzdzz.novelgen.model.entity.GateReportDO;
+import com.zzdzz.novelgen.model.dto.GateReportDTO;
 import com.zzdzz.novelgen.service.data.GateReportDataService;
 import org.springframework.stereotype.Service;
 
@@ -14,7 +14,7 @@ import java.util.Map;
 /** gate_reports 数据服务实现。 */
 @Service
 @RequiredArgsConstructor
-public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, GateReportDO>
+public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, GateReportDTO>
         implements GateReportDataService {
 
     private final ObjectMapper mapper;
@@ -47,26 +47,26 @@ public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, Gat
 
     @Override
     public LatestChapterReport findLatestChapterReport(long chapterId) {
-        List<GateReportDO> rows = baseMapper.findLatestChapterReport(chapterId);
+        List<GateReportDTO> rows = baseMapper.findLatestChapterReport(chapterId);
         if (rows.isEmpty()) {
             return null;
         }
-        GateReportDO r = rows.get(0);
+        GateReportDTO r = rows.get(0);
         return new LatestChapterReport(r.isPassed(), r.getCreateTime(), r.getResult());
     }
 
     @Override
     public LatestReview findLatestChapterReview(long chapterId) {
-        List<GateReportDO> rows = baseMapper.findLatestChapterReview(chapterId);
+        List<GateReportDTO> rows = baseMapper.findLatestChapterReview(chapterId);
         if (rows.isEmpty()) {
             return null;
         }
-        GateReportDO r = rows.get(0);
+        GateReportDTO r = rows.get(0);
         return new LatestReview(r.isPassed(), r.getCreateTime(), r.getResult());
     }
 
     @Override
-    public List<GateReportDO> listByChapter(long chapterId) {
+    public List<GateReportDTO> listByChapter(long chapterId) {
         return baseMapper.listByChapter(chapterId);
     }
 

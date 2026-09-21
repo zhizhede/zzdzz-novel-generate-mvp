@@ -9,8 +9,8 @@ import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.StylePackDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
-import com.zzdzz.novelgen.model.entity.CanonDocDO;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.dto.CanonDocDTO;
+import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -49,8 +49,8 @@ public class LibraryService {
     }
 
     /** 内部校验沿用 DO。 */
-    public CanonDocDO canonDoc(long id) {
-        CanonDocDO doc = canonData.findById(id);
+    public CanonDocDTO canonDoc(long id) {
+        CanonDocDTO doc = canonData.findById(id);
         if (doc == null) throw new BizException(ErrorCode.NOT_FOUND, "正典文档不存在: " + id);
         return doc;
     }

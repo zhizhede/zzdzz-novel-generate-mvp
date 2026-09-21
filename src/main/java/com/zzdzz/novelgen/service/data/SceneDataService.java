@@ -1,16 +1,16 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.SceneDO;
+import com.zzdzz.novelgen.model.dto.SceneDTO;
 
 import java.util.List;
 
 /** chapter_scenes 数据服务接口（原 SceneDAO）。 */
-public interface SceneDataService extends IService<SceneDO> {
+public interface SceneDataService extends IService<SceneDTO> {
 
     int countByChapter(long chapterId);
 
-    List<SceneDO> findByChapter(long chapterId);
+    List<SceneDTO> findByChapter(long chapterId);
 
     Long findId(long chapterId, int sceneNo);
 

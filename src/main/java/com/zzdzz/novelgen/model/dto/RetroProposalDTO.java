@@ -1,4 +1,4 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -10,7 +10,7 @@ import java.time.OffsetDateTime;
 /** 复盘建议/提案（流 D）：卷级复盘产出的建议条目，人工采纳/忽略；kind=CANON 时承接节点9 canon 提案。 */
 @Data
 @TableName("retro_proposals")
-public class RetroProposalDO {
+public class RetroProposalDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long novelId;

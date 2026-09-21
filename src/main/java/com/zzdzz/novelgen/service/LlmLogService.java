@@ -7,7 +7,7 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import com.zzdzz.novelgen.service.data.PipelineEventDataService;
-import com.zzdzz.novelgen.model.entity.LlmCallLogDO;
+import com.zzdzz.novelgen.model.dto.LlmCallLogDTO;
 import com.zzdzz.novelgen.model.vo.LlmLogDetailVO;
 import com.zzdzz.novelgen.model.vo.LlmLogVO;
 import com.zzdzz.novelgen.model.vo.LlmTotalsVO;
@@ -56,7 +56,7 @@ public class LlmLogService {
     }
 
     public LlmLogDetailVO detail(long id) {
-        LlmCallLogDO log = llmCallLogData.findById(id);
+        LlmCallLogDTO log = llmCallLogData.findById(id);
         if (log == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "调用记录不存在: " + id);
         }

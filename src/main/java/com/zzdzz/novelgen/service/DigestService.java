@@ -14,8 +14,8 @@ import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
-import com.zzdzz.novelgen.model.entity.ForeshadowDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -101,10 +101,10 @@ public class DigestService {
                         .append("（state.time 必须体现该推进）\n\n");
             }
         });
-        List<ForeshadowDO> existing = foreshadowData.listByNovel(novelId);
+        List<ForeshadowDTO> existing = foreshadowData.listByNovel(novelId);
         if (!existing.isEmpty()) {
             sb.append("【已有伏笔账本（同义勿重复提议）】\n");
-            for (ForeshadowDO f : existing) {
+            for (ForeshadowDTO f : existing) {
                 sb.append(f.getCode()).append('（').append(f.getStatus()).append('）').append(f.getContent()).append('\n');
             }
             sb.append('\n');
@@ -146,7 +146,7 @@ public class DigestService {
 
     /** 存量回填：只产出世界状态快照，不动事实账（轻量调用，逐章触发）。 */
     public void backfillState(long novelId, int chapterNo) {
-        ChapterDO ch = chapterData.find(novelId, chapterNo)
+        ChapterDTO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
         if (ch.getFullText() == null || ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法回填状态");

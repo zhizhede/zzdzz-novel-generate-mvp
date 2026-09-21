@@ -2,6 +2,7 @@
 
 > 适用：zzdzz-novel-generate-mvp 全部 Java/Vue 代码。与 `docs/git-commit-standards.md`（提交规约）并行生效。
 > 核心模式：**MVC 分层开发**。所有新代码必须遵守；既有管线代码按 §8 的迁移路径渐进归位，不阻塞功能交付。
+> **2026-09-21 修订**：领域模型命名配对切换为项目自有基线——**DTO=库实体（mapper 层）、VO=web 层出入参（收参与返回）**，优先于《阿里巴巴 Java 手册》原配对；DO 后缀废除（原 22 个 XxxDO 已全量改 XxxDTO）。
 
 ## §1. 分层模式与依赖方向
 
@@ -14,13 +15,13 @@
    ↓
 DB      PostgreSQL（is_deleted 软删除，见共识文档 §二#4）
 
-model/   entity(DO) / dto / vo  贯穿各层，依赖方向单向向下，禁止反向与跨层
+model/   dto(库实体) / vo(web 出入参)  贯穿各层，依赖方向单向向下，禁止反向与跨层
 ```
 
 **铁律**：
 1. Controller/Runner 禁止出现业务逻辑与 SQL；Service 禁止出现拼 SQL 与 HTTP 依赖；DAO 禁止出现业务判断。
 2. 依赖只能 `入口 → service → dao`；`llm/`、`infra/` 是基础设施，service 可调用，但业务代码不得绕过 `LlmPort` 直接依赖 MiniMax 实现类。
-3. 跨层传参：入口层收 DTO、出 VO；**DO 禁止逸出 service 层**（不给前端看表结构）。
+3. 跨层传参：**web 层出入参一律 VO**（收参与返回同规）；**库实体（XxxDTO）禁止逸出 service 层**（不给前端看表结构）。
 
 ## §2. 包结构
 
@@ -29,11 +30,11 @@ com.zzdzz.novelgen
 ├── controller/     # Web 入口：XxxController（REST/SSE）
 ├── runner/         # CLI 入口：XxxRunner（ApplicationRunner，视同 controller 层禁令）
 ├── service/        # 业务：XxxService（含管线节点：OutlineService、GateService…）
-├── dao/            # 数据访问：XxxDAO（JdbcTemplate，MVP 不引 JPA）
+├── dao/            # 数据访问：XxxMapper（MyBatis-Plus，SQL 在此类与 resources/mapper/*.xml）
 ├── model/
-│   ├── entity/     # XxxDO：与表一一对应
-│   ├── dto/        # 入参：XxxRequest / XxxDTO
-│   └── vo/         # 出参：XxxResponse / XxxVO
+│   ├── dto/        # XxxDTO：库实体，与表一一对应（mapper 层配对，@TableName）
+│   ├── enums/      # 状态枚举（wire() 返回落库字符串原值）
+│   └── vo/         # web 层出入参：XxxVO（收参与返回；小收参可内嵌 controller）
 ├── llm/            # LLM 基础设施：LlmPort、MiniMaxClient、调用台账
 ├── pipeline/       # 连跑编排（组合各 service，AutoRunRunner 在 runner/）
 ├── config/         # @Configuration、属性类
@@ -42,7 +43,7 @@ com.zzdzz.novelgen
 
 前端 `web/` 对齐：`api/`（axios 封装）、`views/`（页面）、`components/`、`stores/`（Pinia）、`router/`。
 
-## §3. 命名规约（基准：阿里巴巴《Java 开发手册》+ 命名参考，2026-09-10 采纳）
+## §3. 命名规约（基准：阿里巴巴《Java 开发手册》+ 命名参考，2026-09-10 采纳；**2026-09-21 配对修订**：DTO=库实体、VO=web 出入参，见文首）
 
 ### 3.1 基础命名
 
@@ -59,7 +60,7 @@ com.zzdzz.novelgen
 | 类型 | 后缀/前缀 | 例 |
 |---|---|---|
 | MVC 分层 | Controller / Service / ServiceImpl / DAO 后缀 | ChapterController、ChapterDAO |
-| 领域模型 | DO / DTO / VO 后缀（**禁止 UserDo、UserDao 这类大小写混写**） | ChapterDO、ChapterDTO、ChapterVO |
+| 领域模型 | DTO / VO 后缀（DTO=库实体、VO=web 出入参；**禁止 UserDo、UserDao 这类大小写混写**） | ChapterDTO、ChapterVO |
 | 枚举 | Enum 后缀 | ChapterStatusEnum |
 | 工具类 | Utils 后缀 | StyleMetricsUtils |
 | 异常 | Exception 结尾 | BizException |
@@ -98,17 +99,15 @@ com.zzdzz.novelgen
 
 ### 3.6 模型层细则（model/）
 
-**DO（entity/）**：与表一一对应，共 10 张表 10 个 DO，MVP 用 **record**（不可变，构造即完整）：
+**DTO（dto/）=库实体**：与表一一对应（现 22 张表 22 个 XxxDTO，清单以 `model/dto/` 现状为准），MyBatis-Plus `@Data + @TableName`：
 
-`UserDO / NovelDO / StylePackDO / CanonDocDO / ForeshadowDO / ChapterDO / SceneDO / DigestDO / GateReportDO / LlmCallLogDO`
+- 字段 camelCase 对应表列；`is_deleted/create_time/update_time/delete_time` 一并建模；JSONB/List 字段挂 TypeHandler + autoResultMap
+- 只经 mapper 写入（BaseMapper / 自定义语句），禁止业务代码绕过数据层改库
+- **库实体不出 service 层**：mapper 返回 DTO 给 service 是终点，跨层出参一律 VO（service 内 `from()` 转换）
 
-- 字段 camelCase 对应表列；`is_deleted/create_time/update_time/delete_time` 一并建模
-- **只能由 DAO 的 RowMapper 构造**，禁止业务代码 new DO 后绕过 DAO 改库
-- **DO 不出 service 层**：DAO 返回 DO 给 service 是终点，跨层出参一律 VO
+**VO（vo/ 及 controller 内嵌）=web 层出入参**：**类名必须以 `VO` 后缀结尾**（收参与返回同规）；随首个 Web 接口引入，不预建空壳；返回侧 VO 禁止直接序列化库实体（软删除三件套等内部字段不出 API）。
 
-**DTO（dto/）与 VO（vo/）**：**类名必须以 `DTO` / `VO` 后缀结尾**；随首个 Web 接口引入，不预建空壳——每个接口按契约定义；VO 禁止直接序列化 DO。
-
-**内部模型**：service 私有 record（如场景规格、LLM 请求体）允许存在，属实现细节，不跨层、不进 model/。
+**内部模型**：service 私有 record（如场景规格、LLM 请求体、查询投影 TaskRow 等）允许存在，属实现细节，不跨层、不进 model/。
 
 ### 3.7 注解规约
 
@@ -121,7 +120,7 @@ com.zzdzz.novelgen
 
 | 层 | 必须做 | 禁止 |
 |---|---|---|
-| Controller / Runner | 参数校验（@Valid 或手动）、调 service、包 `Result<T>`、声明开放路径 | 业务逻辑、SQL、返回 DO、吞异常 |
+| Controller / Runner | 参数校验（@Valid 或手动）、调 service、包 `Result<T>`、声明开放路径 | 业务逻辑、SQL、返回库实体（XxxDTO）、吞异常 |
 | Service | 业务规则、状态机推进（`UPDATE…WHERE status=前置` 抢占）、事务边界、调 LlmPort 并落台账、写门禁/摘要 | 拼接 SQL、依赖 HttpServletRequest、持有可变单例状态 |
 | DAO | SQL 全部集中于此、软删条件 `is_deleted=false` 必带、预编译参数 | 业务判断、调其他 DAO（组合留给 service） |
 
@@ -129,20 +128,22 @@ com.zzdzz.novelgen
 - 一律预编译参数（`?`），禁止字符串拼接；JSONB 入参用 `?::jsonb`。
 - `update_time` 由 SQL 内 `NOW()` 维护，应用不手传时间。
 - 状态机抢占必须是条件更新并检查影响行数（影响 0 行 = 并发冲突，报冲突而非静默）。
-- **查询条件超过 3 个时建 `XxxQueryDTO`**（dto/）：controller 组装查询条件 → DAO 接收 DTO 拼 WHERE；
-  2-3 个简单参数直接用方法签名裸参数，不造空壳。**查询结果一律返回 DO**，不在 DAO 造 VO。
+- **查询条件超过 3 个时组装为对象传递**（controller 收参 VO，或 service 内部 record）；2-3 个简单参数直接用方法签名裸参数，不造空壳。**查询结果一律返回库实体（XxxDTO）或类型化投影 record**（随 DataService 声明），不在 mapper 造 VO。
 
 ## §5. 统一返回体与异常
 
 ```java
-public record Result<T>(int code, String message, T data) {
-    public static <T> Result<T> ok(T data) { return new Result<>(0, "ok", data); }
-    public static Result<Void> fail(int code, String message) { return new Result<>(code, message, null); }
+public record Result<T>(String code, String message, T data,
+                        @JsonInclude(JsonInclude.Include.NON_NULL) Object detail) {
+    public static <T> Result<T> success(T data) { /* code="00000"，message="ok" */ }
+    public static Result<Void> success() { /* 同上，data=null */ }
+    public static <T> Result<T> fail(ErrorCode ec, String message) { /* 泛型化：失败值可用于任意 Result<T> 返回位 */ }
+    public static <T> Result<T> fail(ErrorCode ec, String message, Object detail) { /* detail=失败结构化明细（实际状态/未过条目等），成功恒 null 且不序列化 */ }
 }
 ```
 
-- 业务异常抛 `BizException(code, message)`；`@RestControllerAdvice` 全局兜底，未知异常统一 500 + 不泄露堆栈。
-- 错误码分段：`1xxx` 参数、`2xxx` 业务规则、`3xxx` 管线状态冲突、`5xxx` 系统/LLM。
+- 业务异常抛 `BizException(ErrorCode, message[, detail])`；`@RestControllerAdvice` 统一转 Result 并按 ErrorCode 设 HTTP 状态，未知异常统一 500 + 不泄露堆栈。
+- 错误码为 5 位字符串（成功 `"00000"`；A 用户 / B 系统 / C 第三方 / D 中间件 / E 其他，如 A0006），HTTP 语义挂在 ErrorCode 枚举上；前端 `api.js` 判 `code !== '00000'`，失败异常附 code/detail。
 - LLM 调用失败已由 `MiniMaxClient` 落 `llm_call_log`（含 error 行），service 层捕获 `LlmException` 后按管线语义处理（断点保留/重试），禁止静默吞掉。
 
 ## §6. 事务与并发
@@ -180,6 +181,11 @@ model/entity/ 十个 DO 与上表同时落地。
 - 迁移 V3__seed_admin：admin 种子（sha256(username:password)），上线前必须改密
 - 已知口径：LLM 读超时 600s（章级修订实测 484s/48K tokens）
 - LlmLogService 展示口径：详情接口 reasoningText（think 区）与 content（正文区，剥 `<think>` 后）分区返回
+
+### 8.2 2026-09-21 增量（命名配对切换）
+
+- 命名配对切为项目自有基线（见文首修订说明）：22 实体 `XxxDO→XxxDTO` 迁 `model/entity→model/dto`；27 个收参类 `XxxDTO→XxxVO`（4 顶层迁 model/vo + 23 个 controller 内嵌）；出参 VO 原名不动；AGENTS.md 铁律同步改写并指向本文档。
+- 数据层自 09-13 起为 MyBatis-Plus：`dao/` 为 XxxMapper + `resources/mapper/*.xml`，数据服务在 `service/data`（DataService 接口 + impl）。
 
 ## §9. 前端补充（web/）
 

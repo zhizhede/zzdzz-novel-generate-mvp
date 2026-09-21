@@ -8,9 +8,9 @@ import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import com.zzdzz.novelgen.service.data.LlmModelPriceDataService;
 import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
-import com.zzdzz.novelgen.model.entity.LlmModelPriceDO;
-import com.zzdzz.novelgen.model.entity.LlmCallLogDO;
-import com.zzdzz.novelgen.model.entity.LlmNodeConfigDO;
+import com.zzdzz.novelgen.model.dto.LlmModelPriceDTO;
+import com.zzdzz.novelgen.model.dto.LlmCallLogDTO;
+import com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO;
 import com.zzdzz.novelgen.model.vo.LlmModelPriceVO;
 import org.springframework.stereotype.Service;
 
@@ -49,9 +49,9 @@ public class LlmNodeConfigService {
 
     /** 单条调用成本（元）：按价目峰谷（Asia/Shanghai 时区口径与 usageByNodeSince SQL 一致）折算；
      * 无价目行或价目查询失败返回 null（fail-open，不拦台账/档案展示）。 */
-    public Double costOf(LlmCallLogDO call) {
+    public Double costOf(LlmCallLogDTO call) {
         try {
-            LlmModelPriceDO p = priceMap().get(call.getModel());
+            LlmModelPriceDTO p = priceMap().get(call.getModel());
             if (p == null) return null;
             boolean peak = call.getCreateTime() != null
                     && isPeakHour(call.getCreateTime(), p);
@@ -69,7 +69,7 @@ public class LlmNodeConfigService {
         }
     }
 
-    private static boolean isPeakHour(java.time.OffsetDateTime createTime, LlmModelPriceDO p) {
+    private static boolean isPeakHour(java.time.OffsetDateTime createTime, LlmModelPriceDTO p) {
         int hour = createTime.atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai")).getHour();
         return hour >= p.getPeakStartHour() && hour < p.getPeakEndHour();
     }
@@ -77,10 +77,10 @@ public class LlmNodeConfigService {
     // ===== 节点路由 =====
 
     public List<NodeVO> list() {
-        Map<String, LlmModelPriceDO> prices = priceMap();
+        Map<String, LlmModelPriceDTO> prices = priceMap();
         Map<String, LlmNodeStat> stats = statsSince(7, prices);
         Map<String, NodeVO> out = new LinkedHashMap<>();
-        for (LlmNodeConfigDO c : configDAO.listAll()) {
+        for (LlmNodeConfigDTO c : configDAO.listAll()) {
             out.put(c.getNode(), toVO(c, stats.get(c.getNode())));
         }
         // 有用量但没建配置行的节点：虚拟行补进来（前端可一键按此节点建行）
@@ -93,7 +93,7 @@ public class LlmNodeConfigService {
         return new ArrayList<>(out.values());
     }
 
-    private NodeVO toVO(LlmNodeConfigDO c, LlmNodeStat stat) {
+    private NodeVO toVO(LlmNodeConfigDTO c, LlmNodeStat stat) {
         return new NodeVO(c.getId(), c.getNode(), c.getModel(), c.getTemperature(), c.getMaxTokens(),
                 c.getExtraJson(), c.enabled(), c.getRemark(), true, stat);
     }
@@ -111,7 +111,7 @@ public class LlmNodeConfigService {
 
     public void update(long id, String model, Double temperature, Integer maxTokens,
                        String extraJson, Boolean enabled, String remark) {
-        LlmNodeConfigDO c = require(id);
+        LlmNodeConfigDTO c = require(id);
         validate(c.getNode(), temperature, maxTokens, extraJson);
         configDAO.update(id, blankToNull(model), temperature, maxTokens, blankToNull(extraJson),
                 enabled == null || enabled, remark);
@@ -124,8 +124,8 @@ public class LlmNodeConfigService {
         configDAO.softDelete(id);
     }
 
-    private LlmNodeConfigDO require(long id) {
-        LlmNodeConfigDO c = configDAO.findById(id);
+    private LlmNodeConfigDTO require(long id) {
+        LlmNodeConfigDTO c = configDAO.findById(id);
         if (c == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "节点配置不存在: " + id);
         }
@@ -141,7 +141,7 @@ public class LlmNodeConfigService {
     public void updatePrice(long id, BigDecimal idleInputHit, BigDecimal idleInputMiss, BigDecimal idleOutput,
                             BigDecimal peakInputHit, BigDecimal peakInputMiss, BigDecimal peakOutput,
                             int peakStartHour, int peakEndHour, String remark) {
-        LlmModelPriceDO p = priceDAO.findById(id);
+        LlmModelPriceDTO p = priceDAO.findById(id);
         if (p == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "价目行不存在: " + id);
         }
@@ -155,7 +155,7 @@ public class LlmNodeConfigService {
     }
 
     /** 近 N 天按 node 聚合用量与成本（无价目行的模型 cost=null）。 */
-    private Map<String, LlmNodeStat> statsSince(int days, Map<String, LlmModelPriceDO> prices) {
+    private Map<String, LlmNodeStat> statsSince(int days, Map<String, LlmModelPriceDTO> prices) {
         Map<String, long[]> acc = new LinkedHashMap<>();   // node -> {calls, tokens, latencySum}
         Map<String, double[]> cost = new HashMap<>();      // node -> {cost, peakCost}，null 用 NaN 表示无价
         for (LlmCallLogDataService.UsageGroup g : callLogDAO.usageByNodeSince(days)) {
@@ -163,7 +163,7 @@ public class LlmNodeConfigService {
             a[0] += g.calls();
             a[1] += g.promptTokens() + g.completionTokens();
             a[2] += g.latencySum();
-            LlmModelPriceDO p = g.model() == null ? null : prices.get(g.model());
+            LlmModelPriceDTO p = g.model() == null ? null : prices.get(g.model());
             if (p == null) {
                 cost.put(g.node(), new double[]{Double.NaN, Double.NaN});
                 continue;
@@ -187,7 +187,7 @@ public class LlmNodeConfigService {
     }
 
     /** 单组成本（元）＝(缓存命中×命中价 + 未命中×未命中价 + 输出×输出价)/百万。 */
-    private double costOf(LlmCallLogDataService.UsageGroup g, LlmModelPriceDO p) {
+    private double costOf(LlmCallLogDataService.UsageGroup g, LlmModelPriceDTO p) {
         long hit = Math.min(g.cachedTokens(), g.promptTokens());
         long miss = g.promptTokens() - hit;
         BigDecimal inHit = g.peak() ? p.getPeakInputHit() : p.getIdleInputHit();
@@ -197,9 +197,9 @@ public class LlmNodeConfigService {
                 + g.completionTokens() * out.doubleValue() / 1e6;
     }
 
-    private Map<String, LlmModelPriceDO> priceMap() {
-        Map<String, LlmModelPriceDO> map = new HashMap<>();
-        for (LlmModelPriceDO p : priceDAO.listAll()) {
+    private Map<String, LlmModelPriceDTO> priceMap() {
+        Map<String, LlmModelPriceDTO> map = new HashMap<>();
+        for (LlmModelPriceDTO p : priceDAO.listAll()) {
             map.put(p.getModel(), p);
         }
         return map;

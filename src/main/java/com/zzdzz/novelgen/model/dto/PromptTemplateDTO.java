@@ -1,4 +1,4 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -6,10 +6,10 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.OffsetDateTime;
 import lombok.Data;
 
-/** PromptTemplateDO。 */
+/** PromptTemplateDTO。 */
 @Data
 @TableName(value = "prompt_templates")
-public class PromptTemplateDO {
+public class PromptTemplateDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private String node;

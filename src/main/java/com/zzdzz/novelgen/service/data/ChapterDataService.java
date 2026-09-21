@@ -1,14 +1,14 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 /** chapters 数据服务接口（原 ChapterDAO）。 */
-public interface ChapterDataService extends IService<ChapterDO> {
+public interface ChapterDataService extends IService<ChapterDTO> {
 
     /** 开篇样本行（非表行）：章节号 + 该章前 3 个非空行（人类手稿审美基准，注入第一场景用）。 */
     record Opening(int chapterNo, String firstLines) {
@@ -27,12 +27,12 @@ public interface ChapterDataService extends IService<ChapterDO> {
     record ApprovedNoDigest(long id, long novelId, int chapterNo) {
     }
 
-    Optional<ChapterDO> find(long novelId, int chapterNo);
+    Optional<ChapterDTO> find(long novelId, int chapterNo);
 
-    Optional<ChapterDO> findById(long chapterId);
+    Optional<ChapterDTO> findById(long chapterId);
 
     /** 列表页摘要：full_text 不取（DO 中置 null）。 */
-    List<ChapterDO> listSummariesByNovel(long novelId);
+    List<ChapterDTO> listSummariesByNovel(long novelId);
 
     /** 卷级复盘用：一卷各章的事实行（规划 + 实际产出）。 */
     List<VolumeFactRow> listVolumeFacts(long novelId, int volNo);

@@ -1,14 +1,14 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-/** GateReportDO。 */
+/** GateReportDTO。 */
 @Data
 @TableName(value = "gate_reports")
-public class GateReportDO {
+public class GateReportDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private long chapterId;

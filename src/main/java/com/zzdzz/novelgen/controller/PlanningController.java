@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.dto.PlanModeDTO;
+import com.zzdzz.novelgen.model.vo.PlanModeVO;
 import com.zzdzz.novelgen.model.vo.RetroProposalVO;
 import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.OutlineService;
@@ -48,7 +48,7 @@ public class PlanningController {
     }
 
     @PutMapping("/story")
-    public Result<Void> saveStory(@PathVariable long novelId, @RequestBody StoryOutlineDTO dto) {
+    public Result<Void> saveStory(@PathVariable long novelId, @RequestBody StoryOutlineVO dto) {
         planningService.saveStoryOutline(novelId, dto.content());
         return Result.success();
     }
@@ -61,7 +61,7 @@ public class PlanningController {
     }
 
     @PostMapping("/chapters")
-    public Result<Void> addChapter(@PathVariable long novelId, @RequestBody ChapterPlanDTO dto) {
+    public Result<Void> addChapter(@PathVariable long novelId, @RequestBody ChapterPlanVO dto) {
         if (dto.chapterNo() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "chapterNo 必填");
         }
@@ -74,7 +74,7 @@ public class PlanningController {
     }
 
     @PutMapping("/chapters/{chapterId}/plan")
-    public Result<Void> updatePlan(@PathVariable long chapterId, @RequestBody ChapterPlanDTO dto) {
+    public Result<Void> updatePlan(@PathVariable long chapterId, @RequestBody ChapterPlanVO dto) {
         planningService.updatePlan(chapterId,
                 dto.volNo(),
                 dto.arc(), dto.title(), dto.goal(), dto.hook(), dto.timeNote(),
@@ -96,7 +96,7 @@ public class PlanningController {
     }
 
     @PutMapping("/plan-mode")
-    public Result<Void> setPlanMode(@PathVariable long novelId, @RequestBody PlanModeDTO dto) {
+    public Result<Void> setPlanMode(@PathVariable long novelId, @RequestBody PlanModeVO dto) {
         planningService.setPlanMode(novelId, dto.mode());
         return Result.success();
     }
@@ -104,7 +104,7 @@ public class PlanningController {
     /** ⑤ 任务化：AI 规划一卷入队（秒回；进度见工作台队列，完成后队列 DONE）。 */
     @PostMapping("/volume/auto-plan-async")
     public Result<Map<String, Object>> autoPlanAsync(@PathVariable long novelId,
-                                                     @RequestBody VolumeAutoPlanDTO dto) {
+                                                     @RequestBody VolumeAutoPlanVO dto) {
         if (dto.volNo() == null || dto.from() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "参数不合法：volNo/from 必填");
         }
@@ -122,7 +122,7 @@ public class PlanningController {
     /** 流 D：提案决策（采纳/忽略）。 */
     @PostMapping("/retro/{proposalId}/decision")
     public Result<Void> decideProposal(@PathVariable long proposalId,
-                                       @RequestBody ProposalDecisionDTO dto) {
+                                       @RequestBody ProposalDecisionVO dto) {
         boolean adopt = Boolean.TRUE.equals(dto.adopt());
         if (!proposalData.decide(proposalId, adopt, dto.note())) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "提案不存在或已决策");
@@ -133,7 +133,7 @@ public class PlanningController {
     /** AI 规划一卷（同步，约 2-10 分钟）：auto 模式 AI 审校通过直接落库；manual 模式返回草稿。 */
     @PostMapping("/volume/auto-plan")
     public Result<Map<String, Object>> autoPlan(@PathVariable long novelId,
-                                                @RequestBody VolumeAutoPlanDTO dto) {
+                                                @RequestBody VolumeAutoPlanVO dto) {
         if (dto.volNo() == null || dto.from() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "参数不合法：volNo/from 必填");
         }
@@ -143,7 +143,7 @@ public class PlanningController {
     /** manual 模式采纳草稿（可先人工修改）：结构校验后直接落库，不再过 AI 审校。 */
     @PostMapping("/volume/adopt")
     public Result<Map<String, Object>> adoptDraft(@PathVariable long novelId,
-                                                  @RequestBody VolumeAdoptDTO dto) {
+                                                  @RequestBody VolumeAdoptVO dto) {
         if (dto.volNo() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "volNo 必填");
         }
@@ -153,7 +153,7 @@ public class PlanningController {
     /** 单章卷纲重写（人工纠偏；管线失败自愈走同一服务方法）。 */
     @PostMapping("/chapters/{chapterNo}/replan")
     public Result<Map<String, Object>> replan(@PathVariable long novelId, @PathVariable int chapterNo,
-                                              @RequestBody(required = false) ReplanDTO dto) {
+                                              @RequestBody(required = false) ReplanVO dto) {
         return Result.success(planningService.replanChapter(novelId, chapterNo,
                 dto == null ? null : dto.reason()));
     }
@@ -188,19 +188,19 @@ public class PlanningController {
         return Result.success(volumeReviewService.findLatest(novelId, volNo));
     }
 
-    public record StoryOutlineDTO(String content) {}
+    public record StoryOutlineVO(String content) {}
 
     /** 卷纲规划行（新增/更新共用；更新时以路径 chapterId 为准）。 */
-    public record ChapterPlanDTO(Integer chapterNo, Integer volNo, String arc, String title, String goal,
+    public record ChapterPlanVO(Integer chapterNo, Integer volNo, String arc, String title, String goal,
                                  String hook, String timeNote, Integer budgetMin, Integer budgetMax) {}
 
     /** AI 规划一卷（同步 auto-plan / 异步 auto-plan-async 共用）。 */
-    public record VolumeAutoPlanDTO(Integer volNo, Integer from, Integer to, String seedOutline) {}
+    public record VolumeAutoPlanVO(Integer volNo, Integer from, Integer to, String seedOutline) {}
 
     /** manual 草稿采纳；rows 为动态结构保持 Map。 */
-    public record VolumeAdoptDTO(Integer volNo, String arc, String brief, List<Map<String, Object>> rows) {}
+    public record VolumeAdoptVO(Integer volNo, String arc, String brief, List<Map<String, Object>> rows) {}
 
-    public record ProposalDecisionDTO(Boolean adopt, String note) {}
+    public record ProposalDecisionVO(Boolean adopt, String note) {}
 
-    public record ReplanDTO(String reason) {}
+    public record ReplanVO(String reason) {}
 }

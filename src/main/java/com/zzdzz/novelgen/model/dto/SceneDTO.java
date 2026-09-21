@@ -1,14 +1,14 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-/** SceneDO。 */
+/** SceneDTO。 */
 @Data
 @TableName(value = "chapter_scenes")
-public class SceneDO {
+public class SceneDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private long chapterId;

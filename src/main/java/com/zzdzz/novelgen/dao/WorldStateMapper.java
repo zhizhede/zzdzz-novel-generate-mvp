@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.entity.WorldStateDO;
+import com.zzdzz.novelgen.model.dto.WorldStateDTO;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import org.apache.ibatis.annotations.Param;
 
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /** world_states 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/WorldStateMapper.xml。 */
-public interface WorldStateMapper extends BaseMapper<WorldStateDO> {
+public interface WorldStateMapper extends BaseMapper<WorldStateDTO> {
 
     int upsert(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo, @Param("state") String state);
 

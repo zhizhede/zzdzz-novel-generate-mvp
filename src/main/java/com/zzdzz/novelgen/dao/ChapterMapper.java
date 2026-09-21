@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import org.apache.ibatis.annotations.Param;
 
@@ -9,13 +9,13 @@ import java.util.List;
 import java.util.Map;
 
 /** chapters 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/ChapterMapper.xml。 */
-public interface ChapterMapper extends BaseMapper<ChapterDO> {
+public interface ChapterMapper extends BaseMapper<ChapterDTO> {
 
     Integer maxChapterWithText(@Param("novelId") long novelId);
 
-    ChapterDO findByNovelAndNo(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
+    ChapterDTO findByNovelAndNo(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
 
-    List<ChapterDO> listSummaries(@Param("novelId") long novelId);
+    List<ChapterDTO> listSummaries(@Param("novelId") long novelId);
 
     List<ChapterDataService.ChapterTextRow> findOpeningRows(@Param("novelId") long novelId, @Param("maxChapterNo") int maxChapterNo);
 

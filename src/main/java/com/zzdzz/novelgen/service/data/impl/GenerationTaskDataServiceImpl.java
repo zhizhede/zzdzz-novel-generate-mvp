@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.GenerationTaskMapper;
-import com.zzdzz.novelgen.model.entity.GenerationTaskDO;
+import com.zzdzz.novelgen.model.dto.GenerationTaskDTO;
 import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
 import org.springframework.stereotype.Service;
 
@@ -11,7 +11,7 @@ import java.util.Map;
 
 /** generation_tasks 数据服务实现。 */
 @Service
-public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMapper, GenerationTaskDO>
+public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMapper, GenerationTaskDTO>
         implements GenerationTaskDataService {
 
     @Override

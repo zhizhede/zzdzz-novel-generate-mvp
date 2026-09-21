@@ -2,17 +2,17 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.LlmNodeConfigMapper">
 
-    <select id="findEnabled" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
+    <select id="findEnabled" resultType="com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO">
 
                 SELECT * FROM llm_node_config WHERE node=#{node} AND is_deleted=false AND enabled=true
                 
     </select>
 
-    <select id="listAll" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
+    <select id="listAll" resultType="com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO">
 SELECT * FROM llm_node_config WHERE is_deleted=false ORDER BY id
     </select>
 
-    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
+    <select id="findById" resultType="com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO">
 SELECT * FROM llm_node_config WHERE id=#{id} AND is_deleted=false
     </select>
 

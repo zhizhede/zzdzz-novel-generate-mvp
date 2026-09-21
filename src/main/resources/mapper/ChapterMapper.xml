@@ -2,11 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.ChapterMapper">
 
-    <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
+    <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.dto.ChapterDTO">
                 SELECT * FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
     </select>
 
-    <select id="listSummaries" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
+    <select id="listSummaries" resultType="com.zzdzz.novelgen.model.dto.ChapterDTO">
                 SELECT id, novel_id, chapter_no, volume_no, arc, title, pov, outline_yaml,
                        NULL AS full_text, goal, hook, time_note, rule_refs, foreshadow_refs,
                        budget_min, budget_max, status, round, is_deleted

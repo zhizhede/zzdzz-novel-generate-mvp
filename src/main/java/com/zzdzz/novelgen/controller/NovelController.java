@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.controller;
 
 import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.dto.ApprovalModeDTO;
+import com.zzdzz.novelgen.model.vo.ApprovalModeVO;
 import com.zzdzz.novelgen.model.vo.NovelVO;
 import com.zzdzz.novelgen.service.NovelService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,7 +29,7 @@ public class NovelController {
     }
 
     @PutMapping("/{id}/approval-mode")
-    public Result<Void> setApprovalMode(@PathVariable long id, @RequestBody ApprovalModeDTO dto) {
+    public Result<Void> setApprovalMode(@PathVariable long id, @RequestBody ApprovalModeVO dto) {
         novelService.setApprovalMode(id, dto.mode());
         return Result.success();
     }

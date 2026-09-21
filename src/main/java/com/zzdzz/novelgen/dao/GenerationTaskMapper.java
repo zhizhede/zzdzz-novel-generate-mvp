@@ -1,14 +1,14 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.entity.GenerationTaskDO;
+import com.zzdzz.novelgen.model.dto.GenerationTaskDTO;
 import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
 /** generation_tasks 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/GenerationTaskMapper.xml。 */
-public interface GenerationTaskMapper extends BaseMapper<GenerationTaskDO> {
+public interface GenerationTaskMapper extends BaseMapper<GenerationTaskDTO> {
 
     Long insert(@Param("novelId") long novelId, @Param("fromChapter") int fromChapter,
                 @Param("toChapter") int toChapter, @Param("submittedBy") Long submittedBy,

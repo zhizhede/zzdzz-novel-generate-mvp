@@ -1,14 +1,14 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-/** CanonDocDO。 */
+/** CanonDocDTO。 */
 @Data
 @TableName(value = "canon_docs")
-public class CanonDocDO {
+public class CanonDocDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private long novelId;

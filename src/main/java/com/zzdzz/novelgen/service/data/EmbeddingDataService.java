@@ -1,13 +1,13 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.entity.EmbeddingDO;
+import com.zzdzz.novelgen.model.dto.EmbeddingDTO;
 
 import java.util.List;
 import java.util.Map;
 
 /** embeddings 数据服务接口（原 EmbeddingDAO）。 */
-public interface EmbeddingDataService extends IService<EmbeddingDO> {
+public interface EmbeddingDataService extends IService<EmbeddingDTO> {
 
     /** 检索命中行。 */
     record Hit(String sourceType, long sourceId, Integer chapterNo, String content, double distance) {

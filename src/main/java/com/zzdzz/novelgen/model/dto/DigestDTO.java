@@ -1,19 +1,19 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-/** UserDO。 */
+/** DigestDTO。 */
 @Data
-@TableName(value = "users")
-public class UserDO {
+@TableName(value = "digests")
+public class DigestDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String username;
-    private String passwordHash;
-    private String role;
+    private long chapterId;
+    private String contentMd;
+    private String facts;
     private boolean isDeleted;
 
 

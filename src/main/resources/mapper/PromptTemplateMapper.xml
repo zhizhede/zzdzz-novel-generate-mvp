@@ -17,7 +17,7 @@
                 
     </update>
 
-    <select id="findAll" resultType="com.zzdzz.novelgen.model.entity.PromptTemplateDO">
+    <select id="findAll" resultType="com.zzdzz.novelgen.model.dto.PromptTemplateDTO">
 
                 SELECT * FROM prompt_templates WHERE is_deleted = FALSE ORDER BY node, phase
                 
@@ -45,7 +45,7 @@
                 SELECT node, phase FROM prompt_templates WHERE id = #{id} AND is_deleted = FALSE
     </select>
 
-    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.PromptTemplateDO">
+    <select id="findById" resultType="com.zzdzz.novelgen.model.dto.PromptTemplateDTO">
                 SELECT * FROM prompt_templates WHERE id = #{id} AND is_deleted = FALSE
     </select>
 </mapper>

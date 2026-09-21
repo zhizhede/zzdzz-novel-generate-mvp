@@ -1,14 +1,14 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-/** ForeshadowDO。 */
+/** ForeshadowDTO。 */
 @Data
 @TableName(value = "foreshadows")
-public class ForeshadowDO {
+public class ForeshadowDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private long novelId;

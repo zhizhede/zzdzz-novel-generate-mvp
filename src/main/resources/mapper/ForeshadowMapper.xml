@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.ForeshadowMapper">
 
-    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.dto.ForeshadowDTO">
 
                 SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
                 FROM foreshadows WHERE novel_id=#{novelId} AND is_deleted=false ORDER BY code
@@ -24,14 +24,14 @@ INSERT INTO foreshadows (novel_id, code, content, planted_in, recovered_in) VALU
                 
     </update>
 
-    <select id="findByCode" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+    <select id="findByCode" resultType="com.zzdzz.novelgen.model.dto.ForeshadowDTO">
 
                 SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
                 FROM foreshadows WHERE novel_id=#{novelId} AND code=#{code} AND is_deleted=false
                 
     </select>
 
-    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.ForeshadowDO">
+    <select id="findById" resultType="com.zzdzz.novelgen.model.dto.ForeshadowDTO">
 
                 SELECT id, novel_id, code, content, planted_in, recovered_in, proposed_in, status, is_deleted
                 FROM foreshadows WHERE id=#{id} AND is_deleted=false

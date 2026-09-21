@@ -12,7 +12,7 @@
                 RETURNING id
     </select>
 
-    <select id="findPage" resultType="com.zzdzz.novelgen.model.entity.LlmCallLogDO">
+    <select id="findPage" resultType="com.zzdzz.novelgen.model.dto.LlmCallLogDTO">
                 SELECT * FROM llm_call_log
                 WHERE is_deleted=false
                   AND (#{novelId,jdbcType=BIGINT} IS NULL OR novel_id=#{novelId})
@@ -20,7 +20,7 @@
                 ORDER BY id DESC LIMIT #{limit} OFFSET #{offset}
     </select>
 
-    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.LlmCallLogDO">
+    <select id="findById" resultType="com.zzdzz.novelgen.model.dto.LlmCallLogDTO">
                 SELECT * FROM llm_call_log WHERE id=#{id} AND is_deleted=false
     </select>
 

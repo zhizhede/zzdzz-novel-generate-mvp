@@ -12,7 +12,7 @@ import com.zzdzz.novelgen.service.data.ChapterStepDataService;
 import com.zzdzz.novelgen.service.data.GateReportDataService;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
-import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.dto.ChapterDTO;
 import com.zzdzz.novelgen.model.vo.ChapterDetailVO;
 import com.zzdzz.novelgen.model.vo.ChapterListItemVO;
 import com.zzdzz.novelgen.model.vo.ChapterStepVO;
@@ -57,7 +57,7 @@ public class ChapterQueryService {
     }
 
     public ChapterDetailVO detail(long chapterId) {
-        ChapterDO ch = chapterData.findById(chapterId)
+        ChapterDTO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         List<SceneVO> scenes = sceneData.findByChapter(chapterId).stream()
                 .map(s -> new SceneVO(s.getId(), s.getSceneNo(), s.getGoal(), s.getDraftText(),
@@ -79,7 +79,7 @@ public class ChapterQueryService {
 
     /** 章生成档案：steps + calls（仅元数据，全文走台账详情）+ checks 全轮次 + 按节点小计。 */
     public ChapterTraceVO trace(long chapterId) {
-        ChapterDO ch = chapterData.findById(chapterId)
+        ChapterDTO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
 
         List<ChapterTraceVO.StepItem> steps = stepData.listByChapter(chapterId).stream()

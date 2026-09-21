@@ -1,4 +1,4 @@
-package com.zzdzz.novelgen.model.entity;
+package com.zzdzz.novelgen.model.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.baomidou.mybatisplus.annotation.TableField;
@@ -9,7 +9,7 @@ import lombok.Data;
 
 @Data
 @TableName("generation_tasks")
-public class GenerationTaskDO {
+public class GenerationTaskDTO {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long novelId;

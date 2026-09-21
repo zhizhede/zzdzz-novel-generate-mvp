@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.MaterialCardMapper;
-import com.zzdzz.novelgen.model.entity.MaterialCardDO;
+import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
 import com.zzdzz.novelgen.service.data.MaterialCardDataService;
 import org.springframework.stereotype.Service;
 
@@ -10,15 +10,15 @@ import java.util.List;
 
 /** material_cards 数据服务实现。 */
 @Service
-public class MaterialCardDataServiceImpl extends ServiceImpl<MaterialCardMapper, MaterialCardDO> implements MaterialCardDataService {
+public class MaterialCardDataServiceImpl extends ServiceImpl<MaterialCardMapper, MaterialCardDTO> implements MaterialCardDataService {
 
     @Override
-    public List<MaterialCardDO> listByNovel(long novelId, String kind) {
+    public List<MaterialCardDTO> listByNovel(long novelId, String kind) {
         return baseMapper.listByNovel(novelId, kind);
     }
 
     @Override
-    public MaterialCardDO findById(long id) {
+    public MaterialCardDTO findById(long id) {
         return baseMapper.findById(id);
     }
 
