@@ -109,11 +109,12 @@ public class LibraryService {
                         && f.getRecoveredIn() != null && f.getRecoveredIn() < current)
                 .map(ForeshadowDTO::getCode).toList();
         List<WorldStateDataService.StateRow> states = worldStateData.listByNovel(novelId, 1000);
+        int archived = (int) all.stream().filter(f -> ForeshadowStatus.DROPPED.is(f.getStatus())).count();
         return new LedgerHealthVO(current,
                 proposed.size(),
                 oldest != null ? oldest.getCode() : null,
                 oldest != null ? current - oldest.getProposedIn() : 0,
-                plantOverdue, recoverOverdue,
+                plantOverdue, recoverOverdue, archived,
                 digests.size(), digests.isEmpty() ? 0 : digests.get(digests.size() - 1).chapterNo(),
                 states.size(), states.stream().mapToInt(WorldStateDataService.StateRow::chapterNo).max().orElse(0));
     }

@@ -85,7 +85,7 @@
                     (health.oldestProposed ? `（最老 ${health.oldestProposed} 已停 ${health.oldestProposedAge} 章）` : '') +
                     (health.plantOverdue?.length ? `；埋设逾期：${health.plantOverdue.join('、')}` : '') +
                     (health.recoverOverdue?.length ? `；回收逾期：${health.recoverOverdue.join('、')}` : '') +
-                    `；事实账 ${health.digestCount} 条（至第 ${health.digestLatestChapter} 章）、世界状态 ${health.worldStateCount} 份（至第 ${health.worldStateLatestChapter} 章）`" />
+                    `；已归档 ${health.archivedCount ?? 0} 条；事实账 ${health.digestCount} 条（至第 ${health.digestLatestChapter} 章）、世界状态 ${health.worldStateCount} 份（至第 ${health.worldStateLatestChapter} 章）`" />
         <div v-if="foreshadows.some((f) => f.status === 'proposed')" style="margin-bottom: 8px; font-size: 12px; color: #e6a23c">
           有 AI 自动提议的新伏笔待处理——采纳后进入埋设编排，忽略则弃用
         </div>

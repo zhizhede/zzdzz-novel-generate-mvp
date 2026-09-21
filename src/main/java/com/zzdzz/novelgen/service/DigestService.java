@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.llm.LlmTemps;
 import com.zzdzz.novelgen.model.enums.ChapterStatus;
+import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
@@ -48,6 +49,7 @@ public class DigestService {
     private final ChapterDataService chapterData;
     private final WorldStateDataService worldStateData;
     private final PromptTemplateService promptTemplates;
+    private final TuningService tuning;
 
 
     public void digest(long novelId, long chapterId, int chapterNo, String fullText) {
@@ -88,8 +90,30 @@ public class DigestService {
         proposeThreads(novelId, chapterNo, node.path("new_threads"));
         foreshadowData.markPlanted(novelId, chapterNo);
         foreshadowData.markRecovered(novelId, chapterNo);
+        sweepStaleProposals(novelId, chapterNo);
         chapterData.updateStatus(chapterId, ChapterStatus.DIGESTED.wire());
         log.info("第 {} 章事实账落库（{} tokens）", chapterNo, r.usage().totalTokens());
+    }
+
+    /**
+     * 伏笔自动园艺第一刀：过期提议归档——digest 每落一章扫一次，proposed 停留超过
+     * {@code foreshadow_proposed_max_age} 章（默认 20，0 关闭）说明规划连续多卷未引用，转 dropped 清理
+     * 规划上下文的堆积；素材库人工可改回 planned 恢复。逐条 warn 显性化，不静默动账。
+     */
+    private void sweepStaleProposals(long novelId, int chapterNo) {
+        int maxAge = tuning.i("foreshadow_proposed_max_age", TuningDefaults.FORESHADOW_PROPOSED_MAX_AGE);
+        if (maxAge <= 0) {
+            return;
+        }
+        foreshadowData.listByNovel(novelId).stream()
+                .filter(f -> ForeshadowStatus.PROPOSED.is(f.getStatus())
+                        && f.getProposedIn() != null && f.getProposedIn() < chapterNo - maxAge)
+                .forEach(f -> {
+                    foreshadowData.update(f.getId(), f.getContent(), f.getPlantedIn(), f.getRecoveredIn(),
+                            ForeshadowStatus.DROPPED.wire());
+                    log.warn("伏笔自动园艺：{} 自第 {} 章提议后 {} 章未被规划引用，已归档 dropped（素材库可恢复）",
+                            f.getCode(), f.getProposedIn(), chapterNo - f.getProposedIn());
+                });
     }
 
     /** digest 用户提示：时间锚点 + 已有伏笔账本（防同义重复提议）+ 本章全文。 */
