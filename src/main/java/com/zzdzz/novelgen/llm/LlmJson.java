@@ -39,10 +39,17 @@ public class LlmJson {
      * 全部失败抛 IllegalStateException（llm_call_log 已逐轮全量留档，可回放）。
      */
     public <T> T ask(LlmPort.ChatRequest request, Function<JsonNode, T> parse, int tries) {
+        return ask(request, parse, tries, null);
+    }
+
+    /** onDelta 非空走流式（评审思考实时可见；重试轮会重推增量，展示侧只追加不做账）。 */
+    public <T> T ask(LlmPort.ChatRequest request, Function<JsonNode, T> parse, int tries,
+                     LlmPort.StreamDelta onDelta) {
         String feedback = "";
         Exception last = null;
         for (int i = 1; i <= tries; i++) {
-            LlmPort.ChatResult r = llm.chat(withFeedback(request, feedback));
+            LlmPort.ChatRequest req = withFeedback(request, feedback);
+            LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
             try {
                 return parse.apply(read(r.content()));
             } catch (Bad e) {

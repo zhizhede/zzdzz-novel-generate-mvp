@@ -317,11 +317,19 @@ function pushTranscript(event, d) {
   } else if (event === 'revise') {
     transcript.value.push({ type: 'line', title: `修订 ${d.phase}`, note: d.chars ? d.chars + ' 字' : '', color: '#e6a23c' })
   } else if (event === 'reader') {
-    transcript.value.push({ type: 'line', title: `读者评审 ${d.phase}`, note: d.verdict ? `verdict=${d.verdict}` : '', color: '#e6a23c' })
+    if (d.phase === 'verdict') {
+      transcript.value.push({ type: 'line', title: `读者评审第 ${d.round} 轮：${d.verdict}`, note: (d.issues || []).join('，'), color: d.verdict === 'pass' ? '#67c23a' : '#e6a23c' })
+    } else {
+      transcript.value.push({ type: 'line', title: `读者评审 ${d.phase}`, note: d.verdict ? `verdict=${d.verdict}` : '', color: '#e6a23c' })
+    }
   } else if (event === 'review') {
-    const t = d.phase === 'start' ? 'AI 审校中'
-      : d.phase === 'done' ? `AI 审校：${d.verdict}${d.blocked ? '（转人工）' : ''}` : 'AI 审校异常（fail-open）'
-    transcript.value.push({ type: 'line', title: t, color: '#e6a23c' })
+    if (d.phase === 'verdict') {
+      transcript.value.push({ type: 'line', open: false, title: `AI 审校第 ${d.round} 轮：${d.verdict}（${(d.issues || []).length} 条意见）`, reason: (d.issues || []).join('\n') || undefined, color: d.verdict === 'pass' ? '#67c23a' : '#e6a23c' })
+    } else {
+      const t = d.phase === 'start' ? 'AI 审校中'
+        : d.phase === 'done' ? `AI 审校：${d.verdict}${d.blocked ? '（转人工）' : ''}` : 'AI 审校异常（fail-open）'
+      transcript.value.push({ type: 'line', title: t, color: '#e6a23c' })
+    }
   } else if (event === 'digest') {
     transcript.value.push({ type: 'line', title: '事实账落库（digest）', color: '#67c23a' })
   } else if (event === 'approve') {
@@ -381,6 +389,7 @@ function log(event, data) {
   const d = typeof data === 'string' ? JSON.parse(data) : data
   // 流式增量不进日志列表（高频），直接喂给实时输出区与会话转录
   if (event === 'scene' && d.phase === 'chunk') { applyChunk(d); return }
+  if ((event === 'review' || event === 'reader') && d.phase === 'chunk') { applyReviewChunk(event, d); return }
   try { pushTranscript(event, d) } catch { /* 转录渲染不牢靠时不影响日志主链路 */ }
   let text = `[${event}] `
   if (d.chapterNo !== undefined) text += `第${d.chapterNo}章 `
@@ -401,12 +410,16 @@ function log(event, data) {
   else if (event === 'revise') text += `修订轮 ${d.phase}${d.chars ? '（' + d.chars + ' 字符）' : ''}`
   else if (event === 'review') {
     if (d.phase === 'start') text += 'AI 语义审校中'
-    else if (d.phase === 'done') text += `审校完成：${d.verdict}${d.blocked ? '，转人工审批' : ''}`
+    else if (d.phase === 'verdict') text += `第 ${d.round} 轮判定：${d.verdict}${d.issues?.length ? '（' + d.issues.length + ' 条意见）' : ''}`
+    else if (d.phase === 'done') text += `审校完成：${d.verdict}${d.blocked ? '，转人工审批' : ''}${d.issues?.length ? '，' + d.issues.length + ' 条意见' : ''}`
     else text += `审校异常，跳过（${d.message || 'fail-open'}）`
   }
   else if (event === 'digest') text += `事实账落库`
   else if (event === 'approve') text += `待人工审批${d.reason === 'review_blocker' ? '（审校硬伤未清）' : ''}`
-  else if (event === 'reader') text += `读者评审 ${d.phase}${d.verdict ? '：' + d.verdict : ''}`
+  else if (event === 'reader') {
+    if (d.phase === 'verdict') text += `第 ${d.round} 轮判定：${d.verdict}${d.issues?.length ? '（' + d.issues.slice(0, 4).join('，') + '）' : ''}`
+    else text += `读者评审 ${d.phase}${d.verdict ? '：' + d.verdict : ''}`
+  }
   else if (event === 'heal') text += `自愈：${d.message || d.phase}`
   else if (event === 'volume_plan') {
     if (d.phase === 'retry') text += `卷纲第 ${d.round} 轮重写（${d.check}）：${(d.reason || '').slice(0, 60)}`
@@ -474,6 +487,20 @@ function applyChunk(d) {
   }
   scrollOut()
   scrollSession()
+}
+
+/** 评审思考流：只收 think 增量（审校正文输出是 JSON 判定，不逐字流），块可折叠展开「审校在想什么」。 */
+function applyReviewChunk(event, d) {
+  const key = `${d.chapterNo}-${event}`
+  let s = scenes.value.find((x) => x.key === key)
+  if (!s) {
+    s = { key, title: `第${d.chapterNo}章 ${event === 'reader' ? '读者评审' : 'AI 审校'}（思考）`,
+      phase: 'chunk', text: '', think: '', thinkOpen: false, streaming: true }
+    scenes.value.push(s)
+  }
+  s.streaming = true
+  s.think += d.delta || ''
+  scrollOut()
 }
 
 function scrollLog() {

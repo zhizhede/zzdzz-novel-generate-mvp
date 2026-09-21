@@ -57,6 +57,8 @@ public class StageLog {
         REJECTED("rejected"), READER_FIX("reader_fix"), REVIEW_FIX("review_fix"),
         CHAPTER_REPLAN("chapter_replan"), ADOPTED("adopted"),
         CANCELED("canceled"), STOPPED("stopped"), QUEUED("queued"),
+        /** 评审单轮判定（round/verdict/issues 随事件负载，审校过程透明化） */
+        VERDICT("verdict"),
         /** 流式增量（emitLive 专用，不落 pipeline_events）。 */
         CHUNK("chunk"), NONE("");
 

@@ -586,6 +586,48 @@ public class ChapterPipelineService {
         }
     }
 
+    /**
+     * 评审思考流转发（REVIEW/READER + CHUNK，emitLive 不落库）：只转 think 增量——
+     * 审校的正文输出是 JSON 判定，逐字流是噪音；「审校在想什么」才是透明化主体。
+     */
+    final class ReviewThinkRelay implements LlmPort.StreamDelta {
+        private final long novelId;
+        private final int chapterNo;
+        private final StageLog.Stage stage;
+        private final StringBuilder buf = new StringBuilder();
+        private long lastFlush = System.currentTimeMillis();
+
+        ReviewThinkRelay(long novelId, int chapterNo, StageLog.Stage stage) {
+            this.novelId = novelId;
+            this.chapterNo = chapterNo;
+            this.stage = stage;
+        }
+
+        @Override
+        public void accept(boolean think, String piece) {
+            if (!think || piece == null || piece.isEmpty()) {
+                return;
+            }
+            buf.append(piece);
+            if (System.currentTimeMillis() - lastFlush >= SceneChunkRelay.FLUSH_INTERVAL_MS) {
+                flush();
+            }
+        }
+
+        void flush() {
+            if (buf.length() > 0) {
+                stageLog.emitLive(novelId, chapterNo, stage, CHUNK,
+                        Map.of("type", "think", "delta", buf.toString()));
+                buf.setLength(0);
+            }
+            lastFlush = System.currentTimeMillis();
+        }
+
+        void close() {
+            flush();
+        }
+    }
+
     /** 步骤 1：AI 章纲。已物化则跳过（场景级断点续跑）。 */
     private ChapterOutcome outlineStep(long novelId, ChapterDTO ch, int attempt, BooleanSupplier stopCheck) {
         if (sceneData.countByChapter(ch.getId()) > 0) return ChapterOutcome.DONE;
@@ -776,15 +818,18 @@ public class ChapterPipelineService {
         chapterData.updateStatus(ch.getId(), "GATE_AI_REVIEW");
         Long stepId = stepData.start(novelId, ch.getId(), ch.getChapterNo(), stepName, null, attempt);
         stageLog.emit(novelId, ch.getChapterNo(), stage, START, Map.of());
+        ReviewThinkRelay thinkRelay = streamLongText() ? new ReviewThinkRelay(novelId, ch.getChapterNo(), stage) : null;
         ReviewService.Outcome outcome;
         try {
-            outcome = isReader ? reviewService.readerReviewAndFix(novelId, ch, fullText)
-                    : reviewService.reviewAndFix(novelId, ch, fullText);
+            outcome = isReader ? reviewService.readerReviewAndFix(novelId, ch, fullText, thinkRelay)
+                    : reviewService.reviewAndFix(novelId, ch, fullText, thinkRelay);
         } catch (Exception e) {
             log.warn("第 {} 章{}调用异常，fail-open 放行：{}", ch.getChapterNo(), stage.label(), e.getMessage());
             stageLog.emit(novelId, ch.getChapterNo(), stage, ERROR, Map.of("message", String.valueOf(e.getMessage())));
             outcome = new ReviewService.Outcome(null, "skipped", false);
             stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("verdict", "skipped", "failOpen", true)));
+        } finally {
+            if (thinkRelay != null) thinkRelay.close();
         }
         if (outcome.revised() != null) {
             fullText = outcome.revised();
@@ -793,8 +838,9 @@ public class ChapterPipelineService {
                     Map.of("chars", fullText.length()));
         }
         stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked())));
+        List<String> issues = outcome.issues().size() > 5 ? outcome.issues().subList(0, 5) : outcome.issues();
         stageLog.emit(novelId, ch.getChapterNo(), stage, DONE,
-                Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked()));
+                Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked(), "issues", issues));
         if (outcome.blocked()) {
             log.warn("第 {} 章{}复审仍 BLOCKER，转人工审批", ch.getChapterNo(), stage.label());
             chapterData.updateStatus(ch.getId(), ChapterStatus.PENDING_APPROVAL.wire());
