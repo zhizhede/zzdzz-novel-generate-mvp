@@ -73,6 +73,7 @@ public class ReviewService {
     private final TuningService tuning;
     private final PromptTemplateService promptTemplates;
     private final GateService gateService;
+    private final StageLog stageLog;
 
 
     /** 书级评审标准：gate_config 优先（按书定制），tuning 平台默认兜底；键名两边一致。 */
@@ -80,24 +81,31 @@ public class ReviewService {
         return gateService.configValue(novelId, key, tuning.d(key, def));
     }
 
-    /** 审校结论：revised 为修订后全文（null=未改），blocked=复审仍 BLOCKER。 */
-    public record Outcome(String revised, String verdict, boolean blocked) {
+    /** 审校结论：revised 为修订后全文（null=未改），blocked=复审仍 BLOCKER，issues 为末轮意见摘要行（透明化）。 */
+    public record Outcome(String revised, String verdict, boolean blocked, List<String> issues) {
+        public Outcome(String revised, String verdict, boolean blocked) {
+            this(revised, verdict, blocked, List.of());
+        }
     }
 
-    /** 管线闭环：审校 → BLOCKER 则带清单修订一轮 → 复审。 */
-    public Outcome reviewAndFix(long novelId, ChapterDTO ch, String fullText) {
-        JsonNode r1 = reviewOnce(novelId, ch, fullText, 1);
+    /** 管线闭环：审校 → BLOCKER 则带清单修订一轮 → 复审。onDelta 非空时思考流实时转发。 */
+    public Outcome reviewAndFix(long novelId, ChapterDTO ch, String fullText, LlmPort.StreamDelta onDelta) {
+        JsonNode r1 = reviewOnce(novelId, ch, fullText, 1, onDelta);
         String verdict = r1.path("verdict").asText("skipped");
         if (!"blocker".equals(verdict)) {
-            return new Outcome(null, verdict, false);
+            return new Outcome(null, verdict, false, aiIssueLines(r1));
         }
         log.warn("第 {} 章审校判 BLOCKER（{} 条），带清单修订一轮", ch.getChapterNo(),
                 r1.path("issues").size());
         String revised = reviseForIssues(novelId, ch, fullText, r1);
-        JsonNode r2 = reviewOnce(novelId, ch, revised != null ? revised : fullText, 2);
+        JsonNode r2 = reviewOnce(novelId, ch, revised != null ? revised : fullText, 2, onDelta);
         String v2 = r2.path("verdict").asText("skipped");
         boolean blocked = "blocker".equals(v2);
-        return new Outcome(revised, blocked ? "blocker" : v2, blocked);
+        return new Outcome(revised, blocked ? "blocker" : v2, blocked, aiIssueLines(r2));
+    }
+
+    public Outcome reviewAndFix(long novelId, ChapterDTO ch, String fullText) {
+        return reviewAndFix(novelId, ch, fullText, null);
     }
 
     /**
@@ -105,25 +113,29 @@ public class ReviewService {
      * BLOCKER 带清单重写一轮并复审；复审仍 BLOCKER 交人工（auto 不过稿）。
      * 报告落 gate_reports（gate_type='reader_review'），解析失败 fail-open。
      */
-    public Outcome readerReviewAndFix(long novelId, ChapterDTO ch, String fullText) {
-        JsonNode r1 = readerOnce(novelId, ch, fullText, 1);
+    public Outcome readerReviewAndFix(long novelId, ChapterDTO ch, String fullText, LlmPort.StreamDelta onDelta) {
+        JsonNode r1 = readerOnce(novelId, ch, fullText, 1, onDelta);
         if (!"blocker".equals(r1.path("verdict").asText())) {
-            return new Outcome(null, r1.path("verdict").asText("pass"), false);
+            return new Outcome(null, r1.path("verdict").asText("pass"), false, readerIssueLines(r1));
         }
         log.warn("第 {} 章读者评审判 BLOCKER（hook={} stakes={} continuity={} consequence={} fat_ratio={}），重写一轮",
                 ch.getChapterNo(), r1.path("hook").asText(), r1.path("stakes").asText(),
                 r1.path("continuity").asText(), r1.path("consequence").asText(), r1.path("fat_ratio").asText());
         String revised = readerFix(novelId, ch, fullText, r1);
         if (revised == null) {
-            return new Outcome(null, "blocker", true);
+            return new Outcome(null, "blocker", true, readerIssueLines(r1));
         }
-        JsonNode r2 = readerOnce(novelId, ch, revised, 2);
+        JsonNode r2 = readerOnce(novelId, ch, revised, 2, onDelta);
         boolean blocked = "blocker".equals(r2.path("verdict").asText());
-        return new Outcome(revised, blocked ? "blocker" : "pass", blocked);
+        return new Outcome(revised, blocked ? "blocker" : "pass", blocked, readerIssueLines(r2));
     }
 
-    /** 单轮读者评审：解析失败重试 1 次，仍失败 fail-open 落 skipped 报告。 */
-    private JsonNode readerOnce(long novelId, ChapterDTO ch, String text, int round) {
+    public Outcome readerReviewAndFix(long novelId, ChapterDTO ch, String fullText) {
+        return readerReviewAndFix(novelId, ch, fullText, null);
+    }
+
+    /** 单轮读者评审：解析失败重试 1 次，仍失败 fail-open 落 skipped 报告。onDelta 非空时思考流转发。 */
+    private JsonNode readerOnce(long novelId, ChapterDTO ch, String text, int round, LlmPort.StreamDelta onDelta) {
         String prevTail = packer.prevTail(novelId, ch.getChapterNo());
         String prevBrief = packer.prevChapterBrief(novelId, ch.getChapterNo());
         String user = "【上一章结尾（衔接定位基准）】\n" + (prevTail == null || prevTail.isBlank() ? "（无）" : prevTail)
@@ -146,12 +158,15 @@ public class ReviewService {
                             throw new LlmJson.Bad("verdict 非法: " + verdict);
                         }
                         return n;
-                    }, 2);
+                    }, 2, onDelta);
             node = downgradeFatOnly(ch, node, fatHard);
             gateReportData.insert(ch.getId(), null, GateType.READER_REVIEW.wire(), round,
                     !"blocker".equals(node.path("verdict").asText()), node);
             log.info("第 {} 章读者评审 round={}：{}（fat_ratio={}）", ch.getChapterNo(), round,
                     node.path("verdict").asText(), node.path("fat_ratio").asText());
+            stageLog.emit(novelId, ch.getChapterNo(), StageLog.Stage.READER, StageLog.Phase.VERDICT,
+                    Map.of("round", round, "verdict", node.path("verdict").asText("pass"),
+                            "issues", readerIssueLines(node)));
             return node;
         } catch (IllegalStateException e) {
             log.warn("第 {} 章读者评审输出两次解析失败，本轮跳过（fail-open）", ch.getChapterNo());
@@ -284,8 +299,12 @@ public class ReviewService {
         reviewOnce(ch.getNovelId(), ch, ch.getFullText(), 1);
     }
 
-    /** 单轮审校：解析失败重试 1 次（原因喂回），仍失败 fail-open 落 skipped 报告。 */
+    /** 单轮审校：解析失败重试 1 次（原因喂回），仍失败 fail-open 落 skipped 报告。onDelta 非空时思考流转发。 */
     private JsonNode reviewOnce(long novelId, ChapterDTO ch, String text, int round) {
+        return reviewOnce(novelId, ch, text, round, null);
+    }
+
+    private JsonNode reviewOnce(long novelId, ChapterDTO ch, String text, int round, LlmPort.StreamDelta onDelta) {
         String user = userPrompt(novelId, ch, text);
         try {
             JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
@@ -300,11 +319,14 @@ public class ReviewService {
                             throw new LlmJson.Bad("verdict 非法: " + verdict);
                         }
                         return n;
-                    }, 2);
+                    }, 2, onDelta);
             gateReportData.insert(ch.getId(), null, GateType.AI_REVIEW.wire(), round,
                     !"blocker".equals(node.path("verdict").asText()), node);
             log.info("第 {} 章审校 round={}：{}（{} 条问题）", ch.getChapterNo(), round,
                     node.path("verdict").asText(), node.path("issues").size());
+            stageLog.emit(novelId, ch.getChapterNo(), StageLog.Stage.REVIEW, StageLog.Phase.VERDICT,
+                    Map.of("round", round, "verdict", node.path("verdict").asText("skipped"),
+                            "issues", aiIssueLines(node)));
             return node;
         } catch (IllegalStateException e) {
             log.warn("第 {} 章审校输出两次解析失败，本轮跳过（fail-open）：{}", ch.getChapterNo(), e.getMessage());
@@ -314,6 +336,35 @@ public class ReviewService {
                     .put("verdict", "skipped")
                     .put("summary", "审校输出解析失败，本轮跳过");
         }
+    }
+
+    /** 审校意见摘要行（事件/Outcome 透明化）：type：quote——explanation，超 80 字截断。 */
+    static List<String> aiIssueLines(JsonNode node) {
+        List<String> out = new java.util.ArrayList<>();
+        for (JsonNode i : node.path("issues")) {
+            String line = i.path("type").asText("issue") + "：「" + i.path("quote").asText("") + "」"
+                    + (i.path("explanation").asText("").isBlank() ? "" : "——" + i.path("explanation").asText());
+            out.add(line.length() > 80 ? line.substring(0, 80) + "…" : line);
+        }
+        return out;
+    }
+
+    /** 读者评审摘要行：四结构性维度 + 注水率 + 意见列表。 */
+    static List<String> readerIssueLines(JsonNode node) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String k : List.of("hook", "stakes", "continuity", "consequence")) {
+            String v = node.path(k).asText("");
+            if (!v.isEmpty()) {
+                out.add(k + "=" + v);
+            }
+        }
+        if (!node.path("fat_ratio").isMissingNode()) {
+            out.add("fat_ratio=" + node.path("fat_ratio").asText());
+        }
+        for (JsonNode i : node.path("issues")) {
+            out.add("意见：" + i.asText());
+        }
+        return out;
     }
 
     private String userPrompt(long novelId, ChapterDTO ch, String text) {

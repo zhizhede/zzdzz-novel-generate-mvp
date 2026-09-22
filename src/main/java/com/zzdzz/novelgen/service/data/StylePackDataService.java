@@ -23,4 +23,15 @@ public interface StylePackDataService extends IService<StylePackDTO> {
     String findRulesMdByNovel(long novelId);
 
     String findFingerprintByNovel(long novelId);
+
+    // ===== 题材预设（阶段三）：预设 = is_preset 风格包，应用到书 = 拷贝字段 =====
+
+    /** 预设按 id 读门禁配置（预设不被书引用）。 */
+    String findGateConfigById(long id);
+
+    /** 预设列表。 */
+    java.util.List<StylePackDTO> listPresets();
+
+    /** 预设落库（is_preset=TRUE），返回 id。 */
+    long insertPreset(String name, String description, String rulesMd, String fingerprint, String gateConfig);
 }

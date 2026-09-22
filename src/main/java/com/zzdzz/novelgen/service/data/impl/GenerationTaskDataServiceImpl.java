@@ -120,4 +120,9 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
     public int resumePaused(long id) {
         return baseMapper.resumePaused(id);
     }
+
+    @Override
+    public int requeueForRetry(long id, int fromChapter, int retryCount, String message) {
+        return baseMapper.requeueForRetry(id, fromChapter, retryCount, message);
+    }
 }

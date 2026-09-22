@@ -38,13 +38,21 @@ public class SceneService {
 
     public String revise(long novelId, long chapterId, long sceneId, int sceneNo,
                          String draft, String gateFeedback, ContextPackerService.Pack pack) {
-        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
+        return revise(novelId, chapterId, sceneId, sceneNo, draft, gateFeedback, pack, null);
+    }
+
+    /** onDelta 非空走流式（门禁重写同样实时可见），空走阻塞 chat。 */
+    public String revise(long novelId, long chapterId, long sceneId, int sceneNo,
+                         String draft, String gateFeedback, ContextPackerService.Pack pack,
+                         LlmPort.StreamDelta onDelta) {
+        LlmPort.ChatRequest req = new LlmPort.ChatRequest(
                 LlmNode.SCENE_REVISE, novelId, chapterId,
                 List.of(LlmPort.Message.system(pack.system()),
                         LlmPort.Message.user(pack.user() + "\n\n【你上一稿】\n" + draft
                                 + "\n\n【门禁意见（只改被点名的问题，保持其余原样）】\n" + gateFeedback
                                 + "\n\n只输出修订后的完整正文。")),
-                LlmTemps.SCENE_REVISE));
+                LlmTemps.SCENE_REVISE);
+        LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
         String text = cleanDraft(r.content());
         sceneData.applyRevise(sceneId, text);
         return text;

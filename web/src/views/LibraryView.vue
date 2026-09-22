@@ -9,6 +9,9 @@
     </div>
 
     <el-tabs>
+      <!-- 分组一：素材设定（写书前准备的世界观与人物素材） -->
+      <el-tab-pane label="素材设定">
+        <el-tabs>
       <!-- 素材卡 -->
       <el-tab-pane :label="`素材卡（${cards.length}）`">
         <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px">
@@ -77,8 +80,21 @@
         </el-table>
       </el-tab-pane>
 
+        </el-tabs>
+      </el-tab-pane>
+
+      <!-- 分组二：记忆台账（生成过程中系统自动维护的三本账） -->
+      <el-tab-pane label="记忆台账">
+        <el-tabs>
       <!-- 伏笔 -->
       <el-tab-pane :label="`伏笔账本（${foreshadows.length}）`">
+        <el-alert v-if="health && (health.proposedCount || health.plantOverdue?.length || health.recoverOverdue?.length)"
+                  type="warning" :closable="false" style="margin-bottom: 8px"
+                  :title="`账本健康度（截至第 ${health.currentChapter} 章）：待采纳 ${health.proposedCount} 条` +
+                    (health.oldestProposed ? `（最老 ${health.oldestProposed} 已停 ${health.oldestProposedAge} 章）` : '') +
+                    (health.plantOverdue?.length ? `；埋设逾期：${health.plantOverdue.join('、')}` : '') +
+                    (health.recoverOverdue?.length ? `；回收逾期：${health.recoverOverdue.join('、')}` : '') +
+                    `；已归档 ${health.archivedCount ?? 0} 条；事实账 ${health.digestCount} 条（至第 ${health.digestLatestChapter} 章）、世界状态 ${health.worldStateCount} 份（至第 ${health.worldStateLatestChapter} 章）`" />
         <div v-if="foreshadows.some((f) => f.status === 'proposed')" style="margin-bottom: 8px; font-size: 12px; color: #e6a23c">
           有 AI 自动提议的新伏笔待处理——采纳后进入埋设编排，忽略则弃用
         </div>
@@ -144,6 +160,12 @@
         </div>
       </el-tab-pane>
 
+        </el-tabs>
+      </el-tab-pane>
+
+      <!-- 分组三：平台配置（与具体作品无关的全局设置） -->
+      <el-tab-pane label="平台配置">
+        <el-tabs>
       <!-- 模型路由 -->
       <el-tab-pane :label="`模型路由（${llmNodes.length}）`">
         <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
@@ -292,6 +314,12 @@
         </el-drawer>
       </el-tab-pane>
 
+        </el-tabs>
+      </el-tab-pane>
+
+      <!-- 分组四：质量与风格（指纹基线、门禁与品类预设） -->
+      <el-tab-pane label="质量与风格">
+        <el-tabs>
       <!-- 风格包 -->
       <el-tab-pane label="风格包">
         <el-tabs v-model="styleTab">
@@ -337,6 +365,62 @@
               <span style="color: #999; font-size: 12px; margin-left: 10px">落库于 style_packs.gate_config，下一次门禁检测即生效</span>
             </div>
           </el-tab-pane>
+        </el-tabs>
+      </el-tab-pane>
+
+      <!-- 品类预设（阶段三·特征提取管线） -->
+      <el-tab-pane label="品类预设">
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
+          <el-select v-model="presetGenre" filterable allow-create default-first-option placeholder="选择或输入新品类"
+                     size="small" style="width: 180px" @change="loadCorpus">
+            <el-option v-for="g in presetGenres" :key="g.genre" :value="g.genre"
+                       :label="`${g.genre}（${g.chapters} 章 / ${g.words} 字）`" />
+          </el-select>
+          <el-input v-model="corpusTitle" placeholder="章标题（可选）" size="small" style="width: 200px" />
+          <el-button type="primary" size="small" :disabled="!presetGenre || !corpusText" @click="addCorpus">导入语料章</el-button>
+          <el-button size="small" :disabled="!presetGenre" @click="extractDraft">提取基线草稿</el-button>
+          <span style="color: #999; font-size: 12px">品类随时新增；机械指标零成本；n&lt;10 低置信提示不拒绝</span>
+        </div>
+        <el-input v-model="corpusText" type="textarea" :rows="5" placeholder="粘贴一章原稿正文后点导入（可反复导入，量级不限）"
+                  style="max-width: 860px; margin-bottom: 10px" />
+        <el-table v-if="corpusRows.length" :data="corpusRows" border size="small" style="max-width: 860px; margin-bottom: 12px">
+          <el-table-column prop="title" label="章标题" min-width="200" />
+          <el-table-column prop="wordCount" label="字数" width="90" />
+          <el-table-column label="操作" width="80">
+            <template #default="{ row }">
+              <el-button size="small" type="danger" link @click="delCorpus(row.id)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-card v-if="draft" shadow="never" style="max-width: 860px; margin-bottom: 12px">
+          <template #header>
+            <span style="font-size: 13px">「{{ draft.genre }}」提取草稿（{{ draft.chapters }} 章 · {{ draft.metricCount }} 项指标）</span>
+          </template>
+          <el-alert v-if="draft.lowConfidence" type="warning" :closable="false" style="margin-bottom: 6px"
+                    :title="draft.notes[0]" />
+          <div style="font-size: 13px; margin-bottom: 6px">
+            章长预算带：<b>{{ draft.budgetMin }}–{{ draft.budgetMax }}</b> 字（容差 {{ draft.chapterLengthTolerance }}）
+          </div>
+          <div style="font-size: 12px; color: #909399; margin-bottom: 8px; white-space: pre-wrap">{{ draft.notes.join('\n') }}</div>
+          <div style="font-size: 12px; color: #909399; max-height: 120px; overflow: auto; margin-bottom: 8px">{{ draft.fingerprintJson.slice(0, 600) }}</div>
+          <div style="display: flex; gap: 8px; align-items: center">
+            <el-input v-model="presetName" placeholder="预设名（如：漱石猫·日常推理）" size="small" style="width: 240px" />
+            <el-button type="primary" size="small" :disabled="!presetName" @click="adoptPreset">保存为预设</el-button>
+          </div>
+        </el-card>
+
+        <el-table :data="presets" border size="small" style="max-width: 860px">
+          <el-table-column prop="id" label="ID" width="60" />
+          <el-table-column prop="name" label="预设" min-width="160" />
+          <el-table-column prop="description" label="说明" min-width="240" show-overflow-tooltip />
+          <el-table-column label="操作" width="110">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" link @click="applyPreset(row.id)">应用到本书</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
         </el-tabs>
       </el-tab-pane>
     </el-tabs>
@@ -474,6 +558,61 @@ import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 
 const novels = ref([])
 const novelId = ref(null)
+const health = ref(null)
+// 品类预设（阶段三）
+const presetGenres = ref([])
+const presetGenre = ref('')
+const corpusTitle = ref('')
+const corpusText = ref('')
+const corpusRows = ref([])
+const draft = ref(null)
+const presetName = ref('')
+const presets = ref([])
+
+async function loadPresets() {
+  try {
+    presetGenres.value = await api.get('/api/preset/genres')
+    presets.value = await api.get('/api/preset/list')
+  } catch { /* 预设页签加载失败不拦其他页签 */ }
+}
+
+async function loadCorpus() {
+  if (!presetGenre.value) return
+  corpusRows.value = await api.get(`/api/preset/corpus?genre=${encodeURIComponent(presetGenre.value)}`)
+}
+
+async function addCorpus() {
+  await api.post('/api/preset/corpus', { genre: presetGenre.value, title: corpusTitle.value, content: corpusText.value })
+  corpusTitle.value = ''
+  corpusText.value = ''
+  ElMessage.success('语料已导入')
+  await loadCorpus()
+  await loadPresets()
+}
+
+async function delCorpus(id) {
+  await api.delete(`/api/preset/corpus/${id}`)
+  await loadCorpus()
+  await loadPresets()
+}
+
+async function extractDraft() {
+  draft.value = await api.post('/api/preset/extract', { genre: presetGenre.value })
+}
+
+async function adoptPreset() {
+  const id = await api.post('/api/preset/adopt', { genre: presetGenre.value, name: presetName.value })
+  draft.value = null
+  presetName.value = ''
+  ElMessage.success(`预设已保存（#${id}）`)
+  await loadPresets()
+}
+
+async function applyPreset(id) {
+  await ElMessageBox.confirm('将覆盖本书的指纹基线/门禁配置/风格规则（原有内容不保留），继续？', '应用预设')
+  await api.post(`/api/preset/${id}/apply/${novelId.value}`)
+  ElMessage.success('已应用：下一次生成即按新指纹门禁')
+}
 const canon = ref([])
 const foreshadows = ref([])
 const digests = ref([])
@@ -740,6 +879,8 @@ async function saveTuning(row) {
 
 async function loadAll() {
   if (!novelId.value) return
+  health.value = await api.get(`/api/novels/${novelId.value}/ledger-health`).catch(() => null)
+  loadPresets()
   canon.value = await api.get(`/api/novels/${novelId.value}/canon`)
   cards.value = await api.get(`/api/novels/${novelId.value}/cards`)
   llmNodes.value = await api.get('/api/llm-nodes')

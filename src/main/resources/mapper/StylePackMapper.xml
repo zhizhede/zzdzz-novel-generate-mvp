@@ -46,6 +46,18 @@ UPDATE style_packs SET fingerprint=#{fingerprint}::jsonb, update_time=NOW() WHER
 
                 SELECT sp.fingerprint::text FROM style_packs sp
                 JOIN novels n ON n.style_pack_id = sp.id WHERE n.id = #{novelId}
-                
+
+    </select>
+
+    <select id="findGateConfigById" resultType="string">
+
+                SELECT gate_config::text FROM style_packs WHERE id = #{id} AND is_deleted = FALSE
+
+    </select>
+
+    <select id="insertPreset" resultType="long">
+INSERT INTO style_packs (name, description, rules_md, fingerprint, gate_config, is_preset)
+VALUES (#{name}, #{description}, #{rulesMd}, #{fingerprint}::jsonb, #{gateConfig}::jsonb, TRUE)
+RETURNING id
     </select>
 </mapper>

@@ -80,7 +80,7 @@ public class ChapterPipelineService {
     }
 
     /** 单章一次尝试的结果：DONE 正常走完（含 manual 停等）；FAILED 可自愈；INTERRUPTED 用户终止。 */
-    enum ChapterOutcome { DONE, FAILED, INTERRUPTED, PENDING }
+    enum ChapterOutcome { DONE, FAILED, INTERRUPTED, PENDING, REVIEW_BLOCKED }
 
     /** 兼容旧入口：按作品标题连跑，无进度回调。 */
     public int runChapters(String novelTitle, int from, int to) {
@@ -137,6 +137,9 @@ public class ChapterPipelineService {
         BooleanSupplier stopCheck = sink == null ? () -> false : sink::shouldStop;
         int attempt = 1;
         ChapterOutcome outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt, stopCheck);
+        if (outcome == ChapterOutcome.REVIEW_BLOCKED) {
+            return reviewBlockedDisposition(novelId, chapterNo, approvalMode, stopCheck, attempt);
+        }
         if (outcome != ChapterOutcome.FAILED) return outcome;
         int retries = tuning.i("heal_retry_times", TuningDefaults.HEAL_RETRY_TIMES);
         for (int r = 1; r <= retries && outcome == ChapterOutcome.FAILED; r++) {
@@ -144,17 +147,24 @@ public class ChapterPipelineService {
                     Map.of("message", retries == 1 ? "第一次失败，自动重试"
                             : "失败，自动重试（第 " + r + "/" + retries + " 次）"));
             log.warn("第 {} 章失败，自愈：直接重试（{}/{}）", chapterNo, r, retries);
-            outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt++, stopCheck);
+            outcome = attemptChapter(novelId, chapterNo, approvalMode, ++attempt, stopCheck);
+            if (outcome == ChapterOutcome.REVIEW_BLOCKED) {
+                return reviewBlockedDisposition(novelId, chapterNo, approvalMode, stopCheck, attempt);
+            }
         }
         if (outcome != ChapterOutcome.FAILED) return outcome;
         String reason = failureReason(novelId, chapterNo);
         stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
                 Map.of("message", "重试仍败，重写卷纲目标后再试", "reason", reason));
         log.warn("第 {} 章重试仍败，自愈：重写卷纲目标后再试一次（原因：{}）", chapterNo, reason);
+        clearFullTextForReplan(novelId, chapterNo); // 拼章后失败的章带正文，replanChapter 守卫会拒（潜伏坑修复）
         volumePlanService.replanChapter(novelId, chapterNo, reason);
         int replans = tuning.i("heal_replan_times", TuningDefaults.HEAL_REPLAN_TIMES);
         for (int r = 0; r < replans && outcome == ChapterOutcome.FAILED; r++) {
-            outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt++, stopCheck);
+            outcome = attemptChapter(novelId, chapterNo, approvalMode, ++attempt, stopCheck);
+            if (outcome == ChapterOutcome.REVIEW_BLOCKED) {
+                return reviewBlockedDisposition(novelId, chapterNo, approvalMode, stopCheck, attempt);
+            }
         }
         return outcome;
     }
@@ -485,7 +495,7 @@ public class ChapterPipelineService {
     }
 
     /** 章级机械门禁未过时的修订轮：外科手术式——只修被点名的指标，不动情节与分行节奏。 */
-    private String reviseChapter(long novelId, ChapterDTO ch, String fullText) {
+    private String reviseChapter(long novelId, ChapterDTO ch, String fullText, LlmPort.StreamDelta onDelta) {
         String feedback = gateService.failureSummary(ch.getId());
         int curWords = ((Number) GateService.computeMetrics(fullText).get("cjk")).intValue();
         int cap = (int) (ch.getBudgetMax() * 1.05);
@@ -505,12 +515,13 @@ public class ChapterPipelineService {
                 【第 %d 章全文（在此版本上修改）】
                 %s
                 """, ch.getChapterNo(), feedback, lengthRule, ch.getChapterNo(), fullText);
-        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
+        LlmPort.ChatRequest req = new LlmPort.ChatRequest(
                 LlmNode.CHAPTER_REVISE, novelId, ch.getId(),
                 List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REVISE, "system",
                                 "你是执行门禁修订的网文编辑，只做被点名的最小修改。")),
                         LlmPort.Message.user(user)),
-                LlmTemps.CHAPTER_REVISE));
+                LlmTemps.CHAPTER_REVISE);
+        LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
         return SceneService.cleanDraft(r.content());
     }
 
@@ -559,6 +570,13 @@ public class ChapterPipelineService {
             if (System.currentTimeMillis() - lastFlush >= FLUSH_INTERVAL_MS) flush();
         }
 
+        /** 修订轮开始：通知前端清空该块旧稿——重写文本是替换不是拼接。 */
+        void reset() {
+            flush();
+            stageLog.emitLive(novelId, chapterNo, SCENE, CHUNK,
+                    Map.of("sceneNo", sceneNo, "type", "reset"));
+        }
+
         void flush() {
             if (thinkBuf.length() > 0) {
                 stageLog.emitLive(novelId, chapterNo, SCENE, CHUNK,
@@ -569,6 +587,48 @@ public class ChapterPipelineService {
                 stageLog.emitLive(novelId, chapterNo, SCENE, CHUNK,
                         Map.of("sceneNo", sceneNo, "type", "text", "delta", textBuf.toString()));
                 textBuf.setLength(0);
+            }
+            lastFlush = System.currentTimeMillis();
+        }
+
+        void close() {
+            flush();
+        }
+    }
+
+    /**
+     * 评审思考流转发（REVIEW/READER + CHUNK，emitLive 不落库）：只转 think 增量——
+     * 审校的正文输出是 JSON 判定，逐字流是噪音；「审校在想什么」才是透明化主体。
+     */
+    final class ReviewThinkRelay implements LlmPort.StreamDelta {
+        private final long novelId;
+        private final int chapterNo;
+        private final StageLog.Stage stage;
+        private final StringBuilder buf = new StringBuilder();
+        private long lastFlush = System.currentTimeMillis();
+
+        ReviewThinkRelay(long novelId, int chapterNo, StageLog.Stage stage) {
+            this.novelId = novelId;
+            this.chapterNo = chapterNo;
+            this.stage = stage;
+        }
+
+        @Override
+        public void accept(boolean think, String piece) {
+            if (!think || piece == null || piece.isEmpty()) {
+                return;
+            }
+            buf.append(piece);
+            if (System.currentTimeMillis() - lastFlush >= SceneChunkRelay.FLUSH_INTERVAL_MS) {
+                flush();
+            }
+        }
+
+        void flush() {
+            if (buf.length() > 0) {
+                stageLog.emitLive(novelId, chapterNo, stage, CHUNK,
+                        Map.of("type", "think", "delta", buf.toString()));
+                buf.setLength(0);
             }
             lastFlush = System.currentTimeMillis();
         }
@@ -644,8 +704,9 @@ public class ChapterPipelineService {
                 stageLog.emit(novelId, chapterNo, SCENE_GATE, NONE,
                         Map.of("sceneNo", spec.sceneNo(), "passed", false, "rewrite", true, "round", round,
                                 "reason", gateService.failedChecksText(ch.getId(), sceneId)));
+                if (relay != null) relay.reset(); // 重写流式：清旧稿再逐字
                 draft = sceneService.revise(novelId, ch.getId(), sceneId, spec.sceneNo(),
-                        draft, gateService.failureSummary(ch.getId(), sceneId), pack);
+                        draft, gateService.failureSummary(ch.getId(), sceneId), pack, relay);
                 stageLog.emit(novelId, chapterNo, SCENE, DRAFT,
                         Map.of("sceneNo", spec.sceneNo(), "text", String.valueOf(draft)));
                 ok = gateService.checkScene(novelId, ch.getId(), sceneId, spec.sceneNo(), draft, spec.words()).passed();
@@ -716,7 +777,15 @@ public class ChapterPipelineService {
             }
             log.warn("第 {} 章章级门禁未过，带意见修订（第 {}/{} 轮）", chapterNo, round, maxRounds);
             stageLog.emit(novelId, chapterNo, REVISE, START, Map.of("round", round));
-            String revised = reviseChapter(novelId, ch, fullText);
+            // 章级修订流式：sceneNo=0 专用块（前端题为「章级修订」），每轮 reset 清旧稿
+            SceneChunkRelay chapterRelay = streamLongText() ? new SceneChunkRelay(novelId, chapterNo, 0) : null;
+            String revised;
+            try {
+                if (chapterRelay != null) chapterRelay.reset();
+                revised = reviseChapter(novelId, ch, fullText, chapterRelay);
+            } finally {
+                if (chapterRelay != null) chapterRelay.close();
+            }
             if (revised == null || revised.length() < fullText.length() * lenMin
                     || revised.length() > fullText.length() * lenMax) {
                 log.error("第 {} 章修订稿长度异常（{} 字符），弃用本轮", chapterNo,
@@ -759,15 +828,18 @@ public class ChapterPipelineService {
         chapterData.updateStatus(ch.getId(), "GATE_AI_REVIEW");
         Long stepId = stepData.start(novelId, ch.getId(), ch.getChapterNo(), stepName, null, attempt);
         stageLog.emit(novelId, ch.getChapterNo(), stage, START, Map.of());
+        ReviewThinkRelay thinkRelay = streamLongText() ? new ReviewThinkRelay(novelId, ch.getChapterNo(), stage) : null;
         ReviewService.Outcome outcome;
         try {
-            outcome = isReader ? reviewService.readerReviewAndFix(novelId, ch, fullText)
-                    : reviewService.reviewAndFix(novelId, ch, fullText);
+            outcome = isReader ? reviewService.readerReviewAndFix(novelId, ch, fullText, thinkRelay)
+                    : reviewService.reviewAndFix(novelId, ch, fullText, thinkRelay);
         } catch (Exception e) {
             log.warn("第 {} 章{}调用异常，fail-open 放行：{}", ch.getChapterNo(), stage.label(), e.getMessage());
             stageLog.emit(novelId, ch.getChapterNo(), stage, ERROR, Map.of("message", String.valueOf(e.getMessage())));
             outcome = new ReviewService.Outcome(null, "skipped", false);
             stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("verdict", "skipped", "failOpen", true)));
+        } finally {
+            if (thinkRelay != null) thinkRelay.close();
         }
         if (outcome.revised() != null) {
             fullText = outcome.revised();
@@ -776,15 +848,52 @@ public class ChapterPipelineService {
                     Map.of("chars", fullText.length()));
         }
         stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked())));
+        List<String> issues = outcome.issues().size() > 5 ? outcome.issues().subList(0, 5) : outcome.issues();
         stageLog.emit(novelId, ch.getChapterNo(), stage, DONE,
-                Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked()));
+                Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked(), "issues", issues));
         if (outcome.blocked()) {
-            log.warn("第 {} 章{}复审仍 BLOCKER，转人工审批", ch.getChapterNo(), stage.label());
-            chapterData.updateStatus(ch.getId(), ChapterStatus.PENDING_APPROVAL.wire());
-            stageLog.emit(novelId, ch.getChapterNo(), APPROVE, PENDING, Map.of("reason", stage.wire() + "_blocker"));
-            return new ReviewStepResult(fullText, ChapterOutcome.PENDING);
+            // 复审仍 BLOCKER：交梯子按策略处置（默认转人工；review_blocker_replan=1 时自动换目标重写一轮）
+            log.warn("第 {} 章{}复审仍 BLOCKER，交处置策略", ch.getChapterNo(), stage.label());
+            return new ReviewStepResult(fullText, ChapterOutcome.REVIEW_BLOCKED);
         }
         return new ReviewStepResult(fullText, ChapterOutcome.DONE);
+    }
+
+    /**
+     * 审校硬伤处置（量产阶段二·无人值守闭环收口）：默认转人工（现状不变）；
+     * {@code review_blocker_replan}=1 时自动「清正文 + 换目标重写」一轮——重写后仍 BLOCKER 才转人工。
+     * 审校意见已随 VERDICT/DONE 事件实时可见，replan 原因喂给卷纲重写 Agent。
+     */
+    private ChapterOutcome reviewBlockedDisposition(long novelId, int chapterNo, String approvalMode,
+                                                    BooleanSupplier stopCheck, int attempt) {
+        boolean replanAllowed = tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
+        if (!replanAllowed || stopCheck.getAsBoolean()) {
+            return markReviewPending(novelId, chapterNo);
+        }
+        log.warn("第 {} 章审校复审仍 BLOCKER，按策略自动换目标重写一轮（review_blocker_replan）", chapterNo);
+        stageLog.emit(novelId, chapterNo, HEAL, CHAPTER_REPLAN,
+                Map.of("reason", "审校复审仍 BLOCKER，自动换目标重写"));
+        clearFullTextForReplan(novelId, chapterNo);
+        volumePlanService.replanChapter(novelId, chapterNo, "审校复审仍 BLOCKER（意见见事件流水），换一条写法");
+        ChapterOutcome redone = attemptChapter(novelId, chapterNo, approvalMode, attempt + 1, stopCheck);
+        return redone == ChapterOutcome.REVIEW_BLOCKED ? markReviewPending(novelId, chapterNo) : redone;
+    }
+
+    /** 审校硬伤转人工：章转待审批，等 [审批]/[打回]。 */
+    private ChapterOutcome markReviewPending(long novelId, int chapterNo) {
+        ChapterDTO ch = chapterData.find(novelId, chapterNo)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
+        chapterData.updateStatus(ch.getId(), ChapterStatus.PENDING_APPROVAL.wire());
+        stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of("reason", "review_blocker"));
+        log.warn("第 {} 章审校硬伤未清，转人工审批", chapterNo);
+        return ChapterOutcome.PENDING;
+    }
+
+    /** replan 前清正文：replanChapter 守卫拒绝带正文的章（既有梯子在拼章后失败走 replan 会撞守卫的潜伏坑）。 */
+    private void clearFullTextForReplan(long novelId, int chapterNo) {
+        chapterData.find(novelId, chapterNo)
+                .filter(ch -> ch.getFullText() != null && !ch.getFullText().isBlank())
+                .ifPresent(ch -> chapterData.saveFullText(ch.getId(), null));
     }
 
     /** 流 0 中断落地：当前章 INTERRUPTED，已完成产物保留，事件流水可回放终止位置。 */

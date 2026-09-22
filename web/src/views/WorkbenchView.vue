@@ -8,9 +8,16 @@
           <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
         </el-select>
         <span>共 {{ novel?.chapterCount || 0 }} 章</span>
-        <span>审批模式：
-          <el-switch v-model="manual" active-text="人工" inactive-text="自动" @change="switchMode" />
-        </span>
+        <el-tooltip placement="bottom" content="卷纲由谁定稿。自动：AI 规划完整卷纲后直接落库，立即可开跑；人工：规划只出草稿，需到「规划」页采纳后才生效，不采纳不生成。">
+          <span>规划模式：
+            <el-switch v-model="planManual" active-text="人工" inactive-text="自动" @change="switchPlanMode" />
+          </span>
+        </el-tooltip>
+        <el-tooltip placement="bottom" content="每章写完后由谁放行。自动：AI 审校无硬伤即放行、直接续写下一章；人工：每章停在「待审批」，去「章节」页逐章放行后才继续。">
+          <span>审批模式：
+            <el-switch v-model="manual" active-text="人工" inactive-text="自动" @change="switchMode" />
+          </span>
+        </el-tooltip>
         <el-divider direction="vertical" />
         <span>连跑范围：第 <el-input-number v-model="from" :min="1" size="small" /> 至
           <el-input-number v-model="to" :min="from" size="small" /> 章</span>
@@ -205,6 +212,7 @@ const novel = ref(null)
 const novels = ref([])
 const novelId = ref(null)
 const manual = ref(false)
+const planManual = ref(false)
 const from = ref(2)
 const to = ref(2)
 const running = ref(false)
@@ -317,11 +325,19 @@ function pushTranscript(event, d) {
   } else if (event === 'revise') {
     transcript.value.push({ type: 'line', title: `修订 ${d.phase}`, note: d.chars ? d.chars + ' 字' : '', color: '#e6a23c' })
   } else if (event === 'reader') {
-    transcript.value.push({ type: 'line', title: `读者评审 ${d.phase}`, note: d.verdict ? `verdict=${d.verdict}` : '', color: '#e6a23c' })
+    if (d.phase === 'verdict') {
+      transcript.value.push({ type: 'line', title: `读者评审第 ${d.round} 轮：${d.verdict}`, note: (d.issues || []).join('，'), color: d.verdict === 'pass' ? '#67c23a' : '#e6a23c' })
+    } else {
+      transcript.value.push({ type: 'line', title: `读者评审 ${d.phase}`, note: d.verdict ? `verdict=${d.verdict}` : '', color: '#e6a23c' })
+    }
   } else if (event === 'review') {
-    const t = d.phase === 'start' ? 'AI 审校中'
-      : d.phase === 'done' ? `AI 审校：${d.verdict}${d.blocked ? '（转人工）' : ''}` : 'AI 审校异常（fail-open）'
-    transcript.value.push({ type: 'line', title: t, color: '#e6a23c' })
+    if (d.phase === 'verdict') {
+      transcript.value.push({ type: 'line', open: false, title: `AI 审校第 ${d.round} 轮：${d.verdict}（${(d.issues || []).length} 条意见）`, reason: (d.issues || []).join('\n') || undefined, color: d.verdict === 'pass' ? '#67c23a' : '#e6a23c' })
+    } else {
+      const t = d.phase === 'start' ? 'AI 审校中'
+        : d.phase === 'done' ? `AI 审校：${d.verdict}${d.blocked ? '（转人工）' : ''}` : 'AI 审校异常（fail-open）'
+      transcript.value.push({ type: 'line', title: t, color: '#e6a23c' })
+    }
   } else if (event === 'digest') {
     transcript.value.push({ type: 'line', title: '事实账落库（digest）', color: '#67c23a' })
   } else if (event === 'approve') {
@@ -381,6 +397,7 @@ function log(event, data) {
   const d = typeof data === 'string' ? JSON.parse(data) : data
   // 流式增量不进日志列表（高频），直接喂给实时输出区与会话转录
   if (event === 'scene' && d.phase === 'chunk') { applyChunk(d); return }
+  if ((event === 'review' || event === 'reader') && d.phase === 'chunk') { applyReviewChunk(event, d); return }
   try { pushTranscript(event, d) } catch { /* 转录渲染不牢靠时不影响日志主链路 */ }
   let text = `[${event}] `
   if (d.chapterNo !== undefined) text += `第${d.chapterNo}章 `
@@ -401,12 +418,16 @@ function log(event, data) {
   else if (event === 'revise') text += `修订轮 ${d.phase}${d.chars ? '（' + d.chars + ' 字符）' : ''}`
   else if (event === 'review') {
     if (d.phase === 'start') text += 'AI 语义审校中'
-    else if (d.phase === 'done') text += `审校完成：${d.verdict}${d.blocked ? '，转人工审批' : ''}`
+    else if (d.phase === 'verdict') text += `第 ${d.round} 轮判定：${d.verdict}${d.issues?.length ? '（' + d.issues.length + ' 条意见）' : ''}`
+    else if (d.phase === 'done') text += `审校完成：${d.verdict}${d.blocked ? '，转人工审批' : ''}${d.issues?.length ? '，' + d.issues.length + ' 条意见' : ''}`
     else text += `审校异常，跳过（${d.message || 'fail-open'}）`
   }
   else if (event === 'digest') text += `事实账落库`
   else if (event === 'approve') text += `待人工审批${d.reason === 'review_blocker' ? '（审校硬伤未清）' : ''}`
-  else if (event === 'reader') text += `读者评审 ${d.phase}${d.verdict ? '：' + d.verdict : ''}`
+  else if (event === 'reader') {
+    if (d.phase === 'verdict') text += `第 ${d.round} 轮判定：${d.verdict}${d.issues?.length ? '（' + d.issues.slice(0, 4).join('，') + '）' : ''}`
+    else text += `读者评审 ${d.phase}${d.verdict ? '：' + d.verdict : ''}`
+  }
   else if (event === 'heal') text += `自愈：${d.message || d.phase}`
   else if (event === 'volume_plan') {
     if (d.phase === 'retry') text += `卷纲第 ${d.round} 轮重写（${d.check}）：${(d.reason || '').slice(0, 60)}`
@@ -443,15 +464,27 @@ function pushScene(d) {
   scrollOut()
 }
 
-/** 流式增量：思考/正文逐字追加到对应场景块（entry 不存在则新建）。 */
+/** 流式块标题：sceneNo=0 是章级修订专用通道。 */
+function chunkTitle(d) {
+  return d.sceneNo === 0 ? `第${d.chapterNo}章 章级修订` : `第${d.chapterNo}章 场景${d.sceneNo}`
+}
+
+/** 流式增量：思考/正文逐字追加到对应场景块（entry 不存在则新建）；reset 清旧稿（修订是替换不是拼接）。 */
 function applyChunk(d) {
   const key = `${d.chapterNo}-${d.sceneNo}`
   let s = scenes.value.find((x) => x.key === key)
   if (!s) {
-    s = { key, title: `第${d.chapterNo}章 场景${d.sceneNo}`, phase: 'chunk', text: '', think: '', thinkOpen: false, streaming: true }
+    s = { key, title: chunkTitle(d), phase: 'chunk', text: '', think: '', thinkOpen: false, streaming: true }
     scenes.value.push(s)
   }
   s.streaming = true
+  if (d.type === 'reset') {
+    s.text = ''
+    s.think = ''
+    const tr = findTranscriptScene(d)
+    if (tr) { tr.text = ''; tr.think = '' }
+    return
+  }
   if (d.type === 'think') s.think += d.delta || ''
   else s.text += d.delta || ''
   const t = findTranscriptScene(d)
@@ -464,6 +497,20 @@ function applyChunk(d) {
   scrollSession()
 }
 
+/** 评审思考流：只收 think 增量（审校正文输出是 JSON 判定，不逐字流），块可折叠展开「审校在想什么」。 */
+function applyReviewChunk(event, d) {
+  const key = `${d.chapterNo}-${event}`
+  let s = scenes.value.find((x) => x.key === key)
+  if (!s) {
+    s = { key, title: `第${d.chapterNo}章 ${event === 'reader' ? '读者评审' : 'AI 审校'}（思考）`,
+      phase: 'chunk', text: '', think: '', thinkOpen: false, streaming: true }
+    scenes.value.push(s)
+  }
+  s.streaming = true
+  s.think += d.delta || ''
+  scrollOut()
+}
+
 function scrollLog() {
   nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
 }
@@ -472,13 +519,40 @@ function scrollOut() {
   nextTick(() => { if (outBox.value) outBox.value.scrollTop = outBox.value.scrollHeight })
 }
 
+let esEverConnected = false
+
 function connect() {
   es = new EventSource('/api/pipeline/stream')
   for (const ev of ['run', 'chapter', 'outline', 'scene', 'gate', 'assemble', 'chapter_gate', 'revise',
     'reader', 'review', 'digest', 'approve', 'heal', 'volume_plan', 'volume_plan_review', 'volume_retro']) {
     es.addEventListener(ev, (e) => log(ev, e.data))
   }
-  es.onerror = () => { /* 断线后 EventSource 自动重连 */ }
+  es.onopen = () => {
+    // 断线期间的事件不可回放：重连后按 trace 重建转录、用章详情愈合输出区的半截流式块
+    if (esEverConnected) rebuildAfterReconnect()
+    esEverConnected = true
+  }
+  es.onerror = () => { /* 断线后 EventSource 自动重连，重连善后在 onopen */ }
+}
+
+/** 断线重连善后：错过的 SCENE/DRAFT 事件导致输出区停在半截、转录缺段——从 trace 与章详情重建。 */
+async function rebuildAfterReconnect() {
+  try {
+    const row = sessionTask.value || queue.value.find((r) => r.status === 'RUNNING')
+    if (!row || row.kind === 'PLAN' || !row.currentChapter || !novelId.value) return
+    const chapters = await api.get(`/api/novels/${novelId.value}/chapters`)
+    const ch = chapters.find((c) => c.chapterNo === row.currentChapter)
+    if (!ch) return
+    // 转录重建：清空后按 trace 重新打底（seedSession 去重键一并复位）
+    transcript.value = []
+    sessionSeededKey = ''
+    if (sessionOpen.value) await seedSession(row)
+    // 输出区愈合：断线期间完成的场景用库里的最终稿替换半截流式块
+    const detail = await api.get(`/api/chapters/${ch.id}`)
+    for (const sc of detail.scenes || []) {
+      pushScene({ chapterNo: detail.chapterNo, sceneNo: sc.sceneNo, text: sc.draftText || '', phase: 'draft' })
+    }
+  } catch { /* 重建失败保持现状，不拦实时链路 */ }
 }
 
 async function switchMode() {
@@ -487,6 +561,23 @@ async function switchMode() {
   } catch (e) {
     ElMessage.error(e.message)
     manual.value = !manual.value
+  }
+}
+
+/** 规划模式与审批模式成对显性化：用户在工作台就能看到并切换当前书的两条“隐藏规则”。 */
+async function loadPlanMode() {
+  try {
+    const m = await api.get(`/api/novels/${novel.value.id}/planning/mode`)
+    planManual.value = m.planMode === 'manual'
+  } catch { /* 规划模式读取失败不打扰工作台 */ }
+}
+
+async function switchPlanMode() {
+  try {
+    await api.put(`/api/novels/${novel.value.id}/planning/plan-mode`, { mode: planManual.value ? 'manual' : 'auto' })
+  } catch (e) {
+    ElMessage.error(e.message)
+    planManual.value = !planManual.value
   }
 }
 
@@ -594,6 +685,7 @@ function onNovelChange() {
   novel.value = novels.value.find((n) => n.id === novelId.value) || null
   setSelectedNovelId(novelId.value)
   manual.value = novel.value?.approvalMode === 'manual'
+  loadPlanMode()
   loadStd()
 }
 

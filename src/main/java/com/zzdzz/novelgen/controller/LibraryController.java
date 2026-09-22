@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
 import com.zzdzz.novelgen.model.vo.CanonDocVO;
 import com.zzdzz.novelgen.model.vo.ForeshadowVO;
+import com.zzdzz.novelgen.model.vo.LedgerHealthVO;
 import com.zzdzz.novelgen.model.vo.LlmModelPriceVO;
 import com.zzdzz.novelgen.model.vo.MaterialCardVO;
 import com.zzdzz.novelgen.model.vo.PromptDetailVO;
@@ -212,6 +213,12 @@ public class LibraryController {
     @GetMapping("/novels/{novelId}/foreshadows")
     public Result<List<ForeshadowVO>> foreshadows(@PathVariable long novelId) {
         return Result.success(libraryService.listForeshadows(novelId));
+    }
+
+    /** 账本健康度（四层记忆体检）：伏笔待采纳/埋设逾期/回收逾期 + 事实账与世界状态覆盖进度。 */
+    @GetMapping("/novels/{novelId}/ledger-health")
+    public Result<LedgerHealthVO> ledgerHealth(@PathVariable long novelId) {
+        return Result.success(libraryService.ledgerHealth(novelId));
     }
 
     @PutMapping("/foreshadows/{id}")

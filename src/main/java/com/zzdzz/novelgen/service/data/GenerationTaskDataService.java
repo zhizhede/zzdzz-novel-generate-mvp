@@ -11,7 +11,7 @@ public interface GenerationTaskDataService extends IService<GenerationTaskDTO> {
     /** 列表行：联作品表带标题，active（排队/运行中）置顶。 */
     record TaskRow(long id, long novelId, String novelTitle, int fromChapter, int toChapter,
                    String status, int doneChapters, Integer currentChapter, String lastMessage,
-                   String createTime, String kind, String payload) {
+                   String createTime, String kind, String payload, int retryCount) {
     }
 
     long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload);
@@ -55,4 +55,7 @@ public interface GenerationTaskDataService extends IService<GenerationTaskDTO> {
 
     /** 插队暂停后继续：PAUSED→QUEUED，从暂停点下一章续跑。 */
     int resumePaused(long id);
+
+    /** 失败自动重试：RUNNING→QUEUED，从失败章断点续跑；返回 0 表示竞态未生效（已被停/取消）。 */
+    int requeueForRetry(long id, int fromChapter, int retryCount, String message);
 }
