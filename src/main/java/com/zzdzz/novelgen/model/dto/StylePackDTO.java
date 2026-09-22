@@ -16,6 +16,8 @@ public class StylePackDTO {
     private String rulesMd;
     private String fingerprint;
     private boolean isDeleted;
+    /** 预设模板（未被书引用）：应用到书 = 拷贝 fingerprint/gate_config/rules_md。 */
+    private boolean isPreset;
 
 
 

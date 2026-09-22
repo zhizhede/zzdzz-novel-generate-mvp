@@ -24,4 +24,12 @@ public interface StylePackMapper extends BaseMapper<StylePackDTO> {
     String findRulesMdByNovel(@Param("novelId") long novelId);
 
     String findFingerprintByNovel(@Param("novelId") long novelId);
+
+    /** 预设按 id 读门禁配置（预设不被书引用，走不了 novel 联查）。 */
+    String findGateConfigById(@Param("id") long id);
+
+    /** 预设落库（is_preset=TRUE，gate_config 直存），返回 id。 */
+    long insertPreset(@Param("name") String name, @Param("description") String description,
+                      @Param("rulesMd") String rulesMd, @Param("fingerprint") String fingerprint,
+                      @Param("gateConfig") String gateConfig);
 }

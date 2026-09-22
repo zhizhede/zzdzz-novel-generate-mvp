@@ -51,4 +51,22 @@ public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, Style
     public String findFingerprintByNovel(long novelId) {
         return baseMapper.findFingerprintByNovel(novelId);
     }
+
+    @Override
+    public String findGateConfigById(long id) {
+        return baseMapper.findGateConfigById(id);
+    }
+
+    @Override
+    public List<StylePackDTO> listPresets() {
+        return list(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<StylePackDTO>()
+                .eq("is_preset", true)
+                .eq("is_deleted", false)
+                .orderByDesc("id"));
+    }
+
+    @Override
+    public long insertPreset(String name, String description, String rulesMd, String fingerprint, String gateConfig) {
+        return baseMapper.insertPreset(name, description, rulesMd, fingerprint, gateConfig);
+    }
 }
