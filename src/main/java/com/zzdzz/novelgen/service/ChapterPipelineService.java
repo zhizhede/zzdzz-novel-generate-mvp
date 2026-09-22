@@ -80,7 +80,7 @@ public class ChapterPipelineService {
     }
 
     /** 单章一次尝试的结果：DONE 正常走完（含 manual 停等）；FAILED 可自愈；INTERRUPTED 用户终止。 */
-    enum ChapterOutcome { DONE, FAILED, INTERRUPTED, PENDING }
+    enum ChapterOutcome { DONE, FAILED, INTERRUPTED, PENDING, REVIEW_BLOCKED }
 
     /** 兼容旧入口：按作品标题连跑，无进度回调。 */
     public int runChapters(String novelTitle, int from, int to) {
@@ -137,6 +137,9 @@ public class ChapterPipelineService {
         BooleanSupplier stopCheck = sink == null ? () -> false : sink::shouldStop;
         int attempt = 1;
         ChapterOutcome outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt, stopCheck);
+        if (outcome == ChapterOutcome.REVIEW_BLOCKED) {
+            return reviewBlockedDisposition(novelId, chapterNo, approvalMode, stopCheck, attempt);
+        }
         if (outcome != ChapterOutcome.FAILED) return outcome;
         int retries = tuning.i("heal_retry_times", TuningDefaults.HEAL_RETRY_TIMES);
         for (int r = 1; r <= retries && outcome == ChapterOutcome.FAILED; r++) {
@@ -144,17 +147,24 @@ public class ChapterPipelineService {
                     Map.of("message", retries == 1 ? "第一次失败，自动重试"
                             : "失败，自动重试（第 " + r + "/" + retries + " 次）"));
             log.warn("第 {} 章失败，自愈：直接重试（{}/{}）", chapterNo, r, retries);
-            outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt++, stopCheck);
+            outcome = attemptChapter(novelId, chapterNo, approvalMode, ++attempt, stopCheck);
+            if (outcome == ChapterOutcome.REVIEW_BLOCKED) {
+                return reviewBlockedDisposition(novelId, chapterNo, approvalMode, stopCheck, attempt);
+            }
         }
         if (outcome != ChapterOutcome.FAILED) return outcome;
         String reason = failureReason(novelId, chapterNo);
         stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
                 Map.of("message", "重试仍败，重写卷纲目标后再试", "reason", reason));
         log.warn("第 {} 章重试仍败，自愈：重写卷纲目标后再试一次（原因：{}）", chapterNo, reason);
+        clearFullTextForReplan(novelId, chapterNo); // 拼章后失败的章带正文，replanChapter 守卫会拒（潜伏坑修复）
         volumePlanService.replanChapter(novelId, chapterNo, reason);
         int replans = tuning.i("heal_replan_times", TuningDefaults.HEAL_REPLAN_TIMES);
         for (int r = 0; r < replans && outcome == ChapterOutcome.FAILED; r++) {
-            outcome = attemptChapter(novelId, chapterNo, approvalMode, attempt++, stopCheck);
+            outcome = attemptChapter(novelId, chapterNo, approvalMode, ++attempt, stopCheck);
+            if (outcome == ChapterOutcome.REVIEW_BLOCKED) {
+                return reviewBlockedDisposition(novelId, chapterNo, approvalMode, stopCheck, attempt);
+            }
         }
         return outcome;
     }
@@ -842,12 +852,48 @@ public class ChapterPipelineService {
         stageLog.emit(novelId, ch.getChapterNo(), stage, DONE,
                 Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked(), "issues", issues));
         if (outcome.blocked()) {
-            log.warn("第 {} 章{}复审仍 BLOCKER，转人工审批", ch.getChapterNo(), stage.label());
-            chapterData.updateStatus(ch.getId(), ChapterStatus.PENDING_APPROVAL.wire());
-            stageLog.emit(novelId, ch.getChapterNo(), APPROVE, PENDING, Map.of("reason", stage.wire() + "_blocker"));
-            return new ReviewStepResult(fullText, ChapterOutcome.PENDING);
+            // 复审仍 BLOCKER：交梯子按策略处置（默认转人工；review_blocker_replan=1 时自动换目标重写一轮）
+            log.warn("第 {} 章{}复审仍 BLOCKER，交处置策略", ch.getChapterNo(), stage.label());
+            return new ReviewStepResult(fullText, ChapterOutcome.REVIEW_BLOCKED);
         }
         return new ReviewStepResult(fullText, ChapterOutcome.DONE);
+    }
+
+    /**
+     * 审校硬伤处置（量产阶段二·无人值守闭环收口）：默认转人工（现状不变）；
+     * {@code review_blocker_replan}=1 时自动「清正文 + 换目标重写」一轮——重写后仍 BLOCKER 才转人工。
+     * 审校意见已随 VERDICT/DONE 事件实时可见，replan 原因喂给卷纲重写 Agent。
+     */
+    private ChapterOutcome reviewBlockedDisposition(long novelId, int chapterNo, String approvalMode,
+                                                    BooleanSupplier stopCheck, int attempt) {
+        boolean replanAllowed = tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
+        if (!replanAllowed || stopCheck.getAsBoolean()) {
+            return markReviewPending(novelId, chapterNo);
+        }
+        log.warn("第 {} 章审校复审仍 BLOCKER，按策略自动换目标重写一轮（review_blocker_replan）", chapterNo);
+        stageLog.emit(novelId, chapterNo, HEAL, CHAPTER_REPLAN,
+                Map.of("reason", "审校复审仍 BLOCKER，自动换目标重写"));
+        clearFullTextForReplan(novelId, chapterNo);
+        volumePlanService.replanChapter(novelId, chapterNo, "审校复审仍 BLOCKER（意见见事件流水），换一条写法");
+        ChapterOutcome redone = attemptChapter(novelId, chapterNo, approvalMode, attempt + 1, stopCheck);
+        return redone == ChapterOutcome.REVIEW_BLOCKED ? markReviewPending(novelId, chapterNo) : redone;
+    }
+
+    /** 审校硬伤转人工：章转待审批，等 [审批]/[打回]。 */
+    private ChapterOutcome markReviewPending(long novelId, int chapterNo) {
+        ChapterDTO ch = chapterData.find(novelId, chapterNo)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
+        chapterData.updateStatus(ch.getId(), ChapterStatus.PENDING_APPROVAL.wire());
+        stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of("reason", "review_blocker"));
+        log.warn("第 {} 章审校硬伤未清，转人工审批", chapterNo);
+        return ChapterOutcome.PENDING;
+    }
+
+    /** replan 前清正文：replanChapter 守卫拒绝带正文的章（既有梯子在拼章后失败走 replan 会撞守卫的潜伏坑）。 */
+    private void clearFullTextForReplan(long novelId, int chapterNo) {
+        chapterData.find(novelId, chapterNo)
+                .filter(ch -> ch.getFullText() != null && !ch.getFullText().isBlank())
+                .ifPresent(ch -> chapterData.saveFullText(ch.getId(), null));
     }
 
     /** 流 0 中断落地：当前章 INTERRUPTED，已完成产物保留，事件流水可回放终止位置。 */

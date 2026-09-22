@@ -37,6 +37,8 @@ public final class TuningDefaults {
     public static final int FORESHADOW_PROPOSED_MAX_AGE = 20;
     // 失败任务自动重试次数上限（章级自愈梯子尽后的任务级重排，0 关闭）
     public static final int TASK_AUTO_RETRY_TIMES = 1;
+    // 审校复审仍 BLOCKER 的处置：0=转人工（默认）；1=自动清正文换目标重写一轮，仍不过才转人工
+    public static final int REVIEW_BLOCKER_REPLAN = 0;
     public static final double RAG_MAX_DISTANCE = 0.55;
 
     private TuningDefaults() {
