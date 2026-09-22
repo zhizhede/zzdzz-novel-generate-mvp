@@ -100,8 +100,14 @@ public class VolumeReviewService {
                 for (Object d : drifts) {
                     String text;
                     if (d instanceof Map<?, ?> dm) {
-                        Object desc = dm.get("desc") != null ? dm.get("desc") : dm.get("description");
-                        text = "[" + dm.get("severity") + "/" + dm.get("type") + "] " + desc;
+                        // schema 字段是 where/issue/suggestion（见审校 prompt），缺正文的残缺项不落提案
+                        String where = dm.get("where") == null ? "" : String.valueOf(dm.get("where"));
+                        String issue = dm.get("issue") == null ? "" : String.valueOf(dm.get("issue"));
+                        String suggestion = dm.get("suggestion") == null ? "" : String.valueOf(dm.get("suggestion"));
+                        if (issue.isBlank()) continue;
+                        text = "[" + dm.get("severity") + "/" + dm.get("type") + "] "
+                                + (where.isBlank() ? "" : where + "：") + issue
+                                + (suggestion.isBlank() ? "" : "（建议：" + suggestion + "）");
                     } else {
                         text = String.valueOf(d);
                     }

@@ -15,7 +15,7 @@ public class VolumeReviewDataServiceImpl extends ServiceImpl<VolumeReviewMapper,
 
     @Override
     public int upsert(long novelId, int volNo, JsonNode report) {
-        return baseMapper.upsert(novelId, volNo, report);
+        return baseMapper.upsert(novelId, volNo, report.toString());
     }
 
     @Override
