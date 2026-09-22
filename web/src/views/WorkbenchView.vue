@@ -8,9 +8,16 @@
           <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
         </el-select>
         <span>共 {{ novel?.chapterCount || 0 }} 章</span>
-        <span>审批模式：
-          <el-switch v-model="manual" active-text="人工" inactive-text="自动" @change="switchMode" />
-        </span>
+        <el-tooltip placement="bottom" content="卷纲由谁定稿。自动：AI 规划完整卷纲后直接落库，立即可开跑；人工：规划只出草稿，需到「规划」页采纳后才生效，不采纳不生成。">
+          <span>规划模式：
+            <el-switch v-model="planManual" active-text="人工" inactive-text="自动" @change="switchPlanMode" />
+          </span>
+        </el-tooltip>
+        <el-tooltip placement="bottom" content="每章写完后由谁放行。自动：AI 审校无硬伤即放行、直接续写下一章；人工：每章停在「待审批」，去「章节」页逐章放行后才继续。">
+          <span>审批模式：
+            <el-switch v-model="manual" active-text="人工" inactive-text="自动" @change="switchMode" />
+          </span>
+        </el-tooltip>
         <el-divider direction="vertical" />
         <span>连跑范围：第 <el-input-number v-model="from" :min="1" size="small" /> 至
           <el-input-number v-model="to" :min="from" size="small" /> 章</span>
@@ -205,6 +212,7 @@ const novel = ref(null)
 const novels = ref([])
 const novelId = ref(null)
 const manual = ref(false)
+const planManual = ref(false)
 const from = ref(2)
 const to = ref(2)
 const running = ref(false)
@@ -556,6 +564,23 @@ async function switchMode() {
   }
 }
 
+/** 规划模式与审批模式成对显性化：用户在工作台就能看到并切换当前书的两条“隐藏规则”。 */
+async function loadPlanMode() {
+  try {
+    const m = await api.get(`/api/novels/${novel.value.id}/planning/mode`)
+    planManual.value = m.planMode === 'manual'
+  } catch { /* 规划模式读取失败不打扰工作台 */ }
+}
+
+async function switchPlanMode() {
+  try {
+    await api.put(`/api/novels/${novel.value.id}/planning/plan-mode`, { mode: planManual.value ? 'manual' : 'auto' })
+  } catch (e) {
+    ElMessage.error(e.message)
+    planManual.value = !planManual.value
+  }
+}
+
 async function run() {
   try {
     await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value })
@@ -660,6 +685,7 @@ function onNovelChange() {
   novel.value = novels.value.find((n) => n.id === novelId.value) || null
   setSelectedNovelId(novelId.value)
   manual.value = novel.value?.approvalMode === 'manual'
+  loadPlanMode()
   loadStd()
 }
 

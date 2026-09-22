@@ -31,7 +31,7 @@
         </div>
         <div v-for="v in volumes" :key="v.volNo" style="margin-bottom: 16px">
           <div style="font-weight: bold; margin-bottom: 6px; display: flex; gap: 10px; align-items: center">
-            <span>第 {{ v.volNo }} 卷 · {{ v.arc }}（{{ v.chapters.length }} 章）</span>
+            <span>第 {{ v.volNo }} 卷 · {{ v.arc }}（{{ v.chapters?.length || 0 }} 章）</span>
             <el-button size="small" plain :loading="retroBusy === v.volNo" @click="runReview(v)">卷级复盘</el-button>
           </div>
           <el-table :data="v.chapters" border size="small" style="max-width: 980px">
@@ -273,6 +273,8 @@ const draft = ref({ arc: '', brief: '', rows: [] })
 const adoptBusy = ref(false)
 const retroBusy = ref(null)
 const retroOpen = ref(false)
+const retro = ref(null)
+const proposals = ref([])
 async function loadProposals(volNo) {
   try {
     proposals.value = await api.get(`/api/novels/${novelId.value}/planning/volumes/${volNo}/proposals`)
@@ -283,7 +285,7 @@ async function loadProposals(volNo) {
 
 async function decideProposal(row, adopt) {
   try {
-    await api.post(`/api/retro/${row.id}/decision`, { adopt, note: adopt ? '采纳' : '忽略' })
+    await api.post(`/api/novels/${novelId.value}/planning/retro/${row.id}/decision`, { adopt, note: adopt ? '采纳' : '忽略' })
     ElMessage.success(adopt ? '已采纳：将在下卷规划上下文中生效' : '已忽略')
     await loadProposals(row.volNo)
   } catch (e) {
@@ -292,9 +294,6 @@ async function decideProposal(row, adopt) {
 }
 
 watch(retro, (r) => { if (r && r.vol_no != null) loadProposals(r.vol_no) })
-const proposals = ref([])
-
-const retro = ref(null)
 
 async function runReview(v) {
   retroBusy.value = v.volNo
