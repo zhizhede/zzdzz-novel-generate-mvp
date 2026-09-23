@@ -34,4 +34,7 @@ public interface StylePackDataService extends IService<StylePackDTO> {
 
     /** 预设落库（is_preset=TRUE），返回 id。 */
     long insertPreset(String name, String description, String rulesMd, String fingerprint, String gateConfig);
+
+    /** 开书克隆：复制预设为书的私有风格包（is_preset=FALSE），返回 id。 */
+    long insertPack(String name, String description, String rulesMd, String fingerprint, String gateConfig);
 }

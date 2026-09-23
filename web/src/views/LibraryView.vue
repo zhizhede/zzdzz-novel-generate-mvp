@@ -421,6 +421,52 @@
           </el-table-column>
         </el-table>
       </el-tab-pane>
+
+      <!-- 导入小说（用户定调：输入的小说与全部分析落库可复用，专门分类展示） -->
+      <el-tab-pane :label="`导入小说（${samples.length}）`">
+        <div style="font-size: 12px; color: #999; margin-bottom: 8px">
+          在「工作台 → 开新书 → 导入我的小说分析」导入的每一本小说都在这里：切块语料入品类库（可补料/重提/采纳），当次分析结论（指纹基线/章长带/相似度/建议）全文留档可回看。
+        </div>
+        <el-table :data="samples" border size="small" style="max-width: 980px">
+          <el-table-column type="expand">
+            <template #default="{ row }">
+              <div v-if="sampleAnalysis(row)" style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
+                <div><b>分析快照</b>（{{ sampleAnalysis(row).chunks }} 块 · {{ Math.round(sampleAnalysis(row).totalChars / 100) / 100 }} 万字 ·
+                  章长带 {{ sampleAnalysis(row).budgetMin }}-{{ sampleAnalysis(row).budgetMax }} ·
+                  {{ sampleAnalysis(row).metricCount }} 项指标 ·
+                  建议：{{ { match: '复用现有', new: '建新品类', choice: '两可' }[sampleAnalysis(row).recommendation] || sampleAnalysis(row).recommendation }}）</div>
+                <div v-for="s in sampleAnalysis(row).similarities || []" :key="s.presetId">
+                  相似度 {{ s.name }}：{{ s.comparable ? Math.round(s.score * 100) + '%' : '不可比' }}
+                </div>
+                <div v-for="(n, i) in sampleAnalysis(row).notes || []" :key="i" style="color: #999">{{ n }}</div>
+              </div>
+              <div v-else style="padding: 4px 12px; color: #999; font-size: 13px">
+                历史导入（早于台账功能，无分析快照；语料在品类库可随时重提）
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="title" label="小说名" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="genre" label="入库品类" min-width="120" show-overflow-tooltip />
+          <el-table-column label="块数" width="70">
+            <template #default="{ row }">{{ row.chunks }}</template>
+          </el-table-column>
+          <el-table-column label="字数" width="90">
+            <template #default="{ row }">{{ (row.totalChars / 10000).toFixed(1) }} 万</template>
+          </el-table-column>
+          <el-table-column label="来源" width="80">
+            <template #default="{ row }">{{ row.source === 'wizard' ? '开书向导' : row.source === 'backfill' ? '历史回填' : row.source }}</template>
+          </el-table-column>
+          <el-table-column label="采纳预设" width="120">
+            <template #default="{ row }">
+              <el-tag v-if="row.presetId" size="small" type="success">#{{ row.presetId }}</el-tag>
+              <span v-else style="color: #999; font-size: 12px">未采纳</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="导入时间" width="150">
+            <template #default="{ row }">{{ (row.createTime || '').replace('T', ' ').slice(0, 16) }}</template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
         </el-tabs>
       </el-tab-pane>
     </el-tabs>
@@ -568,12 +614,34 @@ const corpusRows = ref([])
 const draft = ref(null)
 const presetName = ref('')
 const presets = ref([])
+// 导入小说台账（用户输入即入库，分析快照可回看）
+const samples = ref([])
+const sampleAnalysisCache = new Map()
 
 async function loadPresets() {
   try {
     presetGenres.value = await api.get('/api/preset/genres')
     presets.value = await api.get('/api/preset/list')
   } catch { /* 预设页签加载失败不拦其他页签 */ }
+}
+
+async function loadSamples() {
+  try {
+    samples.value = await api.get('/api/preset/samples')
+  } catch { /* 导入小说页签加载失败不拦其他页签 */ }
+}
+
+/** 展开行解析分析快照（无快照返回 null 走历史回填文案）。 */
+function sampleAnalysis(row) {
+  if (!row.analysisJson) return null
+  if (!sampleAnalysisCache.has(row.id)) {
+    try {
+      sampleAnalysisCache.set(row.id, JSON.parse(row.analysisJson))
+    } catch {
+      sampleAnalysisCache.set(row.id, null)
+    }
+  }
+  return sampleAnalysisCache.get(row.id)
 }
 
 async function loadCorpus() {
@@ -881,6 +949,7 @@ async function loadAll() {
   if (!novelId.value) return
   health.value = await api.get(`/api/novels/${novelId.value}/ledger-health`).catch(() => null)
   loadPresets()
+  loadSamples()
   canon.value = await api.get(`/api/novels/${novelId.value}/canon`)
   cards.value = await api.get(`/api/novels/${novelId.value}/cards`)
   llmNodes.value = await api.get('/api/llm-nodes')

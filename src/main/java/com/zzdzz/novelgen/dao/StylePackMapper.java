@@ -32,4 +32,9 @@ public interface StylePackMapper extends BaseMapper<StylePackDTO> {
     long insertPreset(@Param("name") String name, @Param("description") String description,
                       @Param("rulesMd") String rulesMd, @Param("fingerprint") String fingerprint,
                       @Param("gateConfig") String gateConfig);
+
+    /** 开书克隆：复制预设的指纹/门禁/规则为书的私有风格包（is_preset=FALSE），返回 id。 */
+    long insertPack(@Param("name") String name, @Param("description") String description,
+                    @Param("rulesMd") String rulesMd, @Param("fingerprint") String fingerprint,
+                    @Param("gateConfig") String gateConfig);
 }

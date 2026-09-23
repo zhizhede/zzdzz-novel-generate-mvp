@@ -7,6 +7,7 @@
         <el-select v-model="novelId" style="width: 240px" @change="onNovelChange">
           <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
         </el-select>
+        <el-button size="small" plain @click="openWizard">＋ 开新书</el-button>
         <span>共 {{ novel?.chapterCount || 0 }} 章</span>
         <el-tooltip placement="bottom" content="卷纲由谁定稿。自动：AI 规划完整卷纲后直接落库，立即可开跑；人工：规划只出草稿，需到「规划」页采纳后才生效，不采纳不生成。">
           <span>规划模式：
@@ -62,6 +63,142 @@
         <span style="color:#999;font-size:12px">连贯性优先：四问全过时仅超硬上限才转人工；字数可让路剧情。保存写入本书门禁配置，立即生效</span>
       </div>
     </el-card>
+
+    <!-- 开书向导：建书 → 选预设（克隆为本书风格包）→ 大纲，消灭"没建风格包就提交"式死路 -->
+    <el-dialog v-model="wizardOpen" title="开新书" width="640px" :close-on-click-modal="false">
+      <el-steps :active="wizardStep" finish-status="success" simple style="margin-bottom: 16px">
+        <el-step title="基本信息" />
+        <el-step title="全书大纲" />
+        <el-step title="完成" />
+      </el-steps>
+
+      <template v-if="wizardStep === 0">
+        <el-form label-width="80px">
+          <el-form-item label="书名" required>
+            <el-input v-model="wizardForm.title" maxlength="256" placeholder="作品名，全站唯一" />
+          </el-form-item>
+          <el-form-item label="简介">
+            <el-input v-model="wizardForm.description" type="textarea" :rows="2" placeholder="一句话简介（可选）" />
+          </el-form-item>
+          <el-form-item label="品类预设" required>
+            <el-radio-group v-model="presetMode" size="small" style="margin-bottom: 10px">
+              <el-radio-button value="select">选现有预设</el-radio-button>
+              <el-radio-button value="analyze">导入我的小说分析</el-radio-button>
+            </el-radio-group>
+
+            <template v-if="presetMode === 'select'">
+              <template v-if="presets.length">
+                <el-select v-model="wizardForm.presetId" placeholder="选择品类预设" style="width: 100%">
+                  <el-option v-for="p in presets" :key="p.id" :value="p.id" :label="p.name">
+                    <span>{{ p.name }}</span>
+                    <span style="float: right; color: #999; font-size: 12px">{{ p.description }}</span>
+                  </el-option>
+                </el-select>
+                <div style="font-size: 12px; color: #999; line-height: 1.7">
+                  预设决定文风指纹、门禁阈值与写作规则，创建时克隆为本书私有配置（之后在素材库可单独调整，互不影响）。
+                </div>
+              </template>
+              <el-alert v-else type="warning" :closable="false" title="还没有品类预设"
+                description="预设从语料提取（分位带宽指纹+门禁阈值）。可在下方「导入我的小说分析」直接建一个，或到素材库 → 质量与风格 → 品类预设。" />
+            </template>
+
+            <template v-else>
+              <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap">
+                <el-input v-model="sampleForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 200px" />
+                <label style="cursor: pointer; font-size: 13px; color: #409eff">上传 txt
+                  <input type="file" accept=".txt" style="display: none" @change="onSampleFile" />
+                </label>
+                <span v-if="sampleForm.text" style="font-size: 12px; color: #999">
+                  已载入 {{ (sampleForm.text.length / 10000).toFixed(1) }} 万字
+                </span>
+                <el-button type="primary" size="small" :loading="analyzing" :disabled="!sampleForm.text" @click="analyzeSample">
+                  分析文风
+                </el-button>
+              </div>
+              <el-input v-model="sampleForm.text" type="textarea" :rows="6"
+                placeholder="或直接粘贴小说正文（整本或长片段）。系统自动切块存入语料库（之后随时可补料/重提/采纳），只分析文风分布（用词/句式/节奏），不看情节。" />
+
+              <div v-if="analyzeResult" style="margin-top: 10px; font-size: 13px">
+                <div style="margin-bottom: 6px">
+                  {{ (analyzeResult.totalChars / 10000).toFixed(1) }} 万字 · {{ analyzeResult.chunks }} 块 ·
+                  章长预算 {{ analyzeResult.budgetMin }}-{{ analyzeResult.budgetMax }} 字 ·
+                  {{ analyzeResult.metricCount }} 项指标
+                  <el-tag v-if="analyzeResult.lowConfidence" size="small" type="warning">样本偏少·低置信</el-tag>
+                </div>
+                <div v-for="s in analyzeResult.similarities" :key="s.presetId"
+                     style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px">
+                  <span style="width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ s.name }}</span>
+                  <div style="flex: 1; height: 8px; background: #f0f2f5; border-radius: 4px; overflow: hidden">
+                    <div :style="{ width: Math.max(0, s.score) * 100 + '%', height: '100%', background: s.score >= 0.65 ? '#67c23a' : s.score >= 0.45 ? '#e6a23c' : '#c0c4cc' }" />
+                  </div>
+                  <span style="width: 48px; text-align: right; color: #606266">{{ s.comparable ? Math.round(s.score * 100) + '%' : '不可比' }}</span>
+                </div>
+
+                <el-alert v-if="analyzeResult.recommendation === 'match' && bestSim" type="success" :closable="false"
+                  :title="`与「${bestSim.name}」文风相近（${Math.round(bestSim.score * 100)}%），可直接使用`"
+                  style="margin-top: 8px">
+                  <el-button size="small" type="primary" plain @click="usePreset(bestSim)">用这个预设</el-button>
+                </el-alert>
+                <el-alert v-else-if="analyzeResult.recommendation === 'new'" type="info" :closable="false"
+                  :title="bestSim ? `与现有品类差异大（最相近 ${Math.round(bestSim.score * 100)}%），建议为它建新品类` : '还没有任何品类，建议为它建新品类'"
+                  style="margin-top: 8px" />
+                <el-alert v-else-if="bestSim" type="warning" :closable="false"
+                  :title="`与「${bestSim.name}」有一定相近（${Math.round(bestSim.score * 100)}%）：可直接用，也可以为它建新品类`"
+                  style="margin-top: 8px">
+                  <el-button size="small" type="primary" plain @click="usePreset(bestSim)">用这个预设</el-button>
+                </el-alert>
+
+                <div v-if="analyzeResult.recommendation !== 'match'"
+                     style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap">
+                  <el-tag size="small" type="info">品类「{{ newGenreForm.genre }}」（语料已存库）</el-tag>
+                  <el-input v-model="newGenreForm.presetName" size="small" placeholder="预设名" style="width: 200px" />
+                  <el-button size="small" type="primary" :loading="adopting" @click="adoptFromSample">建品类并使用</el-button>
+                </div>
+
+                <div v-if="chosenPresetName" style="margin-top: 10px">
+                  已选预设：<el-tag size="small" type="success">{{ chosenPresetName }}</el-tag>
+                </div>
+              </div>
+            </template>
+          </el-form-item>
+        </el-form>
+      </template>
+
+      <template v-else-if="wizardStep === 1">
+        <el-input v-model="wizardForm.outline" type="textarea" :rows="12"
+          placeholder="全书大纲：主题、主线、分卷走向、主要人物。生成每一章都会携带它作为方向约束。" />
+        <div style="font-size: 12px; color: #999; margin-top: 6px">
+          可先跳过、之后在「规划」页补写保存；但开跑生成前必须有——没有大纲的章会失去方向约束。
+        </div>
+      </template>
+
+      <template v-else>
+        <el-result v-if="wizardCreated" icon="success" :title="`《${wizardCreated.title}》已创建`"
+          :sub-title="`风格包已从预设克隆，当前 ${wizardCreated.chapterCount} 章。接下来三步：`">
+          <template #extra>
+            <div style="text-align: left; font-size: 13px; line-height: 2">
+              <div>① 到「<router-link to="/planning">规划</router-link>」页确认/补写大纲，点「AI 规划一卷」生成首卷卷纲（2-10 分钟）</div>
+              <div>② 回本页设好连跑范围（默认从第 1 章起），点「启动生成」</div>
+              <div>③ 生成中在本页看实时逐字流；写完的章去「章节」页阅读/审批</div>
+            </div>
+            <el-button type="primary" @click="wizardDone">开始规划 →</el-button>
+          </template>
+        </el-result>
+        <div v-else style="text-align: center; padding: 30px; color: #999">
+          创建中……（克隆预设、建风格包、落书、存大纲）
+        </div>
+      </template>
+
+      <template #footer>
+        <template v-if="wizardStep < 2">
+          <el-button v-if="wizardStep > 0" @click="wizardStep--">上一步</el-button>
+          <el-button v-if="wizardStep === 0" type="primary"
+            :disabled="!wizardForm.title.trim() || !wizardForm.presetId || !presets.length"
+            @click="wizardStep = 1">下一步</el-button>
+          <el-button v-else type="primary" :loading="wizardBusy" @click="createNovel">创建作品</el-button>
+        </template>
+      </template>
+    </el-dialog>
 
     <el-card shadow="never" style="margin-bottom: 12px" header="生成队列（异步执行，逐章回写进度）">
       <el-table v-if="queue.length" :data="queue" border size="small">
@@ -202,17 +339,35 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, nextTick, reactive } from 'vue'
+import { onMounted, onUnmounted, ref, nextTick, reactive, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import { NODE_LABEL, GATE_LABEL, STEP_LABEL, TASK_TEXT, TASK_COLOR } from '../labels'
+
+const router = useRouter()
 
 const novel = ref(null)
 const novels = ref([])
 const novelId = ref(null)
 const manual = ref(false)
 const planManual = ref(false)
+const wizardOpen = ref(false)
+const wizardStep = ref(0)
+const wizardBusy = ref(false)
+const wizardCreated = ref(null)
+const wizardForm = ref({ title: '', description: '', presetId: null, outline: '' })
+const presets = ref([])
+// 开书向导·导入分析模式
+const presetMode = ref('select')
+const sampleForm = ref({ name: '', text: '' })
+const analyzing = ref(false)
+const analyzeResult = ref(null)
+const newGenreForm = ref({ genre: '', presetName: '' })
+const adopting = ref(false)
+const chosenPresetName = ref('')
+const bestSim = computed(() => analyzeResult.value?.similarities?.find((s) => s.comparable) || null)
 const from = ref(2)
 const to = ref(2)
 const running = ref(false)
@@ -579,6 +734,115 @@ async function switchPlanMode() {
     ElMessage.error(e.message)
     planManual.value = !planManual.value
   }
+}
+
+/** 开书向导：预设列表加载 → 三步创建（基本信息 / 大纲 / 完成指引）。 */
+async function openWizard() {
+  wizardStep.value = 0
+  wizardCreated.value = null
+  wizardForm.value = { title: '', description: '', presetId: null, outline: '' }
+  presetMode.value = 'select'
+  sampleForm.value = { name: '', text: '' }
+  analyzeResult.value = null
+  newGenreForm.value = { genre: '', presetName: '' }
+  chosenPresetName.value = ''
+  try {
+    presets.value = await api.get('/api/preset/list')
+    if (presets.value.length) wizardForm.value.presetId = presets.value[0].id
+  } catch (e) {
+    presets.value = []
+    ElMessage.error(e.message)
+  }
+  wizardOpen.value = true
+}
+
+/** 导入小说分析：切块即落库（品类名唯一化，语料永久可复用），返回与现有品类的相似度与建议。 */
+async function analyzeSample() {
+  analyzing.value = true
+  try {
+    analyzeResult.value = await api.post('/api/preset/analyze', {
+      sampleName: sampleForm.value.name,
+      text: sampleForm.value.text
+    })
+    newGenreForm.value.genre = analyzeResult.value.genre
+    newGenreForm.value.presetName = (sampleForm.value.name.trim() || analyzeResult.value.genre) + '·自动提取v1'
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    analyzing.value = false
+  }
+}
+
+function usePreset(sim) {
+  wizardForm.value.presetId = sim.presetId
+  chosenPresetName.value = sim.name
+}
+
+/** 一键建品类：切块落语料 + 采纳为预设，随后当作普通预设继续向导。 */
+async function adoptFromSample() {
+  adopting.value = true
+  try {
+    const r = await api.post('/api/preset/from-sample', {
+      genre: newGenreForm.value.genre,
+      presetName: newGenreForm.value.presetName,
+      text: sampleForm.value.text
+    })
+    wizardForm.value.presetId = r.presetId
+    chosenPresetName.value = r.presetName
+    presets.value = await api.get('/api/preset/list')
+    ElMessage.success(`品类「${r.genre}」已建（${r.chunks} 块语料），预设已选用`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    adopting.value = false
+  }
+}
+
+function onSampleFile(ev) {
+  const f = ev.target.files && ev.target.files[0]
+  if (!f) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    sampleForm.value.text = String(reader.result || '')
+    if (!sampleForm.value.name) sampleForm.value.name = f.name.replace(/\.txt$/i, '')
+  }
+  reader.readAsText(f, 'utf-8')
+  ev.target.value = ''
+}
+
+async function createNovel() {
+  wizardBusy.value = true
+  wizardStep.value = 2
+  wizardCreated.value = null
+  try {
+    const n = await api.post('/api/novels', {
+      title: wizardForm.value.title.trim(),
+      description: wizardForm.value.description.trim(),
+      presetId: wizardForm.value.presetId
+    })
+    if (wizardForm.value.outline.trim()) {
+      try {
+        await api.put(`/api/novels/${n.id}/planning/story`, { content: wizardForm.value.outline.trim() })
+      } catch (e2) {
+        ElMessage.warning(`作品已创建，但大纲保存失败（${e2.message}）——请到「规划」页补写`)
+      }
+    }
+    wizardCreated.value = n
+    novels.value = await api.get('/api/novels')
+    novelId.value = n.id
+    onNovelChange()
+  } catch (e) {
+    ElMessage.error(e.message)
+    wizardStep.value = 0
+  } finally {
+    wizardBusy.value = false
+  }
+}
+
+/** 向导收尾：关弹窗并直接落到规划页，接上「AI 规划一卷」那一步。 */
+function wizardDone() {
+  wizardOpen.value = false
+  router.push('/planning')
 }
 
 async function run() {

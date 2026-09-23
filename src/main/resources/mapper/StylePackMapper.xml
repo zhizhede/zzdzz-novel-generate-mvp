@@ -60,4 +60,10 @@ INSERT INTO style_packs (name, description, rules_md, fingerprint, gate_config, 
 VALUES (#{name}, #{description}, #{rulesMd}, #{fingerprint}::jsonb, #{gateConfig}::jsonb, TRUE)
 RETURNING id
     </select>
+
+    <select id="insertPack" resultType="long">
+INSERT INTO style_packs (name, description, rules_md, fingerprint, gate_config)
+VALUES (#{name}, #{description}, #{rulesMd}, #{fingerprint}::jsonb, #{gateConfig}::jsonb)
+RETURNING id
+    </select>
 </mapper>

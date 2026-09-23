@@ -4,6 +4,8 @@ import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.vo.PresetCorpusVO;
 import com.zzdzz.novelgen.model.vo.PresetDraftVO;
 import com.zzdzz.novelgen.model.vo.PresetVO;
+import com.zzdzz.novelgen.model.vo.SampleAnalyzeVO;
+import com.zzdzz.novelgen.model.vo.SamplePresetVO;
 import com.zzdzz.novelgen.service.GenrePresetService;
 import com.zzdzz.novelgen.service.data.PresetCorpusDataService;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +67,24 @@ public class PresetController {
         return Result.success(presetService.listPresets());
     }
 
+    /** 开书向导·导入小说分析（纯机械探针不落库）：切块→指纹→与现有品类相似度→复用/新建建议。 */
+    @PostMapping("/analyze")
+    public Result<SampleAnalyzeVO> analyze(@RequestBody AnalyzeVO vo) {
+        return Result.success(presetService.analyze(vo.sampleName(), vo.text()));
+    }
+
+    /** 开书向导·由导入小说一键建品类：切块落语料 + 采纳为预设。 */
+    @PostMapping("/from-sample")
+    public Result<SamplePresetVO> fromSample(@RequestBody FromSampleVO vo) {
+        return Result.success(presetService.createPresetFromSample(vo.genre(), vo.presetName(), vo.description(), vo.text()));
+    }
+
+    /** 素材库·导入小说专页：每本导入小说 + 完整分析快照。 */
+    @GetMapping("/samples")
+    public Result<List<com.zzdzz.novelgen.model.vo.ImportedSampleVO>> samples() {
+        return Result.success(presetService.listSamples());
+    }
+
     /** 应用到书（覆盖该书风格包的指纹/门禁/规则，前端二次确认）。 */
     @PostMapping("/{presetId}/apply/{novelId}")
     public Result<Void> apply(@PathVariable long presetId, @PathVariable long novelId) {
@@ -79,5 +99,11 @@ public class PresetController {
     }
 
     public record AdoptVO(String genre, String name, String description) {
+    }
+
+    public record AnalyzeVO(String sampleName, String text) {
+    }
+
+    public record FromSampleVO(String genre, String presetName, String description, String text) {
     }
 }

@@ -64,6 +64,7 @@ public class VolumePlanService {
     private final ForeshadowDataService foreshadowData;
     private final NovelDataService novelData;
     private final CanonDocDataService canonData;
+    private final com.zzdzz.novelgen.service.data.StylePackDataService stylePackData;
     private final StageLog stageLog;
     private final TuningService tuning;
     private final ObjectMapper mapper;
@@ -164,6 +165,12 @@ public class VolumePlanService {
         String span = toNo == null
                 ? "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）"
                 : "到第 " + toNo + " 章结束，共 " + (toNo - fromNo + 1) + " 章";
+        // 品类预设的章长带（开书克隆自 gate_config）：有带则预算必须进带，无带回旧口径（往卷水平自估）
+        int[] band = budgetBand(novelId);
+        String budgetRule = band == null
+                ? "4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。"
+                : "4. budget_min/budget_max 为单章字数预算，本书风格基线（源自品类预设）为 "
+                        + band[0] + "-" + band[1] + " 字，各章预算必须落在该带内。";
         String user = promptTemplates.format(LlmNode.VOLUME_PLAN, "user", """
                 任务：规划第 %d 卷，从第 %d 章开始，%s。
 
@@ -171,7 +178,7 @@ public class VolumePlanService {
                 1. brief 为 150-300 字卷简报，必须写清四个决策：本卷核心悬念与谜底展开节奏（人物身份/动机类问题的答案在本卷如何推进）、卷终点钩子（终章留给下一卷的最大悬念）、伏笔取舍（哪些回收、哪些继续悬置及理由）、节奏曲线（紧张章与舒缓章如何分布）。
                 2. chapters.no 从 %d 开始连续编号；title 不超过 12 字；goal 100-200 字且按戏剧结构写四件套——欲望（本章谁想要什么）、阻碍（什么在阻止）、转折（章内如何升级或翻转）、情绪落点，供下游场景拆解器使用；hook 为一句话章末钩子；time_note 为本章距上一章的故事时间跨度（如「紧接」「次日清晨」「三天后」，不得与时间线矛盾）。
                 3. foreshadows 只列本章要「埋设」或「回收」的伏笔：账本中 proposed/planned 的编码被引用即排期埋设，planted 的被引用即安排回收（action=recover）；账本里没有的新伏笔省略 code、必须给 content（一句话）且 action=plant，将自动建账；已 recovered 的不要引用（旧线呼应写进 goal 即可）；与本章无关的不要列。
-                4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。
+                %s
                 5. 卷尾必须留下强钩子；不得与已有卷纲重复桥段。
                 6. 若上下文给出【上卷复盘要点】，必须在 brief 决策与章节安排中做出回应：点名的悬置伏笔优先安排兑现（引用编码即排期）或给出明确悬置理由；漂移项须有对应修正安排。
 
@@ -180,7 +187,7 @@ public class VolumePlanService {
                 字符串值内部禁止英文双引号，引用一律用「」。
 
                 %s
-                """, volNo, fromNo, span, fromNo, fromNo, context);
+                """, volNo, fromNo, span, fromNo, budgetRule, fromNo, context);
         return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
                         List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN, "system",
                                         "你是网文主编，负责整卷卷纲规划。只输出合法 JSON，不要任何解释或 markdown 代码块。"
@@ -216,8 +223,33 @@ public class VolumePlanService {
                                 timeNote.isBlank() ? null : timeNote, fss,
                                 c.path("budget_min").asInt(2400), c.path("budget_max").asInt(3400)));
                     }
+                    // 预算带钳制：LLM 偶发越带时拉回（带源自品类预设，篇幅是用户/预设口径而非模型自估）
+                    if (band != null) {
+                        rows.replaceAll(r -> new PlanRow(r.chapterNo(), r.title(), r.goal(), r.hook(), r.timeNote(),
+                                r.foreshadows(),
+                                Math.max(band[0], Math.min(r.budgetMin(), band[1])),
+                                Math.max(Math.max(band[0], Math.min(r.budgetMin(), band[1])),
+                                        Math.min(r.budgetMax(), band[1]))));
+                    }
                     return new PlanDraft(arc, brief, rows);
                 }, 2);
+    }
+
+    /** 读本书 gate_config 的章长带（开书时克隆自品类预设）；无带返回 null 走旧口径。 */
+    private int[] budgetBand(long novelId) {
+        try {
+            String json = stylePackData.findGateConfigByNovel(novelId);
+            if (json == null || json.isBlank()) {
+                return null;
+            }
+            JsonNode n = mapper.readTree(json);
+            int lo = n.path("budget_min").asInt(0);
+            int hi = n.path("budget_max").asInt(0);
+            return lo > 0 && hi >= lo ? new int[]{lo, hi} : null;
+        } catch (Exception e) {
+            log.warn("章长带读取失败，按旧口径：{}", e.getMessage());
+            return null;
+        }
     }
 
     /** 确定性结构校验：章号连续、章数、字段非空、预算区间。返回 null 即通过。 */
