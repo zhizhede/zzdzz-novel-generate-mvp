@@ -141,10 +141,21 @@ public class PresetController {
         return Result.success(sampleParseService.recommendParams(id));
     }
 
+    /** 资产卡人工新建（AI 漏抽补录）。 */
+    @PostMapping("/samples/{id}/cards")
+    public Result<Long> createCard(@PathVariable long id, @RequestBody CardCreateVO vo) {
+        return Result.success(sampleParseService.createCard(id, vo.kind(), vo.name(),
+                vo.aliases(), vo.summary(), vo.contentMd(), vo.importance()));
+    }
+
     public record ParseVO(String mode) {
     }
 
     public record CardUpdateVO(String summary, String contentMd, Integer importance) {
+    }
+
+    public record CardCreateVO(String kind, String name, String aliases, String summary,
+                               String contentMd, Integer importance) {
     }
 
     public record CorpusCreateVO(String genre, String title, String content) {

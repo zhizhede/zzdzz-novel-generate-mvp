@@ -902,6 +902,28 @@ public class SampleParseService {
         cardData.softDeleteById(cardId);
     }
 
+    /** 卡人工新建（AI 漏抽补录；别名逗号分隔）。 */
+    public long createCard(long sampleId, String kind, String name, String aliasesText,
+                           String summary, String contentMd, Integer importance) {
+        requireSample(sampleId);
+        if (name == null || name.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "名称必填");
+        }
+        String k = normalizeKind(kind);
+        int imp = importance == null ? 2 : Math.max(1, Math.min(3, importance));
+        Set<String> aliases = new LinkedHashSet<>();
+        if (aliasesText != null) {
+            for (String a : aliasesText.split("[,，、]")) {
+                String s = a.strip();
+                if (!s.isEmpty()) {
+                    aliases.add(s);
+                }
+            }
+        }
+        return cardData.insertCard(sampleId, k, name.strip(), toJsonArray(aliases),
+                summary, contentMd, "[]", imp, null, 0);
+    }
+
     // ===== 私有工具 =====
 
     private static final class MergedEntity {

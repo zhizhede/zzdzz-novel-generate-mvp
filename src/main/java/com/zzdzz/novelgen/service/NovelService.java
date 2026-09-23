@@ -176,6 +176,38 @@ public class NovelService {
         }
     }
 
+    /** 衍生配置全量读（书全生命周期可改参的回显口；无配置返回默认值对象）。 */
+    public DeriveConfigFullVO deriveConfig(long novelId) {
+        requireNovel(novelId);
+        DeriveSupport.Cfg c = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        return new DeriveConfigFullVO(c.water(), c.pov(), c.povCharacter(), c.pacingNote(),
+                c.chaptersPerVolume(), c.targetChapters(), c.autoContinue(), c.priority(), c.sourceSampleId());
+    }
+
+    /** 衍生配置编辑（开书后改目标章数/掺水量/POV/每卷章数/无人续跑/优先级；老书由此启用无人续跑）。
+     * sourceSampleId 保留原值；开无人续跑同时强制规划模式 auto（与开书口径一致）。 */
+    public DeriveConfigFullVO updateDeriveConfig(long novelId, NovelCreateVO.DeriveConfigVO d) {
+        requireNovel(novelId);
+        Long sourceSampleId = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).sourceSampleId();
+        novelData.updateDeriveConfig(novelId, deriveConfigJson(d, sourceSampleId));
+        if (d.autoContinue() != null && d.autoContinue()) {
+            novelData.updatePlanMode(novelId, PlanMode.AUTO.wire());
+        }
+        return deriveConfig(novelId);
+    }
+
+    private void requireNovel(long novelId) {
+        if (novelData.getById(novelId) == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
+        }
+    }
+
+    /** 衍生配置全量（含 sourceSampleId 回显）。 */
+    public record DeriveConfigFullVO(Integer water, String pov, String povCharacter, String pacingNote,
+                                     Integer chaptersPerVolume, Integer targetChapters, Boolean autoContinue,
+                                     Integer priority, Long sourceSampleId) {
+    }
+
     private List<String> parseAliases(String aliasesJson) {
         List<String> out = new ArrayList<>();
         try {

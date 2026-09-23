@@ -127,7 +127,8 @@ public class GenrePresetService {
     }
 
     public List<PresetVO> listPresets() {
-        return stylePackData.listPresets().stream().map(PresetVO::from).toList();
+        return stylePackData.listPresets().stream()
+                .map(p -> PresetVO.from(p, stylePackData.findGateConfigById(p.getId()))).toList();
     }
 
     // ===== 开书向导·导入小说分析（机械层，零 LLM；语料即分析即落库——资产可复用，之后随时采纳/补料/重提） =====
@@ -160,17 +161,17 @@ public class GenrePresetService {
         SampleAnalyzeVO vo = analyzeRows(genre, chunks);
         List<String> notes = new ArrayList<>(vo.notes());
         notes.add(0, "语料已存为品类「" + genre + "」（" + chunks.size() + " 块）：之后可随时在素材库·品类预设里补料、重提或采纳");
-        SampleAnalyzeVO result = new SampleAnalyzeVO(vo.chunks(), vo.totalChars(), vo.lowConfidence(), vo.budgetMin(), vo.budgetMax(),
+        long sampleId = recordSample(base.isBlank() ? genre : base, genre, chunks.size(), vo.totalChars(), vo);
+        SampleAnalyzeVO result = new SampleAnalyzeVO(sampleId, vo.chunks(), vo.totalChars(), vo.lowConfidence(), vo.budgetMin(), vo.budgetMax(),
                 vo.metricCount(), vo.fingerprintJson(), genre, vo.recommendation(), vo.similarities(), notes);
-        recordSample(base.isBlank() ? genre : base, genre, chunks.size(), result.totalChars(), result);
         return result;
     }
 
-    /** 导入即入台账：素材库「导入小说」专页的一行（分析快照全文落库，可复用/回看）。 */
-    private void recordSample(String title, String genre, int chunks, long chars, SampleAnalyzeVO analysis) {
+    /** 导入即入台账：素材库「导入小说」专页的一行（分析快照全文落库，可复用/回看）。返回台账行 id。 */
+    private long recordSample(String title, String genre, int chunks, long chars, SampleAnalyzeVO analysis) {
         try {
             String json = mapper.writeValueAsString(analysis);
-            sampleData.insert(title.length() > 256 ? title.substring(0, 256) : title,
+            return sampleData.insert(title.length() > 256 ? title.substring(0, 256) : title,
                     genre, chunks, chars, "wizard", json);
         } catch (Exception e) {
             throw new IllegalStateException("导入样本台账落库失败", e);
@@ -232,7 +233,7 @@ public class GenrePresetService {
             notes.add("样本 " + chunks.size() + " 块偏少（低置信）：带宽按 min/max 放宽计算，建议继续补语料");
         }
         notes.add("分析只看机械指标（用词/句式/节奏的分布），题材与情节维度属后续 LLM 提取批");
-        return new SampleAnalyzeVO(chunks.size(), totalChars, chunks.size() < 10,
+        return new SampleAnalyzeVO(null, chunks.size(), totalChars, chunks.size() < 10,
                 (int) band[0], (int) band[1], baseline.size(), fingerprintJson,
                 genre, recommendation, sims, notes);
     }

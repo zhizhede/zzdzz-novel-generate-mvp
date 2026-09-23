@@ -44,4 +44,17 @@ public class NovelController {
         novelService.setApprovalMode(id, dto.mode());
         return Result.success();
     }
+
+    /** 衍生配置全量读（开书后改参/老书启用无人续跑的回显口）。 */
+    @GetMapping("/{id}/derive-config")
+    public Result<com.zzdzz.novelgen.service.NovelService.DeriveConfigFullVO> deriveConfig(@PathVariable long id) {
+        return Result.success(novelService.deriveConfig(id));
+    }
+
+    /** 衍生配置编辑（书全生命周期可改；开无人续跑同时强制规划模式 auto）。 */
+    @PutMapping("/{id}/derive-config")
+    public Result<com.zzdzz.novelgen.service.NovelService.DeriveConfigFullVO> updateDeriveConfig(
+            @PathVariable long id, @RequestBody NovelCreateVO vo) {
+        return Result.success(novelService.updateDeriveConfig(id, vo.deriveConfig()));
+    }
 }

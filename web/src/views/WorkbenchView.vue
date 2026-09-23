@@ -20,8 +20,18 @@
           </span>
         </el-tooltip>
         <el-divider direction="vertical" />
+        <el-tooltip placement="bottom" content="掺水量/叙事视角/每卷章数/目标章数/无人续跑/优先级——开书后随时可改；老书可由此启用无人续跑。">
+          <el-button size="small" plain @click="openDeriveEditor">衍生参数</el-button>
+        </el-tooltip>
         <span>连跑范围：第 <el-input-number v-model="from" :min="1" size="small" /> 至
           <el-input-number v-model="to" :min="from" size="small" /> 章</span>
+        <span>优先级：
+          <el-select v-model="runPriority" size="small" style="width: 72px">
+            <el-option :value="0" label="低" />
+            <el-option :value="1" label="中" />
+            <el-option :value="2" label="高" />
+          </el-select>
+        </span>
         <el-button type="primary" size="small" :loading="running" @click="run">启动生成</el-button>
         <el-button size="small" type="danger" plain @click="stopAllTasks">全部停止</el-button>
         <el-tag :type="running ? 'warning' : 'info'" size="small">{{ running ? '运行中' : '空闲' }}</el-tag>
@@ -158,6 +168,13 @@
 
                 <div v-if="chosenPresetName" style="margin-top: 10px">
                   已选预设：<el-tag size="small" type="success">{{ chosenPresetName }}</el-tag>
+                  <el-button v-if="analyzeResult && analyzeResult.sampleId" size="small" type="primary" plain
+                             style="margin-left: 10px" @click="goDeepParse(analyzeResult.sampleId)">
+                    去深度解析剧情与资产 →
+                  </el-button>
+                  <div style="font-size: 12px; color: #999; margin-top: 4px">
+                    深度解析由 AI 拆出大纲/章纲/角色/世界观资产（素材库可看），衍生开书时即可克隆复用；不解析也可直接继续开书。
+                  </div>
                 </div>
               </div>
             </template>
@@ -167,6 +184,10 @@
 
       <template v-else-if="wizardStep === 1">
         <el-form label-width="92px">
+          <div v-if="presetBand" style="font-size: 12px; color: #999; margin: 0 0 10px 92px">
+            本书每章字数带（期望字数，来自预设「{{ chosenPresetName || '所选预设' }}」）：约 <b>{{ presetBand[0] }}–{{ presetBand[1] }}</b> 字/章，
+            之后可在素材库·风格包调整
+          </div>
           <el-form-item label="参考样本">
             <el-select v-model="wizardForm.sampleId" clearable placeholder="选择导入小说（可不选）" style="width: 100%">
               <el-option v-for="s in wizardSamples" :key="s.id" :value="s.id" :label="s.title">
@@ -289,6 +310,7 @@
                      size="small" type="primary" plain @click="resumeAutoChain">
             {{ autoChain.state === 'PAUSED' ? '恢复续跑' : '启动续跑' }}
           </el-button>
+          <el-button size="small" plain @click="openDeriveEditor">参数设置</el-button>
           <span v-if="autoChain.message" style="font-size: 12px; color: #e6a23c; flex: 1; text-align: right">
             {{ autoChain.message }}
           </span>
@@ -298,6 +320,56 @@
                    :percentage="Math.min(100, Math.round(autoChain.currentChapters / autoChain.targetChapters * 100))" />
       <div v-else style="font-size: 12px; color: #999">未设目标章数：续跑按卷推进，达到保险丝或人工停止为止</div>
     </el-card>
+
+    <!-- 衍生参数编辑（开书后随时改；老书由此启用无人续跑） -->
+    <el-dialog v-model="deriveEditorOpen" title="衍生参数（本书）" width="600px">
+      <el-form label-width="92px" v-if="deriveEdit">
+        <el-form-item label="掺水量">
+          <div style="display: flex; align-items: center; gap: 12px; width: 100%">
+            <span style="font-size: 12px; color: #999">干货</span>
+            <el-slider v-model="deriveEdit.water" :min="0" :max="100" :step="5" style="flex: 1" />
+            <span style="font-size: 12px; color: #999">舒缓</span>
+            <el-tag size="small" :type="deriveEdit.water >= 70 ? 'warning' : deriveEdit.water <= 30 ? 'success' : 'info'">
+              {{ deriveEdit.water >= 70 ? '可注水' : deriveEdit.water <= 30 ? '零注水' : '均衡' }}
+            </el-tag>
+          </div>
+        </el-form-item>
+        <el-form-item label="叙事视角">
+          <el-select v-model="deriveEdit.pov" style="width: 200px">
+            <el-option value="第一人称（主角）" label="第一人称（主角）" />
+            <el-option value="第三人称限知" label="第三人称限知" />
+            <el-option value="第三人称全知" label="第三人称全知" />
+            <el-option value="多视角轮换" label="多视角轮换" />
+          </el-select>
+          <el-input v-if="deriveEdit.pov !== '多视角轮换'" v-model="deriveEdit.povCharacter"
+                    placeholder="主视角人物名（可选）" style="width: 180px; margin-left: 8px" />
+        </el-form-item>
+        <el-form-item label="节奏">
+          <el-input-number v-model="deriveEdit.chaptersPerVolume" :min="3" :max="30" size="small" />
+          <span style="margin-left: 6px; font-size: 13px">章/卷</span>
+          <el-input-number v-model="deriveEdit.targetChapters" :min="10" :max="2000" :step="50" size="small" style="margin-left: 16px" />
+          <span style="margin-left: 6px; font-size: 13px">章目标（总）</span>
+        </el-form-item>
+        <el-form-item label="节奏说明">
+          <el-input v-model="deriveEdit.pacingNote" type="textarea" :rows="2" placeholder="给卷规划的节奏交代（可选）" />
+        </el-form-item>
+        <el-form-item label="无人续跑">
+          <el-switch v-model="deriveEdit.autoContinue" />
+          <span style="margin-left: 8px; font-size: 12px; color: #999">开=写到总目标为止全自动（规划/审批强制自动）</span>
+        </el-form-item>
+        <el-form-item label="队列优先级">
+          <el-radio-group v-model="deriveEdit.priority" size="small">
+            <el-radio-button :value="0">低</el-radio-button>
+            <el-radio-button :value="1">中</el-radio-button>
+            <el-radio-button :value="2">高</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="deriveEditorOpen = false">取消</el-button>
+        <el-button type="primary" :loading="deriveSaving" @click="saveDeriveEditor">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-card shadow="never" style="margin-bottom: 12px" header="生成队列（异步执行，逐章回写进度）">
       <el-table v-if="queue.length" :data="queue" border size="small">
@@ -464,6 +536,16 @@ const wizardForm = ref({
 })
 const wizardSamples = ref([])
 const paramsDeciding = ref(false)
+const presetBand = computed(() => {
+  const p = presets.value.find((x) => x.id === wizardForm.value.presetId)
+  return p && p.budgetMin && p.budgetMax ? [p.budgetMin, p.budgetMax] : null
+})
+
+/** 向导内分析完直接跳素材库深度解析（带 sampleId 定位高亮）。 */
+function goDeepParse(sampleId) {
+  wizardOpen.value = false
+  router.push({ path: '/library', query: { sampleId } })
+}
 const presets = ref([])
 // 开书向导·导入分析模式
 const presetMode = ref('select')
@@ -476,6 +558,7 @@ const chosenPresetName = ref('')
 const bestSim = computed(() => analyzeResult.value?.similarities?.find((s) => s.comparable) || null)
 const from = ref(2)
 const to = ref(2)
+const runPriority = ref(1)
 const running = ref(false)
 const lastMessage = ref('')
 const queue = ref([])
@@ -993,7 +1076,7 @@ function wizardDone() {
 
 async function run() {
   try {
-    await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value })
+    await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value, priority: runPriority.value })
     scenes.value = []
     transcript.value = []
     sessionSeededKey = ''
@@ -1114,6 +1197,56 @@ async function resumeAutoChain() {
     await loadQueue()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+// ===== 衍生参数编辑（开书后随时改；老书由此启用无人续跑） =====
+const deriveEditorOpen = ref(false)
+const deriveSaving = ref(false)
+const deriveEdit = ref(null)
+
+async function openDeriveEditor() {
+  try {
+    const c = await api.get(`/api/novels/${novelId.value}/derive-config`)
+    deriveEdit.value = {
+      water: c.water ?? 50,
+      pov: c.pov || '第三人称限知',
+      povCharacter: c.povCharacter || '',
+      pacingNote: c.pacingNote || '',
+      chaptersPerVolume: c.chaptersPerVolume ?? 10,
+      targetChapters: c.targetChapters ?? 300,
+      autoContinue: !!c.autoContinue,
+      priority: c.priority ?? 1
+    }
+    deriveEditorOpen.value = true
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function saveDeriveEditor() {
+  deriveSaving.value = true
+  try {
+    const d = deriveEdit.value
+    await api.put(`/api/novels/${novelId.value}/derive-config`, {
+      deriveConfig: {
+        water: d.water,
+        pov: d.pov,
+        povCharacter: d.povCharacter.trim() || undefined,
+        pacingNote: d.pacingNote.trim() || undefined,
+        chaptersPerVolume: d.chaptersPerVolume,
+        targetChapters: d.targetChapters,
+        autoContinue: d.autoContinue,
+        priority: d.priority
+      }
+    })
+    ElMessage.success(d.autoContinue ? '已保存：无人续跑已启用，可点「启动续跑」开始' : '已保存')
+    deriveEditorOpen.value = false
+    await loadAutoChain()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    deriveSaving.value = false
   }
 }
 

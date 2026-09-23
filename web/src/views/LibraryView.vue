@@ -343,9 +343,13 @@
               <div style="font-size: 13px; margin-bottom: 6px">AI 腔黑名单（每行一个，正文中出现即判未过）</div>
               <el-input v-model="bannedText" type="textarea" :rows="8" placeholder="心中暗想" />
               <div style="display: flex; gap: 12px; align-items: center; margin: 10px 0">
+                <span style="font-size: 13px">每章字数带（期望字数）</span>
+                <el-input-number v-model="budgetMin" :min="300" :max="20000" :step="100" size="small" style="width: 110px" />
+                <span style="font-size: 13px">至</span>
+                <el-input-number v-model="budgetMax" :min="300" :max="20000" :step="100" size="small" style="width: 110px" />
                 <span style="font-size: 13px">章长容差（±）</span>
                 <el-input-number v-model="lenTol" :min="0" :max="0.5" :step="0.05" size="small" />
-                <span style="color: #999; font-size: 12px">预算 2400-3200、容差 0.15 → 实际允许 2040-3680 字</span>
+                <span style="color: #999; font-size: 12px">卷规划按此带出预算并钳制；容差决定门禁实际允许宽度</span>
               </div>
               <div style="font-size: 13px; margin: 10px 0 6px">评审标准（本书覆盖，未列出的键继承平台调参）</div>
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
@@ -424,11 +428,15 @@
 
       <!-- 导入小说（用户定调：输入的小说与全部分析落库可复用，专门分类展示；深度解析出剧情/角色/世界观资产） -->
       <el-tab-pane :label="`导入小说（${samples.length}）`">
-        <div style="font-size: 12px; color: #999; margin-bottom: 8px">
-          每本导入的小说：文风指纹/章长带即时分析留档；「深度解析」由 AI 拆出剧情结构（书/卷/章+场景拆解）、角色/物品/地点/组织资产卡与关系、世界观文档——全部落库，可在下方浏览、纠偏，衍生开书时克隆复用。
-          快速档抽样前 40 章出骨架（约几分钟）；完整档全书逐章（长篇 1-3 小时，可断点续跑）。
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px">
+          <el-button type="primary" size="small" @click="openSampleImport">导入新小说</el-button>
+          <span style="font-size: 12px; color: #999">
+            每本导入的小说：文风指纹/章长带即时分析留档；「深度解析」由 AI 拆出剧情结构（书/卷/章+场景拆解）、角色/物品/地点/组织资产卡与关系、世界观文档——全部落库，可在下方浏览、纠偏，衍生开书时克隆复用。
+            快速档抽样前 40 章出骨架（约几分钟）；完整档全书逐章（长篇 1-3 小时，可断点续跑）。
+          </span>
         </div>
-        <el-table :data="samples" border size="small" style="max-width: 1080px">
+        <el-table :data="samples" border size="small" style="max-width: 1080px"
+                  :row-class-name="({ row }) => (row.id === highlightSampleId ? 'sample-highlight' : '')">
           <el-table-column type="expand">
             <template #default="{ row }">
               <div v-if="sampleAnalysis(row)" style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
@@ -653,6 +661,10 @@
             </div>
           </el-tab-pane>
           <el-tab-pane name="cards" :label="`资产卡（${sampleCards.length}）`">
+            <div style="margin-bottom: 8px">
+              <el-button size="small" type="primary" plain @click="openSampleCardCreate">新建卡</el-button>
+              <span style="font-size: 12px; color: #999; margin-left: 6px">AI 漏抽的实体在这里手工补录（重新解析会重建全部卡）</span>
+            </div>
             <el-table :data="sampleCards" border size="small">
               <el-table-column type="expand">
                 <template #default="{ row }">
@@ -701,11 +713,20 @@
       </template>
     </el-drawer>
 
-    <!-- 导入样本·资产卡纠偏 -->
-    <el-dialog v-model="sampleCardEditor" title="资产卡纠偏" width="640px">
+    <!-- 导入样本·资产卡纠偏/新建 -->
+    <el-dialog v-model="sampleCardEditor" :title="sampleCardForm.id ? '资产卡纠偏' : '新建资产卡'" width="640px">
       <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
-        <b>{{ sampleCardForm.name }}</b>
-        <span style="color: #999; font-size: 12px">{{ sampleKindLabel[sampleCardForm.kind] || sampleCardForm.kind }}（重新解析会重建全部卡）</span>
+        <template v-if="sampleCardForm.id">
+          <b>{{ sampleCardForm.name }}</b>
+          <span style="color: #999; font-size: 12px">{{ sampleKindLabel[sampleCardForm.kind] || sampleCardForm.kind }}（重新解析会重建全部卡）</span>
+        </template>
+        <template v-else>
+          <el-select v-model="sampleCardForm.kind" size="small" style="width: 110px">
+            <el-option v-for="(label, k) in sampleKindLabel" :key="k" :value="k" :label="label" />
+          </el-select>
+          <el-input v-model="sampleCardForm.name" placeholder="名称（必填）" size="small" style="width: 200px" />
+          <el-input v-model="sampleCardForm.aliasesText" placeholder="别名（逗号分隔，可选）" size="small" style="width: 220px" />
+        </template>
         <span style="font-size: 13px">重要度</span>
         <el-select v-model="sampleCardForm.importance" size="small" style="width: 90px">
           <el-option :value="1" label="★" />
@@ -718,6 +739,28 @@
       <template #footer>
         <el-button @click="sampleCardEditor = false">取消</el-button>
         <el-button type="primary" @click="saveSampleCard">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 素材库·导入新小说（不开书也能囤素材：分析落台账，之后随时深度解析/采纳预设/衍生开书） -->
+    <el-dialog v-model="sampleImportOpen" title="导入新小说" width="640px">
+      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px">
+        <el-input v-model="sampleImportForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 220px" />
+        <label style="cursor: pointer; font-size: 13px; color: #409eff">上传 txt
+          <input type="file" accept=".txt" style="display: none" @change="onSampleImportFile" />
+        </label>
+        <span v-if="sampleImportForm.text" style="font-size: 12px; color: #999">
+          已载入 {{ (sampleImportForm.text.length / 10000).toFixed(1) }} 万字
+        </span>
+      </div>
+      <el-input v-model="sampleImportForm.text" type="textarea" :rows="8"
+                placeholder="或直接粘贴小说正文（整本或长片段，最多 800 万字）。系统自动切块存入语料库并出文风分析，之后可在列表里深度解析。" />
+      <div style="font-size: 12px; color: #999; margin-top: 6px">分析为纯机械指标（秒级、零 LLM 成本）；深度解析（LLM）在列表行单独触发。</div>
+      <template #footer>
+        <el-button @click="sampleImportOpen = false">取消</el-button>
+        <el-button type="primary" :loading="sampleImporting" :disabled="!sampleImportForm.text" @click="importSample">
+          分析并入库
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -898,19 +941,80 @@ async function openSampleCard(row) {
   sampleCardEditor.value = true
 }
 
+function openSampleCardCreate() {
+  sampleCardForm.value = { id: null, kind: 'character', name: '', aliasesText: '', summary: '', contentMd: '', importance: 2 }
+  sampleCardEditor.value = true
+}
+
 async function saveSampleCard() {
   try {
-    await api.put(`/api/preset/cards/${sampleCardForm.value.id}`, {
-      summary: sampleCardForm.value.summary,
-      contentMd: sampleCardForm.value.contentMd,
-      importance: sampleCardForm.value.importance
-    })
+    if (sampleCardForm.value.id) {
+      await api.put(`/api/preset/cards/${sampleCardForm.value.id}`, {
+        summary: sampleCardForm.value.summary,
+        contentMd: sampleCardForm.value.contentMd,
+        importance: sampleCardForm.value.importance
+      })
+    } else {
+      if (!sampleCardForm.value.name.trim()) {
+        ElMessage.warning('名称必填')
+        return
+      }
+      await api.post(`/api/preset/samples/${assetsData.value.sampleId}/cards`, {
+        kind: sampleCardForm.value.kind,
+        name: sampleCardForm.value.name.trim(),
+        aliases: sampleCardForm.value.aliasesText || '',
+        summary: sampleCardForm.value.summary || '',
+        contentMd: sampleCardForm.value.contentMd || '',
+        importance: sampleCardForm.value.importance
+      })
+    }
     ElMessage.success('已保存')
     sampleCardEditor.value = false
     await reloadAssets()
     await loadParseStatuses()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+// ===== 素材库直接导入新小说（不开书囤素材） + 来源定位高亮 =====
+const sampleImportOpen = ref(false)
+const sampleImportForm = ref({ name: '', text: '' })
+const sampleImporting = ref(false)
+const highlightSampleId = ref(null)
+
+function openSampleImport() {
+  sampleImportForm.value = { name: '', text: '' }
+  sampleImportOpen.value = true
+}
+
+function onSampleImportFile(ev) {
+  const f = ev.target.files && ev.target.files[0]
+  if (!f) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    sampleImportForm.value.text = String(reader.result || '')
+    if (!sampleImportForm.value.name) sampleImportForm.value.name = f.name.replace(/\.txt$/i, '')
+  }
+  reader.readAsText(f, 'utf-8')
+  ev.target.value = ''
+}
+
+async function importSample() {
+  sampleImporting.value = true
+  try {
+    const r = await api.post('/api/preset/analyze', {
+      sampleName: sampleImportForm.value.name,
+      text: sampleImportForm.value.text
+    })
+    sampleImportOpen.value = false
+    highlightSampleId.value = r.sampleId
+    await loadSamples()
+    ElMessage.success(`已入库（${r.chunks} 块语料，品类「${r.genre}」）——点行内「深度解析」拆剧情与资产`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    sampleImporting.value = false
   }
 }
 
@@ -973,6 +1077,8 @@ const styleRules = ref('')
 const styleFingerprint = ref('')
 const bannedText = ref('')
 const lenTol = ref(0.15)
+const budgetMin = ref(2400)
+const budgetMax = ref(3400)
 const styleTab = ref('rules')
 const editing = ref(null)
 const canonEditor = ref(false)
@@ -1261,6 +1367,8 @@ async function loadAll() {
     const cfg = JSON.parse(s.gateConfigJson || '{}')
     bannedText.value = (cfg.banned_phrases || []).join('\n')
     lenTol.value = typeof cfg.chapter_length_tolerance === 'number' ? cfg.chapter_length_tolerance : 0.15
+    budgetMin.value = typeof cfg.budget_min === 'number' && cfg.budget_min > 0 ? cfg.budget_min : 2400
+    budgetMax.value = typeof cfg.budget_max === 'number' && cfg.budget_max > 0 ? cfg.budget_max : 3400
   } catch {
     bannedText.value = ''
   }
@@ -1360,7 +1468,14 @@ async function saveDigest() {
 async function saveGateConfig() {
   try {
     const phrases = bannedText.value.split('\n').map((s) => s.trim()).filter(Boolean)
-    const cfg = { banned_phrases: phrases, chapter_length_tolerance: lenTol.value, no_straight_quote: true, ...JSON.parse(JSON.stringify(readerStd)) }
+    const cfg = {
+      banned_phrases: phrases,
+      chapter_length_tolerance: lenTol.value,
+      budget_min: Math.min(budgetMin.value, budgetMax.value),
+      budget_max: Math.max(budgetMin.value, budgetMax.value),
+      no_straight_quote: true,
+      ...JSON.parse(JSON.stringify(readerStd))
+    }
     await api.put(`/api/novels/${novelId.value}/gate-config`, { gateConfig: JSON.stringify(cfg) })
     ElMessage.success('门禁配置已落库（下一次门禁检测即生效）')
   } catch (e) {
@@ -1381,6 +1496,10 @@ onMounted(async () => {
   novels.value = await api.get('/api/novels')
   novelId.value = getSelectedNovelId() ?? novels.value[0]?.id
   if (!novels.value.some((n) => n.id === novelId.value)) novelId.value = novels.value[0]?.id
+  // 向导「去深度解析」跳转定位：/?sampleId=N 高亮对应行
+  const q = new URLSearchParams((location.hash.split('?')[1] || ''))
+  const sid = Number(q.get('sampleId'))
+  if (sid) highlightSampleId.value = sid
   await loadAll()
 })
 
@@ -1388,3 +1507,9 @@ onUnmounted(() => clearTimeout(parsePollTimer))
 
 watch(novelId, loadAll)
 </script>
+
+<style scoped>
+:deep(.sample-highlight td) {
+  background: #ecf5ff !important;
+}
+</style>
