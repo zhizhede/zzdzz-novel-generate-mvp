@@ -349,6 +349,15 @@ public class SampleParseService {
         taskData.updateProgress(taskId, done.incrementAndGet(), "world");
         synthesizeWorld(sampleId, fast);
 
+        // 类型/特征标签（fail-open：失败不拦 DONE，可手动重提）
+        taskData.updateProgress(taskId, done.incrementAndGet(), "tags");
+        try {
+            List<String> tags = extractTags(sampleId);
+            sampleData.updateTags(sampleId, toJsonArray(new LinkedHashSet<>(tags)));
+        } catch (Exception e) {
+            log.warn("标签提取失败（fail-open，可手动重提）sampleId={}：{}", sampleId, e.getMessage());
+        }
+
         taskData.finish(taskId, "DONE", "done",
                 (fast ? "快速骨架完成（抽样 " + limit + " 章）" : "完整解析完成（" + limit + " 章）")
                         + "：卡 " + cardCount + " 张" + (volumeCount > 0 ? "，卷 " + volumeCount : ""));
@@ -750,6 +759,58 @@ public class SampleParseService {
         cardData.insertCard(sampleId, "world", "世界观", "[]", "世界观设定文档", world, "[]", 2, null, 0);
     }
 
+    /** 类型/特征标签提取：书级大纲 + 主要角色卡 → LLM 打标（5-15 个）→ 写回 imported_samples.tags。 */
+    public List<String> extractTags(long sampleId) {
+        ImportedSampleDTO sample = requireSample(sampleId);
+        StringBuilder material = new StringBuilder();
+        for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+            if (n.getLevel().equals("book") && n.getSummary() != null) {
+                material.append(n.getSummary());
+                break;
+            }
+        }
+        int characters = 0;
+        for (SampleCardDTO c : cardData.listBySample(sampleId)) {
+            if (c.getKind().equals("character") && c.getImportance() != null && c.getImportance() >= 2
+                    && material.length() < 9000) {
+                material.append('\n').append(c.getName()).append("：").append(truncate(c.getSummary(), 60));
+                characters++;
+            }
+        }
+        if (material.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "尚无书级材料：请先完成深度解析（快速档即可）再提取标签");
+        }
+        String user = promptTemplates.format(LlmNode.SAMPLE_TAGS, "user", """
+                任务：依据下面的书级材料给这本小说打标签，输出 JSON：
+                {"tags":["标签1","标签2",…]}
+                口径：5-15 个；每标签 2-6 字；覆盖三类——类型/题材（如 奇幻、都市、克苏鲁、言情）、体量节奏（如 短篇、长篇、快节奏、慢热）、标志性特征元素（如 不可名状、章鱼、狼人、剑与魔法、系统流）；
+                只提取材料有依据的，宁缺毋滥。
+
+                【书级材料】
+                %s
+                """, truncate(material + "\n（《" + sample.getTitle() + "》，主要角色 " + characters + " 个）", 10000));
+        LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.SAMPLE_TAGS, null, null,
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_TAGS, "system",
+                                "你是网文分类编辑，给小说打类型与特征标签；只输出一个 JSON 对象，字符串值内部禁止英文双引号。")),
+                        LlmPort.Message.user(user)), 0.3);
+        JsonNode r = llmJson.ask(req, node -> {
+            if (!node.path("tags").isArray() || node.path("tags").isEmpty()) {
+                throw new LlmJson.Bad("tags 必须是非空数组");
+            }
+            return node;
+        }, 3);
+        List<String> tags = new ArrayList<>();
+        for (JsonNode t : r.path("tags")) {
+            String s = t.asText("").strip();
+            if (!s.isEmpty() && tags.size() < 15) {
+                tags.add(truncate(s, 12));
+            }
+        }
+        sampleData.updateTags(sampleId, toJsonArray(new LinkedHashSet<>(tags)));
+        log.info("样本标签提取完成 sampleId={}：{}", sampleId, tags);
+        return tags;
+    }
+
     /** 重启善后：RUNNING 的解析任务标 INTERRUPTED（前端可「继续解析」断点续跑）。 */
     @EventListener(ApplicationReadyEvent.class)
     public void recoverInterrupted() {
@@ -794,7 +855,8 @@ public class SampleParseService {
         String user = promptTemplates.format(LlmNode.SAMPLE_PARAMS, "user", """
                 任务：用户要以样例《%s》为蓝本衍生新书。依据下面的结构画像推荐衍生参数，输出 JSON：
                 {"water":0,"pov":"第一人称|第三人称限知|第三人称全知|多视角轮换 之一","povCharacter":"主视角（人物名，多视角则留空）",
-                 "chaptersPerVolume":10,"targetChapters":300,"pacingNote":"节奏说明 40-80 字","reason":"推荐理由 80 字内"}
+                 "chaptersPerVolume":10,"targetChapters":300,"pacingNote":"节奏说明 40-80 字","reason":"推荐理由 80 字内",
+                 "tags":["衍生书类型/特征标签 5-10 个，如 奇幻、剑与魔法、快节奏——可沿用样例也可按衍生方向调整"]}
                 口径：water 0=情节密度拉满的干货流，50=均衡，100=日常氛围舒缓流；chaptersPerVolume 3-30；
                 targetChapters 按样例体量与题材惯例估（50-2000）；povCharacter 必须是材料中出现的主要人物。
 
@@ -812,6 +874,13 @@ public class SampleParseService {
             return node;
         }, 3);
         int[] band = budgetBandOf(sample.getAnalysis());
+        java.util.List<String> tags = new ArrayList<>();
+        for (JsonNode t : r.path("tags")) {
+            String v = t.asText("").strip();
+            if (!v.isEmpty() && tags.size() < 10) {
+                tags.add(truncate(v, 12));
+            }
+        }
         return new SampleParamsVO(
                 clampInt(r.path("water").asInt(50), 0, 100),
                 textOr(r.path("pov").asText(""), "第三人称限知"),
@@ -820,7 +889,7 @@ public class SampleParseService {
                 clampInt(r.path("targetChapters").asInt(300), 50, 2000),
                 r.path("pacingNote").asText(""),
                 r.path("reason").asText(),
-                band == null ? null : band[0], band == null ? null : band[1]);
+                band == null ? null : band[0], band == null ? null : band[1], tags);
     }
 
     /** 文风分析快照里的章长预算带（无快照/无带返回 null）。 */

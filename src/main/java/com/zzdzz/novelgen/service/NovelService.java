@@ -169,6 +169,18 @@ public class NovelService {
         if (sampleId != null) {
             m.put("sourceSampleId", sampleId);
         }
+        if (d.tags() != null && !d.tags().isEmpty()) {
+            java.util.List<String> tags = d.tags().stream()
+                    .map(t -> t == null ? "" : t.strip())
+                    .filter(t -> !t.isEmpty())
+                    .map(t -> t.length() > 12 ? t.substring(0, 12) : t)
+                    .distinct()
+                    .limit(20)
+                    .toList();
+            if (!tags.isEmpty()) {
+                m.put("tags", tags);
+            }
+        }
         try {
             return mapper.writeValueAsString(m);
         } catch (Exception e) {
@@ -181,10 +193,11 @@ public class NovelService {
         requireNovel(novelId);
         DeriveSupport.Cfg c = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
         return new DeriveConfigFullVO(c.water(), c.pov(), c.povCharacter(), c.pacingNote(),
-                c.chaptersPerVolume(), c.targetChapters(), c.autoContinue(), c.priority(), c.sourceSampleId());
+                c.chaptersPerVolume(), c.targetChapters(), c.autoContinue(), c.priority(),
+                c.sourceSampleId(), c.tags());
     }
 
-    /** 衍生配置编辑（开书后改目标章数/掺水量/POV/每卷章数/无人续跑/优先级；老书由此启用无人续跑）。
+    /** 衍生配置编辑（开书后改目标章数/掺水量/POV/每卷章数/标签/无人续跑/优先级；老书由此启用无人续跑）。
      * sourceSampleId 保留原值；开无人续跑同时强制规划模式 auto（与开书口径一致）。 */
     public DeriveConfigFullVO updateDeriveConfig(long novelId, NovelCreateVO.DeriveConfigVO d) {
         requireNovel(novelId);
@@ -202,11 +215,12 @@ public class NovelService {
         }
     }
 
-    /** 衍生配置全量（含 sourceSampleId 回显）。 */
+    /** 衍生配置全量（含 sourceSampleId 回显与类型标签）。 */
     public record DeriveConfigFullVO(Integer water, String pov, String povCharacter, String pacingNote,
                                      Integer chaptersPerVolume, Integer targetChapters, Boolean autoContinue,
-                                     Integer priority, Long sourceSampleId) {
+                                     Integer priority, Long sourceSampleId, java.util.List<String> tags) {
     }
+
 
     private List<String> parseAliases(String aliasesJson) {
         List<String> out = new ArrayList<>();

@@ -235,6 +235,21 @@
             <el-input v-model="wizardForm.derive.pacingNote" type="textarea" :rows="2"
                       placeholder="给卷规划的节奏交代（可选），如：前三卷日常铺垫，之后两卷一个大高潮" />
           </el-form-item>
+          <el-form-item label="类型标签">
+            <div style="width: 100%">
+              <el-select v-model="wizardForm.derive.tags" multiple filterable allow-create default-first-option
+                         placeholder="选样本标签沿用，或直接输入新标签（如：言情、剑与魔法、长篇）" style="width: 100%">
+                <el-option v-for="t in sampleTagOptions" :key="t" :value="t" :label="t" />
+              </el-select>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px">
+                <el-button v-if="sampleTagOptions.length" size="small" link type="primary"
+                           @click="wizardForm.derive.tags = [...sampleTagOptions]">沿用样本标签</el-button>
+                <span style="font-size: 12px; color: #999">
+                  控制衍生书的类型基调与标志性元素（题材/体量节奏/特征元素），进卷规划与正文提示词
+                </span>
+              </div>
+            </div>
+          </el-form-item>
           <el-form-item label="无人续跑">
             <el-switch v-model="wizardForm.derive.autoContinue" />
             <span style="margin-left: 8px; font-size: 12px; color: #999">
@@ -352,6 +367,16 @@
         </el-form-item>
         <el-form-item label="节奏说明">
           <el-input v-model="deriveEdit.pacingNote" type="textarea" :rows="2" placeholder="给卷规划的节奏交代（可选）" />
+        </el-form-item>
+        <el-form-item label="类型标签">
+          <div style="width: 100%">
+            <el-select v-model="deriveEdit.tags" multiple filterable allow-create default-first-option
+                       placeholder="选标签沿用，或输入新标签" style="width: 100%">
+              <el-option v-for="t in deriveTagOptions" :key="t" :value="t" :label="t" />
+            </el-select>
+            <el-button v-if="deriveTagOptions.length" size="small" link type="primary"
+                       @click="deriveEdit.tags = [...deriveTagOptions]">沿用样本标签</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="无人续跑">
           <el-switch v-model="deriveEdit.autoContinue" />
@@ -532,7 +557,7 @@ const wizardForm = ref({
   title: '', description: '', presetId: null, outline: '',
   sampleId: null,
   cloneAssets: { cards: true, world: true, plotOutline: true },
-  derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1 }
+  derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
 })
 const wizardSamples = ref([])
 const paramsDeciding = ref(false)
@@ -540,12 +565,18 @@ const presetBand = computed(() => {
   const p = presets.value.find((x) => x.id === wizardForm.value.presetId)
   return p && p.budgetMin && p.budgetMax ? [p.budgetMin, p.budgetMax] : null
 })
+/** 所选样本的 AI 标签（衍生标签的沿用起点/建议选项）。 */
+const sampleTagOptions = computed(() => {
+  const s = wizardSamples.value.find((x) => x.id === wizardForm.value.sampleId)
+  return s ? (s.tags || []) : []
+})
 
 /** 向导内分析完直接跳素材库深度解析（带 sampleId 定位高亮）。 */
 function goDeepParse(sampleId) {
   wizardOpen.value = false
   router.push({ path: '/library', query: { sampleId } })
 }
+
 const presets = ref([])
 // 开书向导·导入分析模式
 const presetMode = ref('select')
@@ -933,7 +964,7 @@ async function openWizard() {
     title: '', description: '', presetId: null, outline: '',
     sampleId: null,
     cloneAssets: { cards: true, world: true, plotOutline: true },
-    derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1 }
+    derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
   }
   presetMode.value = 'select'
   sampleForm.value = { name: '', text: '' }
@@ -1017,6 +1048,7 @@ async function aiDecideParams() {
     d.chaptersPerVolume = r.chaptersPerVolume || d.chaptersPerVolume
     d.targetChapters = r.targetChapters || d.targetChapters
     d.pacingNote = r.pacingNote || d.pacingNote
+    if ((r.tags || []).length) d.tags = r.tags
     ElMessage.success(r.reason ? `已按样本画像回填：${r.reason}` : '已按样本画像回填')
   } catch (e) {
     ElMessage.error(e.message)
@@ -1045,7 +1077,8 @@ async function createNovel() {
         chaptersPerVolume: f.derive.chaptersPerVolume,
         targetChapters: f.derive.targetChapters,
         autoContinue: f.derive.autoContinue,
-        priority: f.derive.priority
+        priority: f.derive.priority,
+        tags: (f.derive.tags || []).length ? f.derive.tags : undefined
       }
     }
     const n = await api.post('/api/novels', payload)
@@ -1205,6 +1238,7 @@ const deriveEditorOpen = ref(false)
 const deriveSaving = ref(false)
 const deriveEdit = ref(null)
 
+const deriveTagOptions = ref([])
 async function openDeriveEditor() {
   try {
     const c = await api.get(`/api/novels/${novelId.value}/derive-config`)
@@ -1216,7 +1250,14 @@ async function openDeriveEditor() {
       chaptersPerVolume: c.chaptersPerVolume ?? 10,
       targetChapters: c.targetChapters ?? 300,
       autoContinue: !!c.autoContinue,
-      priority: c.priority ?? 1
+      priority: c.priority ?? 1,
+      tags: c.tags || []
+    }
+    // 源样本的 AI 标签作沿用建议
+    deriveTagOptions.value = []
+    if (c.sourceSampleId) {
+      const s = (await api.get('/api/preset/samples').catch(() => [])).find((x) => x.id === c.sourceSampleId)
+      if (s) deriveTagOptions.value = s.tags || []
     }
     deriveEditorOpen.value = true
   } catch (e) {
@@ -1237,7 +1278,8 @@ async function saveDeriveEditor() {
         chaptersPerVolume: d.chaptersPerVolume,
         targetChapters: d.targetChapters,
         autoContinue: d.autoContinue,
-        priority: d.priority
+        priority: d.priority,
+        tags: (d.tags || []).length ? d.tags : []
       }
     })
     ElMessage.success(d.autoContinue ? '已保存：无人续跑已启用，可点「启动续跑」开始' : '已保存')

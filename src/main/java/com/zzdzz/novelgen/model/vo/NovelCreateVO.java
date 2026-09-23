@@ -11,9 +11,10 @@ public record NovelCreateVO(String title, String description, Long presetId,
     public record CloneAssetsVO(Boolean cards, Boolean world, Boolean plotOutline) {
     }
 
-    /** 衍生参数：掺水量 0-100（50 均衡）/POV/主视角/节奏说明/每卷章数/总目标章数/无人续跑/优先级 0-2。 */
+    /** 衍生参数：掺水量 0-100（50 均衡）/POV/主视角/节奏说明/每卷章数/总目标章数/无人续跑/优先级 0-2/
+     * 类型标签（沿用样本或自定，如「言情」「剑与魔法」「长篇」——控制衍生书的类型基调与标志性元素）。 */
     public record DeriveConfigVO(Integer water, String pov, String povCharacter, String pacingNote,
                                  Integer chaptersPerVolume, Integer targetChapters, Boolean autoContinue,
-                                 Integer priority) {
+                                 Integer priority, java.util.List<String> tags) {
     }
 }

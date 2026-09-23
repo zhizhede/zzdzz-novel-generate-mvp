@@ -35,4 +35,9 @@ public class ImportedSampleDataServiceImpl extends ServiceImpl<ImportedSampleMap
                 .set("preset_id", presetId)
                 .set("update_time", java.time.OffsetDateTime.now()));
     }
+
+    @Override
+    public int updateTags(long sampleId, String tagsJson) {
+        return baseMapper.updateTags(sampleId, tagsJson);
+    }
 }

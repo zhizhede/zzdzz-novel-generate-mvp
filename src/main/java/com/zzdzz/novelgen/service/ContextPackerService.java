@@ -55,11 +55,14 @@ public class ContextPackerService {
 
     public record Pack(String system, String user) {}
 
-    /**
-     * 衍生配置段（场景提示词）：POV/主视角 + 掺水量密度口径。
-     * 无配置返回空串（模板占位渲染为空行，旧书零变化，fail-open）。
-     */
+    /** 衍生配置段：POV/主视角 + 掺水量密度口径 + 类型标签。
+     * 卷规划（packVolumePlan）与场景生成（packScene）共用；无配置返回空串（fail-open，旧书零变化）。 */
     private String deriveSection(long novelId) {
+        return deriveSection(novelId, false);
+    }
+
+    /** sceneOnly=true 时只出场景侧要用的段（视角/密度）；标签段由 volume 专用拼装避免重复注入。 */
+    private String deriveSection(long novelId, boolean sceneOnly) {
         DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
         StringBuilder sb = new StringBuilder();
         if (cfg.pov() != null) {
@@ -73,7 +76,16 @@ public class ContextPackerService {
         if (density != null) {
             sb.append("【情节密度要求】\n").append(density).append('\n');
         }
+        if (!sceneOnly && cfg.tags() != null && !cfg.tags().isEmpty()) {
+            sb.append("【类型标签（本书的类型基调与标志性元素，规划与行文必须贴合）】\n")
+                    .append(String.join("、", cfg.tags())).append('\n');
+        }
         return sb.toString();
+    }
+
+    /** 卷规划上下文尾部追加：衍生配置段（含类型标签）。由 packVolumePlan 调用。 */
+    public String deriveVolumeSection(long novelId) {
+        return deriveSection(novelId, false);
     }
 
     public String styleRules(long novelId) {
@@ -238,6 +250,7 @@ public class ContextPackerService {
         sb.append(characters(novelId)).append("\n\n");
         sb.append(packLedgers(novelId, fromNo));
         sb.append(retroSection(novelId, volNo));
+        sb.append(deriveVolumeSection(novelId));
         sb.append("【本卷种子大纲（最高优先级，须全部落实）】\n")
                 .append(seedOutline == null || seedOutline.isBlank()
                         ? "（无——请基于上方全局账本自主设计本卷主线，并在 brief 中说明关键决策）"

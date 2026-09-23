@@ -148,6 +148,12 @@ public class PresetController {
                 vo.aliases(), vo.summary(), vo.contentMd(), vo.importance()));
     }
 
+    /** 样本类型/特征标签提取（解析管线自动跑过一次；此端点供手动重提）。 */
+    @PostMapping("/samples/{id}/tags")
+    public Result<java.util.List<String>> extractTags(@PathVariable long id) {
+        return Result.success(sampleParseService.extractTags(id));
+    }
+
     public record ParseVO(String mode) {
     }
 

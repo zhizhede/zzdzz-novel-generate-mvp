@@ -35,6 +35,8 @@ public final class LlmNode {
     public static final String SAMPLE_WORLD = "sample_world";       // 世界观文档合成
     public static final String SAMPLE_MERGE = "sample_merge";       // 跨章实体名归并判定
     public static final String SAMPLE_PARAMS = "sample_params";     // 衍生参数 AI 推荐（开书向导）
+    public static final String SAMPLE_TAGS = "sample_tags";         // 样本类型/特征标签提取
+    public static final String DERIVE_OUTLINE = "derive_outline";   // 开书向导·AI 生成全书大纲草稿
 
     private LlmNode() {}
 }

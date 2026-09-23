@@ -488,10 +488,21 @@
               <span v-else style="color: #999; font-size: 12px">未解析</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="230">
+          <el-table-column label="标签" min-width="150">
+            <template #default="{ row }">
+              <template v-if="(row.tags || []).length">
+                <el-tag v-for="t in row.tags.slice(0, 4)" :key="t" size="small" style="margin-right: 4px">{{ t }}</el-tag>
+                <span v-if="row.tags.length > 4" style="font-size: 12px; color: #999">+{{ row.tags.length - 4 }}</span>
+              </template>
+              <span v-else style="color: #999; font-size: 12px">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="280">
             <template #default="{ row }">
               <el-button v-if="parseStatuses[row.id] && parseStatuses[row.id].chapterCount > 0"
                          size="small" type="primary" link @click="openAssets(row)">资产</el-button>
+              <el-button v-if="parseStatuses[row.id] && parseStatuses[row.id].chapterCount > 0"
+                         size="small" link :loading="taggingId === row.id" @click="extractTags(row)">提标签</el-button>
               <el-button v-if="canParse(row, 'FAST')" size="small" link @click="submitParse(row, 'FAST')">快速解析</el-button>
               <el-button v-if="canParse(row, 'FULL')" size="small" link @click="submitParse(row, 'FULL')">
                 {{ parseStatuses[row.id] && parseStatuses[row.id].mode === 'FAST' ? '升级完整' : '完整解析' }}
@@ -920,6 +931,21 @@ async function openAssets(row) {
     assetsOpen.value = true
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+/** 样本类型/特征标签手动提取/重提（解析管线 DONE 前会自动跑一次）。 */
+const taggingId = ref(null)
+async function extractTags(row) {
+  taggingId.value = row.id
+  try {
+    const tags = await api.post(`/api/preset/samples/${row.id}/tags`)
+    ElMessage.success(`标签已更新：${tags.join('、')}`)
+    await loadSamples()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    taggingId.value = null
   }
 }
 

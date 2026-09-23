@@ -13,7 +13,7 @@ public final class DeriveSupport {
     /** 解析后的衍生配置（全部可空=未设置，消费方各自取默认）。 */
     public record Cfg(Integer water, String pov, String povCharacter, String pacingNote,
                       Integer chaptersPerVolume, Integer targetChapters, Boolean autoContinue,
-                      Integer priority, Long sourceSampleId) {
+                      Integer priority, Long sourceSampleId, java.util.List<String> tags) {
 
         public boolean autoContinueOn() {
             return Boolean.TRUE.equals(autoContinue);
@@ -28,18 +28,28 @@ public final class DeriveSupport {
     /** 坏 JSON/空值容忍：解析失败返回全空配置。 */
     public static Cfg parse(String json) {
         if (json == null || json.isBlank()) {
-            return new Cfg(null, null, null, null, null, null, null, null, null);
+            return new Cfg(null, null, null, null, null, null, null, null, null, null);
         }
         try {
             JsonNode n = MAPPER.readTree(json);
+            java.util.List<String> tags = new java.util.ArrayList<>();
+            if (n.path("tags").isArray()) {
+                for (JsonNode t : n.path("tags")) {
+                    String v = t.asText("").strip();
+                    if (!v.isEmpty()) {
+                        tags.add(v);
+                    }
+                }
+            }
             return new Cfg(intOrNull(n.path("water")), textOrNull(n.path("pov")),
                     textOrNull(n.path("povCharacter")), textOrNull(n.path("pacingNote")),
                     intOrNull(n.path("chaptersPerVolume")), intOrNull(n.path("targetChapters")),
                     n.path("autoContinue").isBoolean() ? n.path("autoContinue").asBoolean() : null,
                     intOrNull(n.path("priority")),
-                    n.path("sourceSampleId").canConvertToLong() ? n.path("sourceSampleId").asLong() : null);
+                    n.path("sourceSampleId").canConvertToLong() ? n.path("sourceSampleId").asLong() : null,
+                    tags);
         } catch (Exception e) {
-            return new Cfg(null, null, null, null, null, null, null, null, null);
+            return new Cfg(null, null, null, null, null, null, null, null, null, null);
         }
     }
 
