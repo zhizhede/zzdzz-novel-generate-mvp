@@ -30,7 +30,7 @@
     </select>
 
     <select id="findMissingCards" resultType="com.zzdzz.novelgen.service.data.EmbeddingDataService$MissingRow">
-                SELECT id AS "sourceId", kind, name FROM material_cards
+                SELECT id AS "sourceId", NULL AS "chapterNo", summary AS content, kind, name FROM material_cards
                 WHERE novel_id = #{novelId} AND is_deleted = FALSE
                   AND NOT EXISTS (SELECT 1 FROM embeddings e
                                   WHERE e.source_type = 'card' AND e.source_id = material_cards.id AND e.is_deleted = FALSE)
