@@ -40,6 +40,13 @@ public final class TuningDefaults {
     // 审校复审仍 BLOCKER 的处置：0=转人工（默认）；1=自动清正文换目标重写一轮，仍不过才转人工
     public static final int REVIEW_BLOCKER_REPLAN = 0;
     public static final double RAG_MAX_DISTANCE = 0.55;
+    // 导入小说深度解析：逐章 LLM 并发度；快速档抽样章数
+    public static final int SAMPLE_PARSE_PARALLEL = 4;
+    public static final int SAMPLE_FAST_CHAPTERS = 40;
+    // 单次生成任务章数上限（契约施工 M4 欠账收口；无人续跑自动续批同口径）
+    public static final int BATCH_MAX_CHAPTERS = 10;
+    // 无人续跑规划卷数保险丝（防失控）
+    public static final int AUTO_CONTINUE_MAX_VOLUMES = 50;
 
     private TuningDefaults() {
     }

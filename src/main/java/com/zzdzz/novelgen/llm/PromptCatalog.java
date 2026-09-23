@@ -75,6 +75,8 @@ public final class PromptCatalog {
 
                 %s
 
+                %s
+
                 【世界观（必须遵守）】
                 %s
 
@@ -342,6 +344,102 @@ public final class PromptCatalog {
                 %s
 
                 【账本上下文】
+                %s
+                """),
+
+        // ===== 导入小说深度解析（样本资产化） =====
+        new TemplateDef(LlmNode.SAMPLE_CHAPTER, "system", "样本章解析系统提示", true,
+                "你是小说结构分析师。读完给定章节原文，输出结构化分析；只输出一个 JSON 对象，字符串值内部禁止英文双引号，引用一律用「」。"),
+
+        new TemplateDef(LlmNode.SAMPLE_CHAPTER, "user", "样本章解析（摘要+场景拆解+实体抽取）", true, """
+                任务：分析下面这一章原文（长章可能是多章合并或无标题伪章），输出 JSON：
+                {"summary":"本章剧情摘要 150-300 字","beats":[{"goal":"场景目标","conflict":"冲突","outcome":"收束"}],
+                 "entities":[{"name":"规范名","aliases":["别名"],"kind":"character|item|location|org|phenomenon|landmark|disaster|misc",
+                   "note":"一句话身份","relations":[{"target":"对象名","kind":"关系","note":"说明"}]}],
+                 "hooks":["章末钩子"]}
+                要求：entities 覆盖本章全部有名字的实体（人物为主，含重要物品/地点/组织/现象），同一实体只出一行、别名并aliases；relations 只记本章明示的关系；beats 按场景顺序 2-6 条。
+
+                【章节：%s】
+
+                【章节原文】
+                %s
+                """),
+
+        new TemplateDef(LlmNode.SAMPLE_VOLUME, "system", "样本卷汇总系统提示", true,
+                "你是网文主编，负责把逐章摘要合成为卷级结构卡；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
+
+        new TemplateDef(LlmNode.SAMPLE_VOLUME, "user", "样本卷汇总（arc/主线/节奏）", true, """
+                任务：下面是同一卷的逐章摘要，合成卷级结构卡，输出 JSON：
+                {"arc":"本卷主线一句话","summary":"本卷剧情梗概 200-400 字",
+                 "pacing_note":"节奏画像（开局/推进/高潮/收束各占约几成，钩子密度如何，80字内）",
+                 "key_turns":["关键转折点"]}
+                要求：只依据给定摘要，不发明不存在的事件。
+
+                【%s】
+
+                【逐章摘要】
+                %s
+                """),
+
+        new TemplateDef(LlmNode.SAMPLE_OUTLINE, "system", "全书大纲合成系统提示", true,
+                "你是网文总编，负责从卷级结构与主要角色卡合成全书大纲；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
+
+        new TemplateDef(LlmNode.SAMPLE_OUTLINE, "user", "全书大纲合成（premise/主线/arcs/主题/结局）", true, """
+                任务：依据下面的卷级结构卡与主要角色卡，合成全书大纲，输出 JSON：
+                {"premise":"核心设定与开局钩子（100字内）",
+                 "main_plot":"主线剧情梗概（300-500字，交代起承转合）",
+                 "arcs":[{"title":"阶段名","span":"章节范围","summary":"该阶段剧情（100字内）"}],
+                 "themes":["主题"],"ending":"结局走向（80字内）"}
+                要求：arcs 按 3-8 个阶段划分全书；只依据给定材料，不发明不存在的事件。
+
+                【全书概况】
+                %s
+
+                【卷级结构】
+                %s
+
+                【主要角色卡】
+                %s
+                """),
+
+        new TemplateDef(LlmNode.SAMPLE_WORLD, "system", "世界观文档合成系统提示", true,
+                "你是设定考据员，负责从卷级结构与设定类实体卡合成世界观文档；输出 markdown 纯文本（不要 JSON、不要标题记号外的多余格式）。"),
+
+        new TemplateDef(LlmNode.SAMPLE_WORLD, "user", "世界观文档合成", true, """
+                任务：依据下面的卷级结构与设定类实体卡（地点/组织/现象/物品），写一份世界观设定文档（markdown，600-1200 字），分节：世界背景与规则、力量/核心体系、重要地点、重要组织、关键设定与禁忌。
+                要求：只写材料中出现过或可由其直接推出的设定；不得发明原文没有的规则。
+
+                【卷级结构】
+                %s
+
+                【设定类实体卡】
+                %s
+                """),
+
+        new TemplateDef(LlmNode.SAMPLE_MERGE, "system", "实体名归并判定系统提示", true,
+                "你是数据清洗员：判断实体列表里哪些行指的是同一个实体；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
+
+        new TemplateDef(LlmNode.SAMPLE_MERGE, "user", "实体名归并判定", true, """
+                任务：下面是从同一本小说各章抽出的实体行（名/别名/类型/备注）。找出指同一实体的行组，输出 JSON：
+                {"groups":[{"canonical":"保留的规范名","members":["并掉的行名"]}]}
+                要求：只归并有把握同指一人的（如 本名/代号/译名/尊称）；没有可归并的就输出空 groups；单个别名不同的不要归并。
+
+                【实体行】
+                %s
+                """),
+
+        // ===== 衍生参数 AI 推荐（开书向导「AI 帮我定」） =====
+        new TemplateDef(LlmNode.SAMPLE_PARAMS, "system", "衍生参数推荐系统提示", true,
+                "你是网文策划，依据样例小说的结构画像为衍生新书推荐参数；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
+
+        new TemplateDef(LlmNode.SAMPLE_PARAMS, "user", "衍生参数推荐（掺水量/POV/节奏/章数）", true, """
+                任务：用户要以样例《%s》为蓝本衍生新书。依据下面的结构画像推荐衍生参数，输出 JSON：
+                {"water":0,"pov":"第一人称|第三人称限知|第三人称全知|多视角轮换 之一","povCharacter":"主视角（人物名，多视角则留空）",
+                 "chaptersPerVolume":10,"targetChapters":300,"pacingNote":"节奏说明 40-80 字","reason":"推荐理由 80 字内"}
+                口径：water 0=情节密度拉满的干货流，50=均衡，100=日常氛围舒缓流；chaptersPerVolume 3-30；
+                targetChapters 按样例体量与题材惯例估（50-2000）；povCharacter 必须是材料中出现的主要人物。
+
+                【结构画像】
                 %s
                 """)
     );

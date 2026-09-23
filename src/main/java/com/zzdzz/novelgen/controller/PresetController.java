@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -90,6 +91,60 @@ public class PresetController {
     public Result<Void> apply(@PathVariable long presetId, @PathVariable long novelId) {
         presetService.applyToNovel(presetId, novelId);
         return Result.success();
+    }
+
+    // ===== 导入小说深度解析（样本资产化） =====
+
+    private final com.zzdzz.novelgen.service.SampleParseService sampleParseService;
+
+    /** 提交深度解析（FAST=抽样骨架 / FULL=全书完整），异步执行查进度。 */
+    @PostMapping("/samples/{id}/parse")
+    public Result<Long> parse(@PathVariable long id, @RequestBody ParseVO vo) {
+        return Result.success(sampleParseService.submitParse(id, vo.mode()));
+    }
+
+    /** 断点续跑（FAILED/INTERRUPTED → 从缺口继续，已析章跳过）。 */
+    @PostMapping("/samples/{id}/parse/resume")
+    public Result<Long> parseResume(@PathVariable long id) {
+        return Result.success(sampleParseService.resumeParse(id));
+    }
+
+    /** 解析任务状态 + 资产计数。 */
+    @GetMapping("/samples/{id}/parse")
+    public Result<com.zzdzz.novelgen.model.vo.SampleParseStatusVO> parseStatus(@PathVariable long id) {
+        return Result.success(sampleParseService.status(id));
+    }
+
+    /** 解析资产总览：剧情结构树 + 结构化资产卡（素材库资产浏览页数据）。 */
+    @GetMapping("/samples/{id}/assets")
+    public Result<com.zzdzz.novelgen.model.vo.SampleAssetsVO> assets(@PathVariable long id) {
+        return Result.success(sampleParseService.assets(id));
+    }
+
+    /** 资产卡人工纠偏（摘要/正文/重要度）。 */
+    @PutMapping("/cards/{id}")
+    public Result<Void> updateCard(@PathVariable long id, @RequestBody CardUpdateVO vo) {
+        sampleParseService.updateCard(id, vo.summary(), vo.contentMd(), vo.importance());
+        return Result.success();
+    }
+
+    /** 资产卡人工删除（软删，重新解析会重建）。 */
+    @DeleteMapping("/cards/{id}")
+    public Result<Void> deleteCard(@PathVariable long id) {
+        sampleParseService.deleteCard(id);
+        return Result.success();
+    }
+
+    /** 开书向导「AI 帮我定」：依据样本结构画像推荐衍生参数。 */
+    @PostMapping("/samples/{id}/recommend-params")
+    public Result<com.zzdzz.novelgen.model.vo.SampleParamsVO> recommendParams(@PathVariable long id) {
+        return Result.success(sampleParseService.recommendParams(id));
+    }
+
+    public record ParseVO(String mode) {
+    }
+
+    public record CardUpdateVO(String summary, String contentMd, Integer importance) {
     }
 
     public record CorpusCreateVO(String genre, String title, String content) {

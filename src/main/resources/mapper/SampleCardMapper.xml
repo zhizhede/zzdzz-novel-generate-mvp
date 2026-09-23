@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.SampleCardMapper">
+
+    <select id="insertCard" resultType="long">
+INSERT INTO sample_cards (sample_id, kind, name, aliases, summary, content_md, relations, importance, first_seq, mentions)
+VALUES (#{sampleId}, #{kind}, #{name}, #{aliases}::jsonb, #{summary}, #{contentMd}, #{relations}::jsonb,
+        #{importance}, #{firstSeq}, #{mentions})
+RETURNING id
+    </select>
+</mapper>

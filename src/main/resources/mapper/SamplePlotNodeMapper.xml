@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.SamplePlotNodeMapper">
+
+    <select id="insertNode" resultType="long">
+INSERT INTO sample_plot_nodes (sample_id, level, seq, parent_seq, title, summary, beats, meta)
+VALUES (#{sampleId}, #{level}, #{seq}, #{parentSeq}, #{title}, #{summary}, #{beats}::jsonb, #{meta}::jsonb)
+RETURNING id
+    </select>
+</mapper>
