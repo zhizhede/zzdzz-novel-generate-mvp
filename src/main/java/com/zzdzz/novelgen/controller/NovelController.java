@@ -45,6 +45,12 @@ public class NovelController {
         return Result.success();
     }
 
+    /** 开书向导「AI 生成大纲」：基本信息+衍生设定 → 大纲草稿 markdown（纯生成不落库，llm_call_log node=derive_outline 记账）。 */
+    @PostMapping("/outline-draft")
+    public Result<String> outlineDraft(@RequestBody NovelCreateVO dto) {
+        return Result.success(novelService.draftOutline(dto));
+    }
+
     /** 衍生配置全量读（开书后改参/老书启用无人续跑的回显口）。 */
     @GetMapping("/{id}/derive-config")
     public Result<com.zzdzz.novelgen.service.NovelService.DeriveConfigFullVO> deriveConfig(@PathVariable long id) {

@@ -13,6 +13,9 @@ import com.zzdzz.novelgen.model.dto.StylePackDTO;
 import com.zzdzz.novelgen.model.enums.PlanMode;
 import com.zzdzz.novelgen.model.vo.NovelCreateVO;
 import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.llm.LlmNode;
+import com.zzdzz.novelgen.llm.LlmPort;
+import com.zzdzz.novelgen.llm.LlmTemps;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ImportedSampleDataService;
@@ -43,6 +46,8 @@ public class NovelService {
     private final ImportedSampleDataService sampleData;
     private final MaterialCardDataService cardData;
     private final CanonDocDataService canonData;
+    private final LlmPort llm;
+    private final PromptTemplateService promptTemplates;
     private final ObjectMapper mapper;
 
     public List<NovelVO> list() {
@@ -221,6 +226,80 @@ public class NovelService {
                                      Integer priority, Long sourceSampleId, java.util.List<String> tags) {
     }
 
+    /**
+     * 开书向导「AI 生成大纲」：基本信息 + 衍生设定（含样本骨架与标签）→ 大纲草稿 markdown。
+     * 纯生成不落库（llm_call_log 照常记账）；样本只借结构与节奏气质，提示词明令禁止搬运专有设定。
+     */
+    public String draftOutline(NovelCreateVO vo) {
+        String title = requireTitle(vo.title());
+        NovelCreateVO.DeriveConfigVO d = vo.deriveConfig();
+        StylePackDTO preset = vo.presetId() == null ? null : stylePackData.getById(vo.presetId());
+        if (preset == null || !preset.isPreset()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "请先在第一步选择品类预设（文风语境）");
+        }
+        // 样本骨架（只借结构与节奏气质）+ 样本/用户标签
+        String skeleton = "";
+        java.util.List<String> tags = d != null && d.tags() != null ? d.tags() : new java.util.ArrayList<>();
+        if (vo.sampleId() != null) {
+            ImportedSampleDTO sample = sampleData.getById(vo.sampleId());
+            if (sample != null) {
+                for (SamplePlotNodeDTO n : plotData.listBySample(vo.sampleId())) {
+                    if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
+                        skeleton = truncate(n.getSummary(), 2200);
+                        break;
+                    }
+                }
+                if (tags.isEmpty()) {
+                    try {
+                        com.fasterxml.jackson.databind.JsonNode t = mapper.readTree(sample.getTags() == null ? "[]" : sample.getTags());
+                        t.forEach(x -> tags.add(x.asText()));
+                    } catch (Exception ignored) {
+                        // 样本无标签/坏 JSON 时按空处理
+                    }
+                }
+                skeleton = "【参考样本骨架（只借结构与节奏气质，禁止搬运其人名/地名/专有设定）】\n"
+                        + (skeleton.isEmpty() ? "（样本尚未深度解析，无骨架）" : skeleton) + "\n";
+            }
+        }
+        int chaptersPerVolume = d != null && d.chaptersPerVolume() != null ? d.chaptersPerVolume() : 10;
+        int targetChapters = d != null && d.targetChapters() != null ? d.targetChapters() : 300;
+        int volumes = Math.max(1, (int) Math.ceil((double) targetChapters / Math.max(chaptersPerVolume, 1)));
+        String user = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "user", """
+                任务：为下面的新书创作全书大纲，供作者过目修改（之后每一章生成都携带它作为方向约束）。分节输出：## 主题与核心悬念、## 主线（起承转合 300-500 字）、## 分卷走向（每卷一行：卷名+主线任务+卷尾钩子）、## 主要人物（3-6 人：名字/身份/动机/弧光）、## 题材基调。
+                要求：分卷走向按 %d 卷规划；人物名与设定必须原创（若提供了参考样本骨架，只借其结构与节奏气质，禁止搬运其专有人名/地名/专有设定）；全部内容须贴合类型标签与题材基调，悬念与钩子密度按节奏口径安排。
+
+                【书名】%s
+                【简介】%s
+                【文风预设】%s
+                【类型标签】%s
+                【叙事视角】%s
+                【节奏口径】%s（每卷约 %d 章）
+                %s
+                """, volumes, title,
+                vo.description() == null || vo.description().isBlank() ? "（无）" : vo.description().strip(),
+                preset.getName() + (preset.getDescription() == null ? "" : "——" + preset.getDescription()),
+                tags.isEmpty() ? "（未设，按文风预设与简介自定）" : String.join("、", tags),
+                d == null || d.pov() == null ? "第三人称限知" : d.pov() + (d.povCharacter() == null || d.povCharacter().isBlank() ? "" : "（主视角：" + d.povCharacter() + "）"),
+                d == null || d.pacingNote() == null || d.pacingNote().isBlank()
+                        ? DeriveSupport.densityHint(d == null ? null : d.water())
+                        : d.pacingNote().strip(),
+                chaptersPerVolume, volumes,
+                skeleton);
+        LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.DERIVE_OUTLINE, null, null,
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.DERIVE_OUTLINE, "system",
+                                "你是网文总编，为一本新书创作全书大纲。只输出大纲正文（markdown），不要 JSON、不要任何解释或开场白。")),
+                        LlmPort.Message.user(user)), LlmTemps.DERIVE_OUTLINE);
+        LlmPort.ChatResult r = llm.chat(req);
+        String outline = r.content() == null ? "" : r.content().strip();
+        if (outline.isEmpty()) {
+            throw new BizException(ErrorCode.LLM_OUTPUT_INVALID, "大纲生成为空（llm_call_log node=derive_outline 可回放），请重试");
+        }
+        return outline;
+    }
+
+    private static String truncate(String s, int max) {
+        return s == null ? "" : (s.length() <= max ? s : s.substring(0, max));
+    }
 
     private List<String> parseAliases(String aliasesJson) {
         List<String> out = new ArrayList<>();

@@ -270,10 +270,18 @@
       </template>
 
       <template v-else-if="wizardStep === 2">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px">
+          <el-button size="small" type="primary" plain :loading="outlineDrafting"
+                     :disabled="!wizardForm.title.trim() || !wizardForm.presetId"
+                     @click="aiDraftOutline">AI 生成大纲草稿</el-button>
+          <span style="font-size: 12px; color: #999">
+            按书名/简介/文风预设 + 衍生设定（样本骨架、类型标签、POV、节奏与目标章数）生成，生成后可自由修改
+          </span>
+        </div>
         <el-input v-model="wizardForm.outline" type="textarea" :rows="12"
                   :placeholder="wizardForm.sampleId && wizardForm.cloneAssets.plotOutline
-                    ? '可留空——创建时会自动预填样本剧情骨架（标注待改写，之后在「规划」页改写）。也可直接写全书大纲覆盖。'
-                    : '全书大纲：主题、主线、分卷走向、主要人物。生成每一章都会携带它作为方向约束。'" />
+                    ? '可留空——创建时会自动预填样本剧情骨架（标注待改写，之后在「规划」页改写）。也可点上方 AI 生成或直接写全书大纲。'
+                    : '全书大纲：主题、主线、分卷走向、主要人物。生成每一章都会携带它作为方向约束。可点上方 AI 生成草稿后修改。'" />
         <div style="font-size: 12px; color: #999; margin-top: 6px">
           可先跳过、之后在「规划」页补写保存；但开跑生成前必须有——没有大纲的章会失去方向约束。
         </div>
@@ -561,6 +569,7 @@ const wizardForm = ref({
 })
 const wizardSamples = ref([])
 const paramsDeciding = ref(false)
+const outlineDrafting = ref(false)
 const presetBand = computed(() => {
   const p = presets.value.find((x) => x.id === wizardForm.value.presetId)
   return p && p.budgetMin && p.budgetMax ? [p.budgetMin, p.budgetMax] : null
@@ -577,6 +586,43 @@ function goDeepParse(sampleId) {
   router.push({ path: '/library', query: { sampleId } })
 }
 
+/** AI 生成大纲草稿：基本信息+衍生设定 → 填入大纲框（已有内容先确认覆盖）。 */
+async function aiDraftOutline() {
+  if (wizardForm.value.outline.trim()) {
+    try {
+      await ElMessageBox.confirm('当前已有一份大纲内容，生成将覆盖它（先复制保存需要保留的部分）。继续？', '覆盖确认', { type: 'warning' })
+    } catch (e) {
+      if (e !== 'cancel') ElMessage.error(e.message)
+      return
+    }
+  }
+  outlineDrafting.value = true
+  try {
+    const f = wizardForm.value
+    const draft = await api.post('/api/novels/outline-draft', {
+      title: f.title.trim(),
+      description: f.description.trim() || undefined,
+      presetId: f.presetId,
+      sampleId: f.sampleId || undefined,
+      deriveConfig: {
+        water: f.derive.water,
+        pov: f.derive.pov,
+        povCharacter: f.derive.povCharacter.trim() || undefined,
+        pacingNote: f.derive.pacingNote.trim() || undefined,
+        chaptersPerVolume: f.derive.chaptersPerVolume,
+        targetChapters: f.derive.targetChapters,
+        priority: f.derive.priority,
+        tags: (f.derive.tags || []).length ? f.derive.tags : undefined
+      }
+    })
+    wizardForm.value.outline = draft
+    ElMessage.success('大纲草稿已生成，可自由修改后创建作品')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    outlineDrafting.value = false
+  }
+}
 const presets = ref([])
 // 开书向导·导入分析模式
 const presetMode = ref('select')
