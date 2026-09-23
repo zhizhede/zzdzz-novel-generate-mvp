@@ -12,7 +12,10 @@ public interface GenerationTaskMapper extends BaseMapper<GenerationTaskDTO> {
 
     Long insert(@Param("novelId") long novelId, @Param("fromChapter") int fromChapter,
                 @Param("toChapter") int toChapter, @Param("submittedBy") Long submittedBy,
-                @Param("kind") String kind, @Param("payload") String payload);
+                @Param("kind") String kind, @Param("payload") String payload,
+                @Param("priority") int priority);
+
+    boolean existsActiveForNovel(@Param("novelId") long novelId);
 
     List<GenerationTaskDataService.TaskRow> list(@Param("limit") int limit);
 

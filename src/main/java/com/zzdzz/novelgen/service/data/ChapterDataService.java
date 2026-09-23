@@ -40,6 +40,15 @@ public interface ChapterDataService extends IService<ChapterDTO> {
     /** 已有正文的最末章号（无任何正文时为 null）：卷纲规划必须接续其后来。 */
     Integer maxChapterWithText(long novelId);
 
+    /** 无人续跑用：afterNo 之后最小的规划章号（无规划行返回 null）。 */
+    Integer nextPlannedChapterNo(long novelId, int afterNo);
+
+    /** 无人续跑用：最大规划章号（无任何规划行返回 null）。 */
+    Integer maxPlannedChapterNo(long novelId);
+
+    /** 无人续跑用：最大卷号（无规划行返回 0）。 */
+    int maxVolumeNo(long novelId);
+
     boolean exists(long novelId, int chapterNo);
 
     void insertPlan(long novelId, int chapterNo, Integer volumeNo, String arc, String title,

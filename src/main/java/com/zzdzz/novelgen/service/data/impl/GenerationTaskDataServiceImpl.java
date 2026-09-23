@@ -15,8 +15,9 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
         implements GenerationTaskDataService {
 
     @Override
-    public long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload) {
-        return baseMapper.insert(novelId, fromChapter, toChapter, submittedBy, kind, payload);
+    public long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload,
+                       int priority) {
+        return baseMapper.insert(novelId, fromChapter, toChapter, submittedBy, kind, payload, priority);
     }
 
     @Override
@@ -31,6 +32,11 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
         }
         var rows = baseMapper.findRunningById(queuedId);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    @Override
+    public boolean existsActiveForNovel(long novelId) {
+        return baseMapper.existsActiveForNovel(novelId);
     }
 
     @Override

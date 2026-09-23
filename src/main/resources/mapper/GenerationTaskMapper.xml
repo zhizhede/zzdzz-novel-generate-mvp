@@ -3,16 +3,16 @@
 <mapper namespace="com.zzdzz.novelgen.dao.GenerationTaskMapper">
 
     <select id="insert" resultType="long">
-                INSERT INTO generation_tasks (novel_id, from_chapter, to_chapter, submitted_by, kind, payload)
+                INSERT INTO generation_tasks (novel_id, from_chapter, to_chapter, submitted_by, kind, payload, priority)
                 VALUES (#{novelId}, #{fromChapter}, #{toChapter}, #{submittedBy},
-                        #{kind}, #{payload}::jsonb) RETURNING id
+                        #{kind}, #{payload}::jsonb, #{priority}) RETURNING id
     </select>
 
     <select id="list" resultType="com.zzdzz.novelgen.service.data.GenerationTaskDataService$TaskRow">
                 SELECT t.id, t.novel_id AS "novelId", n.title AS "novelTitle", t.from_chapter AS "fromChapter", t.to_chapter AS "toChapter", t.status,
                        t.done_chapters AS "doneChapters", t.current_chapter AS "currentChapter", t.last_message AS "lastMessage",
                        to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
-                       t.retry_count AS "retryCount"
+                       t.retry_count AS "retryCount", t.priority AS "priority"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id
                 WHERE t.is_deleted = FALSE
                 ORDER BY CASE WHEN t.status IN ('QUEUED', 'RUNNING') THEN 0 ELSE 1 END, t.id DESC
@@ -31,7 +31,7 @@
                 SELECT t.id, t.novel_id AS "novelId", n.title AS "novelTitle", t.from_chapter AS "fromChapter", t.to_chapter AS "toChapter", t.status,
                        t.done_chapters AS "doneChapters", t.current_chapter AS "currentChapter", t.last_message AS "lastMessage",
                        to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
-                       t.retry_count AS "retryCount"
+                       t.retry_count AS "retryCount", t.priority AS "priority"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.status = 'RUNNING'
                 ORDER BY t.id LIMIT 1
     </select>
@@ -40,7 +40,7 @@
                 SELECT t.id, t.novel_id AS "novelId", n.title AS "novelTitle", t.from_chapter AS "fromChapter", t.to_chapter AS "toChapter", t.status,
                        t.done_chapters AS "doneChapters", t.current_chapter AS "currentChapter", t.last_message AS "lastMessage",
                        to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
-                       t.retry_count AS "retryCount"
+                       t.retry_count AS "retryCount", t.priority AS "priority"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.status = 'RUNNING'
                 ORDER BY t.id
     </select>
@@ -50,7 +50,12 @@
                 WHERE t.status = 'QUEUED' AND t.is_deleted = FALSE
                   AND NOT EXISTS (SELECT 1 FROM generation_tasks r
                                   WHERE r.novel_id = t.novel_id AND r.status = 'RUNNING')
-                ORDER BY t.id LIMIT 1
+                ORDER BY t.priority DESC, t.id LIMIT 1
+    </select>
+
+    <select id="existsActiveForNovel" resultType="boolean">
+                SELECT EXISTS (SELECT 1 FROM generation_tasks
+                               WHERE novel_id = #{novelId} AND status IN ('QUEUED', 'RUNNING') AND is_deleted = FALSE)
     </select>
 
     <select id="countRunningNovels" resultType="int">
@@ -62,7 +67,7 @@
                 SELECT t.id, t.novel_id AS "novelId", n.title AS "novelTitle", t.from_chapter AS "fromChapter", t.to_chapter AS "toChapter", t.status,
                        t.done_chapters AS "doneChapters", t.current_chapter AS "currentChapter", t.last_message AS "lastMessage",
                        to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
-                       t.retry_count AS "retryCount"
+                       t.retry_count AS "retryCount", t.priority AS "priority"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id WHERE t.id = #{id}
     </select>
 

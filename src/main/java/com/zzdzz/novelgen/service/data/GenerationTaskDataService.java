@@ -11,16 +11,20 @@ public interface GenerationTaskDataService extends IService<GenerationTaskDTO> {
     /** 列表行：联作品表带标题，active（排队/运行中）置顶。 */
     record TaskRow(long id, long novelId, String novelTitle, int fromChapter, int toChapter,
                    String status, int doneChapters, Integer currentChapter, String lastMessage,
-                   String createTime, String kind, String payload, int retryCount) {
+                   String createTime, String kind, String payload, int retryCount, int priority) {
     }
 
-    long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload);
+    long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload,
+                int priority);
 
     /** 分道认领（契约③）：跳过已有 RUNNING 任务的作品，避免同书并行；并行度由调度器控制。 */
     TaskRow claimNextQueuedForDispatch();
 
     /** 当前 RUNNING 任务的 DISTINCT 书数（并行度上限判断）。 */
     int countRunningNovels();
+
+    /** 该书是否存在 QUEUED/RUNNING 任务（无人续跑链解卡判定）。 */
+    boolean existsActiveForNovel(long novelId);
 
     List<TaskRow> list(int limit);
 

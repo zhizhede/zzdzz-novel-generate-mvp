@@ -42,6 +42,22 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
     }
 
     @Override
+    public Integer nextPlannedChapterNo(long novelId, int afterNo) {
+        return baseMapper.nextPlannedChapterNo(novelId, afterNo);
+    }
+
+    @Override
+    public Integer maxPlannedChapterNo(long novelId) {
+        return baseMapper.maxPlannedChapterNo(novelId);
+    }
+
+    @Override
+    public int maxVolumeNo(long novelId) {
+        Integer v = baseMapper.maxVolumeNo(novelId);
+        return v == null ? 0 : v;
+    }
+
+    @Override
     public boolean exists(long novelId, int chapterNo) {
         Long count = baseMapper.existsCount(novelId, chapterNo);
         return count != null && count > 0;

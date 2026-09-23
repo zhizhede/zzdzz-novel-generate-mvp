@@ -276,6 +276,29 @@
       </template>
     </el-dialog>
 
+    <!-- 无人续跑链状态（开了无人续跑的书才有；目标进度/暂停原因/恢复入口） -->
+    <el-card v-if="autoChain && autoChain.enabled" shadow="never" style="margin-bottom: 12px">
+      <template #header>
+        <div style="display: flex; align-items: center; gap: 10px">
+          <b style="font-size: 13px">无人续跑</b>
+          <el-tag size="small" :type="autoChainTagType">{{ autoChainText }}</el-tag>
+          <span style="font-size: 12px; color: #999">
+            {{ autoChain.currentChapters }}/{{ autoChain.targetChapters ?? '∞' }} 章 · 已规划 {{ autoChain.volumes }} 卷
+          </span>
+          <el-button v-if="autoChain.state !== 'REACHED' && autoChain.state !== 'RUNNING'"
+                     size="small" type="primary" plain @click="resumeAutoChain">
+            {{ autoChain.state === 'PAUSED' ? '恢复续跑' : '启动续跑' }}
+          </el-button>
+          <span v-if="autoChain.message" style="font-size: 12px; color: #e6a23c; flex: 1; text-align: right">
+            {{ autoChain.message }}
+          </span>
+        </div>
+      </template>
+      <el-progress v-if="autoChain.targetChapters"
+                   :percentage="Math.min(100, Math.round(autoChain.currentChapters / autoChain.targetChapters * 100))" />
+      <div v-else style="font-size: 12px; color: #999">未设目标章数：续跑按卷推进，达到保险丝或人工停止为止</div>
+    </el-card>
+
     <el-card shadow="never" style="margin-bottom: 12px" header="生成队列（异步执行，逐章回写进度）">
       <el-table v-if="queue.length" :data="queue" border size="small">
         <el-table-column prop="id" label="#" width="50" />
@@ -1065,7 +1088,33 @@ async function pollStatus() {
     lastMessage.value = s.lastMessage
     await loadQueue()
     await loadPending()
+    await loadAutoChain()
   } catch { /* 忽略轮询错误 */ }
+}
+
+// ===== 无人续跑链（P3）：状态条 + 恢复/启动 =====
+const autoChain = ref(null)
+const autoChainText = { OFF: '未启用', IDLE: '待启动', RUNNING: '续跑中', PAUSED: '已暂停', REACHED: '目标达成' }
+const autoChainTagType = computed(() => ({
+  RUNNING: 'success', REACHED: 'info', PAUSED: 'warning'
+}[autoChain.value?.state] || 'info'))
+
+async function loadAutoChain() {
+  try {
+    autoChain.value = novelId.value
+      ? await api.get(`/api/pipeline/novels/${novelId.value}/auto-continue`)
+      : null
+  } catch { /* 未启用/查询失败不展示 */ }
+}
+
+async function resumeAutoChain() {
+  try {
+    autoChain.value = await api.post(`/api/pipeline/novels/${novelId.value}/auto-continue/resume`)
+    ElMessage.success(autoChain.state === 'RUNNING' ? '续跑已恢复，任务已入队' : '续跑已启动，任务已入队')
+    await loadQueue()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
 }
 
 function onNovelChange() {
