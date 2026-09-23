@@ -50,4 +50,80 @@ class GenrePresetServiceTest {
         assertThat(((Number) wide.get("tolerance")).doubleValue()).isLessThanOrEqualTo(1.5); // 上夹紧
         assertThat(((Number) wide.get("abs_max")).doubleValue()).isGreaterThan(15.0);
     }
+
+    // ===== 开书向导·导入小说分析 =====
+
+    @Test
+    void chunkNovelSplitsAtTargetAndStripsNumberLines() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i <= 900; i++) {
+            sb.append("12\n"); // 纯数字行：章号/页码，必须被剔除
+            sb.append("这是一段用来凑字数的正文，猫在窗台看雨。").append(i).append("\n");
+        }
+        List<String> chunks = GenrePresetService.chunkNovel(sb.toString());
+        assertThat(chunks.size()).isGreaterThanOrEqualTo(3);
+        for (String c : chunks) {
+            assertThat(c.length()).isGreaterThanOrEqualTo(500);
+            assertThat(c).doesNotContain("\n12\n"); // 数字行没混进去
+        }
+        long total = chunks.stream().mapToLong(String::length).sum();
+        assertThat(total).isGreaterThan(900 * 15L); // 正文都在
+    }
+
+    @Test
+    void chunkNovelTailMerge() {
+        // 长正文 + 短尾巴：尾块并入前块而不是留碎块
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 400; i++) {
+            sb.append("正文段落线，凑字数用，猫继续看雨第").append(i).append("行\n");
+        }
+        sb.append("短尾巴\n");
+        List<String> chunks = GenrePresetService.chunkNovel(sb.toString());
+        assertThat(chunks.get(chunks.size() - 1)).contains("短尾巴");
+        assertThat(chunks.get(chunks.size() - 1).length()).isGreaterThan(500);
+    }
+
+    private static String fp(String body) {
+        return "{\"baseline\":" + body + "}";
+    }
+
+    @Test
+    void fingerprintSimilarityIdenticalIsOne() {
+        String a = fp("{\"m1\":{\"value\":3.0,\"tolerance\":0.5,\"abs_max\":5.0},\"m2\":{\"value\":1.0,\"tolerance\":0.3,\"abs_max\":2.0},\"m3\":{\"value\":8.0,\"tolerance\":0.4,\"abs_max\":12.0}}");
+        assertThat(GenrePresetService.fingerprintSimilarity(a, a)).isEqualTo(1.0);
+    }
+
+    @Test
+    void fingerprintSimilarityDistantIsLow() {
+        String a = fp("{\"m1\":{\"value\":3.0,\"tolerance\":0.5,\"abs_max\":5.0},\"m2\":{\"value\":1.0,\"tolerance\":0.3,\"abs_max\":2.0},\"m3\":{\"value\":8.0,\"tolerance\":0.4,\"abs_max\":12.0}}");
+        String b = fp("{\"m1\":{\"value\":0.2,\"tolerance\":0.5,\"abs_max\":1.0},\"m2\":{\"value\":6.0,\"tolerance\":0.3,\"abs_max\":9.0},\"m3\":{\"value\":1.0,\"tolerance\":0.4,\"abs_max\":2.0}}");
+        assertThat(GenrePresetService.fingerprintSimilarity(a, b)).isLessThan(GenrePresetService.NEW_THRESHOLD);
+    }
+
+    @Test
+    void fingerprintSimilarityNotComparableWithTooFewCommonMetrics() {
+        String a = fp("{\"m1\":{\"value\":3.0,\"tolerance\":0.5,\"abs_max\":5.0},\"m2\":{\"value\":1.0,\"tolerance\":0.3,\"abs_max\":2.0},\"m3\":{\"value\":8.0,\"tolerance\":0.4,\"abs_max\":12.0}}");
+        String b = fp("{\"x1\":{\"value\":3.0,\"tolerance\":0.5,\"abs_max\":5.0},\"x2\":{\"value\":1.0,\"tolerance\":0.3,\"abs_max\":2.0},\"x3\":{\"value\":8.0,\"tolerance\":0.4,\"abs_max\":12.0}}");
+        assertThat(GenrePresetService.fingerprintSimilarity(a, b)).isEqualTo(-1.0);
+    }
+
+    @Test
+    void fingerprintSimilarityDeadMetricAsymmetryDiscounts() {
+        // 5 指标全同 vs 只有 3 个共有（另外 2 个单侧缺失）：共有分满也要打折
+        String full = fp("{\"m1\":{\"value\":3.0,\"tolerance\":0.5,\"abs_max\":5.0},\"m2\":{\"value\":1.0,\"tolerance\":0.3,\"abs_max\":2.0},\"m3\":{\"value\":8.0,\"tolerance\":0.4,\"abs_max\":12.0},\"m4\":{\"value\":2.0,\"tolerance\":0.3,\"abs_max\":3.0},\"m5\":{\"value\":5.0,\"tolerance\":0.2,\"abs_max\":7.0}}");
+        String partial = fp("{\"m1\":{\"value\":3.0,\"tolerance\":0.5,\"abs_max\":5.0},\"m2\":{\"value\":1.0,\"tolerance\":0.3,\"abs_max\":2.0},\"m3\":{\"value\":8.0,\"tolerance\":0.4,\"abs_max\":12.0}}");
+        assertThat(GenrePresetService.fingerprintSimilarity(full, partial)).isLessThan(1.0);
+        assertThat(GenrePresetService.fingerprintSimilarity(full, partial)).isGreaterThan(0.5);
+    }
+
+    @Test
+    void uniqueGenreNameSuffixesWithoutCollision() {
+        java.util.Set<String> taken = new java.util.HashSet<>(List.of("刀剑神域", "刀剑神域·2"));
+        assertThat(GenrePresetService.uniqueGenreName("刀剑神域", taken)).isEqualTo("刀剑神域·3");
+        assertThat(GenrePresetService.uniqueGenreName("全新品类", taken)).isEqualTo("全新品类");
+        // 长名超 64 字时限长再编号
+        String longName = "很".repeat(70);
+        String got = GenrePresetService.uniqueGenreName(longName, new java.util.HashSet<>());
+        assertThat(got.length()).isLessThanOrEqualTo(64);
+    }
 }

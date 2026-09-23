@@ -69,4 +69,9 @@ public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, Style
     public long insertPreset(String name, String description, String rulesMd, String fingerprint, String gateConfig) {
         return baseMapper.insertPreset(name, description, rulesMd, fingerprint, gateConfig);
     }
+
+    @Override
+    public long insertPack(String name, String description, String rulesMd, String fingerprint, String gateConfig) {
+        return baseMapper.insertPack(name, description, rulesMd, fingerprint, gateConfig);
+    }
 }
