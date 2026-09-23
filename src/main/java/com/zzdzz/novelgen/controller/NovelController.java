@@ -32,11 +32,11 @@ public class NovelController {
         return Result.success(novelService.list());
     }
 
-    /** 开书：书名 + 品类预设 → 克隆预设为本书风格包。 */
+    /** 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选样本资产克隆与衍生配置（P2）。 */
     @PostMapping
     public Result<NovelVO> create(@RequestBody NovelCreateVO dto, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
-        return Result.success(novelService.create(dto.title(), dto.description(), dto.presetId(), userId));
+        return Result.success(novelService.create(dto, userId));
     }
 
     @PutMapping("/{id}/approval-mode")

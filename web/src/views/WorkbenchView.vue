@@ -68,6 +68,7 @@
     <el-dialog v-model="wizardOpen" title="开新书" width="640px" :close-on-click-modal="false">
       <el-steps :active="wizardStep" finish-status="success" simple style="margin-bottom: 16px">
         <el-step title="基本信息" />
+        <el-step title="衍生设定" />
         <el-step title="全书大纲" />
         <el-step title="完成" />
       </el-steps>
@@ -165,8 +166,78 @@
       </template>
 
       <template v-else-if="wizardStep === 1">
+        <el-form label-width="92px">
+          <el-form-item label="参考样本">
+            <el-select v-model="wizardForm.sampleId" clearable placeholder="选择导入小说（可不选）" style="width: 100%">
+              <el-option v-for="s in wizardSamples" :key="s.id" :value="s.id" :label="s.title">
+                <span>{{ s.title }}</span>
+                <span style="float: right; color: #999; font-size: 12px">{{ (s.totalChars / 10000).toFixed(0) }} 万字</span>
+              </el-option>
+            </el-select>
+            <div v-if="wizardForm.sampleId" style="display: flex; gap: 12px; font-size: 13px; margin-top: 4px">
+              <el-checkbox v-model="wizardForm.cloneAssets.cards">素材卡（★2+）</el-checkbox>
+              <el-checkbox v-model="wizardForm.cloneAssets.world">世界观</el-checkbox>
+              <el-checkbox v-model="wizardForm.cloneAssets.plotOutline">剧情骨架预填大纲</el-checkbox>
+            </div>
+            <div style="font-size: 12px; color: #999; line-height: 1.7">
+              克隆的是样本深度解析出的资产（素材库 → 导入小说 → 深度解析）；未解析的样本克隆不到东西，先去解析。
+            </div>
+          </el-form-item>
+          <el-form-item label="掺水量">
+            <div style="display: flex; align-items: center; gap: 12px; width: 100%">
+              <span style="font-size: 12px; color: #999">干货</span>
+              <el-slider v-model="wizardForm.derive.water" :min="0" :max="100" :step="5" style="flex: 1" />
+              <span style="font-size: 12px; color: #999">舒缓</span>
+              <el-tag size="small" :type="wizardForm.derive.water >= 70 ? 'warning' : wizardForm.derive.water <= 30 ? 'success' : 'info'">
+                {{ wizardForm.derive.water >= 70 ? '可注水' : wizardForm.derive.water <= 30 ? '零注水' : '均衡' }}
+              </el-tag>
+            </div>
+            <div style="font-size: 12px; color: #999">决定读者评审的注水拦截线：越干修剪越狠，越水容忍度越高（写入本书门禁）</div>
+          </el-form-item>
+          <el-form-item label="叙事视角">
+            <el-select v-model="wizardForm.derive.pov" style="width: 200px">
+              <el-option value="第一人称（主角）" label="第一人称（主角）" />
+              <el-option value="第三人称限知" label="第三人称限知" />
+              <el-option value="第三人称全知" label="第三人称全知" />
+              <el-option value="多视角轮换" label="多视角轮换" />
+            </el-select>
+            <el-input v-if="wizardForm.derive.pov !== '多视角轮换'" v-model="wizardForm.derive.povCharacter"
+                      placeholder="主视角人物名（可选）" style="width: 200px; margin-left: 8px" />
+          </el-form-item>
+          <el-form-item label="节奏">
+            <el-input-number v-model="wizardForm.derive.chaptersPerVolume" :min="3" :max="30" size="small" />
+            <span style="margin-left: 6px; font-size: 13px">章/卷</span>
+            <el-input-number v-model="wizardForm.derive.targetChapters" :min="10" :max="2000" :step="50" size="small" style="margin-left: 16px" />
+            <span style="margin-left: 6px; font-size: 13px">章目标（总）</span>
+          </el-form-item>
+          <el-form-item label="节奏说明">
+            <el-input v-model="wizardForm.derive.pacingNote" type="textarea" :rows="2"
+                      placeholder="给卷规划的节奏交代（可选），如：前三卷日常铺垫，之后两卷一个大高潮" />
+          </el-form-item>
+          <el-form-item label="无人续跑">
+            <el-switch v-model="wizardForm.derive.autoContinue" />
+            <span style="margin-left: 8px; font-size: 12px; color: #999">
+              开=写到总目标为止全自动（卷尽自动规划下卷续批；规划/审批强制 auto，审校硬伤自动重写一轮，仍不过暂停等人）
+            </span>
+          </el-form-item>
+          <el-form-item label="队列优先级">
+            <el-radio-group v-model="wizardForm.derive.priority" size="small">
+              <el-radio-button :value="0">低</el-radio-button>
+              <el-radio-button :value="1">中</el-radio-button>
+              <el-radio-button :value="2">高</el-radio-button>
+            </el-radio-group>
+            <el-button size="small" type="primary" plain :loading="paramsDeciding" :disabled="!wizardForm.sampleId"
+                       style="margin-left: 16px" @click="aiDecideParams">AI 帮我定</el-button>
+            <span v-if="!wizardForm.sampleId" style="font-size: 12px; color: #999; margin-left: 6px">（选了参考样本才可用）</span>
+          </el-form-item>
+        </el-form>
+      </template>
+
+      <template v-else-if="wizardStep === 2">
         <el-input v-model="wizardForm.outline" type="textarea" :rows="12"
-          placeholder="全书大纲：主题、主线、分卷走向、主要人物。生成每一章都会携带它作为方向约束。" />
+                  :placeholder="wizardForm.sampleId && wizardForm.cloneAssets.plotOutline
+                    ? '可留空——创建时会自动预填样本剧情骨架（标注待改写，之后在「规划」页改写）。也可直接写全书大纲覆盖。'
+                    : '全书大纲：主题、主线、分卷走向、主要人物。生成每一章都会携带它作为方向约束。'" />
         <div style="font-size: 12px; color: #999; margin-top: 6px">
           可先跳过、之后在「规划」页补写保存；但开跑生成前必须有——没有大纲的章会失去方向约束。
         </div>
@@ -177,8 +248,13 @@
           :sub-title="`风格包已从预设克隆，当前 ${wizardCreated.chapterCount} 章。接下来三步：`">
           <template #extra>
             <div style="text-align: left; font-size: 13px; line-height: 2">
-              <div>① 到「<router-link to="/planning">规划</router-link>」页确认/补写大纲，点「AI 规划一卷」生成首卷卷纲（2-10 分钟）</div>
-              <div>② 回本页设好连跑范围（默认从第 1 章起），点「启动生成」</div>
+              <div v-if="wizardForm.derive.autoContinue">
+                本书已开「无人续跑」：回工作台点「启动续跑」即可写到总目标章数为止——卷尽自动规划下卷、自动续批；中途出硬伤会暂停等你处理。
+              </div>
+              <template v-else>
+                <div>① 到「<router-link to="/planning">规划</router-link>」页确认/补写大纲，点「AI 规划一卷」生成首卷卷纲（2-10 分钟）</div>
+                <div>② 回本页设好连跑范围（默认从第 1 章起），点「启动生成」</div>
+              </template>
               <div>③ 生成中在本页看实时逐字流；写完的章去「章节」页阅读/审批</div>
             </div>
             <el-button type="primary" @click="wizardDone">开始规划 →</el-button>
@@ -190,11 +266,11 @@
       </template>
 
       <template #footer>
-        <template v-if="wizardStep < 2">
+        <template v-if="wizardStep < 3">
           <el-button v-if="wizardStep > 0" @click="wizardStep--">上一步</el-button>
-          <el-button v-if="wizardStep === 0" type="primary"
+          <el-button v-if="wizardStep < 2" type="primary"
             :disabled="!wizardForm.title.trim() || !wizardForm.presetId || !presets.length"
-            @click="wizardStep = 1">下一步</el-button>
+            @click="wizardStep++">下一步</el-button>
           <el-button v-else type="primary" :loading="wizardBusy" @click="createNovel">创建作品</el-button>
         </template>
       </template>
@@ -357,7 +433,14 @@ const wizardOpen = ref(false)
 const wizardStep = ref(0)
 const wizardBusy = ref(false)
 const wizardCreated = ref(null)
-const wizardForm = ref({ title: '', description: '', presetId: null, outline: '' })
+const wizardForm = ref({
+  title: '', description: '', presetId: null, outline: '',
+  sampleId: null,
+  cloneAssets: { cards: true, world: true, plotOutline: true },
+  derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1 }
+})
+const wizardSamples = ref([])
+const paramsDeciding = ref(false)
 const presets = ref([])
 // 开书向导·导入分析模式
 const presetMode = ref('select')
@@ -736,16 +819,22 @@ async function switchPlanMode() {
   }
 }
 
-/** 开书向导：预设列表加载 → 三步创建（基本信息 / 大纲 / 完成指引）。 */
+/** 开书向导：预设列表加载 → 四步创建（基本信息 / 衍生设定 / 大纲 / 完成指引）。 */
 async function openWizard() {
   wizardStep.value = 0
   wizardCreated.value = null
-  wizardForm.value = { title: '', description: '', presetId: null, outline: '' }
+  wizardForm.value = {
+    title: '', description: '', presetId: null, outline: '',
+    sampleId: null,
+    cloneAssets: { cards: true, world: true, plotOutline: true },
+    derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1 }
+  }
   presetMode.value = 'select'
   sampleForm.value = { name: '', text: '' }
   analyzeResult.value = null
   newGenreForm.value = { genre: '', presetName: '' }
   chosenPresetName.value = ''
+  wizardSamples.value = await api.get('/api/preset/samples').catch(() => [])
   try {
     presets.value = await api.get('/api/preset/list')
     if (presets.value.length) wizardForm.value.presetId = presets.value[0].id
@@ -810,16 +899,50 @@ function onSampleFile(ev) {
   ev.target.value = ''
 }
 
+/** 「AI 帮我定」：依据样本结构画像回填衍生参数（用户可继续改）。 */
+async function aiDecideParams() {
+  paramsDeciding.value = true
+  try {
+    const r = await api.post(`/api/preset/samples/${wizardForm.value.sampleId}/recommend-params`)
+    const d = wizardForm.value.derive
+    d.water = r.water ?? d.water
+    d.pov = r.pov || d.pov
+    d.povCharacter = r.povCharacter || d.povCharacter
+    d.chaptersPerVolume = r.chaptersPerVolume || d.chaptersPerVolume
+    d.targetChapters = r.targetChapters || d.targetChapters
+    d.pacingNote = r.pacingNote || d.pacingNote
+    ElMessage.success(r.reason ? `已按样本画像回填：${r.reason}` : '已按样本画像回填')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    paramsDeciding.value = false
+  }
+}
+
 async function createNovel() {
   wizardBusy.value = true
-  wizardStep.value = 2
+  wizardStep.value = 3
   wizardCreated.value = null
   try {
-    const n = await api.post('/api/novels', {
-      title: wizardForm.value.title.trim(),
-      description: wizardForm.value.description.trim(),
-      presetId: wizardForm.value.presetId
-    })
+    const f = wizardForm.value
+    const payload = {
+      title: f.title.trim(),
+      description: f.description.trim(),
+      presetId: f.presetId,
+      sampleId: f.sampleId || undefined,
+      cloneAssets: f.sampleId ? { ...f.cloneAssets } : undefined,
+      deriveConfig: {
+        water: f.derive.water,
+        pov: f.derive.pov,
+        povCharacter: f.derive.povCharacter.trim() || undefined,
+        pacingNote: f.derive.pacingNote.trim() || undefined,
+        chaptersPerVolume: f.derive.chaptersPerVolume,
+        targetChapters: f.derive.targetChapters,
+        autoContinue: f.derive.autoContinue,
+        priority: f.derive.priority
+      }
+    }
+    const n = await api.post('/api/novels', payload)
     if (wizardForm.value.outline.trim()) {
       try {
         await api.put(`/api/novels/${n.id}/planning/story`, { content: wizardForm.value.outline.trim() })

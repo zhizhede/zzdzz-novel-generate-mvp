@@ -113,7 +113,7 @@ public class VolumePlanService {
         }
         int fromNo = draft.rows().get(0).chapterNo();
         int toNo = draft.rows().get(draft.rows().size() - 1).chapterNo();
-        String structural = structuralCheck(draft, fromNo, toNo);
+        String structural = structuralCheck(draft, fromNo, toNo, null);
         if (structural != null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "草稿结构不合规：" + structural);
         }
@@ -125,10 +125,11 @@ public class VolumePlanService {
     private PlanDraft generateWithReview(long novelId, int volNo, int fromNo, Integer toNo, String seedOutline) {
         String context = packer.packVolumePlan(novelId, volNo, fromNo, seedOutline);
         String feedback = "";
+        Integer target = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).chaptersPerVolume();
         int maxRounds = tuning.i("volume_plan_review_rounds", TuningDefaults.VOLUME_PLAN_REVIEW_ROUNDS);
         for (int round = 1; round <= maxRounds; round++) {
-            PlanDraft draft = askPlan(novelId, volNo, fromNo, toNo, context, feedback);
-            String structural = structuralCheck(draft, fromNo, toNo);
+            PlanDraft draft = askPlan(novelId, volNo, fromNo, toNo, target, context, feedback);
+            String structural = structuralCheck(draft, fromNo, toNo, target);
             if (structural != null) {
                 log.warn("卷纲第 {} 轮结构校验未过：{}", round, structural);
                 stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.RETRY,
@@ -161,10 +162,18 @@ public class VolumePlanService {
         return t.length() <= 500 ? t : t.substring(0, 500) + "…";
     }
 
-    private PlanDraft askPlan(long novelId, int volNo, int fromNo, Integer toNo, String context, String feedback) {
-        String span = toNo == null
-                ? "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）"
-                : "到第 " + toNo + " 章结束，共 " + (toNo - fromNo + 1) + " 章";
+    private PlanDraft askPlan(long novelId, int volNo, int fromNo, Integer toNo, Integer targetChapters,
+                              String context, String feedback) {
+        String span;
+        if (toNo != null) {
+            span = "到第 " + toNo + " 章结束，共 " + (toNo - fromNo + 1) + " 章";
+        } else if (targetChapters != null) {
+            // 衍生配置的每卷章数目标（开书向导）：提示词给目标、结构校验按 ±2 收口
+            span = "章数目标 " + targetChapters + " 章（允许 ±" + Math.max(1, targetChapters / 8)
+                    + " 章，在 no 字段连续编号体现）——这是本书的节奏设定，非建议";
+        } else {
+            span = "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）";
+        }
         // 品类预设的章长带（开书克隆自 gate_config）：有带则预算必须进带，无带回旧口径（往卷水平自估）
         int[] band = budgetBand(novelId);
         String budgetRule = band == null
@@ -252,14 +261,22 @@ public class VolumePlanService {
         }
     }
 
-    /** 确定性结构校验：章号连续、章数、字段非空、预算区间。返回 null 即通过。 */
-    private String structuralCheck(PlanDraft draft, int fromNo, Integer toNo) {
+    /** 确定性结构校验：章号连续、章数、字段非空、预算区间。返回 null 即通过。
+     * targetChapters=衍生配置的每卷章数目标（±章数容差收口，超差打回重写）；null 走旧 6-15 口径。 */
+    private String structuralCheck(PlanDraft draft, int fromNo, Integer toNo, Integer targetChapters) {
         List<PlanRow> rows = draft.rows();
         if (toNo != null && rows.size() != toNo - fromNo + 1) {
             return "章数应为 " + (toNo - fromNo + 1) + "，实际 " + rows.size();
         }
-        if (toNo == null && (rows.size() < 6 || rows.size() > 15)) {
-            return "章数须 6-15，实际 " + rows.size();
+        if (toNo == null) {
+            if (targetChapters != null) {
+                int slack = Math.max(1, targetChapters / 8);
+                if (rows.size() < targetChapters - slack || rows.size() > targetChapters + slack) {
+                    return "章数目标 " + targetChapters + "±" + slack + "，实际 " + rows.size();
+                }
+            } else if (rows.size() < 6 || rows.size() > 15) {
+                return "章数须 6-15，实际 " + rows.size();
+            }
         }
         for (int i = 0; i < rows.size(); i++) {
             PlanRow r = rows.get(i);

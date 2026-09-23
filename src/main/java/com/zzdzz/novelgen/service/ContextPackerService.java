@@ -49,10 +49,32 @@ public class ContextPackerService {
     private final EmbeddingService embeddingService;
     private final PromptTemplateService promptTemplates;
     private final VolumeReviewDataService volumeReviewData;
+    private final com.zzdzz.novelgen.service.data.NovelDataService novelData;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
 
     public record Pack(String system, String user) {}
+
+    /**
+     * 衍生配置段（场景提示词）：POV/主视角 + 掺水量密度口径。
+     * 无配置返回空串（模板占位渲染为空行，旧书零变化，fail-open）。
+     */
+    private String deriveSection(long novelId) {
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        StringBuilder sb = new StringBuilder();
+        if (cfg.pov() != null) {
+            sb.append("【叙事视角（必须遵守）】\n").append(cfg.pov());
+            if (cfg.povCharacter() != null) {
+                sb.append("；主视角：").append(cfg.povCharacter());
+            }
+            sb.append("。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。\n");
+        }
+        String density = DeriveSupport.densityHint(cfg.water());
+        if (density != null) {
+            sb.append("【情节密度要求】\n").append(density).append('\n');
+        }
+        return sb.toString();
+    }
 
     public String styleRules(long novelId) {
         return stylePackData.findRulesMdByNovel(novelId);
@@ -367,6 +389,8 @@ public class ContextPackerService {
 
                 %s
 
+                %s
+
                 【世界观（必须遵守）】
                 %s
 
@@ -392,6 +416,7 @@ public class ContextPackerService {
                 """, chapterNo, spec.sceneNo(), ch.getTitle(), spec.goal(),
                 spec.present(), spec.mustReveal(), spec.mustNot(), spec.words(),
                 simileRedline,
+                deriveSection(novelId),
                 craft,
                 world(novelId),
                 charactersForScene(novelId, matchText),

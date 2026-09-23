@@ -866,7 +866,10 @@ public class ChapterPipelineService {
      */
     private ChapterOutcome reviewBlockedDisposition(long novelId, int chapterNo, String approvalMode,
                                                     BooleanSupplier stopCheck, int attempt) {
-        boolean replanAllowed = tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
+        // 无人续跑的书按书覆盖为自动换目标重写（tuning 是平台级默认，derive_config.autoContinue 是书级口径）
+        boolean autoBook = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).autoContinueOn();
+        boolean replanAllowed = autoBook
+                || tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
         if (!replanAllowed || stopCheck.getAsBoolean()) {
             return markReviewPending(novelId, chapterNo);
         }

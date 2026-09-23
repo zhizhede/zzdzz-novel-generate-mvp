@@ -37,4 +37,26 @@ UPDATE novels SET plan_mode=#{mode}, update_time=NOW() WHERE id=#{novelId} AND i
     <select id="chapterCount" resultType="int">
 SELECT COUNT(*) FROM chapters WHERE novel_id=#{novelId} AND is_deleted=false
     </select>
+
+    <select id="findDeriveConfig" resultType="string">
+SELECT derive_config::text FROM novels WHERE id=#{novelId} AND is_deleted=false
+    </select>
+
+    <update id="updateDeriveConfig">
+UPDATE novels SET derive_config=#{deriveConfigJson}::jsonb, update_time=NOW() WHERE id=#{novelId} AND is_deleted=false
+    </update>
+
+    <select id="findAutoState" resultType="com.zzdzz.novelgen.service.data.NovelDataService$AutoStateRow">
+SELECT auto_state AS "autoState", auto_message AS "autoMessage", auto_volumes AS "autoVolumes"
+FROM novels WHERE id=#{novelId} AND is_deleted=false
+    </select>
+
+    <update id="updateAutoState">
+UPDATE novels SET auto_state=#{state}, auto_message=#{message}, update_time=NOW()
+WHERE id=#{novelId} AND is_deleted=false
+    </update>
+
+    <update id="bumpAutoVolumes">
+UPDATE novels SET auto_volumes = auto_volumes + 1, update_time=NOW() WHERE id=#{novelId} AND is_deleted=false
+    </update>
 </mapper>

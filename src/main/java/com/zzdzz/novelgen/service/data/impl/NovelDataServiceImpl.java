@@ -51,4 +51,31 @@ public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDTO> imp
     public int chapterCount(long novelId) {
         return baseMapper.chapterCount(novelId);
     }
+
+    @Override
+    public String findDeriveConfig(long novelId) {
+        return baseMapper.findDeriveConfig(novelId);
+    }
+
+    @Override
+    public int updateDeriveConfig(long novelId, String deriveConfigJson) {
+        return baseMapper.updateDeriveConfig(novelId, deriveConfigJson);
+    }
+
+    @Override
+    public com.zzdzz.novelgen.service.data.NovelDataService.AutoStateRow findAutoState(long novelId) {
+        return baseMapper.findAutoState(novelId);
+    }
+
+    @Override
+    public int updateAutoState(long novelId, String state, String message) {
+        return baseMapper.updateAutoState(novelId,
+                state,
+                message == null ? null : message.substring(0, Math.min(message.length(), 256)));
+    }
+
+    @Override
+    public int bumpAutoVolumes(long novelId) {
+        return baseMapper.bumpAutoVolumes(novelId);
+    }
 }
