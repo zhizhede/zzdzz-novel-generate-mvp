@@ -28,12 +28,17 @@ import java.util.List;
 public class DigestService {
 
 
+    /** 库值优先（digest/state_spec），缺省回退此常量。 */
     private static final String STATE_SPEC = """
             "state":{"time":"本章结束时的时间点（故事内历法或相对事件表述）",
              "locations":{"人名或重要物名":"所在位置"},
              "possessions":{"人名":["随身携带的重要物品"]},
              "new_promises":["本章新立下的承诺/约定/邀约"],
              "unresolved":["本章留下的未解之谜或未回收伏笔"]}""";
+
+    private String stateSpec() {
+        return promptTemplates.get("digest", "state_spec", STATE_SPEC);
+    }
 
     /** 世界状态系统提示（%s=STATE_SPEC；保持未格式化的模板形态，运行时经 PromptTemplateService 填充）。 */
     private static final String STATE_SYSTEM = """
@@ -70,7 +75,7 @@ public class DigestService {
                         summary_md 不要包含任何标题行，直接从摘要正文开始。
                         new_threads 只提议真正的长线（需要多章才能回收的谜、承诺、关系变化），本章内已解决的不提；
                         与已有伏笔账本同义的不提；最多 2 条；没有就给空数组。
-                        """, STATE_SPEC)),
+                        """, stateSpec())),
                         LlmPort.Message.user(digestUserPrompt(novelId, chapterId, fullText))), LlmTemps.DIGEST));
         JsonNode node;
         try {
@@ -178,7 +183,7 @@ public class DigestService {
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.WORLD_STATE, novelId, ch.getId(),
                 List.of(LlmPort.Message.system(promptTemplates.format(
-                                LlmNode.WORLD_STATE, "system", STATE_SYSTEM, STATE_SPEC)),
+                                LlmNode.WORLD_STATE, "system", STATE_SYSTEM, stateSpec())),
                         LlmPort.Message.user(ch.getFullText() + "\n\n只输出 state JSON。")), LlmTemps.WORLD_STATE));
         JsonNode node;
         try {

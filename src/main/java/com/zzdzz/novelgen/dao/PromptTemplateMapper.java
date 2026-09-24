@@ -28,4 +28,11 @@ public interface PromptTemplateMapper extends BaseMapper<PromptTemplateDTO> {
 
     List<PromptTemplateDataService.Reset> findNodePhase(@Param("id") long id);
 
+    PromptTemplateDTO findByNodeAndPhase(@Param("node") String node, @Param("phase") String phase);
+
+    long insertCustom(@Param("node") String node, @Param("phase") String phase,
+                      @Param("title") String title, @Param("content") String content);
+
+    int softDeleteById(@Param("id") long id);
+
 }

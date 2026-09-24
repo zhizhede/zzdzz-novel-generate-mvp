@@ -168,18 +168,25 @@ public class VolumePlanService {
         if (toNo != null) {
             span = "到第 " + toNo + " 章结束，共 " + (toNo - fromNo + 1) + " 章";
         } else if (targetChapters != null) {
-            // 衍生配置的每卷章数目标（开书向导）：提示词给目标、结构校验按 ±2 收口
-            span = "章数目标 " + targetChapters + " 章（允许 ±" + Math.max(1, targetChapters / 8)
-                    + " 章，在 no 字段连续编号体现）——这是本书的节奏设定，非建议";
+            // 衍生配置的每卷章数目标（开书向导）：提示词给目标、结构校验按容差收口
+            span = promptTemplates.getSection("common", "plan_span_target",
+                    java.util.Map.of("target", String.valueOf(targetChapters),
+                            "slack", String.valueOf(Math.max(1, targetChapters / 8))),
+                    "章数目标 " + targetChapters + " 章（允许 ±" + Math.max(1, targetChapters / 8)
+                            + " 章，在 no 字段连续编号体现）——这是本书的节奏设定，非建议");
         } else {
-            span = "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）";
+            span = promptTemplates.getSection("common", "plan_span_free", java.util.Map.of(),
+                    "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）");
         }
         // 品类预设的章长带（开书克隆自 gate_config）：有带则预算必须进带，无带回旧口径（往卷水平自估）
         int[] band = budgetBand(novelId);
         String budgetRule = band == null
-                ? "4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。"
-                : "4. budget_min/budget_max 为单章字数预算，本书风格基线（源自品类预设）为 "
-                        + band[0] + "-" + band[1] + " 字，各章预算必须落在该带内。";
+                ? promptTemplates.getSection("common", "plan_budget_without", java.util.Map.of(),
+                        "4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。")
+                : promptTemplates.getSection("common", "plan_budget_with",
+                        java.util.Map.of("lo", String.valueOf(band[0]), "hi", String.valueOf(band[1])),
+                        "4. budget_min/budget_max 为单章字数预算，本书风格基线（源自品类预设）为 "
+                                + band[0] + "-" + band[1] + " 字，各章预算必须落在该带内。");
         String user = promptTemplates.format(LlmNode.VOLUME_PLAN, "user", """
                 任务：规划第 %d 卷，从第 %d 章开始，%s。
 

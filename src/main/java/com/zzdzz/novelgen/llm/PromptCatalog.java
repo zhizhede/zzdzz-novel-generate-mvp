@@ -434,6 +434,69 @@ public final class PromptCatalog {
         new TemplateDef(LlmNode.SAMPLE_PARAMS, "system", "衍生参数推荐系统提示", true,
                 "你是网文策划，依据样例小说的结构画像为衍生新书推荐参数；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
 
+        // ===== 运行时拼装段（common/scene/digest 命名空间：getSection {key} 占位接库，素材库·提示词可编辑） =====
+        new TemplateDef(LlmNode.SCENE_DRAFT, "style_redlines", "量化风格画像（场景 system 追加段，无画像预设时叠加）", false, """
+                【量化风格画像（按此密度写，门禁按同口径验收）】
+                - 对话密：每千字约 19 行「」对话——推动情节靠人物说话，不靠叙述转述。
+                - 一行一拍：平均每行 15-22 字。
+                - 破折号——每千字 2-4 个（同位语补充设定）；省略号……每千字 4-6 个（拖长的思绪）。
+                - 对话行句末 85% 以上不加标点（问句可留？）。例：写「走吧」，不要写「走吧。」；旁白行才用句号。
+                - 阿拉伯数字只用于钱（"时薪18""31块"），每千字不超过 12 个；
+                  时间写中文（凌晨两点，不写凌晨2点）；守则条文序号用中文（第一条，不写第1条）。
+                - 顿号每千字不超过 1 个；感叹号每千字不超过 2 个。
+                """),
+
+        new TemplateDef(LlmNode.SCENE_DRAFT, "derive_pov", "衍生段·叙事视角（有 POV 配置时注入）", false, """
+                【叙事视角（必须遵守）】
+                {pov}；主视角：{povCharacter}。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。
+                """),
+
+        new TemplateDef(LlmNode.SCENE_DRAFT, "derive_density", "衍生段·情节密度（有掺水量配置时注入）", false, """
+                【情节密度要求】
+                {density}
+                """),
+
+        new TemplateDef(LlmNode.SCENE_DRAFT, "derive_tags", "衍生段·类型标签（衍生书注入）", false, """
+                【类型标签（本书的类型基调与标志性元素，规划与行文必须贴合）】
+                {tags}
+                """),
+
+        new TemplateDef(LlmNode.SCENE_DRAFT, "derive_redline", "衍生段·差异红线（衍生书注入，防复述样本原书）", false, """
+                【衍生差异红线（最高优先级）】本书为样本衍生新作，不是样本的复述或改编：
+                - 禁止复述样本原书的情节走向、桥段与章节结构；
+                - 本书主角与主线必须为原创新人物新事件（样本素材卡中的原书主角只能作为背景设定存在，不得担任本书主角）；
+                - 只沿用其世界观规则、力量体系与类型套路。
+                """),
+
+        new TemplateDef("common", "derive_volume", "衍生段·卷规划版（POV/密度/标签/红线合并）", false, """
+                【叙事视角（必须遵守）】
+                {pov}；主视角：{povCharacter}。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。
+                【情节密度要求】
+                {density}
+                【类型标签（本书的类型基调与标志性元素，规划与行文必须贴合）】
+                {tags}
+                【衍生差异红线（最高优先级）】本书为样本衍生新作，不是样本的复述或改编：禁止复述样本原书的情节走向、桥段与章节结构；本书主角与主线必须为原创新人物新事件；只沿用其世界观规则、力量体系与类型套路。
+                """),
+
+        new TemplateDef("common", "plan_span_free", "卷规划·章数自由口径（无目标章数时）", false,
+                "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）"),
+
+        new TemplateDef("common", "plan_span_target", "卷规划·章数目标口径（衍生配置）", false,
+                "章数目标 {target} 章（允许 ±{slack} 章，在 no 字段连续编号体现）——这是本书的节奏设定，非建议"),
+
+        new TemplateDef("common", "plan_budget_with", "卷规划·预算带口径（有带时）", false,
+                "4. budget_min/budget_max 为单章字数预算，本书风格基线（源自品类预设）为 {lo}-{hi} 字，各章预算必须落在该带内。"),
+
+        new TemplateDef("common", "plan_budget_without", "卷规划·预算带口径（无带时）", false,
+                "4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。"),
+
+        new TemplateDef("digest", "state_spec", "世界状态快照字段规格（digest 输出结构）", false, """
+                "state":{"time":"本章结束时的时间点（故事内历法或相对事件表述）",
+                 "locations":{"人名或重要物名":"所在位置"},
+                 "possessions":{"人名":["随身携带的重要物品"]},
+                 "new_promises":["本章新立下的承诺/约定/邀约"],
+                 "unresolved":["本章留下的未解之谜或未回收伏笔"]}"""),
+
         new TemplateDef(LlmNode.SAMPLE_TAGS, "system", "样本标签提取系统提示", true,
                 "你是网文分类编辑，给小说打类型与特征标签；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
 

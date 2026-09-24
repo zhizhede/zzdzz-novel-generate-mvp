@@ -61,6 +61,51 @@ public class PromptTemplateService {
         return formatSafe(get(node, phase, fallback), fallback, node + "/" + phase, args);
     }
 
+    /**
+     * {key} 占位段读取（运行时拼装段接库）：库值优先、缺失回退 fallback，占位 {name} 用 params 替换。
+     * 用于 derive 红线/POV/密度等拼装段——段落文案落库可编辑（素材库·提示词页签），代码只组装参数。
+     */
+    public String getSection(String node, String sectionKey, Map<String, String> params, String fallback) {
+        String tpl = get(node, sectionKey, fallback);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{(\\w+)}").matcher(tpl == null ? fallback : tpl);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            String v = params.getOrDefault(m.group(1), "");
+            m.appendReplacement(out, java.util.regex.Matcher.quoteReplacement(v == null ? "" : v));
+        }
+        m.appendTail(out);
+        return out.toString();
+    }
+
+    /** 新建自定义段/模板行（custom=true，可编辑可删除；catalog 同步不覆盖自定义行）。 */
+    public PromptDetailVO create(String node, String phase, String title, String content) {
+        if (node == null || node.isBlank() || phase == null || phase.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "node/phase 必填");
+        }
+        if (content == null || content.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "内容不能为空");
+        }
+        if (phase.length() > 16) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "phase 过长（≤16 字符）");
+        }
+        if (dao.findByNodeAndPhase(node.strip(), phase.strip()).isPresent()) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "该 node+phase 已存在模板行");
+        }
+        long id = dao.insertCustom(node.strip(), phase.strip(), title == null ? "" : title.strip(), content);
+        cacheLoadedAt = 0;
+        return detail(id);
+    }
+
+    /** 删除自定义行（软删；catalog 同步行不可删，只能重置）。 */
+    public void delete(long id) {
+        PromptTemplateDTO t = require(id);
+        if (!t.isCustom()) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "目录同步行不可删除（可编辑或重置）；如需移除请先在代码目录中移除该条");
+        }
+        dao.softDeleteById(id);
+        cacheLoadedAt = 0;
+    }
+
     /** fail-open 格式化：模板占位符与参数不匹配时回退 fallback（记 warn）。 */
     static String formatSafe(String tpl, String fallback, String tag, Object... args) {
         try {

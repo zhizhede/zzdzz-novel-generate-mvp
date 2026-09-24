@@ -74,6 +74,22 @@ public class LibraryController {
         return Result.success(promptService.reset(id));
     }
 
+    /** 新建自定义模板/段（custom=true，可编辑可删除；目录同步不覆盖）。 */
+    @PostMapping("/prompts")
+    public Result<PromptDetailVO> createPrompt(@RequestBody PromptCreateVO dto) {
+        return Result.success(promptService.create(dto.node(), dto.phase(), dto.title(), dto.content()));
+    }
+
+    /** 删除自定义模板/段（软删；目录同步行不可删）。 */
+    @DeleteMapping("/prompts/{id}")
+    public Result<Void> deletePrompt(@PathVariable long id) {
+        promptService.delete(id);
+        return Result.success();
+    }
+
+    public record PromptCreateVO(String node, String phase, String title, String content) {
+    }
+
     // ===== 调参（平台级行为参数，改后 30s 内生效） =====
 
     @GetMapping("/tuning")

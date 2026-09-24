@@ -48,4 +48,20 @@
     <select id="findById" resultType="com.zzdzz.novelgen.model.dto.PromptTemplateDTO">
                 SELECT * FROM prompt_templates WHERE id = #{id} AND is_deleted = FALSE
     </select>
+    <select id="findByNodeAndPhase" resultType="com.zzdzz.novelgen.model.dto.PromptTemplateDTO">
+                SELECT * FROM prompt_templates
+                WHERE node=#{node} AND phase=#{phase} AND is_deleted=false
+                LIMIT 1
+    </select>
+
+    <select id="insertCustom" resultType="long">
+                INSERT INTO prompt_templates (node, phase, title, content, exact, version, custom)
+                VALUES (#{node}, #{phase}, #{title}, #{content}, false, 1, true)
+                RETURNING id
+    </select>
+
+    <update id="softDeleteById">
+                UPDATE prompt_templates SET is_deleted=true, delete_time=NOW()
+                WHERE id=#{id} AND custom=true
+    </update>
 </mapper>

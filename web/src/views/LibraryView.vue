@@ -261,13 +261,14 @@
       <el-tab-pane :label="`提示词（${prompts.length}）`">
         <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px">
           <span style="color: #999; font-size: 12px">
-            各 LLM 节点的提示词模板（启动时与代码同步落库）。本页只读；%s/%d 为运行时占位。
+            各 LLM 节点的提示词模板（启动时与代码同步落库）。exact 行可编辑，骨架/自定义段可新建删除；%s 与 {key} 为运行时占位。
           </span>
           <el-input v-model="promptFilter" placeholder="按节点/标题筛选" size="small" clearable style="width: 220px" />
+          <el-button type="primary" size="small" @click="openPromptCreate">新建提示词</el-button>
         </div>
-        <el-table :data="filteredPrompts" border size="small" style="max-width: 1020px" @row-click="(r) => viewPrompt(r.id)">
+        <el-table :data="filteredPrompts" border size="small" style="max-width: 1080px" @row-click="(r) => viewPrompt(r.id)">
           <el-table-column prop="node" label="节点" width="150" />
-          <el-table-column prop="phase" label="阶段" width="70" />
+          <el-table-column prop="phase" label="阶段" width="90" />
           <el-table-column prop="title" label="用途" min-width="260" show-overflow-tooltip />
           <el-table-column label="形态" width="80">
             <template #default="{ row }">
@@ -286,6 +287,12 @@
           </el-table-column>
           <el-table-column label="更新时间" width="150">
             <template #default="{ row }">{{ fmtTime(row.updateTime) }}</template>
+          </el-table-column>
+          <el-table-column v-if="showPromptDelete" label="删" width="60">
+            <template #default="{ row }">
+              <el-button v-if="row.custom" size="small" type="danger" link
+                         @click.stop="deletePrompt(row)">删</el-button>
+            </template>
           </el-table-column>
         </el-table>
 
@@ -312,6 +319,24 @@
             <pre v-else style="white-space: pre-wrap; background: #f7f8fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.7">{{ promptDetail.content }}</pre>
           </template>
         </el-drawer>
+
+        <!-- 新建提示词 -->
+        <el-dialog v-model="promptCreateOpen" title="新建提示词" width="640px" append-to-body>
+          <div style="display: flex; gap: 10px; margin-bottom: 10px">
+            <el-input v-model="promptCreateForm.node" placeholder="节点（如 scene_draft）" />
+            <el-input v-model="promptCreateForm.phase" placeholder="阶段（≤16 字符，如 my_rule）" />
+          </div>
+          <el-input v-model="promptCreateForm.title" placeholder="用途说明（可选）" style="margin-bottom: 10px" />
+          <el-input v-model="promptCreateForm.content" type="textarea" :rows="10"
+                    placeholder="提示词内容。{key} 为运行时参数占位（由代码填充）；%s/%d 由 String.format 填充。" />
+          <div style="font-size: 12px; color: #999; margin-top: 6px">
+            自定义行永久保留（目录同步不覆盖）；删除仅限自定义行。内容是否生效取决于消费方是否读取该 node/phase。
+          </div>
+          <template #footer>
+            <el-button @click="promptCreateOpen = false">取消</el-button>
+            <el-button type="primary" :loading="promptCreating" @click="createPrompt">创建</el-button>
+          </template>
+        </el-dialog>
       </el-tab-pane>
 
         </el-tabs>
@@ -1172,6 +1197,56 @@ const filteredPrompts = computed(() => {
   if (!kw) return prompts.value
   return prompts.value.filter((p) => p.node.toLowerCase().includes(kw) || p.title.toLowerCase().includes(kw))
 })
+
+// ===== 提示词新建/删除（增删改查补齐） =====
+const promptCreateOpen = ref(false)
+const promptCreateForm = ref({ node: '', phase: '', title: '', content: '' })
+const promptCreating = ref(false)
+const showPromptDelete = ref(false)
+
+function openPromptCreate() {
+  promptCreateForm.value = { node: '', phase: '', title: '', content: '' }
+  promptCreateOpen.value = true
+}
+
+async function createPrompt() {
+  const f = promptCreateForm.value
+  if (!f.node.trim() || !f.phase.trim() || !f.content.trim()) {
+    ElMessage.warning('节点/阶段/内容必填')
+    return
+  }
+  if (f.phase.trim().length > 16) {
+    ElMessage.warning('阶段过长（≤16 字符）')
+    return
+  }
+  promptCreating.value = true
+  try {
+    await api.post('/api/prompts', {
+      node: f.node.trim(),
+      phase: f.phase.trim(),
+      title: f.title.trim(),
+      content: f.content
+    })
+    ElMessage.success('提示词已创建')
+    promptCreateOpen.value = false
+    prompts.value = await api.get('/api/prompts')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    promptCreating.value = false
+  }
+}
+
+async function deletePrompt(row) {
+  try {
+    await ElMessageBox.confirm(`删除提示词「${row.node}/${row.phase}」？（软删，可数据库恢复）`, '删除', { type: 'warning' })
+    await api.delete(`/api/prompts/${row.id}`)
+    ElMessage.success('已删除')
+    prompts.value = await api.get('/api/prompts')
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message)
+  }
+}
 
 async function viewPrompt(id) {
   promptDetail.value = await api.get(`/api/prompts/${id}`)

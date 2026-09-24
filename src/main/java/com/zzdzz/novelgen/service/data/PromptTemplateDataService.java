@@ -31,4 +31,13 @@ public interface PromptTemplateDataService extends IService<PromptTemplateDTO> {
 
     java.util.Optional<Reset> findNodePhase(long id);
 
+    /** node+phase 定位（活跃行）。 */
+    java.util.Optional<PromptTemplateDTO> findByNodeAndPhase(String node, String phase);
+
+    /** 新建自定义行（custom=true），返回 id。 */
+    long insertCustom(String node, String phase, String title, String content);
+
+    /** 自定义行软删。 */
+    int softDeleteById(long id);
+
 }

@@ -61,31 +61,40 @@ public class ContextPackerService {
         return deriveSection(novelId, false);
     }
 
-    /** sceneOnly=true 时只出场景侧要用的段（视角/密度）；标签段由 volume 专用拼装避免重复注入。 */
+    /** sceneOnly=true 时只出场景侧要用的段（视角/密度）；标签/红线段由 volume 专用拼装避免重复注入。
+     * 段文案从 PromptCatalog（node+sectionKey，{key} 占位）读取——落库可编辑，代码只组装参数。 */
     private String deriveSection(long novelId, boolean sceneOnly) {
         DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
         StringBuilder sb = new StringBuilder();
         if (cfg.pov() != null) {
-            sb.append("【叙事视角（必须遵守）】\n").append(cfg.pov());
-            if (cfg.povCharacter() != null) {
-                sb.append("；主视角：").append(cfg.povCharacter());
-            }
-            sb.append("。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。\n");
+            sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_pov",
+                    java.util.Map.of("pov", cfg.pov(),
+                            "povCharacter", java.util.Objects.requireNonNullElse(cfg.povCharacter(), "（未指定）")),
+                    """
+                            【叙事视角（必须遵守）】
+                            %s。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。
+                            """.formatted(cfg.pov() + (cfg.povCharacter() == null ? "" : "；主视角：" + cfg.povCharacter()))));
         }
         String density = DeriveSupport.densityHint(cfg.water());
         if (density != null) {
-            sb.append("【情节密度要求】\n").append(density).append('\n');
+            sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_density",
+                    java.util.Map.of("density", density),
+                    "【情节密度要求】\n%s\n".formatted(density)));
         }
         if (!sceneOnly && cfg.tags() != null && !cfg.tags().isEmpty()) {
-            sb.append("【类型标签（本书的类型基调与标志性元素，规划与行文必须贴合）】\n")
-                    .append(String.join("、", cfg.tags())).append('\n');
+            sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_tags",
+                    java.util.Map.of("tags", String.join("、", cfg.tags())),
+                    "【类型标签（本书的类型基调与标志性元素，规划与行文必须贴合）】\n%s\n".formatted(String.join("、", cfg.tags()))));
         }
         // 衍生差异红线（书 10 实证：克隆的原书主角卡 pinned 注入后，卷规划复述了原书剧情）
         if (!sceneOnly && cfg.sourceSampleId() != null) {
-            sb.append("【衍生差异红线（最高优先级）】本书为样本衍生新作，不是样本的复述或改编：\n")
-              .append("- 禁止复述样本原书的情节走向、桥段与章节结构；\n")
-              .append("- 本书主角与主线必须为原创新人物新事件（样本素材卡中的原书主角只能作为背景设定存在，不得担任本书主角）；\n")
-              .append("- 只沿用其世界观规则、力量体系与类型套路。\n");
+            sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_redline", java.util.Map.of(),
+                    """
+                            【衍生差异红线（最高优先级）】本书为样本衍生新作，不是样本的复述或改编：
+                            - 禁止复述样本原书的情节走向、桥段与章节结构；
+                            - 本书主角与主线必须为原创新人物新事件（样本素材卡中的原书主角只能作为背景设定存在，不得担任本书主角）；
+                            - 只沿用其世界观规则、力量体系与类型套路。
+                            """));
         }
         return sb.toString();
     }
@@ -370,7 +379,7 @@ public class ContextPackerService {
 
         // 风格包自带量化红线（新风格包）时不再叠加手搓红线，避免两套阈值打架
         String rules = styleRules(novelId);
-        String system = rules.contains("【量化风格红线】") ? rules : rules + STYLE_REDLINES;
+        String system = rules.contains("【量化风格红线】") ? rules : rules + promptTemplates.get("scene_draft", "style_redlines", STYLE_REDLINES);
         // 写作工艺块：首场景=开篇红线+手稿开篇范例；所有场景=对白推进范例
         String craft = openingSection(novelId, spec.sceneNo());
         String dex = dialogueExcerpt(novelId);

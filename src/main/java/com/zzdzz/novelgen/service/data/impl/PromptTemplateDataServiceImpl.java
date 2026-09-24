@@ -66,4 +66,19 @@ public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMap
             baseMapper.syncTouch(node, phase);
         }
     }
+
+    @Override
+    public java.util.Optional<PromptTemplateDTO> findByNodeAndPhase(String node, String phase) {
+        return java.util.Optional.ofNullable(baseMapper.findByNodeAndPhase(node, phase));
+    }
+
+    @Override
+    public long insertCustom(String node, String phase, String title, String content) {
+        return baseMapper.insertCustom(node, phase, title, content);
+    }
+
+    @Override
+    public int softDeleteById(long id) {
+        return baseMapper.softDeleteById(id);
+    }
 }
