@@ -17,6 +17,8 @@ public class NovelDTO {
     private Long stylePackId;
     private String approvalMode;
     private String status;
+    private java.time.OffsetDateTime createTime;
+    private java.time.OffsetDateTime updateTime;
     private boolean isDeleted;
 
 

@@ -89,7 +89,7 @@ public class ImportRunner implements ApplicationRunner {
         long packId = importBookStylePack(cfg);
         Long exist = novelData.findIdByTitle(title);
         long novelId = exist != null ? exist
-                : novelData.insert(userId, title, (String) cfg.get("description"), packId, "auto");
+                : novelData.insert(userId, title, (String) cfg.get("description"), packId, "auto", "active");
         if (exist == null) {
             log.info("书目导入：新作品 {} (novelId={})", title, novelId);
         }
@@ -201,7 +201,7 @@ public class ImportRunner implements ApplicationRunner {
         Long exist = novelData.findIdByTitle("夜班守则");
         if (exist != null) return exist;
         return novelData.insert(userId, "夜班守则",
-                "规则怪谈：便利店夜班与不对劲的守则（管线测试作）", packId, "auto");
+                "规则怪谈：便利店夜班与不对劲的守则（管线测试作）", packId, "auto", "active");
     }
 
     private void importCanonDocs(long novelId) throws Exception {

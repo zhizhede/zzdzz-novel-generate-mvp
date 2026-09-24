@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.zzdzz.novelgen.model.dto.CanonDocDTO;
 import com.zzdzz.novelgen.model.dto.ImportedSampleDTO;
+import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
 import com.zzdzz.novelgen.model.dto.NovelDTO;
 import com.zzdzz.novelgen.model.dto.SampleCardDTO;
 import com.zzdzz.novelgen.model.dto.SamplePlotNodeDTO;
@@ -46,15 +48,64 @@ public class NovelService {
     private final ImportedSampleDataService sampleData;
     private final MaterialCardDataService cardData;
     private final CanonDocDataService canonData;
+    private final com.zzdzz.novelgen.service.data.GenerationTaskDataService taskData;
     private final LlmPort llm;
     private final PromptTemplateService promptTemplates;
     private final ObjectMapper mapper;
 
     public List<NovelVO> list() {
-        return novelData.listAlive().stream()
-                .map(n -> new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(),
-                        n.getStatus(), novelData.chapterCount(n.getId())))
-                .toList();
+        return novelData.listAlive().stream().map(n -> {
+            DeriveSupport.Cfg c = DeriveSupport.parse(novelData.findDeriveConfig(n.getId()));
+            return new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(),
+                    n.getStatus(), novelData.chapterCount(n.getId()), n.getCreateTime(),
+                    c.autoContinueOn(), c.targetChapters());
+        }).toList();
+    }
+
+    /** 草稿书完成激活（draft → active；条件更新防重复激活）。 */
+    public void activate(long novelId) {
+        requireNovel(novelId);
+        if (novelData.activate(novelId) == 0) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "该书不是草稿状态（可能已激活）");
+        }
+    }
+
+    /** 编辑书籍基本信息（改名全站唯一；不触碰风格包/衍生配置/生成数据）。 */
+    public void updateProfile(long novelId, String title, String description) {
+        requireNovel(novelId);
+        if (title == null || title.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "书名必填");
+        }
+        String t = title.strip();
+        if (t.length() > 256) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "书名过长（≤256 字）");
+        }
+        Long existing = novelData.findIdByTitle(t);
+        if (existing != null && existing != novelId) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "已有同名作品：" + t);
+        }
+        novelData.updateProfile(novelId, t, description == null ? "" : description.strip());
+    }
+
+    /**
+     * 删除书籍（软删，可 psql 恢复）。守卫：有排队/运行中的生成任务拒绝（先停止再删）；
+     * 无人续跑开着时先关闭（derive_config.autoContinue=false + 链置 OFF），防止删除后队列钩子继续排任务。
+     */
+    public void deleteNovel(long novelId) {
+        requireNovel(novelId);
+        if (taskData.existsActiveForNovel(novelId)) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "这本书还有排队/运行中的生成任务——先到工作台停止任务，再删除");
+        }
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        if (cfg.autoContinueOn()) {
+            novelData.updateDeriveConfig(novelId, deriveConfigJson(
+                    new NovelCreateVO.DeriveConfigVO(cfg.water(), cfg.pov(), cfg.povCharacter(), cfg.pacingNote(),
+                            cfg.chaptersPerVolume(), cfg.targetChapters(), false, cfg.priority(), cfg.tags()), novelId));
+        }
+        novelData.updateAutoState(novelId, "OFF", "书籍已删除，无人续跑已关闭");
+        novelData.softDelete(novelId);
+        log.info("书籍软删 novelId={}", novelId);
     }
 
     public void setApprovalMode(long novelId, String mode) {
@@ -88,7 +139,8 @@ public class NovelService {
         long packId = stylePackData.insertPack(title + "·风格", "开书克隆自预设：" + preset.getName(),
                 preset.getRulesMd() == null ? "" : preset.getRulesMd(),
                 preset.getFingerprint(), gateConfig);
-        long novelId = novelData.insert(userId, title, vo.description() == null ? "" : vo.description(), packId, "auto");
+        String bookStatus = Boolean.TRUE.equals(vo.draft()) ? "draft" : "active";
+        long novelId = novelData.insert(userId, title, vo.description() == null ? "" : vo.description(), packId, "auto", bookStatus);
         if (derive != null) {
             novelData.updateDeriveConfig(novelId, deriveConfigJson(derive, vo.sampleId()));
             if (derive.autoContinue() != null && derive.autoContinue()) {
@@ -99,7 +151,9 @@ public class NovelService {
             cloneSampleAssets(novelId, vo.sampleId(), vo.cloneAssets());
         }
         NovelDTO n = novelData.getById(novelId);
-        return new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(), n.getStatus(), 0);
+        return new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(), n.getStatus(), 0,
+                n.getCreateTime(), derive != null && derive.autoContinue() != null && derive.autoContinue(),
+                derive == null ? null : derive.targetChapters());
     }
 
     /** 样本资产克隆：素材卡（★2+，★3 置常驻）/世界观文档/剧情骨架预填大纲（标注待改写）。 */
@@ -117,12 +171,20 @@ public class NovelService {
                 if (c.getKind().equals("world") || (c.getImportance() == null || c.getImportance() < 2)) {
                     continue;
                 }
+                // 衍生书克隆语义（书 10 实证教训）：
+                // ① 人物卡（character）不克隆——衍生新书的主角团必须原创，克隆原书主角团会让卷规划
+                //    顺着原书人生轨迹排章（衍生变复述）；原书人物应由用户按需在素材库手动补；
+                // ② 设定类卡（地点/物品/组织/现象等）照常克隆——这是"沿用样本世界观"的部分；
+                // ③ cloned 卡一律不 pinned（常驻注入会持续把原书设定压进每章上下文）。
+                if (c.getKind().equals("character")) {
+                    continue;
+                }
                 cardData.insert(novelId, c.getKind(), c.getName(), parseAliases(c.getAliases()),
-                        c.getSummary(), c.getContentMd(), c.getImportance() != null && c.getImportance() >= 3,
+                        c.getSummary(), c.getContentMd(), false,
                         "active", c.getFirstSeq());
                 count++;
             }
-            log.info("样本资产克隆：sampleId={} → novelId={} 素材卡 {} 张（★2+）", sampleId, novelId, count);
+            log.info("样本资产克隆：sampleId={} → novelId={} 设定卡 {} 张（★2+，人物卡不克隆）", sampleId, novelId, count);
         }
         if (cloneWorld) {
             for (SampleCardDTO c : sampleCardData.listBySample(sampleId)) {
@@ -231,24 +293,23 @@ public class NovelService {
      * 纯生成不落库（llm_call_log 照常记账）；样本只借结构与节奏气质，提示词明令禁止搬运专有设定。
      */
     public String draftOutline(NovelCreateVO vo) {
-        String title = requireTitle(vo.title());
+        // 只做非空校验，不做全站查重——草稿流程里书已落库，worker 重放会撞自己的名字
+        if (vo.title() == null || vo.title().isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "书名必填");
+        }
+        String title = vo.title().strip();
         NovelCreateVO.DeriveConfigVO d = vo.deriveConfig();
         StylePackDTO preset = vo.presetId() == null ? null : stylePackData.getById(vo.presetId());
         if (preset == null || !preset.isPreset()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "请先在第一步选择品类预设（文风语境）");
         }
-        // 样本骨架（只借结构与节奏气质）+ 样本/用户标签
+        // 样本仅贡献：类型标签回填 + （勾选预填时）canon 骨架。AI 生成本身不喂样本剧情——
+        // 实训教训：剧情骨架进生成材料，模型会逐桥段复刻原书（换名不换故事），衍生变抄袭。
         String skeleton = "";
         java.util.List<String> tags = d != null && d.tags() != null ? d.tags() : new java.util.ArrayList<>();
         if (vo.sampleId() != null) {
             ImportedSampleDTO sample = sampleData.getById(vo.sampleId());
             if (sample != null) {
-                for (SamplePlotNodeDTO n : plotData.listBySample(vo.sampleId())) {
-                    if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
-                        skeleton = truncate(n.getSummary(), 2200);
-                        break;
-                    }
-                }
                 if (tags.isEmpty()) {
                     try {
                         com.fasterxml.jackson.databind.JsonNode t = mapper.readTree(sample.getTags() == null ? "[]" : sample.getTags());
@@ -257,16 +318,33 @@ public class NovelService {
                         // 样本无标签/坏 JSON 时按空处理
                     }
                 }
-                skeleton = "【参考样本骨架（只借结构与节奏气质，禁止搬运其人名/地名/专有设定）】\n"
-                        + (skeleton.isEmpty() ? "（样本尚未深度解析，无骨架）" : skeleton) + "\n";
             }
         }
         int chaptersPerVolume = d != null && d.chaptersPerVolume() != null ? d.chaptersPerVolume() : 10;
         int targetChapters = d != null && d.targetChapters() != null ? d.targetChapters() : 300;
         int volumes = Math.max(1, (int) Math.ceil((double) targetChapters / Math.max(chaptersPerVolume, 1)));
+        // 世界约束由**用户勾选驱动**（cloneAssets.world）：勾选=新故事发生在样本世界内（同世界衍生）；
+        // 不勾=AI 完全自由创作（新世界）。选择权在前端按钮，后端不硬编码。
+        // 提示词文案在 PromptCatalog（node=derive_outline/phase=world），业务代码只组装参数。
+        boolean worldCloned = vo.cloneAssets() != null && Boolean.TRUE.equals(vo.cloneAssets().world());
+        String worldConstraint = "";
+        if (worldCloned && vo.novelId() != null) {
+            String worldDoc = "";
+            for (CanonDocDTO doc : canonData.listByNovel(vo.novelId())) {
+                if (doc.getKind().equals("world") && doc.getContent() != null && !doc.getContent().isBlank()) {
+                    worldDoc = truncate(doc.getContent(), 2200);
+                    break;
+                }
+            }
+            if (!worldDoc.isEmpty()) {
+                worldConstraint = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "world",
+                        "【共用世界观（新故事必须发生在该世界内；可少量引用原书人物为配角，但主角、主线与情节必须完全原创，禁止复刻样本的剧情线与桥段）】\n%s\n",
+                        worldDoc);
+            }
+        }
         String user = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "user", """
-                任务：为下面的新书创作全书大纲，供作者过目修改（之后每一章生成都携带它作为方向约束）。分节输出：## 主题与核心悬念、## 主线（起承转合 300-500 字）、## 分卷走向（每卷一行：卷名+主线任务+卷尾钩子）、## 主要人物（3-6 人：名字/身份/动机/弧光）、## 题材基调。
-                要求：分卷走向按 %d 卷规划；人物名与设定必须原创（若提供了参考样本骨架，只借其结构与节奏气质，禁止搬运其专有人名/地名/专有设定）；全部内容须贴合类型标签与题材基调，悬念与钩子密度按节奏口径安排。
+                任务：为下面的新书创作**全新原创**的全书大纲，供作者过目修改（之后每一章生成都携带它作为方向约束）。分节输出：## 主题与核心悬念、## 主线（起承转合 300-500 字）、## 分卷走向（每卷一行：卷名+主线任务+卷尾钩子）、## 主要人物（3-6 人：名字/身份/动机/弧光）、## 题材基调。
+                要求：分卷走向按 %d 卷规划；**情节、人物、桥段必须完全原创**——即使提供了样本的世界观或类型方向，也禁止复刻样本的剧情线、人物关系与桥段序列；全部内容须贴合类型标签与题材基调，悬念与钩子密度按节奏口径安排。
 
                 【书名】%s
                 【简介】%s
@@ -283,8 +361,7 @@ public class NovelService {
                 d == null || d.pacingNote() == null || d.pacingNote().isBlank()
                         ? DeriveSupport.densityHint(d == null ? null : d.water())
                         : d.pacingNote().strip(),
-                chaptersPerVolume, volumes,
-                skeleton);
+                chaptersPerVolume, volumes);
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.DERIVE_OUTLINE, null, null,
                 List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.DERIVE_OUTLINE, "system",
                                 "你是网文总编，为一本新书创作全书大纲。只输出大纲正文（markdown），不要 JSON、不要任何解释或开场白。")),

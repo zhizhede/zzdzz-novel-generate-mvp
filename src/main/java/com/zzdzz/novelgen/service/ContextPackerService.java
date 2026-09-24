@@ -80,6 +80,13 @@ public class ContextPackerService {
             sb.append("【类型标签（本书的类型基调与标志性元素，规划与行文必须贴合）】\n")
                     .append(String.join("、", cfg.tags())).append('\n');
         }
+        // 衍生差异红线（书 10 实证：克隆的原书主角卡 pinned 注入后，卷规划复述了原书剧情）
+        if (!sceneOnly && cfg.sourceSampleId() != null) {
+            sb.append("【衍生差异红线（最高优先级）】本书为样本衍生新作，不是样本的复述或改编：\n")
+              .append("- 禁止复述样本原书的情节走向、桥段与章节结构；\n")
+              .append("- 本书主角与主线必须为原创新人物新事件（样本素材卡中的原书主角只能作为背景设定存在，不得担任本书主角）；\n")
+              .append("- 只沿用其世界观规则、力量体系与类型套路。\n");
+        }
         return sb.toString();
     }
 

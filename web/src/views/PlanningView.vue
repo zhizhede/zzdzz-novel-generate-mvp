@@ -20,9 +20,19 @@
 
       <!-- 卷纲 -->
       <el-tab-pane :label="`卷纲（${planChapters.length} 章规划）`">
+        <div v-if="planTask" style="margin-bottom: 10px; padding: 8px 12px; background: #fdf6ec; border-radius: 6px">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px">
+            <el-tag size="small" type="warning">卷纲规划中</el-tag>
+            <span style="font-size: 12px; color: #999">{{ planTask.currentStep || '排队等待中' }} · 第 {{ planTask.fromChapter }} 章起
+              <template v-if="planTask.status === 'DONE'"> · 完成</template>
+            </span>
+          </div>
+          <el-progress :percentage="planTaskPercent" :stroke-width="8" :show-text="false" />
+          <div v-if="planTask.status === 'DONE'" style="font-size: 12px; color: #67c23a; margin-top: 4px">规划完成并落库 ✓</div>
+        </div>
         <div style="margin-bottom: 10px; display: flex; gap: 14px; align-items: center">
           <el-button size="small" type="primary" @click="openAdd">新增章规划</el-button>
-          <el-button size="small" type="success" :loading="autoPlanBusy" @click="openAutoPlan">AI 规划下一卷</el-button>
+          <el-button size="small" type="success" :loading="autoPlanBusy" :disabled="!!planTask && planTask.status !== 'DONE'" @click="openAutoPlan">AI 规划下一卷</el-button>
           <span style="display: flex; align-items: center; gap: 6px; color: #999; font-size: 12px">
             卷纲人工审核
             <el-switch v-model="planMode" active-value="manual" inactive-value="auto" @change="switchPlanMode" />
@@ -45,7 +55,7 @@
             <el-table-column label="状态" width="130">
               <template #default="{ row }">
                 <el-tag size="small" :type="row.hasText ? 'success' : 'info'">
-                  {{ row.hasText ? '已成文' : row.status }}
+                  {{ row.hasText ? '正文已成' : '规划就绪·待生成' }}
                 </el-tag>
                 <span v-if="row.sceneCount" style="font-size: 11px; color: #999"> {{ row.sceneCount }}场</span>
               </template>
@@ -249,7 +259,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
@@ -419,7 +429,8 @@ async function runAutoPlan() {
   if (planMode.value !== 'manual') {
     try {
       await api.post(`/api/novels/${novelId.value}/planning/volume/auto-plan-async`, autoPlanForm.value)
-      ElMessage.success('规划任务已入队，进度见工作台队列；完成后本页刷新即可看到新卷')
+      ElMessage.success('规划任务已入队——本页下方实时显示进度，完成后自动刷新')
+      if (!planPollTimer) pollPlanTask()
     } catch (e) {
       ElMessage.error(e.message)
     }
@@ -478,10 +489,35 @@ async function adoptPlan() {
   }
 }
 
+// ===== 卷纲规划进度（auto 模式异步任务内嵌展示） =====
+const planTask = ref(null)
+let planPollTimer = null
+
+const planTaskPercent = computed(() => (planTask.value?.status === 'RUNNING' ? 50 : 5))
+
+async function pollPlanTask() {
+  try {
+    const title = (novels.value.find((n) => n.id === novelId.value) || {}).title
+    const q = title ? await api.get('/api/pipeline/queue') : []
+    planTask.value = q.find((t) => t.novelTitle === title
+        && t.kind === 'PLAN' && ['QUEUED', 'RUNNING'].includes(t.status)) || null
+  } catch { /* 忽略轮询错误 */ }
+  if (planTask.value) {
+    planPollTimer = setTimeout(pollPlanTask, 3000)
+  } else if (planPollTimer) {
+    // 任务从队列消失=刚完成——刷新卷纲一次后停止轮询
+    planPollTimer = null
+    try { await loadAll() } catch { /* 刷新失败不打扰 */ }
+  }
+}
+
 onMounted(async () => {
   novels.value = await api.get('/api/novels')
   novelId.value = getSelectedNovelId() ?? novels.value[0]?.id
   if (!novels.value.some((n) => n.id === novelId.value)) novelId.value = novels.value[0]?.id
   await loadAll()
+  pollPlanTask()
 })
+
+onUnmounted(() => clearTimeout(planPollTimer))
 </script>

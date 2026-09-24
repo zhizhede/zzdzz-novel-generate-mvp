@@ -47,6 +47,8 @@ public final class TuningDefaults {
     public static final int BATCH_MAX_CHAPTERS = 10;
     // 无人续跑规划卷数保险丝（防失控）
     public static final int AUTO_CONTINUE_MAX_VOLUMES = 50;
+    // AI 大纲草稿并发生成数（批量开书排队消费）
+    public static final int OUTLINE_DRAFT_PARALLEL = 4;
 
     private TuningDefaults() {
     }

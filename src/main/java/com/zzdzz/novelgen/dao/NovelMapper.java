@@ -13,7 +13,7 @@ public interface NovelMapper extends BaseMapper<NovelDTO> {
 
     Long findIdByTitle(@Param("title") String title);
 
-    long insert(@Param("userId") long userId, @Param("title") String title, @Param("description") String description, @Param("stylePackId") Long stylePackId, @Param("approvalMode") String approvalMode);
+    long insert(@Param("userId") long userId, @Param("title") String title, @Param("description") String description, @Param("stylePackId") Long stylePackId, @Param("approvalMode") String approvalMode, @Param("status") String status);
 
     String findApprovalMode(@Param("novelId") long novelId);
 

@@ -5,7 +5,8 @@ package com.zzdzz.novelgen.model.vo;
  * cloneAssets/deriveConfig 均可空——不选样本时就是纯预设开书，行为与旧口径一致。
  */
 public record NovelCreateVO(String title, String description, Long presetId,
-                            Long sampleId, CloneAssetsVO cloneAssets, DeriveConfigVO deriveConfig) {
+                            Long sampleId, CloneAssetsVO cloneAssets, DeriveConfigVO deriveConfig,
+                            Boolean draft, Long novelId) {
 
     /** 克隆哪些样本资产：素材卡（★2+）/世界观文档/剧情骨架预填大纲。 */
     public record CloneAssetsVO(Boolean cards, Boolean world, Boolean plotOutline) {

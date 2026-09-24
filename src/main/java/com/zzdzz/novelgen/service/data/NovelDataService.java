@@ -12,7 +12,10 @@ public interface NovelDataService extends IService<NovelDTO> {
 
     Long findIdByTitle(String title);
 
-    long insert(long userId, String title, String description, Long stylePackId, String approvalMode);
+    long insert(long userId, String title, String description, Long stylePackId, String approvalMode, String status);
+
+    /** 草稿书转正式（draft → active）。 */
+    int activate(long novelId);
 
     String findApprovalMode(long novelId);
 
@@ -41,4 +44,10 @@ public interface NovelDataService extends IService<NovelDTO> {
 
     /** 自动规划卷数 +1（保险丝计数）。 */
     int bumpAutoVolumes(long novelId);
+
+    /** 编辑书名/简介（改名唯一性在 service 校验）。 */
+    int updateProfile(long novelId, String title, String description);
+
+    /** 软删书籍（is_deleted=true；关联数据保留可恢复）。 */
+    int softDelete(long novelId);
 }
