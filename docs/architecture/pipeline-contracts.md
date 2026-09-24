@@ -167,3 +167,50 @@ sequenceDiagram
 - **传**：采纳条目 → 下卷规划上下文（FixB 自动注入已有，单条人工决策无通道）
 - **展示**：报告条目上直接操作，决策后状态可见
 - **异步**：采纳动作只写记录，规划时才消费，不阻塞
+
+## 五、样本资产化与衍生量产契约（2026-09-25 增补）
+
+> 本节为 2026-09-24/25 八批功能的契约补记。此前施工未先改本文，违反「改契约先改这个文件」——补记同时立此存照：**后续任何批次，完工前必须回写本文，否则不得 commit**。
+
+### 流 S：样本导入与深度解析
+
+```mermaid
+flowchart LR
+    A[导入 txt/mobi] --> B[analyze 秒级 文风指纹+切块落库+台账行]
+    B --> C[深度解析 FAST抽样40章 / FULL全书]
+    C --> D[逐章 sample_chapter 并发 幂等=断点checkpoint]
+    D --> E[实体归并+sample_merge] --> F[卷汇总/全书大纲/世界观/标签]
+```
+
+验收口径：①语料与资产全部落库（preset_corpus/imported_samples/sample_plot_nodes/sample_cards），删除仅软删；②FAST→FULL 升级与重启恢复不重析已析章（UNIQUE(sample,level,seq)）；③解析失败留缺口可续跑，不产生半截资产展示；④mobi/azw3 无 DRM 可提取，DRM/HUFF 人话拒绝。
+
+### 流 D：衍生开书与草稿态
+
+```mermaid
+flowchart LR
+    A[向导选预设+样本] --> B[衍生参数 用户定或AI帮定] --> C[点AI生成大纲]
+    C --> D[书即落库 status=draft 秒回任务id]
+    D --> E[大纲后台并发生成 注入克隆世界观+素材卡约束]
+    E --> F[完成并激活 draft-to-active 大纲进canon]
+    D -.中途离开.-> G[草稿恢复 自动取回设定与大纲]
+```
+
+验收口径：①生大纲即落库，书籍管理页立即可见（状态=草稿）；②克隆样本资产时 AI 大纲必须贴合克隆世界（derive_outline/world 段，PromptCatalog 可编辑）——否则卷规划审校必打回（书 9 实证）；③克隆预设的章长带约束卷规划预算；④掺水量/POV/标签/每卷章数/目标/无人续跑全参数书级可改（PUT derive-config，fail-open）。**已知约束**：克隆世界观与 AI 自创大纲是组合风险，向导须提示（TODO：勾选联动警告）。
+
+### 流 C：无人续跑链
+
+```mermaid
+flowchart LR
+    A[derive_config.autoContinue=true] --> B[CHAPTERS任务 DONE] --> C{目标未达?}
+    C -->|有下章规划行| D[续批 cap=batch_max_chapters 钳目标]
+    C -->|无规划行| E[自动卷复盘 fail-open] --> F[submitPlan 下卷]
+    F -->|PLAN DONE| D
+    C -->|已达 targetChapters| G[REACHED 收链]
+    B -.非DONE终态.-> H[PAUSED 带原因 人工恢复]
+```
+
+验收口径：①链状态三列（auto_state/auto_message/auto_volumes）可观测，工作台状态卡展示；②用户停止/失败耗尽/规划失败 → 链必 PAUSED 且原因可读；③resume 允许解卡（RUNNING 但无活动任务）；④保险丝 auto_continue_max_volumes 防失控；⑤队列认领 priority DESC,id ASC。
+
+### 书籍管理契约
+
+查（GET /api/novels 含无人续跑读数）/改（PUT，书名全站唯一）/删（DELETE 软删；有活动任务拒绝；autoContinue 自动关闭+链置 OFF）/打开（设当前书→章节页）。删书相关 TODO：级联展示（书删后素材/任务在书外页签仍可见的口径）待产品定。
