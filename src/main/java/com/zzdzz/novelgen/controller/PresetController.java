@@ -71,7 +71,7 @@ public class PresetController {
     /** 开书向导·导入小说分析（纯机械探针不落库）：切块→指纹→与现有品类相似度→复用/新建建议。 */
     @PostMapping("/analyze")
     public Result<SampleAnalyzeVO> analyze(@RequestBody AnalyzeVO vo) {
-        return Result.success(presetService.analyze(vo.sampleName(), vo.text()));
+        return Result.success(presetService.analyze(vo.sampleName(), vo.text(), vo.mobiBase64()));
     }
 
     /** 开书向导·由导入小说一键建品类：切块落语料 + 采纳为预设。 */
@@ -173,7 +173,8 @@ public class PresetController {
     public record AdoptVO(String genre, String name, String description) {
     }
 
-    public record AnalyzeVO(String sampleName, String text) {
+    /** text 与 mobiBase64 二选一：txt 直接给 text；mobi/azw 给文件字节的 base64（后端提取正文）。 */
+    public record AnalyzeVO(String sampleName, String text, String mobiBase64) {
     }
 
     public record FromSampleVO(String genre, String presetName, String description, String text) {

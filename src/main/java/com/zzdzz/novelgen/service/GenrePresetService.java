@@ -140,7 +140,26 @@ public class GenrePresetService {
     static final double MATCH_THRESHOLD = 0.65;
     static final double NEW_THRESHOLD = 0.45;
 
-    public SampleAnalyzeVO analyze(String sampleName, String text) {
+    public SampleAnalyzeVO analyze(String sampleName, String text, String mobiBase64) {
+        if (text == null || text.isBlank()) {
+            if (mobiBase64 == null || mobiBase64.isBlank()) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "请提供小说正文或上传 mobi/azw 电子书");
+            }
+            byte[] file;
+            try {
+                file = java.util.Base64.getDecoder().decode(mobiBase64.contains(",")
+                        ? mobiBase64.substring(mobiBase64.indexOf(',') + 1)
+                        : mobiBase64);
+            } catch (IllegalArgumentException e) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "电子书文件解码失败，请重新选择文件");
+            }
+            if (file.length > 64 * 1024 * 1024) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "电子书文件过大（>64MB）");
+            }
+            com.zzdzz.novelgen.common.util.MobiExtractor.Extracted ex =
+                    com.zzdzz.novelgen.common.util.MobiExtractor.extract(file);
+            text = ex.text();
+        }
         String t = requireText(text, "小说正文必填");
         if (t.length() > ANALYZE_MAX_CHARS) {
             throw new BizException(ErrorCode.PARAM_ERROR, "正文超长（" + (t.length() / 10000) + " 万字 > 上限 800 万），请分段导入");

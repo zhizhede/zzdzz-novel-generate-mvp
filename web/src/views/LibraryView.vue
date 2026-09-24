@@ -497,12 +497,14 @@
               <span v-else style="color: #999; font-size: 12px">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="280">
+          <el-table-column label="操作" width="340">
             <template #default="{ row }">
               <el-button v-if="parseStatuses[row.id] && parseStatuses[row.id].chapterCount > 0"
                          size="small" type="primary" link @click="openAssets(row)">资产</el-button>
               <el-button v-if="parseStatuses[row.id] && parseStatuses[row.id].chapterCount > 0"
                          size="small" link :loading="taggingId === row.id" @click="extractTags(row)">提标签</el-button>
+              <el-button v-if="!row.presetId" size="small" type="warning" link
+                         :loading="adoptingId === row.id" @click="adoptSamplePreset(row)">提预设</el-button>
               <el-button v-if="canParse(row, 'FAST')" size="small" link @click="submitParse(row, 'FAST')">快速解析</el-button>
               <el-button v-if="canParse(row, 'FULL')" size="small" link @click="submitParse(row, 'FULL')">
                 {{ parseStatuses[row.id] && parseStatuses[row.id].mode === 'FAST' ? '升级完整' : '完整解析' }}
@@ -757,8 +759,8 @@
     <el-dialog v-model="sampleImportOpen" title="导入新小说" width="640px">
       <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px">
         <el-input v-model="sampleImportForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 220px" />
-        <label style="cursor: pointer; font-size: 13px; color: #409eff">上传 txt
-          <input type="file" accept=".txt" style="display: none" @change="onSampleImportFile" />
+        <label style="cursor: pointer; font-size: 13px; color: #409eff">上传 txt / mobi
+          <input type="file" accept=".txt,.mobi,.azw3,.azw" style="display: none" @change="onSampleImportFile" />
         </label>
         <span v-if="sampleImportForm.text" style="font-size: 12px; color: #999">
           已载入 {{ (sampleImportForm.text.length / 10000).toFixed(1) }} 万字
@@ -769,7 +771,7 @@
       <div style="font-size: 12px; color: #999; margin-top: 6px">分析为纯机械指标（秒级、零 LLM 成本）；深度解析（LLM）在列表行单独触发。</div>
       <template #footer>
         <el-button @click="sampleImportOpen = false">取消</el-button>
-        <el-button type="primary" :loading="sampleImporting" :disabled="!sampleImportForm.text" @click="importSample">
+        <el-button type="primary" :loading="sampleImporting" :disabled="!sampleImportForm.text && !sampleImportForm.mobiBase64" @click="importSample">
           分析并入库
         </el-button>
       </template>
@@ -936,6 +938,26 @@ async function openAssets(row) {
 
 /** 样本类型/特征标签手动提取/重提（解析管线 DONE 前会自动跑一次）。 */
 const taggingId = ref(null)
+const adoptingId = ref(null)
+
+/** 一键把该样本品类的文风采纳为预设（之后开书下拉即可选）。 */
+async function adoptSamplePreset(row) {
+  adoptingId.value = row.id
+  try {
+    const r = await api.post('/api/preset/from-sample', {
+      genre: row.genre,
+      presetName: row.genre + '·文风v1',
+      description: '源品类：' + row.genre + '，' + row.chunks + ' 块语料'
+    })
+    ElMessage.success(`文风预设已生成（#${r.presetId}），开书向导可直接选`)
+    await loadSamples()
+    await loadPresets()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    adoptingId.value = null
+  }
+}
 async function extractTags(row) {
   taggingId.value = row.id
   try {
@@ -1010,19 +1032,30 @@ const sampleImporting = ref(false)
 const highlightSampleId = ref(null)
 
 function openSampleImport() {
-  sampleImportForm.value = { name: '', text: '' }
+  sampleImportForm.value = { name: '', text: '', mobiBase64: '' }
   sampleImportOpen.value = true
 }
 
 function onSampleImportFile(ev) {
   const f = ev.target.files && ev.target.files[0]
   if (!f) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    sampleImportForm.value.text = String(reader.result || '')
-    if (!sampleImportForm.value.name) sampleImportForm.value.name = f.name.replace(/\.txt$/i, '')
+  if (/\.(mobi|azw3|azw)$/i.test(f.name)) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      sampleImportForm.value.mobiBase64 = String(reader.result || '')
+      sampleImportForm.value.text = ''
+      if (!sampleImportForm.value.name) sampleImportForm.value.name = f.name.replace(/\.(mobi|azw3|azw)$/i, '')
+    }
+    reader.readAsDataURL(f)
+  } else {
+    const reader = new FileReader()
+    reader.onload = () => {
+      sampleImportForm.value.text = String(reader.result || '')
+      sampleImportForm.value.mobiBase64 = ''
+      if (!sampleImportForm.value.name) sampleImportForm.value.name = f.name.replace(/\.txt$/i, '')
+    }
+    reader.readAsText(f, 'utf-8')
   }
-  reader.readAsText(f, 'utf-8')
   ev.target.value = ''
 }
 
@@ -1031,7 +1064,8 @@ async function importSample() {
   try {
     const r = await api.post('/api/preset/analyze', {
       sampleName: sampleImportForm.value.name,
-      text: sampleImportForm.value.text
+      text: sampleImportForm.value.text,
+      mobiBase64: sampleImportForm.value.mobiBase64 || undefined
     })
     sampleImportOpen.value = false
     highlightSampleId.value = r.sampleId
