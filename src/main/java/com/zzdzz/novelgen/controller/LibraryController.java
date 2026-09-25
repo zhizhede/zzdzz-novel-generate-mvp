@@ -62,10 +62,16 @@ public class LibraryController {
         return Result.success(promptService.detail(id));
     }
 
-    /** 人工编辑模板（置 custom；占位符序列须与代码目录一致）。 */
+    /** 人工编辑模板（置 custom；目录行占位符序列须与代码目录一致，{key} 拼接段与自定义行直接保存）。 */
     @PutMapping("/prompts/{id}")
     public Result<PromptDetailVO> updatePrompt(@PathVariable long id, @RequestBody PromptUpdateVO dto) {
         return Result.success(promptService.updateContent(id, dto.content()));
+    }
+
+    /** 启用/停用（停用即该行不生效，运行时回退代码模板）。 */
+    @PutMapping("/prompts/{id}/enabled")
+    public Result<PromptDetailVO> togglePrompt(@PathVariable long id, @RequestBody PromptEnabledVO dto) {
+        return Result.success(promptService.setEnabled(id, Boolean.TRUE.equals(dto.enabled())));
     }
 
     /** 重置回代码目录版本（清 custom）。 */
@@ -313,6 +319,8 @@ public class LibraryController {
     // ===== 请求 DTO（字段名与前端 payload 逐字对齐；后缀规约）=====
 
     public record PromptUpdateVO(String content) {}
+
+    public record PromptEnabledVO(Boolean enabled) {}
 
     /** tuning 值库存为字符串，数字/文本都可能，绑定保持 Object。 */
     public record TuningUpdateVO(Object value) {}

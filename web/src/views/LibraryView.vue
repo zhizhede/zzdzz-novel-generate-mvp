@@ -261,24 +261,31 @@
       <el-tab-pane :label="`提示词（${prompts.length}）`">
         <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px">
           <span style="color: #999; font-size: 12px">
-            各 LLM 节点的提示词模板（启动时与代码同步落库）。exact 行可编辑，骨架/自定义段可新建删除；%s 与 {key} 为运行时占位。
+            所有 LLM 节点提示词与拼装段全量落库：运行时库值优先、代码为回退。%s/%d 为 format 占位（保存时校验序列），{key} 为拼装段占位（代码填参）；停用行即回退代码版。
           </span>
           <el-input v-model="promptFilter" placeholder="按节点/标题筛选" size="small" clearable style="width: 220px" />
           <el-button type="primary" size="small" @click="openPromptCreate">新建提示词</el-button>
         </div>
-        <el-table :data="filteredPrompts" border size="small" style="max-width: 1080px" @row-click="(r) => viewPrompt(r.id)">
+        <el-table :data="filteredPrompts" border size="small" style="max-width: 1180px" @row-click="(r) => viewPrompt(r.id)">
           <el-table-column prop="node" label="节点" width="150" />
-          <el-table-column prop="phase" label="阶段" width="90" />
-          <el-table-column prop="title" label="用途" min-width="260" show-overflow-tooltip />
-          <el-table-column label="形态" width="80">
+          <el-table-column prop="phase" label="阶段" width="110" />
+          <el-table-column prop="title" label="用途" min-width="240" show-overflow-tooltip />
+          <el-table-column label="形态" width="90">
             <template #default="{ row }">
-              <el-tag :type="row.exact ? 'success' : 'warning'" size="small">{{ row.exact ? '逐字' : '骨架' }}</el-tag>
+              <el-tag :type="row.exact ? 'success' : 'info'" size="small">{{ row.exact ? 'format' : '{key}段' }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="来源" width="70">
             <template #default="{ row }">
               <el-tag v-if="row.custom" type="danger" size="small">已改</el-tag>
               <span v-else style="color: #999; font-size: 12px">代码</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="启用" width="70">
+            <template #default="{ row }">
+              <span @click.stop>
+                <el-switch :model-value="row.enabled" size="small" @change="(v) => togglePromptEnabled(row, v)" />
+              </span>
             </template>
           </el-table-column>
           <el-table-column prop="version" label="版" width="50" />
@@ -299,21 +306,20 @@
         <el-drawer v-model="promptOpen" :title="promptDetail ? promptDetail.node + ' · ' + promptDetail.phase : '提示词'" size="55%">
           <template v-if="promptDetail">
             <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
-              <el-tag size="small" :type="promptDetail.exact ? 'success' : 'warning'">
-                {{ promptDetail.exact ? '与代码逐字一致' : '运行时拼接骨架' }}
+              <el-tag size="small" :type="promptDetail.exact ? 'success' : 'info'">
+                {{ promptDetail.exact ? 'format 模板' : '{key} 拼接段' }}
               </el-tag>
               <el-tag v-if="promptDetail.custom" type="danger" size="small">人工已改</el-tag>
+              <el-tag v-if="!promptDetail.enabled" type="warning" size="small">已停用（走代码版）</el-tag>
               <span style="color: #999; font-size: 12px">v{{ promptDetail.version }} · {{ promptDetail.title }}</span>
               <el-button size="small" plain @click="copyPrompt">复制全文</el-button>
-              <template v-if="promptDetail.exact">
-                <el-button v-if="!promptEditing" size="small" type="primary" plain @click="promptContent = promptDetail.content; promptEditing = true">编辑</el-button>
-                <el-button v-else size="small" type="primary" :loading="promptSaving" @click="savePrompt">保存</el-button>
-                <el-button v-if="promptEditing" size="small" @click="promptEditing = false; loadPrompt()">取消</el-button>
-                <el-button v-if="promptDetail.custom" size="small" type="warning" plain @click="resetPrompt">重置回代码版</el-button>
-              </template>
+              <el-button v-if="!promptEditing" size="small" type="primary" plain @click="promptContent = promptDetail.content; promptEditing = true">编辑</el-button>
+              <el-button v-else size="small" type="primary" :loading="promptSaving" @click="savePrompt">保存</el-button>
+              <el-button v-if="promptEditing" size="small" @click="promptEditing = false; loadPrompt()">取消</el-button>
+              <el-button v-if="!promptDetail.custom" size="small" type="warning" plain @click="resetPrompt">重置回代码版</el-button>
             </div>
             <div style="color: #999; font-size: 12px; margin-bottom: 8px" v-if="promptEditing">
-              可直接改文案；%s/%d 占位符的数量与顺序必须保持不变（保存时校验）。保存后 30 秒内对新生效，格式化失败会自动回退代码模板。
+              可直接改文案：format 模板的 %s/%d 占位符数量与顺序必须保持不变（保存时校验）；{key} 拼接段的占位由代码填参，改文案即可。保存后 30 秒内对新生效，格式化失败会自动回退代码模板。
             </div>
             <el-input v-if="promptEditing" v-model="promptContent" type="textarea" :rows="24" />
             <pre v-else style="white-space: pre-wrap; background: #f7f8fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.7">{{ promptDetail.content }}</pre>
@@ -324,7 +330,7 @@
         <el-dialog v-model="promptCreateOpen" title="新建提示词" width="640px" append-to-body>
           <div style="display: flex; gap: 10px; margin-bottom: 10px">
             <el-input v-model="promptCreateForm.node" placeholder="节点（如 scene_draft）" />
-            <el-input v-model="promptCreateForm.phase" placeholder="阶段（≤16 字符，如 my_rule）" />
+            <el-input v-model="promptCreateForm.phase" placeholder="阶段（≤32 字符，如 my_rule）" />
           </div>
           <el-input v-model="promptCreateForm.title" placeholder="用途说明（可选）" style="margin-bottom: 10px" />
           <el-input v-model="promptCreateForm.content" type="textarea" :rows="10"
@@ -1215,8 +1221,8 @@ async function createPrompt() {
     ElMessage.warning('节点/阶段/内容必填')
     return
   }
-  if (f.phase.trim().length > 16) {
-    ElMessage.warning('阶段过长（≤16 字符）')
+  if (f.phase.trim().length > 32) {
+    ElMessage.warning('阶段过长（≤32 字符）')
     return
   }
   promptCreating.value = true
@@ -1245,6 +1251,16 @@ async function deletePrompt(row) {
     prompts.value = await api.get('/api/prompts')
   } catch (e) {
     if (e !== 'cancel') ElMessage.error(e.message)
+  }
+}
+
+async function togglePromptEnabled(row, enabled) {
+  try {
+    await api.put(`/api/prompts/${row.id}/enabled`, { enabled })
+    row.enabled = enabled
+    ElMessage.success(enabled ? '已启用（30 秒内生效）' : '已停用（回退代码版）')
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 
