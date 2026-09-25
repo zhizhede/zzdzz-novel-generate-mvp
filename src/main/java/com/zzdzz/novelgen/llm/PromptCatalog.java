@@ -497,6 +497,9 @@ public final class PromptCatalog {
                  "new_promises":["本章新立下的承诺/约定/邀约"],
                  "unresolved":["本章留下的未解之谜或未回收伏笔"]}"""),
 
+        new TemplateDef(LlmNode.WORLD_STATE, "system", "世界状态记录员系统提示（world_state 回填）", true,
+                "你是世界状态记录员。读完本章，输出本章结束时刻的结构化状态快照，只输出 JSON：\n{%s}\n规则：只记硬事实；人名用规范名；拿不准的不写；字符串值内部禁止英文双引号，引用一律用「」。"),
+
         new TemplateDef(LlmNode.SAMPLE_TAGS, "system", "样本标签提取系统提示", true,
                 "你是网文分类编辑，给小说打类型与特征标签；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
 
