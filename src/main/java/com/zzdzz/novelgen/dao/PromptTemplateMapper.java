@@ -12,6 +12,8 @@ public interface PromptTemplateMapper extends BaseMapper<PromptTemplateDTO> {
 
     int updateContent(@Param("id") long id, @Param("content") String content);
 
+    int updateEnabled(@Param("id") long id, @Param("enabled") boolean enabled);
+
     int reset(@Param("id") long id, @Param("content") String content, @Param("catalogHash") String catalogHash);
 
     List<PromptTemplateDTO> findAll();

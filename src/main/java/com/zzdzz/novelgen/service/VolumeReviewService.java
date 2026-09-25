@@ -212,38 +212,13 @@ public class VolumeReviewService {
                     .append("｜实际：").append(r.status()).append(' ').append(r.textLen()).append("字\n");
         }
 
-        String user = promptTemplates.format(LlmNode.VOLUME_REVIEW, "user", """
-                任务：复盘第 %d 卷（第 %d-%d 章）。你是资深网文责编，对照卷纲意图与实际成稿找漂移。
-
-                【卷纲行 vs 实际】
-                %s
-                【各章事实账（实际发生了什么）】
-                %s
-                【世界状态：卷首】
-                %s
-                【世界状态：卷末】
-                %s
-                【机械对账（确定性结果，直接采信）】
-                %s
-
-                只输出 JSON：
-                {"overall":"pass|drift|critical","summary":"300字内总评：主线推进/人物弧光/卷尾钩子兑现度",
-                 "drifts":[{"type":"plot|foreshadow|character|world|pacing","severity":"minor|major",
-                   "where":"第N章或全卷","issue":"漂移描述（对照卷纲意图）","suggestion":"怎么改"}],
-                 "highlights":["做得好的点"],"next_volume":"下一卷建议（150字内）"}
-                规则：
-                - 机械对账已给出的伏笔/字数结论不要重复报，只在其揭示的模式上展开叙事层分析。
-                - 漂移 = 实际走向偏离卷纲意图或前后矛盾；没有把握的不要报；字符串值内部禁止英文双引号。
-                - 不要输出思考过程，只输出 JSON。
-                """, volNo, fromNo, toNo, rowsSb,
+        String user = promptTemplates.format(LlmNode.VOLUME_REVIEW, "user", volNo, fromNo, toNo, rowsSb,
                 digestsSb.isEmpty() ? "（本卷无事实账）" : digestsSb.toString(),
                 worldFirst, worldLast, mechanical);
 
         JsonNode n = llmJson.ask(new LlmPort.ChatRequest(
                         LlmNode.VOLUME_REVIEW, novelId, null,
-                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_REVIEW, "system",
-                                        "你是资深网文责编，负责卷级复盘。只输出合法 JSON，"
-                                                + "字符串值内部禁止英文双引号，引用一律用「」。")),
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_REVIEW, "system")),
                                 LlmPort.Message.user(user)),
                         LlmTemps.VOLUME_REVIEW),
                 node -> {

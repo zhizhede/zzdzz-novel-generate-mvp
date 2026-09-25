@@ -55,35 +55,10 @@ public class OutlineService {
             if (trimmed.length() > maxLen) {
                 trimmed = trimmed.substring(0, maxLen) + "…（意见超长已截断）";
             }
-            goal = goal + "（上一版内容已被人工打回，打回意见：" + trimmed
-                    + "。本次规划必须针对性回应上述意见，调整场景设计）";
+            goal = goal + promptTemplates.getSection(LlmNode.OUTLINE, "reject_suffix",
+                    java.util.Map.of("reason", trimmed));
         }
-        String user = promptTemplates.format(LlmNode.OUTLINE, "user", """
-                任务：为第 %d 章《%s》编写场景级章纲。
-                本章卷纲目标：%s
-                章末钩子类型：%s
-                本章距上一章的时间跨度：%s（场景与对白须体现该推进，不可凭空另设时间线）
-                本章涉及的守则：%s
-                伏笔任务：%s
-                全章字数预算：%d–%d 字，必须拆成 2-3 个场景，每个场景 800–1200 字。
-
-                【世界观（必须遵守，不得发明矛盾设定）】
-                %s
-
-                %s
-
-                【前情摘要】
-                %s
-
-                【上一章事件后果（第一场景必须与之对接：兑现、交代或明确推进，禁止无视另起炉灶）】
-                %s
-
-                【上一章结尾原文（衔接其节奏）】
-                %s
-
-                只输出 JSON，格式：
-                {"scenes":[{"no":1,"goal":"本场景目标","present":["出场人物"],"must_reveal":["必须让读者知道的信息"],"must_not":["禁止出现的内容"],"words":900}]}
-                """, ch.getChapterNo(), ch.getTitle(), goal, ch.getHook(),
+        String user = promptTemplates.format(LlmNode.OUTLINE, "user", ch.getChapterNo(), ch.getTitle(), goal, ch.getHook(),
                 Objects.toString(ch.getTimeNote(), "紧接上一章，无跳跃"),
                 Objects.toString(ch.getRuleRefs(), "[]"), Objects.toString(ch.getForeshadowRefs(), "[]"),
                 ch.getBudgetMin(), ch.getBudgetMax(), world, characters,
@@ -126,8 +101,7 @@ public class OutlineService {
     private JsonNode askScenes(long novelId, long chapterId, String user, int tries) {
         return llmJson.ask(new LlmPort.ChatRequest(
                         LlmNode.OUTLINE, novelId, chapterId,
-                        List.of(LlmPort.Message.system("你是网文章纲规划器，只输出合法 JSON，不要任何解释或 markdown 代码块。"
-                                + "字符串值内部禁止英文双引号，引用一律用「」。"),
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.OUTLINE, "system")),
                                 LlmPort.Message.user(user)),
                         LlmTemps.OUTLINE),
                 node -> {

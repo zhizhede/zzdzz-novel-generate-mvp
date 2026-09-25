@@ -171,43 +171,25 @@ public class VolumePlanService {
             // 衍生配置的每卷章数目标（开书向导）：提示词给目标、结构校验按容差收口
             span = promptTemplates.getSection("common", "plan_span_target",
                     java.util.Map.of("target", String.valueOf(targetChapters),
-                            "slack", String.valueOf(Math.max(1, targetChapters / 8))),
-                    "章数目标 " + targetChapters + " 章（允许 ±" + Math.max(1, targetChapters / 8)
-                            + " 章，在 no 字段连续编号体现）——这是本书的节奏设定，非建议");
+                            "slack", String.valueOf(Math.max(1, targetChapters / 8))));
         } else {
-            span = promptTemplates.getSection("common", "plan_span_free", java.util.Map.of(),
-                    "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）");
+            span = promptTemplates.getSection("common", "plan_span_free", java.util.Map.of());
         }
         // 品类预设的章长带（开书克隆自 gate_config）：有带则预算必须进带，无带回旧口径（往卷水平自估）
         int[] band = budgetBand(novelId);
         String budgetRule = band == null
-                ? promptTemplates.getSection("common", "plan_budget_without", java.util.Map.of(),
-                        "4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。")
+                ? promptTemplates.getSection("common", "plan_budget_without", java.util.Map.of())
                 : promptTemplates.getSection("common", "plan_budget_with",
-                        java.util.Map.of("lo", String.valueOf(band[0]), "hi", String.valueOf(band[1])),
-                        "4. budget_min/budget_max 为单章字数预算，本书风格基线（源自品类预设）为 "
-                                + band[0] + "-" + band[1] + " 字，各章预算必须落在该带内。");
-        String user = promptTemplates.format(LlmNode.VOLUME_PLAN, "user", """
-                任务：规划第 %d 卷，从第 %d 章开始，%s。
-
-                规划规则：
-                1. brief 为 150-300 字卷简报，必须写清四个决策：本卷核心悬念与谜底展开节奏（人物身份/动机类问题的答案在本卷如何推进）、卷终点钩子（终章留给下一卷的最大悬念）、伏笔取舍（哪些回收、哪些继续悬置及理由）、节奏曲线（紧张章与舒缓章如何分布）。
-                2. chapters.no 从 %d 开始连续编号；title 不超过 12 字；goal 100-200 字且按戏剧结构写四件套——欲望（本章谁想要什么）、阻碍（什么在阻止）、转折（章内如何升级或翻转）、情绪落点，供下游场景拆解器使用；hook 为一句话章末钩子；time_note 为本章距上一章的故事时间跨度（如「紧接」「次日清晨」「三天后」，不得与时间线矛盾）。
-                3. foreshadows 只列本章要「埋设」或「回收」的伏笔：账本中 proposed/planned 的编码被引用即排期埋设，planted 的被引用即安排回收（action=recover）；账本里没有的新伏笔省略 code、必须给 content（一句话）且 action=plant，将自动建账；已 recovered 的不要引用（旧线呼应写进 goal 即可）；与本章无关的不要列。
-                %s
-                5. 卷尾必须留下强钩子；不得与已有卷纲重复桥段。
-                6. 若上下文给出【上卷复盘要点】，必须在 brief 决策与章节安排中做出回应：点名的悬置伏笔优先安排兑现（引用编码即排期）或给出明确悬置理由；漂移项须有对应修正安排。
-
-                只输出 JSON，格式：
-                {"arc":"卷名（8字内）","brief":"…","chapters":[{"no":%d,"title":"…","goal":"…","hook":"…","time_note":"…","foreshadows":[{"code":"F4","action":"recover","content":""},{"code":"","action":"plant","content":"新伏笔一句话"}],"budget_min":2400,"budget_max":3400}]}
-                字符串值内部禁止英文双引号，引用一律用「」。
-
-                %s
-                """, volNo, fromNo, span, fromNo, budgetRule, fromNo, context);
+                        java.util.Map.of("lo", String.valueOf(band[0]), "hi", String.valueOf(band[1])));
+        String user = promptTemplates.format(LlmNode.VOLUME_PLAN, "user",
+                volNo, fromNo, span, fromNo, budgetRule, fromNo, context);
+        // 结构校验/AI 审校未过原因喂回下一轮（common/plan_retry_feedback 落库可编辑；此前 feedback 是死参，失败轮在盲试）
+        if (feedback != null && !feedback.isBlank()) {
+            user += promptTemplates.getSection("common", "plan_retry_feedback",
+                    java.util.Map.of("feedback", feedback));
+        }
         return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
-                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN, "system",
-                                        "你是网文主编，负责整卷卷纲规划。只输出合法 JSON，不要任何解释或 markdown 代码块。"
-                                                + "字符串值内部禁止英文双引号，引用一律用「」。")),
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN, "system")),
                                 LlmPort.Message.user(user)),
                         LlmTemps.VOLUME_PLAN),
                 node -> {
@@ -324,24 +306,11 @@ public class VolumePlanService {
                     .append(" 伏笔：").append(r.foreshadows().isEmpty() ? "无" : renderRefs(r.foreshadows()))
                     .append('\n');
         }
-        String user = promptTemplates.format(LlmNode.VOLUME_PLAN_REVIEW, "user", """
-                【待审卷纲】
-                %s
-                【对照材料（人物设定卡 + 账本）】
-                %s
-                %s
-                审校清单：① 连续性——是否与世界观/人物卡/世界状态/事实账矛盾（人物已死复活、物品凭空转移、时间倒流、凭空发明人物卡与账本中不存在的人名）；
-                ② 重复——卷内相邻章目标是否雷同、是否与往卷炒冷饭；③ 伏笔——planted 未回收项是否被安排回收或给出悬置理由、proposed 取舍是否合理；
-                ④ 节奏——张弛是否有曲线、卷尾钩子是否成立。
-                只输出 JSON：{"verdict":"PASS"或"BLOCKER","issues":["问题（指明章号）"]}
-                存在必须修复的硬伤才 BLOCKER；风格偏好类意见写进 issues 但给 PASS。
-                """, plan, packer.characters(novelId),
+        String user = promptTemplates.format(LlmNode.VOLUME_PLAN_REVIEW, "user", plan, packer.characters(novelId),
                 packer.packLedgers(novelId, draft.rows().get(0).chapterNo()));
         try {
             return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN_REVIEW, novelId, null,
-                            List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN_REVIEW, "system",
-                                            "你是网文规划审校员，在卷纲落库前把关。只输出合法 JSON。"
-                                                    + "字符串值内部禁止英文双引号，引用一律用「」。")),
+                            List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN_REVIEW, "system")),
                                     LlmPort.Message.user(user)),
                             LlmTemps.VOLUME_PLAN_REVIEW),
                     node -> {
@@ -489,26 +458,13 @@ public class VolumePlanService {
         if (ch.getFullText() != null && !ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + chapterNo + " 章已有正文，禁止重写其卷纲");
         }
-        String user = promptTemplates.format(LlmNode.CHAPTER_REPLAN, "user", """
-                任务：第 %d 章《%s》按现有卷纲目标生成反复失败，需要换一个写法。失败原因：
-                %s
-                现目标：%s
-                现钩子：%s
-                请重写该章的 title/goal/hook/time_note：目标必须换一条可行路径完成本章在卷中的使命（可改事件、改场景、改信息揭示顺序），不得与相邻章（第 %d、%d 章）目标雷同。
-                只输出 JSON：{"title":"…","goal":"…","hook":"…","time_note":"…"}
-                字符串值内部禁止英文双引号，引用一律用「」。
-
-                %s
-
-                【账本上下文】
-                %s
-                """, chapterNo, Objects.toString(ch.getTitle(), ""), failureReason,
+        String user = promptTemplates.format(LlmNode.CHAPTER_REPLAN, "user",
+                chapterNo, Objects.toString(ch.getTitle(), ""), failureReason,
                 Objects.toString(ch.getGoal(), ""), Objects.toString(ch.getHook(), ""),
                 chapterNo - 1, chapterNo + 1, packer.characters(novelId),
                 packer.packLedgers(novelId, chapterNo));
         Replan replan = llmJson.ask(new LlmPort.ChatRequest(LlmNode.CHAPTER_REPLAN, novelId, ch.getId(),
-                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REPLAN, "system",
-                                        "你是网文主编，只输出合法 JSON，字符串内禁英文双引号，引用一律用「」。")),
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REPLAN, "system")),
                                 LlmPort.Message.user(user)),
                         LlmTemps.CHAPTER_REPLAN),
                 node -> {

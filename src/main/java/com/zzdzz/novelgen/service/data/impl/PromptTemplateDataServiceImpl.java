@@ -19,6 +19,11 @@ public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMap
     }
 
     @Override
+    public int updateEnabled(long id, boolean enabled) {
+        return baseMapper.updateEnabled(id, enabled);
+    }
+
+    @Override
     public int reset(long id, String content, String catalogHash) {
         return baseMapper.reset(id, content, catalogHash);
     }

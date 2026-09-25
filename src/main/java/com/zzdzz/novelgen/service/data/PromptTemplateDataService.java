@@ -10,6 +10,9 @@ public interface PromptTemplateDataService extends IService<PromptTemplateDTO> {
 
     int updateContent(long id, String content);
 
+    /** 启用/停用（停用行不进运行时缓存，回退代码模板）。 */
+    int updateEnabled(long id, boolean enabled);
+
     int reset(long id, String content, String catalogHash);
 
     List<PromptTemplateDTO> findAll();

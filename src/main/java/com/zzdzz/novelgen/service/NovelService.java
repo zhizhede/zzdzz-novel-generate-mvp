@@ -337,23 +337,10 @@ public class NovelService {
                 }
             }
             if (!worldDoc.isEmpty()) {
-                worldConstraint = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "world",
-                        "【共用世界观（新故事必须发生在该世界内；可少量引用原书人物为配角，但主角、主线与情节必须完全原创，禁止复刻样本的剧情线与桥段）】\n%s\n",
-                        worldDoc);
+                worldConstraint = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "world", worldDoc);
             }
         }
-        String user = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "user", """
-                任务：为下面的新书创作**全新原创**的全书大纲，供作者过目修改（之后每一章生成都携带它作为方向约束）。分节输出：## 主题与核心悬念、## 主线（起承转合 300-500 字）、## 分卷走向（每卷一行：卷名+主线任务+卷尾钩子）、## 主要人物（3-6 人：名字/身份/动机/弧光）、## 题材基调。
-                要求：分卷走向按 %d 卷规划；**情节、人物、桥段必须完全原创**——即使提供了样本的世界观或类型方向，也禁止复刻样本的剧情线、人物关系与桥段序列；全部内容须贴合类型标签与题材基调，悬念与钩子密度按节奏口径安排。
-
-                【书名】%s
-                【简介】%s
-                【文风预设】%s
-                【类型标签】%s
-                【叙事视角】%s
-                【节奏口径】%s（每卷约 %d 章）
-                %s
-                """, volumes, title,
+        String user = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "user", volumes, title,
                 vo.description() == null || vo.description().isBlank() ? "（无）" : vo.description().strip(),
                 preset.getName() + (preset.getDescription() == null ? "" : "——" + preset.getDescription()),
                 tags.isEmpty() ? "（未设，按文风预设与简介自定）" : String.join("、", tags),
@@ -363,8 +350,7 @@ public class NovelService {
                         : d.pacingNote().strip(),
                 chaptersPerVolume, volumes);
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.DERIVE_OUTLINE, null, null,
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.DERIVE_OUTLINE, "system",
-                                "你是网文总编，为一本新书创作全书大纲。只输出大纲正文（markdown），不要 JSON、不要任何解释或开场白。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.DERIVE_OUTLINE, "system")),
                         LlmPort.Message.user(user)), LlmTemps.DERIVE_OUTLINE);
         LlmPort.ChatResult r = llm.chat(req);
         String outline = r.content() == null ? "" : r.content().strip();

@@ -5,8 +5,13 @@
     <update id="updateContent">
 
                 UPDATE prompt_templates SET content = #{content}, custom = TRUE, version = version + 1, update_time = NOW()
-                WHERE id = #{id} AND is_deleted = FALSE AND exact = TRUE
-                
+                WHERE id = #{id} AND is_deleted = FALSE
+
+    </update>
+
+    <update id="updateEnabled">
+                UPDATE prompt_templates SET enabled = #{enabled}, update_time = NOW()
+                WHERE id = #{id} AND is_deleted = FALSE
     </update>
 
     <update id="reset">

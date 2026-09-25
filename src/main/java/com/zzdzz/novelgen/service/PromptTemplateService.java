@@ -50,24 +50,31 @@ public class PromptTemplateService {
         log.info("提示词注册表同步完成（{} 条）", PromptCatalog.ALL.size());
     }
 
-    /** 取模板：库内 enabled 行优先，否则回退代码模板（fail-open）。 */
-    public String get(String node, String phase, String fallback) {
-        Map<String, String> c = cache();
-        return c.getOrDefault(node + "|" + phase, fallback);
+    /**
+     * 取模板：库内 enabled 行优先，否则回退 PromptCatalog 目录正文。
+     * 目录缺条目属编程错误（新调用点必须先在 PromptCatalog 登记），直接抛错fail-fast。
+     */
+    public String get(String node, String phase) {
+        String v = cache().get(node + "|" + phase);
+        if (v != null) {
+            return v;
+        }
+        return catalogFallback(node, phase);
     }
 
-    /** 取模板并格式化：库内模板占位符损坏时回退代码模板，抛错只记日志。 */
-    public String format(String node, String phase, String fallback, Object... args) {
-        return formatSafe(get(node, phase, fallback), fallback, node + "/" + phase, args);
+    /** 取模板并格式化：库内模板占位符损坏时回退目录正文，抛错只记日志。 */
+    public String format(String node, String phase, Object... args) {
+        String fb = catalogFallback(node, phase);
+        return formatSafe(get(node, phase), fb, node + "/" + phase, args);
     }
 
     /**
-     * {key} 占位段读取（运行时拼装段接库）：库值优先、缺失回退 fallback，占位 {name} 用 params 替换。
-     * 用于 derive 红线/POV/密度等拼装段——段落文案落库可编辑（素材库·提示词页签），代码只组装参数。
+     * {key} 占位段读取（运行时拼装段接库）：库值优先、缺失回退目录正文，占位 {name} 用 params 替换。
+     * 用于 derive 红线/POV/密度、账本段头等拼装段——段落文案落库可编辑（素材库·提示词页签），代码只组装参数。
      */
-    public String getSection(String node, String sectionKey, Map<String, String> params, String fallback) {
-        String tpl = get(node, sectionKey, fallback);
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{(\\w+)}").matcher(tpl == null ? fallback : tpl);
+    public String getSection(String node, String sectionKey, Map<String, String> params) {
+        String tpl = get(node, sectionKey);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{(\\w+)}").matcher(tpl);
         StringBuilder out = new StringBuilder();
         while (m.find()) {
             String v = params.getOrDefault(m.group(1), "");
@@ -75,6 +82,14 @@ public class PromptTemplateService {
         }
         m.appendTail(out);
         return out.toString();
+    }
+
+    private String catalogFallback(String node, String phase) {
+        String fb = PromptCatalog.contentOf(node, phase);
+        if (fb == null) {
+            throw new IllegalStateException("提示词目录缺条目（新调用点须先在 PromptCatalog 登记）: " + node + "/" + phase);
+        }
+        return fb;
     }
 
     /** 新建自定义段/模板行（custom=true，可编辑可删除；catalog 同步不覆盖自定义行）。 */
@@ -85,8 +100,8 @@ public class PromptTemplateService {
         if (content == null || content.isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "内容不能为空");
         }
-        if (phase.length() > 16) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "phase 过长（≤16 字符）");
+        if (phase.length() > 32) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "phase 过长（≤32 字符）");
         }
         if (dao.findByNodeAndPhase(node.strip(), phase.strip()).isPresent()) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "该 node+phase 已存在模板行");
@@ -116,19 +131,34 @@ public class PromptTemplateService {
         }
     }
 
-    /** 人工编辑：仅 exact 行可编辑，占位符序列必须与代码目录一致（防坏模板；运行时另有 fail-open 兜底）。 */
+    /**
+     * 人工编辑：目录行须占位符序列与代码目录一致（防坏模板；运行时另有 fail-open 兜底）；
+     * 自定义行直接保存（无目录对照）。{key} 拼接段与 %s format 模板均可编辑。
+     */
     public PromptDetailVO updateContent(long id, String content) {
         PromptTemplateDTO t = require(id);
-        PromptCatalog.TemplateDef def = catalogDef(t.getNode(), t.getPhase())
-                .orElseThrow(() -> new IllegalArgumentException("该条为运行时拼接骨架，未接入库读取，不可编辑"));
         if (content == null || content.isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "模板内容不能为空");
         }
-        if (!specs(content).equals(specs(def.content()))) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "占位符序列与代码模板不一致（须保持 %s/%d 的数量与顺序）");
+        if (!t.isCustom()) {
+            PromptCatalog.TemplateDef def = catalogDef(t.getNode(), t.getPhase())
+                    .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "该条不在代码目录中，不可编辑"));
+            if (!specs(content).equals(specs(def.content()))) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "占位符序列与代码模板不一致（须保持 %s/%d 的数量与顺序）");
+            }
         }
         if (dao.updateContent(id, content) == 0) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "保存失败：模板已被其他操作变更");
+        }
+        cacheLoadedAt = 0;
+        return detail(id);
+    }
+
+    /** 启用/停用：停用即该行不进缓存，运行时回退代码模板（fail-open）。 */
+    public PromptDetailVO setEnabled(long id, boolean enabled) {
+        require(id);
+        if (dao.updateEnabled(id, enabled) == 0) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "操作失败：模板已被其他操作变更");
         }
         cacheLoadedAt = 0;
         return detail(id);
@@ -138,7 +168,7 @@ public class PromptTemplateService {
     public PromptDetailVO reset(long id) {
         PromptTemplateDTO t = require(id);
         PromptCatalog.TemplateDef def = catalogDef(t.getNode(), t.getPhase())
-                .orElseThrow(() -> new IllegalArgumentException("目录中不存在该节点，无法重置"));
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "目录中不存在该节点，无法重置"));
         dao.reset(id, def.content(), md5(def.content()));
         cacheLoadedAt = 0;
         return detail(id);

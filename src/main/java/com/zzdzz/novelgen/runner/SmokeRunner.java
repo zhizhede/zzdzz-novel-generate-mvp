@@ -25,10 +25,13 @@ public class SmokeRunner implements ApplicationRunner {
 
 
     private final LlmPort llm;
+    private final com.zzdzz.novelgen.service.PromptTemplateService promptTemplates;
     private final String styleDir;
 
-    public SmokeRunner(LlmPort llm, @Value("${novelgen.style-dir}") String styleDir) {
+    public SmokeRunner(LlmPort llm, com.zzdzz.novelgen.service.PromptTemplateService promptTemplates,
+                       @Value("${novelgen.style-dir}") String styleDir) {
         this.llm = llm;
+        this.promptTemplates = promptTemplates;
         this.styleDir = styleDir;
     }
 
@@ -38,10 +41,9 @@ public class SmokeRunner implements ApplicationRunner {
         String exemplar = extractExemplar();
         log.info("风格规则 {} 字，范例 E01 {} 字", rules.length(), exemplar.length());
 
-        String system = rules + "\n\n【风格范例（逐字原文，严格模仿其分行节奏与口吻）】\n" + exemplar;
-        String user = "任务：续写《人类、法师、地下城》。场景：早饭后，塞拉斯和坎德尔一起出门前往冒险家协会，"
-                + "路上坎德尔提到最近向导委托变多，感觉魔物又要溢出。写到协会门口为止。"
-                + "要求 300–500 字，只输出正文，不要任何解释。";
+        String system = rules + "\n\n" + promptTemplates.getSection(LlmNode.SMOKE, "exemplar_header",
+                java.util.Map.of("exemplar", exemplar));
+        String user = promptTemplates.get(LlmNode.SMOKE, "user");
 
         LlmPort.ChatResult result = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.SMOKE, null, null,

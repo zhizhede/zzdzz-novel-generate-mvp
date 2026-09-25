@@ -411,22 +411,9 @@ public class SampleParseService {
     }
 
     private JsonNode askChapter(String header, String text) {
-        String user = promptTemplates.format(LlmNode.SAMPLE_CHAPTER, "user", """
-                任务：分析下面这一章原文（长章可能是多章合并或无标题伪章），输出 JSON：
-                {"summary":"本章剧情摘要 150-300 字","beats":[{"goal":"场景目标","conflict":"冲突","outcome":"收束"}],
-                 "entities":[{"name":"规范名","aliases":["别名"],"kind":"character|item|location|org|phenomenon|landmark|disaster|misc",
-                   "note":"一句话身份","relations":[{"target":"对象名","kind":"关系","note":"说明"}]}],
-                 "hooks":["章末钩子"]}
-                要求：entities 覆盖本章全部有名字的实体（人物为主，含重要物品/地点/组织/现象），同一实体只出一行、别名并aliases；relations 只记本章明示的关系；beats 按场景顺序 2-6 条。
-
-                【章节：%s】
-
-                【章节原文】
-                %s
-                """, header, text);
+        String user = promptTemplates.format(LlmNode.SAMPLE_CHAPTER, "user", header, text);
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.SAMPLE_CHAPTER, null, null,
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_CHAPTER, "system",
-                                "你是小说结构分析师。读完给定章节原文，输出结构化分析；只输出一个 JSON 对象，字符串值内部禁止英文双引号，引用一律用「」。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_CHAPTER, "system")),
                         LlmPort.Message.user(user)), 0.3);
         return llmJson.ask(req, node -> {
             if (!node.path("summary").isTextual() || node.path("summary").asText().isBlank()) {
@@ -519,17 +506,9 @@ public class SampleParseService {
             sb.append(m.name).append(" | ").append(m.kind).append(" | 别名：")
                     .append(String.join("、", m.aliases)).append('\n');
         }
-        String user = promptTemplates.format(LlmNode.SAMPLE_MERGE, "user", """
-                任务：下面是从同一本小说各章抽出的实体行（名/别名/类型/备注）。找出指同一实体的行组，输出 JSON：
-                {"groups":[{"canonical":"保留的规范名","members":["并掉的行名"]}]}
-                要求：只归并有把握同指一人的（如 本名/代号/译名/尊称）；没有可归并的就输出空 groups；单个别名不同的不要归并。
-
-                【实体行】
-                %s
-                """, truncate(sb.toString(), 20000));
+        String user = promptTemplates.format(LlmNode.SAMPLE_MERGE, "user", truncate(sb.toString(), 20000));
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.SAMPLE_MERGE, null, null,
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_MERGE, "system",
-                                "你是数据清洗员：判断实体列表里哪些行指的是同一个实体；只输出一个 JSON 对象，字符串值内部禁止英文双引号。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_MERGE, "system")),
                         LlmPort.Message.user(user)), 0.1);
         try {
             return llmJson.ask(req, node -> {
@@ -609,21 +588,9 @@ public class SampleParseService {
     }
 
     private JsonNode askVolume(String header, String chapterSummaries) {
-        String user = promptTemplates.format(LlmNode.SAMPLE_VOLUME, "user", """
-                任务：下面是同一卷的逐章摘要，合成卷级结构卡，输出 JSON：
-                {"arc":"本卷主线一句话","summary":"本卷剧情梗概 200-400 字",
-                 "pacing_note":"节奏画像（开局/推进/高潮/收束各占约几成，钩子密度如何，80字内）",
-                 "key_turns":["关键转折点"]}
-                要求：只依据给定摘要，不发明不存在的事件。
-
-                【%s】
-
-                【逐章摘要】
-                %s
-                """, header, truncate(chapterSummaries, 30000));
+        String user = promptTemplates.format(LlmNode.SAMPLE_VOLUME, "user", header, truncate(chapterSummaries, 30000));
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.SAMPLE_VOLUME, null, null,
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_VOLUME, "system",
-                                "你是网文主编，负责把逐章摘要合成为卷级结构卡；只输出一个 JSON 对象，字符串值内部禁止英文双引号。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_VOLUME, "system")),
                         LlmPort.Message.user(user)), 0.3);
         return llmJson.ask(req, node -> {
             if (!node.path("summary").isTextual() || node.path("summary").asText().isBlank()) {
@@ -658,27 +625,10 @@ public class SampleParseService {
         }
         String stats = "共 " + limit + " 章（已析 " + parsedCount + "）"
                 + (fast ? "；快速档为抽样骨架，完整结构请升级完整解析" : "");
-        String user = promptTemplates.format(LlmNode.SAMPLE_OUTLINE, "user", """
-                任务：依据下面的卷级结构卡与主要角色卡，合成全书大纲，输出 JSON：
-                {"premise":"核心设定与开局钩子（100字内）",
-                 "main_plot":"主线剧情梗概（300-500字，交代起承转合）",
-                 "arcs":[{"title":"阶段名","span":"章节范围","summary":"该阶段剧情（100字内）"}],
-                 "themes":["主题"],"ending":"结局走向（80字内）"}
-                要求：arcs 按 3-8 个阶段划分全书；只依据给定材料，不发明不存在的事件。
-
-                【全书概况】
-                 %s
-
-                【卷级结构】
-                %s
-
-                【主要角色卡】
-                %s
-                """, stats, truncate(volBlock.toString(), 30000),
+        String user = promptTemplates.format(LlmNode.SAMPLE_OUTLINE, "user", stats, truncate(volBlock.toString(), 30000),
                 truncate(cardBlock.toString(), 6000));
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.SAMPLE_OUTLINE, null, null,
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_OUTLINE, "system",
-                                "你是网文总编，负责从卷级结构与主要角色卡合成全书大纲；只输出一个 JSON 对象，字符串值内部禁止英文双引号。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_OUTLINE, "system")),
                         LlmPort.Message.user(user)), 0.3);
         JsonNode outline = llmJson.ask(req, node -> {
             if (!node.path("main_plot").isTextual() || node.path("main_plot").asText().isBlank()) {
@@ -727,19 +677,9 @@ public class SampleParseService {
                         .append(c.getSummary()).append('\n');
             }
         }
-        String user = promptTemplates.format(LlmNode.SAMPLE_WORLD, "user", """
-                任务：依据下面的卷级结构与设定类实体卡（地点/组织/现象/物品），写一份世界观设定文档（markdown，600-1200 字），分节：世界背景与规则、力量/核心体系、重要地点、重要组织、关键设定与禁忌。
-                要求：只写材料中出现过或可由其直接推出的设定；不得发明原文没有的规则。
-
-                【卷级结构】
-                %s
-
-                【设定类实体卡】
-                %s
-                """, truncate(volBlock.toString(), 20000), truncate(cardBlock.toString(), 8000));
+        String user = promptTemplates.format(LlmNode.SAMPLE_WORLD, "user", truncate(volBlock.toString(), 20000), truncate(cardBlock.toString(), 8000));
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.SAMPLE_WORLD, null, null,
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_WORLD, "system",
-                                "你是设定考据员，负责从卷级结构与设定类实体卡合成世界观文档；输出 markdown 纯文本（不要 JSON、不要标题记号外的多余格式）。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_WORLD, "system")),
                         LlmPort.Message.user(user)), 0.3);
         String world;
         LlmPort.ChatResult r = llm.chat(req);
@@ -780,18 +720,10 @@ public class SampleParseService {
         if (material.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "尚无书级材料：请先完成深度解析（快速档即可）再提取标签");
         }
-        String user = promptTemplates.format(LlmNode.SAMPLE_TAGS, "user", """
-                任务：依据下面的书级材料给这本小说打标签，输出 JSON：
-                {"tags":["标签1","标签2",…]}
-                口径：5-15 个；每标签 2-6 字；覆盖三类——类型/题材（如 奇幻、都市、克苏鲁、言情）、体量节奏（如 短篇、长篇、快节奏、慢热）、标志性特征元素（如 不可名状、章鱼、狼人、剑与魔法、系统流）；
-                只提取材料有依据的，宁缺毋滥。
-
-                【书级材料】
-                %s
-                """, truncate(material + "\n（《" + sample.getTitle() + "》，主要角色 " + characters + " 个）", 10000));
+        String user = promptTemplates.format(LlmNode.SAMPLE_TAGS, "user",
+                truncate(material + "\n（《" + sample.getTitle() + "》，主要角色 " + characters + " 个）", 10000));
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.SAMPLE_TAGS, null, null,
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_TAGS, "system",
-                                "你是网文分类编辑，给小说打类型与特征标签；只输出一个 JSON 对象，字符串值内部禁止英文双引号。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_TAGS, "system")),
                         LlmPort.Message.user(user)), 0.3);
         JsonNode r = llmJson.ask(req, node -> {
             if (!node.path("tags").isArray() || node.path("tags").isEmpty()) {
@@ -852,20 +784,9 @@ public class SampleParseService {
                 profile.append(c.getName()).append("（").append(truncate(c.getSummary(), 60)).append("）");
             }
         }
-        String user = promptTemplates.format(LlmNode.SAMPLE_PARAMS, "user", """
-                任务：用户要以样例《%s》为蓝本衍生新书。依据下面的结构画像推荐衍生参数，输出 JSON：
-                {"water":0,"pov":"第一人称|第三人称限知|第三人称全知|多视角轮换 之一","povCharacter":"主视角（人物名，多视角则留空）",
-                 "chaptersPerVolume":10,"targetChapters":300,"pacingNote":"节奏说明 40-80 字","reason":"推荐理由 80 字内",
-                 "tags":["衍生书类型/特征标签 5-10 个，如 奇幻、剑与魔法、快节奏——可沿用样例也可按衍生方向调整"]}
-                口径：water 0=情节密度拉满的干货流，50=均衡，100=日常氛围舒缓流；chaptersPerVolume 3-30；
-                targetChapters 按样例体量与题材惯例估（50-2000）；povCharacter 必须是材料中出现的主要人物。
-
-                【结构画像】
-                %s
-                """, sample.getTitle(), truncate(profile.toString(), 10000));
+        String user = promptTemplates.format(LlmNode.SAMPLE_PARAMS, "user", sample.getTitle(), truncate(profile.toString(), 10000));
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(LlmNode.SAMPLE_PARAMS, null, null,
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_PARAMS, "system",
-                                "你是网文策划，依据样例小说的结构画像为衍生新书推荐参数；只输出一个 JSON 对象，字符串值内部禁止英文双引号。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.SAMPLE_PARAMS, "system")),
                         LlmPort.Message.user(user)), 0.3);
         JsonNode r = llmJson.ask(req, node -> {
             if (!node.path("reason").isTextual() || node.path("reason").asText().isBlank()) {

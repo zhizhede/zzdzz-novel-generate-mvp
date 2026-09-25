@@ -23,46 +23,12 @@ import java.util.Map;
  * AI 语义审校闭环：机械门禁之后的连续性/逻辑/错字审校。
  * BLOCKER 带问题清单修订一轮并复审，复审仍 BLOCKER 则交人工（管线不过稿）。
  * 报告落 gate_reports（gate_type='ai_review'），解析失败 fail-open 跳过——审校员故障不能卡死管线。
+ * 本类零提示词文本：所有固定文案走 PromptTemplateService（node+phase 定位，库值优先、目录回退）。
  */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ReviewService {
-
-
-    /** 读者评审提示词模板：%s=注水率软阈值，%s=硬上限（书级 gate_config 可覆盖，兜底 tuning）。 */
-    private static final String READER_SYSTEM = """
-            你是一个没耐心的网文读者，刷手机时点开了这一章。你只关心「想不想继续读」，只回答下列问题：
-            1. hook 前 3 行：会不会继续往下读？（环境/氛围/抒情式开场、或与上章结尾接不上=不会）
-            2. stakes 这场戏：谁想要什么？什么在阻止？（说不出来=没有戏剧张力）
-            3. continuity 读完前 10 行，能否定位上一章结束时的情境（时间/地点/在场人物）？（定位不到=衔接断裂）
-            4. fat 与剧情无关、删掉后读者不会少知道任何事的纯装饰描写（给微动作写人物志、连篇比喻、静态观察），占比大约多少？
-            5. consequence 上下文给出了【上一章事件后果】（上一章的目标、章末钩子与实际收束）。本章是否与之对接——给出兑现、交代或明确推进？（完全无视另起炉灶=fail）
-            只输出 JSON：
-            {"verdict":"pass|blocker","hook":"pass|fail","stakes":"pass|fail","continuity":"pass|fail","consequence":"pass|fail","fat_ratio":0.4,"skip_quotes":["可整段删除的原句"],"issues":["具体问题（引用原句）"]}
-            规则：
-            - 引用原文一律用「」；字符串值内部禁止英文双引号。
-            - hook/stakes/continuity/consequence 任一 fail → verdict=blocker。
-            - fat_ratio 是报告项：大于 %s（软阈值）只提示偏水，不否决；只有大于 %s（硬上限）才判 blocker。连贯性永远比注水重要，不要为注水否决剧情完整的章节。
-            - skip_quotes 只能列纯装饰句；推进剧情、刻画人物、交代信息的句子一律不许进清单。
-            - 你只管「想不想往下读」，错别字与设定连续性是另一位审校的事，不要报。
-            - 不要输出思考过程，只输出 JSON。
-            """.strip();
-
-    private static final String SYSTEM = """
-            你是资深网文审校编辑，在机械门禁之后做语义审校。只查以下四类问题：
-            1. continuity 连续性：与给定上下文（世界设定、人物卡、近章事实账、上一章结尾）矛盾——时间线、称呼、物件、地点、人物状态。
-            2. logic 逻辑硬伤：情节自相矛盾、前因后果断裂。
-            3. typo 错别字/用词错误：明显的错字、漏字、用词不当。
-            4. format 格式：章题混入正文、markdown 残留、阿拉伯数字。
-            只输出 JSON：
-            {"verdict":"pass|minor|blocker","summary":"一句话总评","issues":[{"type":"continuity|logic|typo|format","severity":"minor|blocker","quote":"原句","explanation":"问题说明","suggestion":"修改建议"}]}
-            规则：
-            - 引用原文一律用「」；字符串值内部禁止英文双引号。
-            - 存在必须改的硬伤（时间线矛盾、称呼错、错字）才判 blocker；只有不破坏阅读的瑕疵判 minor；无问题判 pass。
-            - 宁可漏报不可误报：没有把握的不要报，不提风格意见。
-            - 不要输出思考过程，只输出 JSON。
-            """.strip();
 
     private final LlmPort llmPort;      // 文本修订轮（reader_fix / ai_review_revise）
     private final LlmJson llmJson;      // JSON 评审轮（reader_review / ai_review）
@@ -138,18 +104,19 @@ public class ReviewService {
     private JsonNode readerOnce(long novelId, ChapterDTO ch, String text, int round, LlmPort.StreamDelta onDelta) {
         String prevTail = packer.prevTail(novelId, ch.getChapterNo());
         String prevBrief = packer.prevChapterBrief(novelId, ch.getChapterNo());
-        String user = "【上一章结尾（衔接定位基准）】\n" + (prevTail == null || prevTail.isBlank() ? "（无）" : prevTail)
-                + "\n\n【上一章事件后果】\n" + (prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，consequence 直接 pass）" : prevBrief)
-                + "\n\n【本章目标】" + ch.getGoal()
-                + "\n\n【第 " + ch.getChapterNo() + " 章全文（评审对象）】\n" + text + "\n\n只输出 JSON。";
+        String user = promptTemplates.getSection(LlmNode.READER_REVIEW, "user",
+                java.util.Map.of("prev_tail", prevTail == null || prevTail.isBlank() ? "（无）" : prevTail,
+                        "prev_brief", prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，consequence 直接 pass）" : prevBrief,
+                        "goal", java.util.Objects.toString(ch.getGoal(), ""),
+                        "chapter_no", String.valueOf(ch.getChapterNo()),
+                        "full_text", text == null ? "" : text));
         try {
             double fatSoft = perNovel(novelId, "reader_fat_ratio_block", TuningDefaults.READER_FAT_RATIO_BLOCK);
             double fatHard = perNovel(novelId, "reader_fat_ratio_hard", TuningDefaults.READER_FAT_RATIO_HARD);
             JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
                             LlmNode.READER_REVIEW, novelId, ch.getId(),
                             List.of(LlmPort.Message.system(
-                                            promptTemplates.format(LlmNode.READER_REVIEW, "system", READER_SYSTEM,
-                                                    fatSoft, fatHard)),
+                                            promptTemplates.format(LlmNode.READER_REVIEW, "system", fatSoft, fatHard)),
                                     LlmPort.Message.user(user)),
                             LlmTemps.READER_REVIEW),
                     n -> {
@@ -215,21 +182,10 @@ public class ReviewService {
         }
         String band = "目标 " + ch.getBudgetMin() + "–" + (int) (ch.getBudgetMax() * 1.05)
                 + " 字；删注水后低于目标时可用推进情节的对白与动作补足，但与保留剧情冲突时宁短勿注";
-        String user = promptTemplates.format(LlmNode.READER_FIX, "user", """
-                任务：修订第 %d 章全文。没耐心的网文读者给出以下弃书理由：
-                %s
-                要求：情节节拍、关键信息与对白立场全部保留，人物性格与说话方式不得改变，任何剧情节拍不得删除或合并；
-                删掉全部纯装饰描写与重复观察；推动情节的对白可以增加；篇幅与保留剧情冲突时优先保剧情，字数可低于目标。
-                分行节奏与风格特征保持本书原貌；直接输出修订后的完整正文，不要输出思考过程。
-                本章篇幅约束：%s。
-
-                【第 %d 章全文（在此版本上修改）】
-                %s
-                """, ch.getChapterNo(), fb, band, ch.getChapterNo(), fullText);
+        String user = promptTemplates.format(LlmNode.READER_FIX, "user", ch.getChapterNo(), fb, band, ch.getChapterNo(), fullText);
         LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
                 LlmNode.READER_FIX, novelId, ch.getId(),
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.READER_FIX, "system",
-                                "你是网文编辑，任务是让这一章「每一行都值得读」：删注水、保情节、补张力。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.READER_FIX, "system")),
                         LlmPort.Message.user(user)),
                 LlmTemps.READER_FIX));
         String cleaned = ChapterPipelineService.stripTitleLine(
@@ -254,21 +210,12 @@ public class ReviewService {
     private String recoverLength(long novelId, ChapterDTO ch, String cleaned, StringBuilder fb) {
         int floor = ch.getBudgetMin();
         int cap = (int) (ch.getBudgetMax() * 1.05);
-        String user = """
-                任务：第 %d 章上一稿删注水后只剩约 %d 字，低于本章下限 %d 字。
-                请把被删掉的情节节拍恢复为对白与动作，禁止新增环境/氛围/心理铺陈，目标 %d–%d 字；
-                直接输出修订后的完整正文，不要输出思考过程。
-
-                【弃书理由清单（删除仍然成立，不得恢复纯装饰段落）】
-                %s
-                【当前稿（在此版本上扩写）】
-                %s
-                """.formatted(ch.getChapterNo(), cleaned.length(), floor, floor, cap, fb, cleaned);
+        String user = promptTemplates.format(LlmNode.READER_FIX, "user_recover",
+                ch.getChapterNo(), cleaned.length(), floor, floor, cap, fb, cleaned);
         try {
             LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
                     LlmNode.READER_FIX, novelId, ch.getId(),
-                    List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.READER_FIX, "system",
-                                    "你是网文编辑，任务是让这一章「每一行都值得读」：删注水、保情节、补张力。")),
+                    List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.READER_FIX, "system")),
                             LlmPort.Message.user(user)),
                     LlmTemps.RECOVERY_EXPAND));
             String recovered = ChapterPipelineService.stripTitleLine(
@@ -309,8 +256,7 @@ public class ReviewService {
         try {
             JsonNode node = llmJson.ask(new LlmPort.ChatRequest(
                             LlmNode.AI_REVIEW, novelId, ch.getId(),
-                            List.of(LlmPort.Message.system(promptTemplates.get(
-                                            LlmNode.AI_REVIEW, "system", SYSTEM)),
+                            List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.AI_REVIEW, "system")),
                                     LlmPort.Message.user(user)),
                             LlmTemps.AI_REVIEW),
                     n -> {
@@ -370,18 +316,17 @@ public class ReviewService {
     private String userPrompt(long novelId, ChapterDTO ch, String text) {
         List<String> digests = packer.recentDigests(novelId, ch.getChapterNo(), 3);
         String prevTail = packer.prevTail(novelId, ch.getChapterNo());
-        StringBuilder sb = new StringBuilder();
-        sb.append("【世界设定与大纲】\n").append(packer.world(novelId)).append("\n\n");
-        sb.append("【人物卡】\n").append(packer.characters(novelId)).append("\n\n");
         String ws = packer.worldState(novelId, ch.getChapterNo());
-        sb.append("【世界状态（上一章结束时）】\n").append(ws == null ? "（无）" : ws).append("\n\n");
-        sb.append("【近章事实账】\n");
-        if (digests.isEmpty()) sb.append("（无）\n");
-        digests.forEach(d -> sb.append("---\n").append(d).append('\n'));
-        sb.append("\n【上一章结尾】\n").append(prevTail == null || prevTail.isBlank() ? "（无）" : prevTail);
-        sb.append("\n\n【第 ").append(ch.getChapterNo()).append(" 章全文（审校对象）】\n").append(text);
-        sb.append("\n\n审校以上全文，只输出 JSON。");
-        return sb.toString();
+        String digestBlock = digests.isEmpty() ? "（无）\n"
+                : digests.stream().map(d -> "---\n" + d + "\n").collect(java.util.stream.Collectors.joining());
+        return promptTemplates.getSection(LlmNode.AI_REVIEW, "user",
+                java.util.Map.of("world", java.util.Objects.toString(packer.world(novelId), ""),
+                        "characters", java.util.Objects.toString(packer.characters(novelId), ""),
+                        "world_state", ws == null ? "（无）" : ws,
+                        "digests", digestBlock,
+                        "prev_tail", prevTail == null || prevTail.isBlank() ? "（无）" : prevTail,
+                        "chapter_no", String.valueOf(ch.getChapterNo()),
+                        "full_text", text == null ? "" : text));
     }
 
     /** 带问题清单的修订轮：外科手术式，只修 BLOCKER 条目；修订稿异常时保留原文（返回 null）。 */
@@ -397,19 +342,10 @@ public class ReviewService {
         if (fb.isEmpty()) {
             fb.append("- 审校判定存在硬伤但未给出条目，请通读自查时间线、称呼与错别字。\n");
         }
-        String user = promptTemplates.format(LlmNode.AI_REVIEW_REVISE, "user", """
-                任务：修订第 %d 章全文。语义审校发现以下必须修复的问题：
-                %s
-                要求：只修被点名的问题（错字改字、矛盾句最小改写），严禁改动情节走向与分行节奏，总字数变化控制在 ±10%% 内。
-                直接输出修订后的完整正文，不要输出思考过程。
-
-                【第 %d 章全文（在此版本上修改）】
-                %s
-                """, ch.getChapterNo(), fb, ch.getChapterNo(), fullText);
+        String user = promptTemplates.format(LlmNode.AI_REVIEW_REVISE, "user", ch.getChapterNo(), fb, ch.getChapterNo(), fullText);
         LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
                 LlmNode.AI_REVIEW_REVISE, novelId, ch.getId(),
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.AI_REVIEW_REVISE, "system",
-                                "你是执行审校修订的网文编辑，只做被点名的最小修改。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.AI_REVIEW_REVISE, "system")),
                         LlmPort.Message.user(user)),
                 LlmTemps.AI_REVIEW_REVISE));
         String cleaned = ChapterPipelineService.stripTitleLine(

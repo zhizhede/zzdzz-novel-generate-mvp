@@ -504,21 +504,11 @@ public class ChapterPipelineService {
                 ? "当前正文约 %d 字，超出预算上限：请把篇幅压缩到 %d–%d 字（删冗余描写与重复信息，情节与对白全保留）"
                         .formatted(curWords, ch.getBudgetMin(), cap)
                 : "总字数变化控制在 ±10%% 内，且不得超过 %d 字".formatted(cap);
-        String user = promptTemplates.format(LlmNode.CHAPTER_REVISE, "user", """
-                任务：修订第 %d 章全文。门禁检测出以下问题：
-                %s
-                要求：只针对被点名的问题做最小修改（例如破折号超标：把「——」改写为逗号、句号、拆句或直接删除）；
-                除被点名的指标外，其余风格特征必须原样保留——破折号「——」与省略号「……」的数量不得增加，分行节奏不得重排；
-                严禁改动情节、人物与对话内容；%s。
-                直接输出修订后的完整正文，不要输出思考过程。
-
-                【第 %d 章全文（在此版本上修改）】
-                %s
-                """, ch.getChapterNo(), feedback, lengthRule, ch.getChapterNo(), fullText);
+        String user = promptTemplates.format(LlmNode.CHAPTER_REVISE, "user",
+                ch.getChapterNo(), feedback, lengthRule, ch.getChapterNo(), fullText);
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(
                 LlmNode.CHAPTER_REVISE, novelId, ch.getId(),
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REVISE, "system",
-                                "你是执行门禁修订的网文编辑，只做被点名的最小修改。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REVISE, "system")),
                         LlmPort.Message.user(user)),
                 LlmTemps.CHAPTER_REVISE);
         LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);

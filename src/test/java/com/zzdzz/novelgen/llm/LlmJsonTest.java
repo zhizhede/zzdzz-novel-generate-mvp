@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** LlmJson 容错解析行为基线：重构期 1（三份内联拷贝迁入）前先锁行为。 */
 class LlmJsonTest {
 
-    private final LlmJson llmJson = new LlmJson(null); // read/repair 不触 LlmPort
+    private final LlmJson llmJson = new LlmJson(null, null); // read/repair 不触 LlmPort 与提示词注册表
 
     @Test
     void plainObjectParses() throws Exception {

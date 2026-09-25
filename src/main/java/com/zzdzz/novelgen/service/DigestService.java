@@ -21,31 +21,19 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/** 章摘要：定稿正文 → 事实账 + 世界状态快照；伏笔状态随章号确定性推进（不走模型）。 */
+/**
+ * 章摘要：定稿正文 → 事实账 + 世界状态快照；伏笔状态随章号确定性推进（不走模型）。
+ * 本类零提示词文本：所有固定文案走 PromptTemplateService（node+phase 定位，库值优先、目录回退）。
+ */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class DigestService {
 
-
-    /** 库值优先（digest/state_spec），缺省回退此常量。 */
-    private static final String STATE_SPEC = """
-            "state":{"time":"本章结束时的时间点（故事内历法或相对事件表述）",
-             "locations":{"人名或重要物名":"所在位置"},
-             "possessions":{"人名":["随身携带的重要物品"]},
-             "new_promises":["本章新立下的承诺/约定/邀约"],
-             "unresolved":["本章留下的未解之谜或未回收伏笔"]}""";
-
+    /** state 字段规格（digest/state_spec，库值优先可编辑）。 */
     private String stateSpec() {
-        return promptTemplates.get("digest", "state_spec", STATE_SPEC);
+        return promptTemplates.get("digest", "state_spec");
     }
-
-    /** 世界状态系统提示（%s=STATE_SPEC；保持未格式化的模板形态，运行时经 PromptTemplateService 填充）。 */
-    private static final String STATE_SYSTEM = """
-            你是世界状态记录员。读完本章，输出本章结束时刻的结构化状态快照，只输出 JSON：
-            {%s}
-            规则：只记硬事实；人名用规范名；拿不准的不写；字符串值内部禁止英文双引号，引用一律用「」。
-            """.strip();
 
     private final LlmPort llm;
     private final LlmJson llmJson;
@@ -65,17 +53,7 @@ public class DigestService {
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.DIGEST, novelId, chapterId,
-                List.of(LlmPort.Message.system(promptTemplates.format(LlmNode.DIGEST, "system", """
-                        你是事实账记录员。把章节压缩成供后续章节续写使用的事实账，只输出 JSON：
-                        {"summary_md":"300字以内的md：谁做了什么/信息揭示/情绪落点/章末钩子",
-                         "facts":["一条一句的硬事实（人名、物件、承诺、时间线变化）"],
-                         %s,
-                         "new_threads":[{"name":"三到六字短名","content":"一句话：这条新长线是什么、为何值得跨章追踪"}]}
-                        字符串值内部禁止使用英文双引号，引用一律用「」。
-                        summary_md 不要包含任何标题行，直接从摘要正文开始。
-                        new_threads 只提议真正的长线（需要多章才能回收的谜、承诺、关系变化），本章内已解决的不提；
-                        与已有伏笔账本同义的不提；最多 2 条；没有就给空数组。
-                        """, stateSpec())),
+                List.of(LlmPort.Message.system(promptTemplates.format(LlmNode.DIGEST, "system", stateSpec())),
                         LlmPort.Message.user(digestUserPrompt(novelId, chapterId, fullText))), LlmTemps.DIGEST));
         JsonNode node;
         try {
@@ -121,25 +99,25 @@ public class DigestService {
                 });
     }
 
-    /** digest 用户提示：时间锚点 + 已有伏笔账本（防同义重复提议）+ 本章全文。 */
+    /** digest 用户提示：时间锚点段 + 已有伏笔账本段（防同义重复提议）+ 本章全文，三段均落库（digest 命名空间）。 */
     private String digestUserPrompt(long novelId, long chapterId, String fullText) {
-        StringBuilder sb = new StringBuilder();
-        chapterData.findById(chapterId).ifPresent(ch -> {
-            if (ch.getTimeNote() != null && !ch.getTimeNote().isBlank()) {
-                sb.append("【时间锚点】本章距上一章：").append(ch.getTimeNote())
-                        .append("（state.time 必须体现该推进）\n\n");
-            }
-        });
+        String timeAnchor = chapterData.findById(chapterId)
+                .filter(ch -> ch.getTimeNote() != null && !ch.getTimeNote().isBlank())
+                .map(ch -> promptTemplates.getSection(LlmNode.DIGEST, "time_anchor",
+                        java.util.Map.of("time_note", ch.getTimeNote())))
+                .orElse("");
+        String ledger = "";
         List<ForeshadowDTO> existing = foreshadowData.listByNovel(novelId);
         if (!existing.isEmpty()) {
-            sb.append("【已有伏笔账本（同义勿重复提议）】\n");
+            StringBuilder rows = new StringBuilder();
             for (ForeshadowDTO f : existing) {
-                sb.append(f.getCode()).append('（').append(f.getStatus()).append('）').append(f.getContent()).append('\n');
+                rows.append(f.getCode()).append('（').append(f.getStatus()).append('）').append(f.getContent()).append('\n');
             }
-            sb.append('\n');
+            ledger = promptTemplates.getSection(LlmNode.DIGEST, "ledger",
+                    java.util.Map.of("rows", rows.toString()));
         }
-        sb.append("【本章全文】\n").append(fullText);
-        return sb.toString();
+        return promptTemplates.getSection(LlmNode.DIGEST, "user",
+                java.util.Map.of("time_anchor", timeAnchor, "ledger", ledger, "full_text", fullText == null ? "" : fullText));
     }
 
     /** 自动提议落库：status='proposed'，等素材库人工采纳（→planned）或忽略（→dropped）。 */
@@ -182,9 +160,9 @@ public class DigestService {
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.WORLD_STATE, novelId, ch.getId(),
-                List.of(LlmPort.Message.system(promptTemplates.format(
-                                LlmNode.WORLD_STATE, "system", STATE_SYSTEM, stateSpec())),
-                        LlmPort.Message.user(ch.getFullText() + "\n\n只输出 state JSON。")), LlmTemps.WORLD_STATE));
+                List.of(LlmPort.Message.system(promptTemplates.format(LlmNode.WORLD_STATE, "system", stateSpec())),
+                        LlmPort.Message.user(promptTemplates.getSection(LlmNode.WORLD_STATE, "user",
+                                java.util.Map.of("full_text", ch.getFullText())))), LlmTemps.WORLD_STATE));
         JsonNode node;
         try {
             node = llmJson.read(r.content());

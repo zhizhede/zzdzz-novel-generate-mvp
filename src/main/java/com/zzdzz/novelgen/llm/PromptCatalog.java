@@ -3,20 +3,48 @@ package com.zzdzz.novelgen.llm;
 import java.util.List;
 
 /**
- * 提示词注册表：各 LLM 节点 system/user 模板的集中目录，启动时由 PromptTemplateService 同步落库。
- * exact=true 表示与代码中的格式模板逐字一致（%s/%d 为运行时占位），管线运行时库值优先、代码块为回退；
- * exact=false 为运行时拼接件的骨架快照（仅浏览，不接库读取）。
+ * 提示词注册表：各 LLM 节点 system/user 模板与运行时拼装段的集中目录，启动时由 PromptTemplateService 同步落库。
+ * exact=true 为 format 模板（%s/%d 为运行时占位），exact=false 为 {key} 拼接段（占位由代码填参）——两类运行时都库值优先、代码块为回退，
+ * 即目录里没有「仅浏览不接库」的行：凡发给 LLM 的固定文案都在此登记（素材库·提示词页签可编辑）。
  * 代码模板改动后：未人工定制的行会在下次启动自动对齐（version+1）；custom 行不受影响，可前端一键重置。
  */
 public final class PromptCatalog {
 
     public record TemplateDef(String node, String phase, String title, boolean exact, String content) {}
 
+    /** node|phase → 条目索引（Holder 惯例：首次访问才构建，此时 ALL 已就绪；重复条目即炸）。 */
+    private static final class IndexHolder {
+        static final java.util.Map<String, TemplateDef> INDEX = buildIndex();
+
+        private static java.util.Map<String, TemplateDef> buildIndex() {
+            java.util.Map<String, TemplateDef> idx = new java.util.HashMap<>();
+            for (TemplateDef d : ALL) {
+                if (idx.put(d.node() + "|" + d.phase(), d) != null) {
+                    throw new IllegalStateException("PromptCatalog 重复条目: " + d.node() + "/" + d.phase());
+                }
+            }
+            return java.util.Map.copyOf(idx);
+        }
+    }
+
+    /** 目录内模板正文（node+phase 定位）：业务调用点的唯一回退，调用点不得再内联提示词文本。 */
+    public static String contentOf(String node, String phase) {
+        TemplateDef d = IndexHolder.INDEX.get(node + "|" + phase);
+        return d == null ? null : d.content();
+    }
+
     private PromptCatalog() {}
 
     public static final List<TemplateDef> ALL = List.of(
 
         // ===== 章纲 =====
+        new TemplateDef(LlmNode.OUTLINE, "system", "AI 章纲系统提示", true,
+                "你是网文章纲规划器，只输出合法 JSON，不要任何解释或 markdown 代码块。"
+                        + "字符串值内部禁止英文双引号，引用一律用「」。"),
+
+        new TemplateDef(LlmNode.OUTLINE, "reject_suffix", "章纲·人工打回意见注入句（拼在卷纲目标后）", false,
+                "（上一版内容已被人工打回，打回意见：{reason}。本次规划必须针对性回应上述意见，调整场景设计）"),
+
         new TemplateDef(LlmNode.OUTLINE, "user", "AI 章纲生成（场景拆解）", true, """
                 任务：为第 %d 章《%s》编写场景级章纲。
                 本章卷纲目标：%s
@@ -45,8 +73,8 @@ public final class PromptCatalog {
                 """),
 
         // ===== 场景生成 =====
-        new TemplateDef(LlmNode.SCENE_DRAFT, "system", "场景写作系统提示（风格包红线；未含量化画像时叠加默认画像）", false, """
-
+        // 场景 system = style_packs 规则正文（按书落库）+ style_redlines 段（下），无独立 system 模板行。
+        new TemplateDef(LlmNode.SCENE_DRAFT, "style_redlines", "量化风格画像（场景 system 追加段，无画像预设时叠加）", false, """
                 【量化风格画像（按此密度写，门禁按同口径验收）】
                 - 对话密：每千字约 19 行「」对话——推动情节靠人物说话，不靠叙述转述。
                 - 一行一拍：平均每行 15-22 字。
@@ -101,20 +129,24 @@ public final class PromptCatalog {
                 %s
                 """),
 
-        new TemplateDef(LlmNode.SCENE_REVISE, "system", "场景重写系统提示（复用场景包 system）", false,
-                "同 scene_draft/system：复用场景包 system（风格包红线 + 量化风格画像）。"),
+        new TemplateDef(LlmNode.SCENE_REVISE, "user", "场景门禁重写（{key} 拼接段：场景包+上一稿+门禁意见）", false,
+                "{scene_user}\n\n【你上一稿】\n{draft}\n\n【门禁意见（只改被点名的问题，保持其余原样）】\n{gate_feedback}\n\n只输出修订后的完整正文。"),
 
-        new TemplateDef(LlmNode.SCENE_REVISE, "user", "场景门禁重写", false, """
-                {场景包 user（同 scene_draft/user 组装结果）}
-
-                【你上一稿】
-                {draft：上一稿正文}
-
-                【门禁意见（只改被点名的问题，保持其余原样）】
-                {gateFeedback：门禁未过项与原因}
-
-                只输出修订后的完整正文。
+        // ===== 场景工艺段（写法约束，注入 scene user 的 craft 槽位） =====
+        new TemplateDef(LlmNode.SCENE_DRAFT, "opening_redlines", "本章开篇红线（第一场景注入）", false, """
+                【本章开篇红线（本章第一个场景，逐条硬性执行）】
+                - 必须紧接上一章结尾的情境：同一时间、同一地点、同一组在场人物；读者读完前 3 行就能定位「这章接在哪之后」。
+                - 上一章结尾留下的钩子必须在场：开篇就是对它的回应、后果或直接推进，不是另起炉灶。
+                - 但禁止复述上一章结尾的任何句子，也不要原地停留——第一段就要让情节往前走一步。
+                - 从动作、对白、威胁或反常细节切入，禁止环境/天气/氛围铺陈开篇；前 3 行内必须抛出新信息或新威胁。
+                - 禁止情绪直给（如「他很紧张」），情绪用动作与细节承载。
                 """),
+
+        new TemplateDef(LlmNode.SCENE_DRAFT, "craft_opening", "人类作者开篇范例（首场景审美对齐）", false,
+                "【人类作者开篇范例（本作真实章节的前三行——学它的切入方式与信息密度，禁止照抄其内容与意象）】\n{examples}"),
+
+        new TemplateDef(LlmNode.SCENE_DRAFT, "craft_dialogue", "对白推进范例（全场景注入）", false,
+                "【对白推进范例（本作真实章节——情节靠人物说话，学这个节奏与密度，禁止照抄内容）】\n第{chapter_no}章：\n{excerpt}"),
 
         // ===== 章级机械门禁修订 =====
         new TemplateDef(LlmNode.CHAPTER_REVISE, "system", "章级门禁修订系统提示", true,
@@ -151,17 +183,17 @@ public final class PromptCatalog {
                 - 不要输出思考过程，只输出 JSON。
                 """),
 
-        new TemplateDef(LlmNode.READER_REVIEW, "user", "读者评审输入", false, """
+        new TemplateDef(LlmNode.READER_REVIEW, "user", "读者评审输入（{key} 拼接段）", false, """
                 【上一章结尾（衔接定位基准）】
-                {prevTail}
+                {prev_tail}
 
                 【上一章事件后果】
-                {prevBrief（第一章时提示 consequence 直接 pass）}
+                {prev_brief}
 
                 【本章目标】{goal}
 
-                【第 {chapterNo} 章全文（评审对象）】
-                {fullText}
+                【第 {chapter_no} 章全文（评审对象）】
+                {full_text}
 
                 只输出 JSON。
                 """),
@@ -181,6 +213,17 @@ public final class PromptCatalog {
                 %s
                 """),
 
+        new TemplateDef(LlmNode.READER_FIX, "user_recover", "读者重写·恢复扩写（删过头后补回情节节拍）", true, """
+                任务：第 %d 章上一稿删注水后只剩约 %d 字，低于本章下限 %d 字。
+                请把被删掉的情节节拍恢复为对白与动作，禁止新增环境/氛围/心理铺陈，目标 %d–%d 字；
+                直接输出修订后的完整正文，不要输出思考过程。
+
+                【弃书理由清单（删除仍然成立，不得恢复纯装饰段落）】
+                %s
+                【当前稿（在此版本上扩写）】
+                %s
+                """),
+
         // ===== AI 语义审校 =====
         new TemplateDef(LlmNode.AI_REVIEW, "system", "AI 语义审校四查", true, """
                 你是资深网文审校编辑，在机械门禁之后做语义审校。只查以下四类问题：
@@ -197,20 +240,24 @@ public final class PromptCatalog {
                 - 不要输出思考过程，只输出 JSON。
                 """),
 
-        new TemplateDef(LlmNode.AI_REVIEW, "user", "AI 审校输入", false, """
-                【世界设定与大纲】{world}
+        new TemplateDef(LlmNode.AI_REVIEW, "user", "AI 审校输入（{key} 拼接段）", false, """
+                【世界设定与大纲】
+                {world}
 
-                【人物卡】{characters}
+                【人物卡】
+                {characters}
 
-                【世界状态（上一章结束时）】{worldState（无则「（无）」）}
+                【世界状态（上一章结束时）】
+                {world_state}
 
                 【近章事实账】
-                {digests：近 3 条以 --- 分隔（无则「（无）」）}
+                {digests}
 
-                【上一章结尾】{prevTail}
+                【上一章结尾】
+                {prev_tail}
 
-                【第 {chapterNo} 章全文（审校对象）】
-                {fullText}
+                【第 {chapter_no} 章全文（审校对象）】
+                {full_text}
 
                 审校以上全文，只输出 JSON。
                 """),
@@ -241,22 +288,20 @@ public final class PromptCatalog {
                 与已有伏笔账本同义的不提；最多 2 条；没有就给空数组。
                 """),
 
-        new TemplateDef(LlmNode.DIGEST, "user", "digest 输入（时间锚点+伏笔账本+全文）", false, """
-                〔运行时按序拼接，均有则拼〕
-                【时间锚点】本章距上一章：{timeNote}（state.time 必须体现该推进）
+        new TemplateDef(LlmNode.DIGEST, "time_anchor", "digest·时间锚点段（章行有 time_note 时注入）", false,
+                "【时间锚点】本章距上一章：{time_note}（state.time 必须体现该推进）\n\n"),
 
-                【已有伏笔账本（同义勿重复提议）】
-                {code（status）content 逐条}
+        new TemplateDef(LlmNode.DIGEST, "ledger", "digest·已有伏笔账本段（防同义重复提议）", false,
+                "【已有伏笔账本（同义勿重复提议）】\n{rows}\n"),
 
-                【本章全文】
-                {fullText}
-                """),
+        new TemplateDef(LlmNode.DIGEST, "user", "digest 输入（{key} 拼接段）", false,
+                "{time_anchor}{ledger}【本章全文】\n{full_text}"),
 
-        new TemplateDef(LlmNode.WORLD_STATE, "system", "世界状态快照（%s=state 字段规格）", true, """
-                你是世界状态记录员。读完本章，输出本章结束时刻的结构化状态快照，只输出 JSON：
-                {%s}
-                规则：只记硬事实；人名用规范名；拿不准的不写；字符串值内部禁止英文双引号，引用一律用「」。
-                """),
+        new TemplateDef(LlmNode.WORLD_STATE, "system", "世界状态记录员系统提示（%s=state 字段规格）", true,
+                "你是世界状态记录员。读完本章，输出本章结束时刻的结构化状态快照，只输出 JSON：\n{%s}\n规则：只记硬事实；人名用规范名；拿不准的不写；字符串值内部禁止英文双引号，引用一律用「」。"),
+
+        new TemplateDef(LlmNode.WORLD_STATE, "user", "世界状态回填输入（存量章回填）", false,
+                "{full_text}\n\n只输出 state JSON。"),
 
         // ===== 卷纲规划 =====
         new TemplateDef(LlmNode.VOLUME_PLAN, "system", "整卷规划系统提示", true,
@@ -270,7 +315,7 @@ public final class PromptCatalog {
                 1. brief 为 150-300 字卷简报，必须写清四个决策：本卷核心悬念与谜底展开节奏（人物身份/动机类问题的答案在本卷如何推进）、卷终点钩子（终章留给下一卷的最大悬念）、伏笔取舍（哪些回收、哪些继续悬置及理由）、节奏曲线（紧张章与舒缓章如何分布）。
                 2. chapters.no 从 %d 开始连续编号；title 不超过 12 字；goal 100-200 字且按戏剧结构写四件套——欲望（本章谁想要什么）、阻碍（什么在阻止）、转折（章内如何升级或翻转）、情绪落点，供下游场景拆解器使用；hook 为一句话章末钩子；time_note 为本章距上一章的故事时间跨度（如「紧接」「次日清晨」「三天后」，不得与时间线矛盾）。
                 3. foreshadows 只列本章要「埋设」或「回收」的伏笔：账本中 proposed/planned 的编码被引用即排期埋设，planted 的被引用即安排回收（action=recover）；账本里没有的新伏笔省略 code、必须给 content（一句话）且 action=plant，将自动建账；已 recovered 的不要引用（旧线呼应写进 goal 即可）；与本章无关的不要列。
-                4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。
+                %s
                 5. 卷尾必须留下强钩子；不得与已有卷纲重复桥段。
                 6. 若上下文给出【上卷复盘要点】，必须在 brief 决策与章节安排中做出回应：点名的悬置伏笔优先安排兑现（引用编码即排期）或给出明确悬置理由；漂移项须有对应修正安排。
 
@@ -435,17 +480,6 @@ public final class PromptCatalog {
                 "你是网文策划，依据样例小说的结构画像为衍生新书推荐参数；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
 
         // ===== 运行时拼装段（common/scene/digest 命名空间：getSection {key} 占位接库，素材库·提示词可编辑） =====
-        new TemplateDef(LlmNode.SCENE_DRAFT, "style_redlines", "量化风格画像（场景 system 追加段，无画像预设时叠加）", false, """
-                【量化风格画像（按此密度写，门禁按同口径验收）】
-                - 对话密：每千字约 19 行「」对话——推动情节靠人物说话，不靠叙述转述。
-                - 一行一拍：平均每行 15-22 字。
-                - 破折号——每千字 2-4 个（同位语补充设定）；省略号……每千字 4-6 个（拖长的思绪）。
-                - 对话行句末 85% 以上不加标点（问句可留？）。例：写「走吧」，不要写「走吧。」；旁白行才用句号。
-                - 阿拉伯数字只用于钱（"时薪18""31块"），每千字不超过 12 个；
-                  时间写中文（凌晨两点，不写凌晨2点）；守则条文序号用中文（第一条，不写第1条）。
-                - 顿号每千字不超过 1 个；感叹号每千字不超过 2 个。
-                """),
-
         new TemplateDef(LlmNode.SCENE_DRAFT, "derive_pov", "衍生段·叙事视角（有 POV 配置时注入）", false, """
                 【叙事视角（必须遵守）】
                 {pov}；主视角：{povCharacter}。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。
@@ -478,6 +512,40 @@ public final class PromptCatalog {
                 【衍生差异红线（最高优先级）】本书为样本衍生新作，不是样本的复述或改编：禁止复述样本原书的情节走向、桥段与章节结构；本书主角与主线必须为原创新人物新事件；只沿用其世界观规则、力量体系与类型套路。
                 """),
 
+        // ===== 全局账本段（packLedgers 注入卷规划/单章重规划上下文） =====
+        new TemplateDef("common", "ledger_plans", "账本·已有卷纲段（不得重复桥段，须衔接走向）", false,
+                "【已有卷纲（往卷已写与当前规划；不得重复其桥段，须衔接其走向）】\n{rows}\n"),
+
+        new TemplateDef("common", "ledger_digests", "账本·事实账段（最近硬事实）", false,
+                "【事实账（最近硬事实）】\n{rows}\n\n"),
+
+        new TemplateDef("common", "ledger_worldstate", "账本·世界状态段（截至第 {until_no} 章结束）", false,
+                "【世界状态（截至第 {until_no} 章结束，必须遵守——物品归属与位置不得凭空变化）】\n{rows}\n\n"),
+
+        new TemplateDef("common", "ledger_foreshadows", "账本·伏笔账本段（未回收项）", false,
+                "【伏笔账本（未回收项；proposed=自动提议待排期，被引用即采纳；planted=已埋待回收，被引用即安排回收）】\n{rows}\n"),
+
+        new TemplateDef("common", "retro_section", "上卷复盘要点段（有复盘报告时注入卷规划）", false,
+                "【上卷复盘要点（第 {vol_no} 卷复盘结论，本卷规划必须做出回应：点名的悬置伏笔优先安排兑现或给出理由）】\n{compact}\n\n"),
+
+        // ===== 卷规划上下文框架段（packVolumePlan） =====
+        new TemplateDef("common", "volume_world", "卷规划·世界观与大纲头段", false,
+                "【世界观与全书大纲（必须遵守，不得发明矛盾设定）】\n{world}\n\n"),
+
+        new TemplateDef("common", "volume_seed", "卷规划·本卷种子大纲头段", false,
+                "【本卷种子大纲（最高优先级，须全部落实）】\n{seed}"),
+
+        new TemplateDef("common", "volume_seed_empty", "卷规划·无种子大纲时的占位句", false,
+                "（无——请基于上方全局账本自主设计本卷主线，并在 brief 中说明关键决策）"),
+
+        // ===== JSON 校验喂回（LlmJson 重试轮追加到末条 user 之后） =====
+        new TemplateDef("common", "json_retry_feedback", "JSON 输出不合规喂回句（LlmJson 重试）", false,
+                "【上一次输出不合规：{reason}。请重新输出，只输出合法 JSON。】"),
+
+        // ===== 卷规划重试喂回（结构校验/AI 审校未过原因注入下一轮） =====
+        new TemplateDef("common", "plan_retry_feedback", "卷规划重试·上轮未过原因注入段", false,
+                "\n\n【上一轮未过原因（本轮必须修正）】\n{feedback}"),
+
         new TemplateDef("common", "plan_span_free", "卷规划·章数自由口径（无目标章数时）", false,
                 "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）"),
 
@@ -497,29 +565,8 @@ public final class PromptCatalog {
                  "new_promises":["本章新立下的承诺/约定/邀约"],
                  "unresolved":["本章留下的未解之谜或未回收伏笔"]}"""),
 
-        new TemplateDef(LlmNode.WORLD_STATE, "system", "世界状态记录员系统提示（world_state 回填）", true,
-                "你是世界状态记录员。读完本章，输出本章结束时刻的结构化状态快照，只输出 JSON：\n{%s}\n规则：只记硬事实；人名用规范名；拿不准的不写；字符串值内部禁止英文双引号，引用一律用「」。"),
-
         new TemplateDef(LlmNode.SAMPLE_TAGS, "system", "样本标签提取系统提示", true,
                 "你是网文分类编辑，给小说打类型与特征标签；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
-
-        // 衍生配置段（ContextPackerService.deriveSection 运行时拼装；快照仅浏览）
-        new TemplateDef(LlmNode.SCENE_DRAFT, "derive", "衍生配置段（POV/情节密度/类型标签，运行时拼装）", false, """
-                【叙事视角（必须遵守）】
-                {pov}；主视角：{povCharacter}。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。
-                【情节密度要求】
-                {density}
-                【类型标签（本书的类型基调与标志性元素，规划与行文必须贴合）】
-                {tags}
-                """),
-
-        // 衍生差异红线（仅 sourceSampleId 非空的衍生书注入卷规划与场景；防复述样本原书）
-        new TemplateDef(LlmNode.SCENE_DRAFT, "redline", "衍生差异红线（防复述样本原书，运行时拼装）", false, """
-                【衍生差异红线（最高优先级）】本书为样本衍生新作，不是样本的复述或改编：
-                - 禁止复述样本原书的情节走向、桥段与章节结构；
-                - 本书主角与主线必须为原创新人物新事件（样本素材卡中的原书主角只能作为背景设定存在，不得担任本书主角）；
-                - 只沿用其世界观规则、力量体系与类型套路。
-                """),
 
         // ===== 开书向导·AI 生成全书大纲草稿 =====
         new TemplateDef(LlmNode.DERIVE_OUTLINE, "system", "全书大纲草稿生成系统提示", true,
@@ -530,8 +577,8 @@ public final class PromptCatalog {
                 "【共用世界观（新故事必须发生在该世界内；可少量引用原书人物为配角，但主角、主线与情节必须完全原创，禁止复刻样本的剧情线与桥段）】\n%s\n"),
 
         new TemplateDef(LlmNode.DERIVE_OUTLINE, "user", "全书大纲草稿生成（基本信息+衍生设定）", true, """
-                任务：为下面的新书创作全书大纲，供作者过目修改（之后每一章生成都携带它作为方向约束）。分节输出：## 主题与核心悬念、## 主线（起承转合 300-500 字）、## 分卷走向（每卷一行：卷名+主线任务+卷尾钩子）、## 主要人物（3-6 人：名字/身份/动机/弧光）、## 题材基调。
-                要求：分卷走向按 %d 卷规划；人物名与设定必须原创（若提供了参考样本骨架，只借其结构与节奏气质，禁止搬运其专有人名/地名/专有设定）；全部内容须贴合类型标签与题材基调，悬念与钩子密度按节奏口径安排。
+                任务：为下面的新书创作**全新原创**的全书大纲，供作者过目修改（之后每一章生成都携带它作为方向约束）。分节输出：## 主题与核心悬念、## 主线（起承转合 300-500 字）、## 分卷走向（每卷一行：卷名+主线任务+卷尾钩子）、## 主要人物（3-6 人：名字/身份/动机/弧光）、## 题材基调。
+                要求：分卷走向按 %d 卷规划；**情节、人物、桥段必须完全原创**——即使提供了样本的世界观或类型方向，也禁止复刻样本的剧情线、人物关系与桥段序列；全部内容须贴合类型标签与题材基调，悬念与钩子密度按节奏口径安排。
 
                 【书名】%s
                 【简介】%s
@@ -539,7 +586,6 @@ public final class PromptCatalog {
                 【类型标签】%s
                 【叙事视角】%s
                 【节奏口径】%s（每卷约 %d 章）
-                %s
                 %s
                 """),
 
@@ -555,12 +601,26 @@ public final class PromptCatalog {
         new TemplateDef(LlmNode.SAMPLE_PARAMS, "user", "衍生参数推荐（掺水量/POV/节奏/章数）", true, """
                 任务：用户要以样例《%s》为蓝本衍生新书。依据下面的结构画像推荐衍生参数，输出 JSON：
                 {"water":0,"pov":"第一人称|第三人称限知|第三人称全知|多视角轮换 之一","povCharacter":"主视角（人物名，多视角则留空）",
-                 "chaptersPerVolume":10,"targetChapters":300,"pacingNote":"节奏说明 40-80 字","reason":"推荐理由 80 字内"}
+                 "chaptersPerVolume":10,"targetChapters":300,"pacingNote":"节奏说明 40-80 字","reason":"推荐理由 80 字内",
+                 "tags":["衍生书类型/特征标签 5-10 个，如 奇幻、剑与魔法、快节奏——可沿用样例也可按衍生方向调整"]}
                 口径：water 0=情节密度拉满的干货流，50=均衡，100=日常氛围舒缓流；chaptersPerVolume 3-30；
                 targetChapters 按样例体量与题材惯例估（50-2000）；povCharacter 必须是材料中出现的主要人物。
 
                 【结构画像】
                 %s
-                """)
+                """),
+
+        // ===== 素材卡注入段（MaterialCardService.render） =====
+        new TemplateDef("material", "card_block_header", "素材卡·设定卡块头段（卡清单注入规划/审校/章纲）", false,
+                "【设定卡（人物/物品/地点设定，必须遵守，不得发明矛盾设定）】\n{cards}"),
+
+        // ===== 开发冒烟（SmokeRunner，--smoke.enabled=true 时运行） =====
+        new TemplateDef(LlmNode.SMOKE, "exemplar_header", "冒烟·风格范例标题段", false,
+                "【风格范例（逐字原文，严格模仿其分行节奏与口吻）】\n{exemplar}"),
+
+        new TemplateDef(LlmNode.SMOKE, "user", "冒烟·续写任务", true,
+                "任务：续写《人类、法师、地下城》。场景：早饭后，塞拉斯和坎德尔一起出门前往冒险家协会，"
+                        + "路上坎德尔提到最近向导委托变多，感觉魔物又要溢出。写到协会门口为止。"
+                        + "要求 300–500 字，只输出正文，不要任何解释。")
     );
 }

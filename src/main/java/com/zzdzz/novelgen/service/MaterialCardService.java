@@ -46,6 +46,7 @@ public class MaterialCardService {
 
     private final MaterialCardDataService cardDAO;
     private final TuningService tuning;
+    private final PromptTemplateService promptTemplates;
 
 
     /** 向量化文本（RAG 索引用）：类型标签 + 名 + 别名 + 摘要 + 正文。 */
@@ -184,10 +185,9 @@ public class MaterialCardService {
         return false;
     }
 
-    /** 渲染：【设定卡】块，pinned 在前带全文，其余摘要；已按 kind 分组。 */
+    /** 渲染：【设定卡】块，pinned 在前带全文，其余摘要；已按 kind 分组。头段文案走 material/card_block_header（落库可编辑）。 */
     private String render(List<MaterialCardDTO> pinned, List<MaterialCardDTO> rest) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("【设定卡（人物/物品/地点设定，必须遵守，不得发明矛盾设定）】\n");
+        StringBuilder rows = new StringBuilder();
         Map<String, List<MaterialCardDTO>> byKind = new LinkedHashMap<>();
         for (MaterialCardDTO c : pinned) {
             byKind.computeIfAbsent(c.getKind(), k -> new ArrayList<>()).add(c);
@@ -198,25 +198,26 @@ public class MaterialCardService {
         for (Map.Entry<String, List<MaterialCardDTO>> e : byKind.entrySet()) {
             for (MaterialCardDTO c : e.getValue()) {
                 String label = KIND_LABELS.getOrDefault(c.getKind(), c.getKind());
-                sb.append("- ").append(c.getName()).append("（").append(label);
+                rows.append("- ").append(c.getName()).append("（").append(label);
                 if (c.pinned()) {
-                    sb.append("，常驻");
+                    rows.append("，常驻");
                 }
                 if ("dead".equals(c.getStatus())) {
-                    sb.append("，已死亡");
+                    rows.append("，已死亡");
                 } else if ("retired".equals(c.getStatus())) {
-                    sb.append("，已退场");
+                    rows.append("，已退场");
                 }
-                sb.append("）：");
+                rows.append("）：");
                 String body = c.pinned() && notBlank(c.getContentMd()) ? c.getContentMd() : firstNonBlank(c.getSummary(), c.getContentMd());
                 if (body == null) {
                     body = "";
                 }
-                sb.append(body.strip().replace('\n', '；'));
-                sb.append('\n');
+                rows.append(body.strip().replace('\n', '；'));
+                rows.append('\n');
             }
         }
-        return sb.toString().strip();
+        return promptTemplates.getSection("material", "card_block_header",
+                Map.of("cards", rows.toString())).strip();
     }
 
     /** 摘要缺省时全文截断（匹配命中卡的兜底）。 */
