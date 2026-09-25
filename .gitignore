@@ -24,6 +24,13 @@ web/node_modules/
 
 # IDE
 .idea/
+.vscode/
+*.iml
+# Eclipse
+.classpath
+.project
+.factorypath
+.settings/
 __pycache__/
 var/
 
