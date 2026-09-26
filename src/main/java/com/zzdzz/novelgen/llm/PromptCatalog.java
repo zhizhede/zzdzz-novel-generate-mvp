@@ -330,10 +330,11 @@ public final class PromptCatalog {
                 "你是网文规划审校员，在卷纲落库前把关。只输出合法 JSON。"
                         + "字符串值内部禁止英文双引号，引用一律用「」。"),
 
-        new TemplateDef(LlmNode.VOLUME_PLAN_REVIEW, "user", "卷纲审校（连续性/重复/伏笔/节奏四查）", true, """
+        new TemplateDef(LlmNode.VOLUME_PLAN_REVIEW, "user", "卷纲审校（连续性/重复/伏笔/节奏/复刻五查）", true, """
                 【待审卷纲】
                 %s
                 【对照材料（人物设定卡 + 账本）】
+                %s
                 %s
                 %s
                 审校清单：① 连续性——是否与世界观/人物卡/世界状态/事实账矛盾（人物已死复活、物品凭空转移、时间倒流）；
@@ -343,6 +344,13 @@ public final class PromptCatalog {
                 设定卡里没有某个名字本身不是问题，与卡中人物/设定发生冲突才是。同类判定：「新地点/新物品」同理，自洽即可。
                 只输出 JSON：{"verdict":"PASS"或"BLOCKER","issues":["问题（指明章号）"]}
                 存在必须修复的硬伤才 BLOCKER；风格偏好类意见写进 issues 但给 PASS。
+                """),
+
+        // 衍生书复刻判据段（sourceSampleId 存在时由 VolumePlanService 注入第 4 个 %s；非衍生书传空串）
+        new TemplateDef(LlmNode.VOLUME_PLAN_REVIEW, "derive_no_copy", "卷纲审校·衍生复刻判据段（含样本骨架）", false, """
+                【衍生复刻红线（最高优先级）】本书为样本衍生新作：规划行的主角不得为样本原书人物或其仅换姓名的对应物，主线节拍与标志性桥段不得与下方原书骨架同序同构——发现复刻即 BLOCKER，问题写明「复刻样本剧情」。
+                【样本原书剧情骨架（仅供对照禁区，禁止落实进规划行）】
+                {skeleton}
                 """),
 
         // ===== 卷级复盘 =====
@@ -502,6 +510,12 @@ public final class PromptCatalog {
                 - 只沿用其世界观规则、力量体系与类型套路。
                 """),
 
+        // 文风指纹量化目标（GateService.fingerprintGuidance 按书生成；有指纹才注入——第一稿就朝门禁及格线写）
+        new TemplateDef(LlmNode.SCENE_DRAFT, "fingerprint_targets", "写作段·文风指纹量化目标（与机械门禁同口径）", false, """
+                【文风指纹指标（机械门禁逐条硬判，超限直接打回重写——写作时同步自查）】
+                {targets}
+                """),
+
         new TemplateDef("common", "derive_volume", "衍生段·卷规划版（POV/密度/标签/红线合并）", false, """
                 【叙事视角（必须遵守）】
                 {pov}；主视角：{povCharacter}。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。
@@ -586,6 +600,47 @@ public final class PromptCatalog {
                 【类型标签】%s
                 【叙事视角】%s
                 【节奏口径】%s（每卷约 %d 章）
+                %s
+                """),
+
+        // 复刻重写（原大纲被 derive_originality 判复刻后的再生成；system 复用本节点 system）
+        new TemplateDef(LlmNode.DERIVE_OUTLINE, "rewrite", "全书大纲·复刻判定后重写", true, """
+                你此前为这本书生成的大纲被原创性审校判定为**复刻样本原书**，判定依据：
+                %s
+
+                请重写全书大纲：保持书名、简介、类型标签与世界观设定不变，但主角必须换成全新原创人物（不得使用原书人物名，也不得用仅换姓名的对应物），主线事件序列必须重新设计（不得沿用原书的起承转合顺序与标志性桥段）。分节输出：## 主题与核心悬念、## 主线（起承转合 300-500 字）、## 分卷走向（每卷一行：卷名+主线任务+卷尾钩子）、## 主要人物（3-6 人：名字/身份/动机/弧光）、## 题材基调。只输出大纲正文（markdown），不要 JSON、不要任何解释。
+
+                【被判复刻的原大纲】
+                %s
+                """),
+
+        // ===== 衍生大纲·原书复刻评审（书 9/10/11 换名复刻实证后的防线） =====
+        new TemplateDef(LlmNode.DERIVE_ORIGINALITY, "system", "衍生大纲复刻评审系统提示", true,
+                "你是原创性审校官，判定一本衍生新作的大纲是否复刻了样本原书的情节。只输出合法 JSON。"
+                        + "字符串值内部禁止英文双引号，引用一律用「」。"),
+
+        new TemplateDef(LlmNode.DERIVE_ORIGINALITY, "user", "衍生大纲复刻评审（换名重述也算复刻）", true, """
+                任务：对照【样本原书骨架】与【原书主要人物】，判定下面的【新书大纲】是否构成对原书情节的复刻。**换名重述也算复刻**。
+
+                判为复刻（copy=true）的口径（满足任一条）：
+                - 大纲主角与原书主角为同一人物，或仅换了姓名的对应物（身份、核心关系、经历轨迹一致）；
+                - 主线节拍与原书骨架同序同构（起承转合的关键转折一一对应，仅细节表皮不同）；
+                - 原书的标志性桥段被直接搬用（序列关系 preserved）。
+
+                不判为复刻（copy=false）的口径：
+                - 只共用世界观、力量体系、地理与类型套路（同世界衍生允许）；
+                - 原书人物仅作背景提及，不担任主角、不驱动主线；
+                - 题材相似但事件序列是原创的。
+
+                只输出 JSON：{"copy":true或false,"reasons":["判定依据（copy=false 时给空数组）"]}
+
+                【样本原书骨架】
+                %s
+
+                【原书主要人物】
+                %s
+
+                【新书大纲】
                 %s
                 """),
 

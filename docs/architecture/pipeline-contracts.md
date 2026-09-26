@@ -191,11 +191,22 @@ flowchart LR
     A[向导选预设+样本] --> B[衍生参数 用户定或AI帮定] --> C[点AI生成大纲]
     C --> D[书即落库 status=draft 秒回任务id]
     D --> E[大纲后台并发生成 注入克隆世界观+素材卡约束]
-    E --> F[完成并激活 draft-to-active 大纲进canon]
+    E --> O{derive_originality 复刻评审}
+    O -->|判复刻| P[带原因重写 ≤2轮]
+    P --> O
+    O -->|通过| F[完成并激活 draft-to-active 大纲进canon]
+    O -.重写耗尽仍复刻.-> X[任务 FAILED 消息含建议]
     D -.中途离开.-> G[草稿恢复 自动取回设定与大纲]
 ```
 
 验收口径：①生大纲即落库，书籍管理页立即可见（状态=草稿）；②克隆样本资产时 AI 大纲必须贴合克隆世界（derive_outline/world 段，PromptCatalog 可编辑）——否则卷规划审校必打回（书 9 实证）；③克隆预设的章长带约束卷规划预算；④掺水量/POV/标签/每卷章数/目标/无人续跑全参数书级可改（PUT derive-config，fail-open）。**已知约束**：克隆世界观与 AI 自创大纲是组合风险，向导须提示（TODO：勾选联动警告）。
+
+**复刻防线契约（2026-09-26 增补，书 9/10/11 悉达多换名复刻实证）**：
+
+- **cloneAssets 全路径生效**：AI 大纲异步路径与直接创建路径都必须传 cloneAssets（此前 buildOutlinePayload 丢弃勾选，后端 null 一律全克隆）；`plotOutline`（骨架预填）默认**关**。
+- **大纲原创性把关（derive_originality 节点）**：sampleId 存在且样本已有书级剧情骨架时，大纲生成后自动评审——对照样本骨架+原书人物名（★2+ 人物卡），判复刻（主角同一/换名对应物/主线同序同构/桥段搬用）→ 带原因重写（derive_outline/rewrite 段）≤2 轮 → 仍复刻 → 任务 FAILED，消息含可行动建议；评审调用本身故障时 fail-open 放行但必留 log.warn。llm_call_log node=derive_originality 可回放。
+- **骨架大纲激活门禁**：canon 大纲仍是样本剧情骨架原文（"> 由样本《" 开头）时 `POST /{id}/activate` 拒绝——防"骨架直通下游"（大纲=原书时章纲/正文全链复刻）。
+- **卷规划审校复刻判据**：sourceSampleId 存在时审校 user 注入 derive_no_copy 段（含样本骨架），复刻样本剧情=BLOCKER，与既有"贴合克隆世界"口径并行。
 
 ### 流 C：无人续跑链
 

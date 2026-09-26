@@ -224,7 +224,8 @@
                      :disabled="(!wizardForm.title.trim() || !wizardForm.presetId) && !outlineDrafting"
                      @click="aiDraftOutline">{{ outlineDrafting ? '大纲生成中…' : 'AI 生成大纲草稿' }}</el-button>
           <span style="font-size: 12px; color: #999">
-            后台并发生成（约半分钟/本，可连续批量提交），完成后自动填入本框；按书名/简介/文风预设 + 衍生设定（样本骨架、类型标签、POV、节奏与目标章数）生成
+            后台并发生成（约半分钟/本，可连续批量提交），完成后自动填入本框；按书名/简介/文风预设 + 衍生设定（类型标签、克隆世界观、POV、节奏与目标章数）生成。
+            选了样本时自动做「原书复刻」审校：判复刻会自动重写，重写仍复刻则任务失败并给出建议
           </span>
         </div>
         <el-input v-model="wizardForm.outline" type="textarea" :rows="14"
@@ -289,7 +290,7 @@ const draftBook = ref(null)
 const wizardForm = ref({
   title: '', description: '', presetId: null, outline: '',
   sampleId: null,
-  cloneAssets: { cards: true, world: true, plotOutline: true },
+  cloneAssets: { cards: true, world: true, plotOutline: false },
   derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
 })
 const wizardSamples = ref([])
@@ -327,7 +328,7 @@ async function initWizard() {
   wizardForm.value = {
     title: '', description: '', presetId: null, outline: '',
     sampleId: null,
-    cloneAssets: { cards: true, world: true, plotOutline: true },
+    cloneAssets: { cards: true, world: true, plotOutline: false },
     derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
   }
   presetMode.value = 'select'
@@ -524,6 +525,7 @@ function buildOutlinePayload() {
     sampleId: f.sampleId || undefined,
     novelId: createdNovelId.value || undefined,
     draft: createdNovelId.value ? undefined : true,
+    cloneAssets: f.sampleId ? { ...f.cloneAssets } : undefined,
     deriveConfig: {
       water: f.derive.water,
       pov: f.derive.pov,
@@ -595,14 +597,9 @@ async function createNovel() {
   wizardStep.value = 3
   wizardCreated.value = null
   try {
-    const n = await api.post('/api/novels', {
-      title: payload.title,
-      description: payload.description,
-      presetId: payload.presetId,
-      sampleId: payload.sampleId,
-      cloneAssets: wizardForm.value.sampleId ? { ...wizardForm.value.cloneAssets } : undefined,
-      deriveConfig: payload.deriveConfig
-    })
+    const payload = buildOutlinePayload()
+    delete payload.draft // 直接创建路径保持原语义：一步建成 active 正式书（勾选 cloneAssets 随 payload 传递）
+    const n = await api.post('/api/novels', payload)
     if (wizardForm.value.outline.trim()) {
       try {
         await api.put(`/api/novels/${n.id}/planning/story`, { content: wizardForm.value.outline.trim() })

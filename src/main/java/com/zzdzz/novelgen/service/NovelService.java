@@ -15,6 +15,7 @@ import com.zzdzz.novelgen.model.dto.StylePackDTO;
 import com.zzdzz.novelgen.model.enums.PlanMode;
 import com.zzdzz.novelgen.model.vo.NovelCreateVO;
 import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.llm.LlmTemps;
@@ -32,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -50,6 +52,7 @@ public class NovelService {
     private final CanonDocDataService canonData;
     private final com.zzdzz.novelgen.service.data.GenerationTaskDataService taskData;
     private final LlmPort llm;
+    private final LlmJson llmJson;
     private final PromptTemplateService promptTemplates;
     private final ObjectMapper mapper;
 
@@ -62,9 +65,14 @@ public class NovelService {
         }).toList();
     }
 
-    /** 草稿书完成激活（draft → active；条件更新防重复激活）。 */
+    /** 草稿书完成激活（draft → active；条件更新防重复激活）。骨架大纲门禁：未改写的样本骨架直通下游会让卷规划/正文沿原书剧情生成。 */
     public void activate(long novelId) {
         requireNovel(novelId);
+        String outline = canonData.findContentByKindName(novelId, "misc", "大纲");
+        if (outline != null && outline.strip().startsWith(SKELETON_OUTLINE_MARKER)) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "大纲仍是样本剧情骨架（未改写）——先完成「AI 生成大纲」或在「规划」页改写大纲后再激活");
+        }
         if (novelData.activate(novelId) == 0) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "该书不是草稿状态（可能已激活）");
         }
@@ -357,7 +365,121 @@ public class NovelService {
         if (outline.isEmpty()) {
             throw new BizException(ErrorCode.LLM_OUTPUT_INVALID, "大纲生成为空（llm_call_log node=derive_outline 可回放），请重试");
         }
+        if (vo.sampleId() != null) {
+            outline = ensureOriginality(vo, outline);
+        }
         return outline;
+    }
+
+    // ===== 衍生大纲原创性把关（书 9/10/11 悉达多换名复刻实证）=====
+
+    /** 复刻判定后自动重写轮数上限（初始生成 + ≤N 轮重写，轮满仍复刻即失败）。 */
+    private static final int ORIGINALITY_REWRITE_ROUNDS = 2;
+    /** cloneSampleAssets 预填骨架大纲的固定头（activate 门禁据此识别未改写骨架）。 */
+    private static final String SKELETON_OUTLINE_MARKER = "> 由样本《";
+
+    record OriginalityVerdict(boolean copy, List<String> reasons) {}
+
+    /**
+     * 大纲复刻把关：对照样本书级骨架与原书人物名（★2+）评审，判复刻→带原因重写≤N轮→仍复刻抛错（任务 FAILED）。
+     * 评审调用本身故障 fail-open 放行（与卷规划审校同口径）但必留 warn——判定结果绝不静默丢弃。
+     */
+    private String ensureOriginality(NovelCreateVO vo, String outline) {
+        String skeleton = sampleBookSkeleton(vo.sampleId());
+        if (skeleton.isBlank()) {
+            return outline; // 样本还没深度解析出书级骨架——没有可比对象，放行
+        }
+        List<String> names = sampleCharacterNames(vo.sampleId());
+        String reasons = null;
+        for (int attempt = 0; attempt <= ORIGINALITY_REWRITE_ROUNDS; attempt++) {
+            if (attempt > 0) {
+                outline = rewriteOutline(vo, outline, reasons);
+            }
+            OriginalityVerdict v = judgeOriginality(vo, skeleton, names, outline);
+            if (v == null) {
+                return outline; // 评审没跑成（基础设施故障），judge 内已留痕
+            }
+            if (!v.copy()) {
+                return outline;
+            }
+            reasons = v.reasons().isEmpty() ? "（评审未给出具体依据）" : String.join("；", v.reasons());
+            log.warn("衍生大纲复刻判定成立（重写前第 {}/{} 轮）：{}", attempt, ORIGINALITY_REWRITE_ROUNDS, reasons);
+        }
+        throw new BizException(ErrorCode.LLM_OUTPUT_INVALID,
+                "衍生大纲与原书复刻度过高：自动重写 " + ORIGINALITY_REWRITE_ROUNDS + " 轮仍未通过原创性审校（末次依据："
+                        + reasons + "）。建议：换掉书名/简介里的原书元素，或取消勾选「世界观」克隆后重试"
+                        + "（llm_call_log node=derive_originality 可回放）");
+    }
+
+    /** 复刻评审（derive_originality）；调用/解析失败返回 null（fail-open 放行，warn 留痕）。 */
+    private OriginalityVerdict judgeOriginality(NovelCreateVO vo, String skeleton, List<String> names, String outline) {
+        try {
+            String user = promptTemplates.format(LlmNode.DERIVE_ORIGINALITY, "user",
+                    skeleton, names.isEmpty() ? "（样本未解析出 ★2+ 人物卡）" : String.join("、", names),
+                    truncate(outline, 3200));
+            return llmJson.ask(new LlmPort.ChatRequest(LlmNode.DERIVE_ORIGINALITY, vo.novelId(), null,
+                            List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.DERIVE_ORIGINALITY, "system")),
+                                    LlmPort.Message.user(user)),
+                            LlmTemps.DERIVE_ORIGINALITY),
+                    node -> new OriginalityVerdict(node.path("copy").asBoolean(false),
+                            toStringList(node.path("reasons"))),
+                    2);
+        } catch (Exception e) {
+            log.warn("衍生大纲复刻评审调用失败，本轮放行（评审没跑成≠判定通过）：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 复刻重写：derive_outline/rewrite 段 + 原 system，产出替换稿。 */
+    private String rewriteOutline(NovelCreateVO vo, String outline, String reasons) {
+        String user = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "rewrite", reasons, truncate(outline, 3200));
+        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(LlmNode.DERIVE_OUTLINE, vo.novelId(), null,
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.DERIVE_OUTLINE, "system")),
+                        LlmPort.Message.user(user)),
+                LlmTemps.DERIVE_OUTLINE));
+        String next = r.content() == null ? "" : r.content().strip();
+        if (next.isEmpty()) {
+            throw new BizException(ErrorCode.LLM_OUTPUT_INVALID, "复刻重写输出为空（llm_call_log node=derive_outline 可回放），请重试");
+        }
+        return next;
+    }
+
+    /** 样本书级剧情骨架（深度解析产物；未解析返回空串）。 */
+    private String sampleBookSkeleton(long sampleId) {
+        for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+            if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
+                return truncate(n.getSummary(), 1200);
+            }
+        }
+        return "";
+    }
+
+    /** 原书主要人物名（★2+ 人物卡，去重，上限 20）。 */
+    private List<String> sampleCharacterNames(long sampleId) {
+        LinkedHashSet<String> names = new LinkedHashSet<>();
+        for (SampleCardDTO c : sampleCardData.listBySample(sampleId)) {
+            if (c.getKind().equals("character") && c.getImportance() != null && c.getImportance() >= 2
+                    && c.getName() != null && !c.getName().isBlank()) {
+                names.add(c.getName().strip());
+                if (names.size() >= 20) {
+                    break;
+                }
+            }
+        }
+        return new ArrayList<>(names);
+    }
+
+    private List<String> toStringList(JsonNode arr) {
+        List<String> out = new ArrayList<>();
+        if (arr != null && arr.isArray()) {
+            for (JsonNode n : arr) {
+                String t = n.asText("").strip();
+                if (!t.isBlank()) {
+                    out.add(t);
+                }
+            }
+        }
+        return out;
     }
 
     private static String truncate(String s, int max) {

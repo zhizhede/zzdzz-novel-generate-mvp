@@ -9,6 +9,8 @@ public final class LlmTemps {
     public static final double SCENE_DRAFT = 0.9;
     /** 开书向导·全书大纲草稿（创作型） */
     public static final double DERIVE_OUTLINE = 0.8;
+    /** 衍生大纲·原书复刻评审（判定） */
+    public static final double DERIVE_ORIGINALITY = 0.2;
     /** 场景门禁重写 */
     public static final double SCENE_REVISE = 0.8;
     /** 章级修订 */
