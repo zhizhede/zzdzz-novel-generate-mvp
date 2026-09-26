@@ -235,6 +235,43 @@
         </el-table>
       </el-tab-pane>
 
+      <!-- 模型接入（baseUrl/apiKey 落库，密文存储） -->
+      <el-tab-pane :label="`模型接入（${llmProviders.length}）`">
+        <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
+          <el-button size="small" type="primary" plain @click="openProvider(null)">新建接入</el-button>
+          <span style="color: #999; font-size: 12px">
+            启用的接入全平台唯一（启用新行自动停用旧行），下次调用即生效；API key 以 AES-GCM 密文落库，界面只回显掩码、永不回传明文。
+            无启用行时回退服务端本地配置。
+          </span>
+        </div>
+        <el-table :data="llmProviders" border size="small" style="max-width: 1020px">
+          <el-table-column prop="name" label="名称" width="130" />
+          <el-table-column prop="baseUrl" label="baseUrl" min-width="200" show-overflow-tooltip />
+          <el-table-column label="默认模型" width="130">
+            <template #default="{ row }">{{ row.model || '（节点路由/调用方默认）' }}</template>
+          </el-table-column>
+          <el-table-column label="API key" width="150">
+            <template #default="{ row }"><code style="font-size: 12px">{{ row.keyMasked }}</code></template>
+          </el-table-column>
+          <el-table-column label="超时（连/读 秒）" width="120">
+            <template #default="{ row }">{{ row.connectTimeoutMs == null ? '默认' : Math.round(row.connectTimeoutMs / 1000) }} / {{ row.readTimeoutMs == null ? '默认' : Math.round(row.readTimeoutMs / 1000) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="70">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '使用中' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="remark" label="备注" min-width="100" show-overflow-tooltip />
+          <el-table-column label="操作" width="200">
+            <template #default="{ row }">
+              <el-button size="small" @click="openProvider(row)">编辑</el-button>
+              <el-button size="small" type="primary" plain :loading="providerTesting" @click="testProvider(row)">测试</el-button>
+              <el-button size="small" type="danger" plain @click="delProvider(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <!-- 调参（平台级行为参数） -->
       <el-tab-pane :label="`调参（${tunings.length}）`">
         <div style="color: #999; font-size: 12px; margin-bottom: 8px">
@@ -603,6 +640,29 @@
       <template #footer>
         <el-button @click="nodeEditor = false">取消</el-button>
         <el-button type="primary" @click="saveNode">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 模型接入编辑 -->
+    <el-dialog v-model="providerEditor" :title="providerForm.id ? `编辑接入：${providerForm.name}` : '新建接入'" width="560px">
+      <el-input v-model="providerForm.name" placeholder="名称（唯一，如：MiniMax 主接入）" style="margin-bottom: 10px" />
+      <el-input v-model="providerForm.baseUrl" placeholder="baseUrl（如 https://api.minimax.chat/v1，不带尾斜杠）" style="margin-bottom: 10px" />
+      <el-input v-model="providerForm.apiKey" type="password" show-password
+                :placeholder="providerForm.id ? 'API key（留空 = 保留原 key）' : 'API key（必填，加密后入库）'" style="margin-bottom: 10px" />
+      <el-input v-model="providerForm.model" placeholder="默认模型（留空 = 按节点路由/调用方默认）" style="margin-bottom: 10px" />
+      <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 10px">
+        <span style="font-size: 13px">连接超时(秒)</span>
+        <el-input-number v-model="providerForm.connectTimeoutSec" :min="1" :max="120" size="small" style="width: 100px" />
+        <span style="font-size: 13px">读超时(秒，含响应体)</span>
+        <el-input-number v-model="providerForm.readTimeoutSec" :min="10" :max="1800" :step="30" size="small" style="width: 130px" />
+      </div>
+      <div style="display: flex; gap: 14px; align-items: center">
+        <el-switch v-model="providerForm.enabled" active-text="启用（自动停用其它接入）" />
+        <el-input v-model="providerForm.remark" placeholder="备注" size="small" style="flex: 1" />
+      </div>
+      <template #footer>
+        <el-button @click="providerEditor = false">取消</el-button>
+        <el-button type="primary" @click="saveProvider">保存</el-button>
       </template>
     </el-dialog>
 
@@ -1186,6 +1246,10 @@ const nodeForm = ref({})
 const llmPrices = ref([])
 const priceEditor = ref(false)
 const priceForm = ref({})
+const llmProviders = ref([])
+const providerEditor = ref(false)
+const providerTesting = ref(false)
+const providerForm = ref({})
 const tunings = ref([])
 const readerStd = reactive({ reader_fat_ratio_block: 0.33, reader_fat_ratio_hard: 0.5, reader_fix_len_min: 0.75, reader_fix_len_max: 1.15, ai_review_fix_floor: 0.6 })
 const prompts = ref([])
@@ -1388,6 +1452,68 @@ async function saveNode() {
   }
 }
 
+function openProvider(row) {
+  providerForm.value = row
+    ? { id: row.id, name: row.name, baseUrl: row.baseUrl, apiKey: '', model: row.model || '',
+        connectTimeoutSec: row.connectTimeoutMs == null ? null : Math.round(row.connectTimeoutMs / 1000),
+        readTimeoutSec: row.readTimeoutMs == null ? null : Math.round(row.readTimeoutMs / 1000),
+        enabled: row.enabled, remark: row.remark || '' }
+    : { id: null, name: '', baseUrl: '', apiKey: '', model: '', connectTimeoutSec: 10, readTimeoutSec: 600, enabled: true, remark: '' }
+  providerEditor.value = true
+}
+
+async function saveProvider() {
+  const f = providerForm.value
+  if (!f.id && !f.apiKey?.trim()) {
+    ElMessage.error('新建接入必须填 API key')
+    return
+  }
+  try {
+    const body = {
+      name: f.name?.trim(), baseUrl: f.baseUrl?.trim(), apiKey: f.apiKey?.trim() || null,
+      model: f.model?.trim() || null,
+      connectTimeoutMs: f.connectTimeoutSec == null ? null : f.connectTimeoutSec * 1000,
+      readTimeoutMs: f.readTimeoutSec == null ? null : f.readTimeoutSec * 1000,
+      enabled: f.enabled, remark: f.remark
+    }
+    if (f.id) await api.put(`/api/llm-providers/${f.id}`, body)
+    else await api.post('/api/llm-providers', body)
+    ElMessage.success('已保存，下一次调用即生效')
+    providerEditor.value = false
+    llmProviders.value = await api.get('/api/llm-providers')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function testProvider(row) {
+  providerTesting.value = true
+  try {
+    const r = await api.post(`/api/llm-providers/${row.id}/test`)
+    if (r.ok) ElMessage.success(`连通正常（${r.latencyMs}ms）`)
+    else ElMessage.error(`测试失败：${r.message}`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    providerTesting.value = false
+  }
+}
+
+async function delProvider(row) {
+  try {
+    await ElMessageBox.confirm(`删除接入「${row.name}」？（软删，可 psql 恢复）`, '删除确认', { type: 'warning' })
+  } catch (e) {
+    return
+  }
+  try {
+    await api.delete(`/api/llm-providers/${row.id}`)
+    ElMessage.success('已删除')
+    llmProviders.value = await api.get('/api/llm-providers')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
 function openCard(row) {
   cardForm.value = row
     ? { ...row, aliasesText: (row.aliases || []).join(',') }
@@ -1492,6 +1618,7 @@ async function loadAll() {
   cards.value = await api.get(`/api/novels/${novelId.value}/cards`)
   llmNodes.value = await api.get('/api/llm-nodes')
   llmPrices.value = await api.get('/api/llm-prices')
+  llmProviders.value = await api.get('/api/llm-providers')
   tunings.value = (await api.get('/api/tuning')).map(t => ({ ...t, editValue: t.value }))
   prompts.value = await api.get('/api/prompts')
   try {

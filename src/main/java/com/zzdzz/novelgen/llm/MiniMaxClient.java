@@ -11,7 +11,6 @@ import com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO;
 import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -50,26 +49,27 @@ public class MiniMaxClient implements LlmPort {
     private final ObjectMapper mapper;
     private final LlmCallLogDataService callLogDAO;
     private final LlmNodeConfigDataService nodeConfigDAO;
-    private final RestClient restClient;
-    private final HttpClient streamClient;
+    private final LlmProviderResolver providerResolver;
+    private final HttpClient httpClient;
 
     @Override
     public ChatResult chat(ChatRequest request) {
         long start = System.currentTimeMillis();
+        LlmProviderResolver.Resolved provider = providerResolver.resolve();
         LlmNodeConfigDTO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
-                ? cfg.getModel() : props.model();
+                ? cfg.getModel() : defaultModel(provider);
         Map<String, Object> body = buildBody(request, cfg, model);
         String requestJson = serialize(body);
 
         JsonNode response;
         try {
-            response = post(body);
+            response = post(provider, body);
         } catch (Exception first) {
             // 传输类失败（超时/网络）自动重试一次；注意重试可能造成服务端重复计费
             log.warn("LLM 调用传输失败，重试一次: {}", first.toString());
             try {
-                response = post(body);
+                response = post(provider, body);
             } catch (Exception second) {
                 log.error("LLM 调用失败 node={} model={}", request.node(), model, second);
                 long id = insertLog(request, model, requestJson, null, null, 0, 0, 0, 0,
@@ -115,9 +115,10 @@ public class MiniMaxClient implements LlmPort {
     @Override
     public ChatResult chatStream(ChatRequest request, StreamDelta onDelta) {
         long start = System.currentTimeMillis();
+        LlmProviderResolver.Resolved provider = providerResolver.resolve();
         LlmNodeConfigDTO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
-                ? cfg.getModel() : props.model();
+                ? cfg.getModel() : defaultModel(provider);
         Map<String, Object> body = buildBody(request, cfg, model);
         body.put("stream", true);
         body.put("stream_options", Map.of("include_usage", true));
@@ -125,7 +126,7 @@ public class MiniMaxClient implements LlmPort {
 
         StreamAccumulator acc = new StreamAccumulator(mapper, onDelta);
         try {
-            streamPost(body, acc);
+            streamPost(provider, body, acc);
             acc.finish(); // 冲刷切分器扣住的尾部增量（未闭合思考等）
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt(); // 语义交还上层（attemptChapter 统一清理）
@@ -170,17 +171,17 @@ public class MiniMaxClient implements LlmPort {
     }
 
     /** 阻塞至流结束；线程中断即刻解除并取消订阅（关流）。 */
-    private void streamPost(Map<String, Object> body, StreamAccumulator acc) throws InterruptedException {
+    private void streamPost(LlmProviderResolver.Resolved provider, Map<String, Object> body, StreamAccumulator acc) throws InterruptedException {
         HttpRequest httpRequest = HttpRequest.newBuilder()
-                .uri(URI.create(props.baseUrl() + "/chat/completions"))
-                .timeout(props.readTimeout())
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + props.apiKey())
+                .uri(URI.create(provider.baseUrl() + "/chat/completions"))
+                .timeout(provider.readTimeout())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + provider.apiKey())
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofString(serialize(body), StandardCharsets.UTF_8))
                 .build();
         SseSubscriber subscriber = new SseSubscriber();
         CompletableFuture<HttpResponse<Void>> responseFuture =
-                streamClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.fromSubscriber(subscriber));
+                httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.fromSubscriber(subscriber));
         try {
             while (true) {
                 Object item = subscriber.queue().take();
@@ -500,12 +501,45 @@ public class MiniMaxClient implements LlmPort {
         }
     }
 
-    private JsonNode post(Map<String, Object> body) {
-        return restClient.post()
-                .uri("/chat/completions")
-                .body(body)
-                .retrieve()
-                .body(JsonNode.class);
+    /**
+     * 阻塞 JSON 调用。超时双保险：JDK 客户端的 request timeout 不覆盖响应体读取阶段
+     * （2026-09-27 卷规划任务 #49 永久 RUNNING 实证：响应头已到、body 中途断供，worker 在
+     * HttpResponseInputStream.take() 上无超时 park）——因此 sendAsync + future.get(readTimeout)，
+     * 超时/中断即 cancel(true) 打断底层读取；异常沿既有"传输失败重试一次→error 落库→LlmException"语义。
+     */
+    private JsonNode post(LlmProviderResolver.Resolved provider, Map<String, Object> body) {
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(provider.baseUrl() + "/chat/completions"))
+                .timeout(provider.readTimeout())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + provider.apiKey())
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .POST(HttpRequest.BodyPublishers.ofString(serialize(body), StandardCharsets.UTF_8))
+                .build();
+        CompletableFuture<HttpResponse<String>> future =
+                httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        try {
+            HttpResponse<String> resp = future.get(provider.readTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            if (resp.statusCode() >= 400) {
+                throw new IllegalStateException("HTTP " + resp.statusCode() + ": " + truncate(resp.body(), 500));
+            }
+            return mapper.readTree(resp.body());
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw new IllegalStateException("LLM 响应超时（>" + provider.readTimeout().toSeconds() + "s，含响应体读取）", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            throw new IllegalStateException("LLM 调用被中断", e);
+        } catch (ExecutionException e) {
+            throw new IllegalStateException("LLM 传输失败: " + String.valueOf(e.getCause()), e.getCause());
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("LLM 响应解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 全局默认模型：接入行覆盖 → yaml 兜底。 */
+    private String defaultModel(LlmProviderResolver.Resolved provider) {
+        return provider.model() != null && !provider.model().isBlank() ? provider.model() : props.model();
     }
 
     private Map<String, Object> buildBody(ChatRequest request,

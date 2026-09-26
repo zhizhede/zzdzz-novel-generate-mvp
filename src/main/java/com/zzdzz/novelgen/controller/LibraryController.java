@@ -16,6 +16,7 @@ import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.GateService;
 import com.zzdzz.novelgen.service.LibraryService;
 import com.zzdzz.novelgen.service.LlmNodeConfigService;
+import com.zzdzz.novelgen.service.LlmProviderService;
 import com.zzdzz.novelgen.service.MaterialCardService;
 import com.zzdzz.novelgen.service.PromptTemplateService;
 import com.zzdzz.novelgen.service.TuningService;
@@ -44,6 +45,7 @@ public class LibraryController {
     private final DigestService digestService;
     private final MaterialCardService cardService;
     private final LlmNodeConfigService nodeConfigService;
+    private final LlmProviderService providerService;
     private final TuningService tuningService;
     private final EmbeddingService embeddingService;
     private final PromptTemplateService promptService;
@@ -150,6 +152,39 @@ public class LibraryController {
                 dto.peakEndHour() != null ? dto.peakEndHour() : 18,
                 dto.remark());
         return Result.success();
+    }
+
+    // ===== 模型接入（平台级 baseUrl/apiKey 密文/默认模型/超时） =====
+
+    @GetMapping("/llm-providers")
+    public Result<List<LlmProviderService.ProviderVO>> llmProviders() {
+        return Result.success(providerService.list());
+    }
+
+    @PostMapping("/llm-providers")
+    public Result<Void> createLlmProvider(@RequestBody LlmProviderUpsertVO dto) {
+        providerService.create(dto.name(), dto.baseUrl(), dto.apiKey(), dto.model(),
+                dto.connectTimeoutMs(), dto.readTimeoutMs(),
+                dto.enabled() == null || dto.enabled(), dto.remark());
+        return Result.success();
+    }
+
+    @PutMapping("/llm-providers/{id}")
+    public Result<Void> updateLlmProvider(@PathVariable long id, @RequestBody LlmProviderUpsertVO dto) {
+        providerService.update(id, dto.name(), dto.baseUrl(), dto.apiKey(), dto.model(),
+                dto.connectTimeoutMs(), dto.readTimeoutMs(), dto.enabled(), dto.remark());
+        return Result.success();
+    }
+
+    @DeleteMapping("/llm-providers/{id}")
+    public Result<Void> deleteLlmProvider(@PathVariable long id) {
+        providerService.delete(id);
+        return Result.success();
+    }
+
+    @PostMapping("/llm-providers/{id}/test")
+    public Result<LlmProviderService.TestResult> testLlmProvider(@PathVariable long id) {
+        return Result.success(providerService.test(id));
     }
 
     // ===== 向量索引（RAG 语义检索） =====
@@ -327,6 +362,11 @@ public class LibraryController {
 
     public record LlmNodeCreateVO(String node, String model, Double temperature, Integer maxTokens,
                                    String extraJson, Boolean enabled, String remark) {}
+
+    /** apiKey 编辑留空 = 保留原密文；明文只进加密器，不落日志不回显。 */
+    public record LlmProviderUpsertVO(String name, String baseUrl, String apiKey, String model,
+                                       Integer connectTimeoutMs, Integer readTimeoutMs,
+                                       Boolean enabled, String remark) {}
 
     public record LlmNodeUpdateVO(String model, Double temperature, Integer maxTokens,
                                    String extraJson, Boolean enabled, String remark) {}
