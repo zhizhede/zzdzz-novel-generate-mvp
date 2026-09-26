@@ -292,6 +292,144 @@ public class GateService {
     }
 
     @SuppressWarnings("unchecked")
+    /** 指纹指标中文名（写作提示用；未收录的键回退指标名）。 */
+    private static final Map<String, String> METRIC_LABELS = Map.ofEntries(
+            Map.entry("line_avg_len", "每行平均长度（字）"),
+            Map.entry("dash_per1k", "破折号"),
+            Map.entry("ellipsis_per1k", "省略号"),
+            Map.entry("exclam_per1k", "感叹号"),
+            Map.entry("question_per1k", "问号"),
+            Map.entry("dunhao_per1k", "顿号"),
+            Map.entry("digit_per1k", "阿拉伯数字"),
+            Map.entry("simile_per1k", "比喻"),
+            Map.entry("dialogue_density_per1k", "对白行"),
+            Map.entry("dialogue_end_punct_ratio", "对白句末标点占比"),
+            Map.entry("tic_haiyou_per1k", "口头禅「还有」"));
+
+    /**
+     * 指纹量化目标转写作口径（场景生成 system 注入）：与 fingerprintChecks 同一套判定数学
+     * （abs_min 两端 / 稀疏指标（基线<3）只设上限 / 其余 ±tolerance、abs_max 优先）——
+     * 写手第一稿就朝及格线写，而不是靠门禁打回后试错。无指纹返回 null。
+     */
+    @SuppressWarnings("unchecked")
+    public String fingerprintGuidance(long novelId) {
+        String json = stylePackData.findFingerprintByNovel(novelId);
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        Map<String, Object> base;
+        try {
+            base = new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
+        } catch (Exception e) {
+            return null;
+        }
+        Map<String, Object> baselineMap = (Map<String, Object>) base.get("baseline");
+        if (baselineMap == null || baselineMap.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Object> e : baselineMap.entrySet()) {
+            String key = e.getKey();
+            Map<String, Object> rule = (Map<String, Object>) e.getValue();
+            if (rule == null || !rule.containsKey("value")) {
+                continue;
+            }
+            double v = ((Number) rule.get("value")).doubleValue();
+            double tol = ((Number) rule.get("tolerance")).doubleValue();
+            double upper = rule.containsKey("abs_max")
+                    ? ((Number) rule.get("abs_max")).doubleValue() : v * (1 + tol);
+            String label = METRIC_LABELS.getOrDefault(key, key);
+            String unit = key.endsWith("_per1k") ? "每千字" : "";
+            String range;
+            if (rule.containsKey("abs_min")) {
+                range = num(((Number) rule.get("abs_min")).doubleValue()) + "–" + num(upper);
+            } else if (v < 3.0) {
+                range = "≤" + num(upper);
+            } else {
+                range = num(v * (1 - tol)) + "–" + num(upper);
+            }
+            sb.append(label).append(unit).append(' ').append(range)
+              .append("（目标 ").append(num(v)).append("）；");
+        }
+        List<String> directives = derivedDirectives(baselineMap);
+        if (!directives.isEmpty()) {
+            sb.append("\n执行口径：");
+            for (String d : directives) {
+                sb.append("\n- ").append(d);
+            }
+        }
+        return sb.isEmpty() ? null : sb.toString();
+    }
+
+    /** 从指纹数据推导写作口径（长句/碎句取向、标点禁用与保底、口头禅），与门禁判定同源。 */
+    @SuppressWarnings("unchecked")
+    private List<String> derivedDirectives(Map<String, Object> baselineMap) {
+        List<String> out = new ArrayList<>();
+        Map<String, Object> line = (Map<String, Object>) baselineMap.get("line_avg_len");
+        if (line != null && line.containsKey("value")) {
+            double v = ((Number) line.get("value")).doubleValue();
+            if (v >= 40) {
+                out.add("叙述段由多句长句构成，善用从句、排比与列举把信息延宕铺开——严禁一句一段的碎句排版");
+            } else if (v < 25) {
+                out.add("行文以短句为主，节奏干脆，少用长复合句");
+            }
+        }
+        Map<String, Object> ell = (Map<String, Object>) baselineMap.get("ellipsis_per1k");
+        if (ell != null) {
+            double up = ((Number) ell.get("value")).doubleValue() * (1 + ((Number) ell.get("tolerance")).doubleValue());
+            if (ell.containsKey("abs_max")) {
+                up = ((Number) ell.get("abs_max")).doubleValue();
+            }
+            if (up < 0.5) {
+                out.add("禁用省略号");
+            }
+        }
+        Map<String, Object> dash = (Map<String, Object>) baselineMap.get("dash_per1k");
+        if (dash != null) {
+            double up = ((Number) dash.get("value")).doubleValue() * (1 + ((Number) dash.get("tolerance")).doubleValue());
+            if (dash.containsKey("abs_max")) {
+                up = ((Number) dash.get("abs_max")).doubleValue();
+            }
+            if (up < 4) {
+                out.add("破折号克制（每千字 ≤" + num(up) + "），补充说明改用逗号或句号衔接");
+            }
+        }
+        for (String key : new String[]{"dunhao_per1k", "exclam_per1k"}) {
+            Map<String, Object> rule = (Map<String, Object>) baselineMap.get(key);
+            if (rule != null && rule.containsKey("value")) {
+                double v = ((Number) rule.get("value")).doubleValue();
+                double lo = v * (1 - ((Number) rule.get("tolerance")).doubleValue());
+                if (v >= 3 && lo > 0.3) {
+                    out.add("基线非零的标点有下界（通篇密度为 0 同样打回）——" + METRIC_LABELS.getOrDefault(key, key)
+                            + "按目标 " + num(v) + "/千字 左右安排");
+                    break;
+                }
+            }
+        }
+        for (Map.Entry<String, Object> e : baselineMap.entrySet()) {
+            String key = e.getKey();
+            if (!key.startsWith("tic_")) {
+                continue;
+            }
+            Map<String, Object> rule = (Map<String, Object>) e.getValue();
+            if (rule != null && rule.containsKey("abs_max")) {
+                String word = key.substring("tic_".length(), key.length() - "_per1k".length());
+                out.add("口头禅「" + word + "」能删则删（每千字 ≤" + num(((Number) rule.get("abs_max")).doubleValue()) + "）");
+            }
+        }
+        return out;
+    }
+
+    private static String num(double d) {
+        if (d >= 20) {
+            return String.valueOf(Math.round(d));
+        }
+        if (d >= 1) {
+            return String.format("%.1f", d);
+        }
+        return String.format("%.2f", d);
+    }
+
     private Map<String, Object> fingerprint(long novelId) {
         String json = stylePackData.findFingerprintByNovel(novelId);
         try {

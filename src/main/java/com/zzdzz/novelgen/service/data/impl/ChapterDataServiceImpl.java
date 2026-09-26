@@ -139,10 +139,17 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
     }
 
     @Override
-    public Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines) {
+    public Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines,
+                                       java.util.Collection<Long> onlyChapterIds) {
+        if (onlyChapterIds != null && onlyChapterIds.isEmpty()) {
+            return null;
+        }
         record Row(int no, String text) {}
         List<Row> rows = new ArrayList<>();
         for (var m : baseMapper.findDialogueRows(novelId, maxChapterNo)) {
+            if (onlyChapterIds != null && !onlyChapterIds.contains((long) m.chapterNo())) {
+                continue;
+            }
             rows.add(new Row(m.chapterNo(), m.fullText()));
         }
         Opening best = null;

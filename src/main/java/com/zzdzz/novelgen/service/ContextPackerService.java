@@ -39,6 +39,8 @@ public class ContextPackerService {
     private final PromptTemplateService promptTemplates;
     private final VolumeReviewDataService volumeReviewData;
     private final com.zzdzz.novelgen.service.data.NovelDataService novelData;
+    private final GateService gateService;
+    private final com.zzdzz.novelgen.service.data.GateReportDataService gateReportData;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
 
@@ -312,15 +314,23 @@ public class ContextPackerService {
 
     /** 真实章节开篇范例（1-21 章人类手稿前 3 行隔章抽 10 例）：注入本章第一场景做审美对齐。框架文案走 craft_opening 段（落库）。 */
     public String openingExamples(long novelId) {
-        List<ChapterDataService.Opening> all = chapterData.findOpeningLines(novelId, 21);
-        if (all.isEmpty()) {
+        // 只从过门禁的合格稿取范例——本书初稿若是不合格文风，逐字模仿只会把碎句风锁死
+        List<Long> passed = gateReportData.passedChapterIds(novelId);
+        if (passed.isEmpty()) {
             return null;
         }
-        int step = Math.max(1, all.size() / 10);
+        List<ChapterDataService.Opening> all = chapterData.findOpeningLines(novelId, 21);
+        List<ChapterDataService.Opening> compliant = all.stream()
+                .filter(o -> passed.contains((long) o.chapterNo()))
+                .toList();
+        if (compliant.isEmpty()) {
+            return null;
+        }
+        int step = Math.max(1, compliant.size() / 10);
         StringBuilder body = new StringBuilder();
-        for (int i = 0; i < all.size() && body.length() < 4000; i += step) {
-            body.append("第").append(all.get(i).chapterNo()).append("章：\n")
-                    .append(all.get(i).firstLines()).append("\n\n");
+        for (int i = 0; i < compliant.size() && body.length() < 4000; i += step) {
+            body.append("第").append(compliant.get(i).chapterNo()).append("章：\n")
+                    .append(compliant.get(i).firstLines()).append("\n\n");
         }
         return promptTemplates.getSection(LlmNode.SCENE_DRAFT, "craft_opening",
                 java.util.Map.of("examples", body.toString().strip()));
@@ -328,7 +338,13 @@ public class ContextPackerService {
 
     /** 对白推进范例：本作真实章节中对白最密集的连续 10 行（情节靠人物说话的活样本）。框架文案走 craft_dialogue 段（落库）。 */
     public String dialogueExcerpt(long novelId) {
-        ChapterDataService.Opening ex = chapterData.findDialogueExcerpt(novelId, 21, 10);
+        // 只从过门禁的合格稿取——碎句稿当"逐字模仿"范例会把坏文风反向强化
+        List<Long> passed = gateReportData.passedChapterIds(novelId);
+        if (passed.isEmpty()) {
+            return null;
+        }
+        ChapterDataService.Opening ex = chapterData.findDialogueExcerpt(novelId, 21, 10,
+                passed);
         if (ex == null) {
             return null;
         }
@@ -360,6 +376,12 @@ public class ContextPackerService {
         // 风格包自带量化红线（新风格包）时不再叠加手搓红线，避免两套阈值打架
         String rules = styleRules(novelId);
         String system = rules.contains("【量化风格红线】") ? rules : rules + promptTemplates.get(LlmNode.SCENE_DRAFT, "style_redlines");
+        // 指纹量化目标随提示词下发（提示词环节对齐门禁口径——第一稿就朝及格线写，而不是被门禁打回后试错）
+        String fingerprintTargets = gateService.fingerprintGuidance(novelId);
+        if (fingerprintTargets != null) {
+            system += promptTemplates.getSection(LlmNode.SCENE_DRAFT, "fingerprint_targets",
+                    java.util.Map.of("targets", fingerprintTargets));
+        }
         // 写作工艺块：首场景=开篇红线+手稿开篇范例；所有场景=对白推进范例
         String craft = openingSection(novelId, spec.sceneNo());
         String dex = dialogueExcerpt(novelId);

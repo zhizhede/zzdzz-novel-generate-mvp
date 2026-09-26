@@ -86,8 +86,10 @@ public interface ChapterDataService extends IService<ChapterDTO> {
     /** 1..maxChapterNo 章的开篇样本（有正文的章）。 */
     List<Opening> findOpeningLines(long novelId, int maxChapterNo);
 
-    /** 对白推进范例：1..maxChapterNo 中「最密集的连续 lines 行对白段」（至少六成行带对白才算范例）。 */
-    Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines);
+    /** 对白推进范例：1..maxChapterNo 中「最密集的连续 lines 行对白段」（至少六成行带对白才算范例）。
+     *  onlyChapterIds 非空时只在这些章里找（风格范例只取过门禁的合格稿）；空集合直接返回 null。 */
+    Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines,
+                                java.util.Collection<Long> onlyChapterIds);
 
     /** 无该章（如第 1 章无“上一章”）时返回 null，由调用方决定降级文案。 */
     String findFullText(long novelId, int chapterNo);
