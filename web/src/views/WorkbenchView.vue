@@ -283,6 +283,18 @@
                  style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
             <div style="white-space:pre-wrap; border-left: 3px solid #409eff; padding-left: 10px; font-size: 14px; line-height: 1.9">{{ t.text }}<span v-if="t.streaming && t.text" style="color:#409eff">▍</span></div>
           </div>
+          <!-- 卷规划/审校：流式思考块（JSON 正文不逐字展示，思考流才是透明化主体） -->
+          <div v-else-if="t.type === 'pstream'">
+            <div style="color:#e6a23c;font-size:13px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+              <b>{{ t.title }}</b>
+              <el-tag v-if="t.streaming" type="warning" size="small" effect="plain">{{ t.think ? '思考中…' : '打包上下文中…' }}</el-tag>
+              <el-link v-if="t.think" type="info" :underline="false" style="font-size:12px" @click="t.thinkOpen = !t.thinkOpen">
+                {{ t.thinkOpen ? '收起思考' : `思考（${t.think.length}字）` }}
+              </el-link>
+            </div>
+            <div v-if="t.think && (t.thinkOpen || t.streaming)"
+                 style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
+          </div>
           <!-- 通用步骤/判定行 -->
           <div v-else style="font-size: 13px; display: flex; align-items: baseline; gap: 8px">
             <span :style="{ color: t.color || '#606266' }">▸ {{ t.title }}</span>
@@ -369,7 +381,11 @@ function planEventTitle(e) {
     if (e.phase === 'adopted') return '卷纲落库'
     if (e.phase === 'draft') return '卷纲草稿完成（待采纳）'
   }
-  if (e.stage === 'volume_plan_review') return `卷纲审校 · ${e.phase || '判定'}`
+  if (e.stage === 'volume_plan_review') {
+    if (e.phase === 'start') return `卷纲审校中（第 ${p.round} 轮）`
+    if (e.phase === 'verdict') return `卷纲审校第 ${p.round} 轮：${p.verdict || 'PASS'}`
+    return `卷纲审校 · ${e.phase || '判定'}`
+  }
   return `${e.stage} ${e.phase || ''}`
 }
 
@@ -387,10 +403,16 @@ async function seedSession(row) {
     try {
       const novel = novels.value.find((n) => n.title === row.novelTitle)
       if (!novel) return
-      const events = await api.get(`/api/llm-logs/events?novelId=${novel.id}&limit=40`)
-      const seed = events
+      // 事件按 id DESC（新→旧）。任务打界：载荷带 taskId 的任务级事件（queued/stopped）框定本任务的
+      // 事件区间——旧任务的失败史不再混进本次回放（多次重跑会话曾被误读成"一直失败"）。
+      const all = await api.get(`/api/llm-logs/events?novelId=${novel.id}&limit=200`)
+      const taskEvIds = all.filter((e) => planEventPayload(e).taskId === row.id).map((e) => e.id)
+      const lo = taskEvIds.length ? Math.min(...taskEvIds) : null
+      const scoped = lo == null ? all : all.filter((e) => e.id >= lo)
+      const seed = scoped
         .filter((e) => ['volume_plan', 'volume_plan_review'].includes(e.stage))
-        .slice(-12)
+        .slice(0, 12)
+        .reverse() // 转录按时间正序展示（旧在上）；取最新 12 条
         .map((e) => ({ type: 'line', title: planEventTitle(e), reason: planEventReason(e),
           color: e.phase === 'failed' ? '#c45656' : e.phase === 'retry' ? '#e6a23c' : '#67c23a' }))
       transcript.value.push({ type: 'header', chapterNo: 0, title: `卷纲规划（任务 #${row.id}）——已发生的过程回放` })
@@ -433,6 +455,22 @@ async function seedSession(row) {
 
 function findTranscriptScene(d) {
   return [...transcript.value].reverse().find((t) => t.type === 'scene' && t.chapterNo === d.chapterNo && t.sceneNo === d.sceneNo)
+}
+
+/** 卷规划/审校思考流：同标签的流式块追加增量，没有就新开一块（重写轮各自成块）。 */
+function upsertPlanThink(label, delta) {
+  if (!delta) return
+  let t = [...transcript.value].reverse().find((x) => x.type === 'pstream' && x.title === label && x.streaming)
+  if (!t) {
+    t = { type: 'pstream', title: label, think: '', thinkOpen: false, streaming: true }
+    transcript.value.push(t)
+  }
+  t.think += delta
+}
+
+function closePlanThink(label) {
+  const t = [...transcript.value].reverse().find((x) => x.type === 'pstream' && x.title === label && x.streaming)
+  if (t) t.streaming = false
 }
 
 /** SSE 事件 → 转录条目（与日志并行累积；本页会话期间有效，历史回溯走章节抽屉·档案）。 */
@@ -492,12 +530,26 @@ function pushTranscript(event, d) {
     transcript.value.push({ type: 'line', title: `章纲 ${d.phase}`, note: d.sceneCount ? d.sceneCount + ' 个场景' : '', color: '#67c23a' })
   } else if (event === 'assemble') {
     transcript.value.push({ type: 'line', title: `拼章完成（${d.chars} 字），章级门禁检测中`, color: '#909399' })
-  } else if (event === 'volume_plan') {
-    if (d.phase === 'retry') transcript.value.push({ type: 'line', title: `卷纲规划第 ${d.round} 轮重写（${d.check}）`, reason: d.reason, color: '#e6a23c' })
-    else if (d.phase === 'failed') transcript.value.push({ type: 'line', title: '卷纲规划放弃（轮次用尽）', reason: d.reason, color: '#c45656' })
-    else if (d.phase === 'start') transcript.value.push({ type: 'line', title: `卷纲规划开始（第 ${d.volNo} 卷，从第 ${d.from} 章）`, color: '#67c23a' })
-    else if (d.phase === 'adopted') transcript.value.push({ type: 'line', title: `卷纲落库（${d.chapters} 章）`, color: '#67c23a' })
-    else if (d.phase === 'draft') transcript.value.push({ type: 'line', title: '卷纲草稿完成（manual 待采纳）', color: '#67c23a' })
+  } else if (event === 'volume_plan' || event === 'volume_plan_review') {
+    const label = event === 'volume_plan' ? '卷纲规划' : '卷纲审校'
+    if (d.phase === 'chunk') {
+      upsertPlanThink(label, d.delta)
+    } else if (event === 'volume_plan_review') {
+      if (d.phase === 'start') {
+        transcript.value.push({ type: 'line', title: `卷纲审校中（第 ${d.round} 轮）`, color: '#e6a23c' })
+      } else if (d.phase === 'verdict') {
+        transcript.value.push({ type: 'line', title: `卷纲审校第 ${d.round} 轮：${d.verdict}`,
+          reason: (d.issues || []).join('\n') || undefined, color: d.verdict === 'BLOCKER' ? '#e6a23c' : '#67c23a' })
+      }
+      closePlanThink(label)
+    } else {
+      closePlanThink(label)
+      if (d.phase === 'retry') transcript.value.push({ type: 'line', title: `卷纲规划第 ${d.round} 轮重写（${d.check}）`, reason: d.reason, color: '#e6a23c' })
+      else if (d.phase === 'failed') transcript.value.push({ type: 'line', title: '卷纲规划放弃（轮次用尽）', reason: d.reason, color: '#c45656' })
+      else if (d.phase === 'start') transcript.value.push({ type: 'line', title: `卷纲规划开始（第 ${d.volNo} 卷，从第 ${d.from} 章）`, color: '#67c23a' })
+      else if (d.phase === 'adopted') transcript.value.push({ type: 'line', title: `卷纲落库（${d.chapters} 章）`, color: '#67c23a' })
+      else if (d.phase === 'draft') transcript.value.push({ type: 'line', title: '卷纲草稿完成（manual 待采纳）', color: '#67c23a' })
+    }
   } else if (event === 'volume_retro') {
     transcript.value.push({ type: 'line', title: `卷级复盘 ${d.phase}`, color: '#909399' })
   }

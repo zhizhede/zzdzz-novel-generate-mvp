@@ -15,6 +15,7 @@ import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.service.data.PipelineEventDataService;
+import com.zzdzz.novelgen.service.data.SamplePlotNodeDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -64,6 +65,7 @@ public class VolumePlanService {
     private final ForeshadowDataService foreshadowData;
     private final NovelDataService novelData;
     private final CanonDocDataService canonData;
+    private final SamplePlotNodeDataService plotData;
     private final com.zzdzz.novelgen.service.data.StylePackDataService stylePackData;
     private final StageLog stageLog;
     private final TuningService tuning;
@@ -138,7 +140,7 @@ public class VolumePlanService {
                 feedback = "【结构校验】" + structural;
                 continue;
             }
-            String issues = reviewPlan(novelId, draft);
+            String issues = reviewPlan(novelId, round, draft);
             if (issues != null) {
                 log.warn("卷纲第 {} 轮 AI 审校 BLOCKER：{}", round, issues);
                 stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.RETRY,
@@ -188,7 +190,9 @@ public class VolumePlanService {
             user += promptTemplates.getSection("common", "plan_retry_feedback",
                     java.util.Map.of("feedback", feedback));
         }
-        return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
+        PlanThinkRelay relay = new PlanThinkRelay(novelId, StageLog.Stage.VOLUME_PLAN);
+        try {
+            return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
                         List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN, "system")),
                                 LlmPort.Message.user(user)),
                         LlmTemps.VOLUME_PLAN),
@@ -230,7 +234,10 @@ public class VolumePlanService {
                                         Math.min(r.budgetMax(), band[1]))));
                     }
                     return new PlanDraft(arc, brief, rows);
-                }, 2);
+                }, 2, relay);
+        } finally {
+            relay.close();
+        }
     }
 
     /** 读本书 gate_config 的章长带（开书时克隆自品类预设）；无带返回 null 走旧口径。 */
@@ -293,10 +300,10 @@ public class VolumePlanService {
     }
 
     /**
-     * AI 规划审校：对照账本查连续性/重复/伏笔悬空/节奏。返回 null 即 PASS，否则 BLOCKER 清单文本。
+     * AI 规划审校：对照账本查连续性/重复/伏笔悬空/节奏（衍生书另查样本复刻）。返回 null 即 PASS，否则 BLOCKER 清单文本。
      * 审校调用异常 fail-open（放行）——规划行没有不可逆下游，正文生成端还有已验证的审校管线兜底。
      */
-    private String reviewPlan(long novelId, PlanDraft draft) {
+    private String reviewPlan(long novelId, int round, PlanDraft draft) {
         StringBuilder plan = new StringBuilder("卷名：").append(draft.arc()).append("\n卷简报：").append(draft.brief()).append('\n');
         for (PlanRow r : draft.rows()) {
             plan.append("第").append(r.chapterNo()).append("章《").append(r.title())
@@ -307,15 +314,17 @@ public class VolumePlanService {
                     .append('\n');
         }
         String user = promptTemplates.format(LlmNode.VOLUME_PLAN_REVIEW, "user", plan, packer.characters(novelId),
-                packer.packLedgers(novelId, draft.rows().get(0).chapterNo()));
+                packer.packLedgers(novelId, draft.rows().get(0).chapterNo()), deriveNoCopySection(novelId));
+        stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.START, Map.of("round", round));
+        PlanThinkRelay relay = new PlanThinkRelay(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW);
         try {
-            return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN_REVIEW, novelId, null,
+            String verdict = llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN_REVIEW, novelId, null,
                             List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN_REVIEW, "system")),
                                     LlmPort.Message.user(user)),
                             LlmTemps.VOLUME_PLAN_REVIEW),
                     node -> {
-                        String verdict = node.path("verdict").asText("PASS").strip().toUpperCase();
-                        if ("BLOCKER".equals(verdict)) {
+                        String v = node.path("verdict").asText("PASS").strip().toUpperCase();
+                        if ("BLOCKER".equals(v)) {
                             List<String> issues = new ArrayList<>();
                             for (JsonNode i : node.path("issues")) {
                                 String t = i.asText("").strip();
@@ -325,12 +334,83 @@ public class VolumePlanService {
                             return String.join("；", issues);
                         }
                         return null;
-                    }, 2);
+                    }, 2, relay);
+            stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.VERDICT,
+                    verdict == null ? Map.of("round", round, "verdict", "PASS")
+                            : Map.of("round", round, "verdict", "BLOCKER", "issues", List.of(brief(verdict))));
+            return verdict;
         } catch (Exception e) {
             log.warn("卷纲审校调用异常，fail-open 放行：{}", e.getMessage());
             stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.ERROR,
                     Map.of("message", String.valueOf(e.getMessage())));
             return null;
+        } finally {
+            relay.close();
+        }
+    }
+
+    /**
+     * 衍生复刻判据段（审校 user 第 4 参）：sourceSampleId 存在且样本有书级骨架时，注入骨架+复刻=BLOCKER 口径；
+     * 非衍生书/无骨架返回空串（占位符仍需参数，空串即不出现该段）。
+     */
+    private String deriveNoCopySection(long novelId) {
+        Long sampleId = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).sourceSampleId();
+        if (sampleId == null) {
+            return "";
+        }
+        for (var n : plotData.listBySample(sampleId)) {
+            if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
+                String skeleton = n.getSummary().strip();
+                if (skeleton.length() > 1200) {
+                    skeleton = skeleton.substring(0, 1200);
+                }
+                return promptTemplates.getSection(LlmNode.VOLUME_PLAN_REVIEW, "derive_no_copy",
+                        Map.of("skeleton", skeleton));
+            }
+        }
+        return "";
+    }
+
+    /**
+     * 卷规划/审校思考流转发（VOLUME_PLAN/VOLUME_PLAN_REVIEW + CHUNK，emitLive 只推 SSE 不落库）：
+     * 只转 think 增量——两者的正文输出都是 JSON，逐字流是噪音；「规划在想什么」才是透明化主体。
+     * 章级同款见 ChapterPipelineService.ReviewThinkRelay（卷级无章号）。
+     */
+    final class PlanThinkRelay implements LlmPort.StreamDelta {
+        private static final long FLUSH_INTERVAL_MS = 200;
+
+        private final long novelId;
+        private final StageLog.Stage stage;
+        private final StringBuilder buf = new StringBuilder();
+        private long lastFlush = System.currentTimeMillis();
+
+        PlanThinkRelay(long novelId, StageLog.Stage stage) {
+            this.novelId = novelId;
+            this.stage = stage;
+        }
+
+        @Override
+        public void accept(boolean think, String piece) {
+            if (!think || piece == null || piece.isEmpty()) {
+                return;
+            }
+            buf.append(piece);
+            if (System.currentTimeMillis() - lastFlush >= FLUSH_INTERVAL_MS) {
+                flush();
+            }
+        }
+
+        void flush() {
+            if (buf.length() > 0) {
+                stageLog.emitLive(novelId, null, stage, StageLog.Phase.CHUNK,
+                        Map.of("type", "think", "delta", buf.toString()));
+                buf.setLength(0);
+            }
+            lastFlush = System.currentTimeMillis();
+        }
+
+        void close() {
+            flush();
         }
     }
 
