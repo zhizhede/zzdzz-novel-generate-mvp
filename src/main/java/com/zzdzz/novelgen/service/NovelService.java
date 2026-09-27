@@ -273,13 +273,19 @@ public class NovelService {
     }
 
     /** 衍生配置编辑（开书后改目标章数/掺水量/POV/每卷章数/标签/无人续跑/优先级；老书由此启用无人续跑）。
-     * sourceSampleId 保留原值；开无人续跑同时强制规划模式 auto（与开书口径一致）。 */
+     * sourceSampleId 保留原值；开无人续跑同时强制规划模式 auto（与开书口径一致）。
+     * 掺水量变更时注水/审校三阈值按新水重算写入本书 gate_config——与开书同一换算（单一口径），
+     * 其余门禁键（恢复线/扩写护栏等）不动。 */
     public DeriveConfigFullVO updateDeriveConfig(long novelId, NovelCreateVO.DeriveConfigVO d) {
         requireNovel(novelId);
-        Long sourceSampleId = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).sourceSampleId();
-        novelData.updateDeriveConfig(novelId, deriveConfigJson(d, sourceSampleId));
+        DeriveSupport.Cfg old = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        novelData.updateDeriveConfig(novelId, deriveConfigJson(d, old.sourceSampleId()));
         if (d.autoContinue() != null && d.autoContinue()) {
             novelData.updatePlanMode(novelId, PlanMode.AUTO.wire());
+        }
+        if (d.water() != null && !java.util.Objects.equals(old.water(), d.water())) {
+            stylePackData.updateGateConfigByNovel(novelId,
+                    DeriveSupport.applyWaterGates(stylePackData.findGateConfigByNovel(novelId), d.water()));
         }
         return deriveConfig(novelId);
     }

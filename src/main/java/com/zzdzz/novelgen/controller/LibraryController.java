@@ -328,6 +328,15 @@ public class LibraryController {
         return Result.success(gateService.readerStandards(novelId));
     }
 
+    /** 掺水量→注水/审校三阈值换算预览（与开书/保存同一公式 DeriveSupport.waterGates，弹窗即时预览）。 */
+    @GetMapping("/novels/{novelId}/water-gates")
+    public Result<Map<String, Double>> waterGates(@PathVariable long novelId,
+                                                  @org.springframework.web.bind.annotation.RequestParam Integer water) {
+        double[] g = com.zzdzz.novelgen.service.DeriveSupport.waterGates(water == null ? 50 : water);
+        return Result.success(Map.of("reader_fat_ratio_block", g[0],
+                "reader_fat_ratio_hard", g[1], "ai_review_fix_floor", g[2]));
+    }
+
     // ===== 世界状态账 =====
 
     @GetMapping("/novels/{novelId}/world-states")
