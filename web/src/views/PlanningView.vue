@@ -63,7 +63,7 @@
             <el-table-column label="操作" width="220">
               <template #default="{ row }">
                 <el-button size="small" @click="openEdit(row)">编辑</el-button>
-                <el-button size="small" type="warning" plain :loading="regenBusy" @click="regen(row)">重出章纲</el-button>
+                <el-button size="small" type="warning" plain :loading="regenBusy" @click="regen(row)">生成章纲</el-button>
                 <el-button size="small" type="danger" plain @click="removePlan(row)">删</el-button>
               </template>
             </el-table-column>
@@ -72,16 +72,66 @@
       </el-tab-pane>
 
       <!-- 章纲 -->
-      <el-tab-pane label="章纲（场景拆解）">
-        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
-          <span>查看章节：</span>
-          <el-input-number v-model="viewChapterNo" :min="1" size="small" />
-          <el-button size="small" @click="loadScenes">查看</el-button>
+      <el-tab-pane :label="`章纲（场景拆解${allScenes.length ? ' · ' + allScenes.length + ' 场景' : ''}）`">
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
+          <span>批量生成章纲：第</span>
+          <el-input-number v-model="outlineFrom" :min="1" size="small" style="width: 92px" />
+          <span>至</span>
+          <el-input-number v-model="outlineTo" :min="outlineFrom || 1" size="small" style="width: 92px" />
+          <span>章</span>
+          <el-button size="small" type="primary" :disabled="!!outlineTask" @click="submitOutlineBatch">
+            {{ outlineTask ? '章纲生成中…' : '生成章纲（入队）' }}
+          </el-button>
         </div>
-        <el-empty v-if="!scenes.length" description="该章还没有章纲（未生成场景拆解）" :image-size="60" />
-        <el-table v-else :data="scenes" border size="small" style="max-width: 900px">
-          <el-table-column prop="sceneNo" label="场景" width="70" />
-          <el-table-column prop="goal" label="场景目标" min-width="320" />
+        <div style="font-size: 12px; color: #999; margin-bottom: 10px; line-height: 1.7">
+          入队后在工作台生成队列看实时进度（约 1-2 分钟/章，可停止）；已有章纲覆盖重建，已有正文/无规划行的章自动跳过。
+          提前出的章纲缺「前情」（此前章节的摘要与结尾），量产建议交给管线逐章自动出；启动生成时已有章纲直接复用、不再重出。
+        </div>
+        <div v-if="outlineTask" style="margin-bottom: 10px; padding: 8px 12px; background: #fdf6ec; border-radius: 6px">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px">
+            <el-tag size="small" type="warning">章纲生成中</el-tag>
+            <span style="font-size: 12px; color: #999">
+              任务 #{{ outlineTask.id }} · 第 {{ outlineTask.fromChapter }}-{{ outlineTask.toChapter }} 章
+              <template v-if="outlineTask.status === 'RUNNING' && outlineTask.currentChapter">
+                · 当前第 {{ outlineTask.currentChapter }} 章 · {{ outlineTask.lastMessage || '' }}
+              </template>
+              <template v-else-if="outlineTask.status === 'QUEUED'"> · 排队等待中</template>
+            </span>
+          </div>
+          <el-progress :percentage="Math.round((outlineTask.doneChapters || 0) / Math.max(1, outlineTask.totalChapters) * 100)"
+                       :stroke-width="8" :show-text="false" />
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap">
+          <span style="font-size: 13px; color: #606266">筛选：</span>
+          <el-select v-model="sceneFilterChapter" clearable placeholder="全部章纲（按章）" size="small" style="width: 210px">
+            <el-option v-for="c in sceneChapterOptions" :key="c.value" :value="c.value" :label="c.label">
+              <span>{{ c.label }}</span>
+              <span style="float: right; color: #999; font-size: 12px">{{ c.count }} 场景</span>
+            </el-option>
+          </el-select>
+          <el-select v-model="sceneFilterMaterial" clearable filterable placeholder="按素材（出场人物/事物）" size="small" style="width: 210px">
+            <el-option v-for="m in sceneMaterialOptions" :key="m.name" :value="m.name" :label="m.name">
+              <span>{{ m.name }}</span>
+              <span style="float: right; color: #999; font-size: 12px">{{ m.count }} 场景</span>
+            </el-option>
+          </el-select>
+          <el-input v-model="sceneFilterText" clearable placeholder="搜内容：目标 / 必揭示 / 禁出现" size="small"
+                    style="width: 230px" />
+          <el-button v-if="sceneFiltersActive" size="small" link type="primary" @click="clearSceneFilters">清空筛选</el-button>
+          <span style="font-size: 12px; color: #999; margin-left: auto">
+            {{ filteredScenes.length }} / {{ allScenes.length }} 场景 · 涉及 {{ filteredChapterCount }} 章
+          </span>
+        </div>
+        <el-empty v-if="!allScenes.length" description="还没有任何章纲——用上方批量生成（区间可只填本章），或启动生成时自动出" :image-size="60" />
+        <el-table v-else :data="filteredScenes" border size="small" max-height="560">
+          <el-table-column label="所属章纲" width="180" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-link type="primary" :underline="false" style="font-size: 12px"
+                       @click="sceneFilterChapter = row.chapterNo">第 {{ row.chapterNo }} 章 · {{ row.chapterTitle }}</el-link>
+            </template>
+          </el-table-column>
+          <el-table-column prop="sceneNo" label="场景" width="60" />
+          <el-table-column prop="goal" label="场景目标" min-width="300" show-overflow-tooltip />
           <el-table-column label="要素" min-width="300">
             <template #default="{ row }">
               <div v-if="(row.present || []).length" style="font-size: 12px">出场：{{ row.present.join('、') }}</div>
@@ -89,8 +139,9 @@
               <div v-if="(row.mustNot || []).length" style="font-size: 12px; color: #f56c6c">禁出现：{{ row.mustNot.join('、') }}</div>
             </template>
           </el-table-column>
-          <el-table-column prop="words" label="预算" width="80" />
+          <el-table-column prop="wordsBudget" label="预算" width="70" />
         </el-table>
+        <el-empty v-if="allScenes.length && !filteredScenes.length" description="没有符合筛选条件的场景——调整或清空筛选" :image-size="60" />
       </el-tab-pane>
     </el-tabs>
 
@@ -268,8 +319,10 @@ const novels = ref([])
 const novelId = ref(null)
 const story = ref('')
 const volumes = ref([])
-const scenes = ref([])
-const viewChapterNo = ref(29)
+const allScenes = ref([])
+const sceneFilterChapter = ref(null)
+const sceneFilterMaterial = ref('')
+const sceneFilterText = ref('')
 const editing = ref(null)
 const planEditor = ref(false)
 const regenBusy = ref(false)
@@ -326,6 +379,7 @@ async function loadAll() {
   volumes.value = await api.get(`/api/novels/${novelId.value}/planning/volumes`)
   const m = await api.get(`/api/novels/${novelId.value}/planning/mode`)
   planMode.value = m.planMode
+  await loadAllScenes()
 }
 
 async function saveStory() {
@@ -380,7 +434,7 @@ async function removePlan(row) {
 async function regen(row) {
   try {
     await ElMessageBox.confirm(
-      `为第 ${row.chapterNo} 章「${row.title}」重新生成章纲？将清掉旧的场景拆解（约 1-2 分钟）`, '确认', { type: 'warning' })
+      `为第 ${row.chapterNo} 章「${row.title}」生成章纲？（已有章纲将清掉重建，约 1-2 分钟）`, '确认', { type: 'warning' })
   } catch {
     return
   }
@@ -396,12 +450,63 @@ async function regen(row) {
   }
 }
 
-async function loadScenes() {
+/** 章纲批量生成入队：秒回任务 id，逐章出场景拆解；进度走工作台队列与本页横幅，单章 from=to 即可。 */
+async function submitOutlineBatch() {
   try {
-    scenes.value = await api.get(`/api/novels/${novelId.value}/planning/chapters/${viewChapterNo.value}/scenes`)
+    const r = await api.post(`/api/novels/${novelId.value}/planning/outline/batch`,
+        { from: outlineFrom.value, to: outlineTo.value })
+    ElMessage.success(`章纲生成已入队（任务 #${r.taskId}）——下方显示进度，工作台生成队列同步可见`)
+    pollPlanTask()
   } catch (e) {
     ElMessage.error(e.message)
   }
+}
+
+/** 章纲全量跨章拉取（带所属章号/章题）——进 tab 即全景展示，筛选全在前端即时完成。 */
+async function loadAllScenes() {
+  try {
+    allScenes.value = await api.get(`/api/novels/${novelId.value}/planning/scenes`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+// ===== 章纲筛选（章节/素材/内容，前端即时计算） =====
+const sceneChapterOptions = computed(() => {
+  const byChapter = new Map()
+  for (const s of allScenes.value) {
+    const cur = byChapter.get(s.chapterNo) || { value: s.chapterNo, label: `第 ${s.chapterNo} 章 · ${s.chapterTitle || '未命名'}`, count: 0 }
+    cur.count++
+    byChapter.set(s.chapterNo, cur)
+  }
+  return [...byChapter.values()].sort((a, b) => a.value - b.value)
+})
+const sceneMaterialOptions = computed(() => {
+  const count = new Map()
+  for (const s of allScenes.value) {
+    for (const p of s.present || []) count.set(p, (count.get(p) || 0) + 1)
+  }
+  return [...count.entries()].map(([name, n]) => ({ name, count: n }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh'))
+})
+const filteredScenes = computed(() => allScenes.value.filter((s) => {
+  if (sceneFilterChapter.value != null && s.chapterNo !== sceneFilterChapter.value) return false
+  if (sceneFilterMaterial.value && !(s.present || []).includes(sceneFilterMaterial.value)) return false
+  const q = sceneFilterText.value.trim().toLowerCase()
+  if (q) {
+    const hay = [s.goal, ...(s.mustReveal || []), ...(s.mustNot || []), ...(s.present || [])]
+        .filter(Boolean).join('\n').toLowerCase()
+    if (!hay.includes(q)) return false
+  }
+  return true
+}))
+const filteredChapterCount = computed(() => new Set(filteredScenes.value.map((s) => s.chapterNo)).size)
+const sceneFiltersActive = computed(() =>
+    sceneFilterChapter.value != null || !!sceneFilterMaterial.value || !!sceneFilterText.value.trim())
+function clearSceneFilters() {
+  sceneFilterChapter.value = null
+  sceneFilterMaterial.value = ''
+  sceneFilterText.value = ''
 }
 
 // ===== AI 卷纲规划 =====
@@ -489,8 +594,11 @@ async function adoptPlan() {
   }
 }
 
-// ===== 卷纲规划进度（auto 模式异步任务内嵌展示） =====
+// ===== 卷纲规划/章纲批量 异步任务内嵌展示 =====
 const planTask = ref(null)
+const outlineTask = ref(null)
+const outlineFrom = ref(1)
+const outlineTo = ref(1)
 let planPollTimer = null
 
 const planTaskPercent = computed(() => (planTask.value?.status === 'RUNNING' ? 50 : 5))
@@ -501,11 +609,13 @@ async function pollPlanTask() {
     const q = title ? await api.get('/api/pipeline/queue') : []
     planTask.value = q.find((t) => t.novelTitle === title
         && t.kind === 'PLAN' && ['QUEUED', 'RUNNING'].includes(t.status)) || null
+    outlineTask.value = q.find((t) => t.novelTitle === title
+        && t.kind === 'OUTLINE' && ['QUEUED', 'RUNNING'].includes(t.status)) || null
   } catch { /* 忽略轮询错误 */ }
-  if (planTask.value) {
+  if (planTask.value || outlineTask.value) {
     planPollTimer = setTimeout(pollPlanTask, 3000)
   } else if (planPollTimer) {
-    // 任务从队列消失=刚完成——刷新卷纲一次后停止轮询
+    // 任务从队列消失=刚完成——刷新一次后停止轮询（loadAll 内含章纲全量刷新）
     planPollTimer = null
     try { await loadAll() } catch { /* 刷新失败不打扰 */ }
   }

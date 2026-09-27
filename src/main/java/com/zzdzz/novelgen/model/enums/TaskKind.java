@@ -3,7 +3,8 @@ package com.zzdzz.novelgen.model.enums;
 /** 队列任务类型（generation_tasks.kind 列口径）。 */
 public enum TaskKind {
     CHAPTERS("CHAPTERS"),
-    PLAN("PLAN");
+    PLAN("PLAN"),
+    OUTLINE("OUTLINE");
 
     private final String wire;
 

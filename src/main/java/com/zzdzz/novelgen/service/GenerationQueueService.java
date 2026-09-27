@@ -182,6 +182,11 @@ public class GenerationQueueService {
         return enqueue(novelId, novelTitle, from, to == null ? from : to, userId, TaskKind.PLAN.wire(), payload, null);
     }
 
+    /** 章纲批量生成入队（from=to 即单章）：逐章出场景拆解，进度/事件走队列口径，工作台可见可停。 */
+    public long submitOutline(long novelId, String novelTitle, int from, int to, Long userId) {
+        return enqueue(novelId, novelTitle, from, to, userId, TaskKind.OUTLINE.wire(), null, null);
+    }
+
     private long enqueue(long novelId, String novelTitle, int from, int to, Long userId, String kind,
                          String payload, Integer priority) {
         int prio = priority != null ? Math.max(0, Math.min(2, priority))
@@ -200,6 +205,7 @@ public class GenerationQueueService {
                     Long chapterTokens = null;
                     if (TaskStatus.RUNNING.is(t.status())) {
                         currentStep = TaskKind.PLAN.is(t.kind()) ? "卷纲规划中"
+                                : TaskKind.OUTLINE.is(t.kind()) ? "章纲生成中"
                                 : currentStepLabel(t.novelId(), t.currentChapter());
                         if (t.currentChapter() != null) {
                             chapterTokens = chapterTokens(t.novelId(), t.currentChapter());
@@ -303,6 +309,17 @@ public class GenerationQueueService {
         if (TaskKind.PLAN.is(task.kind())) {
             try {
                 runPlanTask(task);
+            } finally {
+                taskThreads.remove(task.id());
+                Thread.interrupted();
+            }
+            return;
+        }
+
+        // 章纲批量生成：逐章出场景拆解（工作台可见进度，可硬停）
+        if (TaskKind.OUTLINE.is(task.kind())) {
+            try {
+                runOutlineTask(task);
             } finally {
                 taskThreads.remove(task.id());
                 Thread.interrupted();
@@ -425,9 +442,67 @@ public class GenerationQueueService {
         }
     }
 
-    // ===== P3 书级无人续跑闭环 =====
+    /**
+     * 章纲批量生成（OUTLINE 任务）：逐章复用单章 regenerateOutline（守卫内置：已有正文拒绝）。
+     * 守卫失败/无规划行的章跳过不中断；LLM 异常记失败续走；支持章间硬停（在飞调用会被中断）。
+     */
+    private void runOutlineTask(GenerationTaskDataService.TaskRow task) {
+        int done = 0, skipped = 0, failed = 0;
+        Integer interrupted = null;
+        try {
+            for (int no = task.fromChapter(); no <= task.toChapter(); no++) {
+                if (cancelRequested.contains(task.id()) || taskDAO.isCancelRequested(task.id())) {
+                    interrupted = no;
+                    break;
+                }
+                taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章章纲生成中");
+                stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.START,
+                        Map.of("taskId", task.id(), "batch", true));
+                try {
+                    int scenes = pipeline.regenerateOutline(task.novelId(), no).size();
+                    done++;
+                    taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章章纲完成（" + scenes + " 场景）");
+                    stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.DONE,
+                            Map.of("taskId", task.id(), "sceneCount", scenes, "batch", true));
+                } catch (BizException e) {
+                    skipped++;
+                    taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章跳过：" + e.getMessage());
+                    stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.REUSE,
+                            Map.of("taskId", task.id(), "reason", e.getMessage()));
+                } catch (Exception e) {
+                    if (cancelRequested.contains(task.id()) || taskDAO.isCancelRequested(task.id())) {
+                        interrupted = no;
+                        break;
+                    }
+                    failed++;
+                    String reason = String.valueOf(e.getMessage());
+                    taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章失败：" + reason);
+                    stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.FAILED,
+                            Map.of("taskId", task.id(), "reason", reason));
+                }
+            }
+            if (interrupted != null) {
+                taskDAO.updateStatus(task.id(), TaskStatus.INTERRUPTED.wire(),
+                        "用户终止（生成 " + done + " 章，停在第 " + interrupted + " 章）");
+                emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                        StageLog.Phase.STOPPED, "章纲批量生成被终止（完成 " + done + " 章）");
+            } else {
+                String summary = "章纲批量完成：生成 " + done
+                        + (skipped > 0 ? " · 跳过 " + skipped : "")
+                        + (failed > 0 ? " · 失败 " + failed : "") + " 章";
+                taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), summary);
+                emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                        StageLog.Phase.DONE, summary);
+            }
+        } catch (Exception e) {
+            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "章纲批量生成异常：" + e.getMessage());
+            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                    StageLog.Phase.STOPPED, "章纲批量生成异常：" + e.getMessage());
+            log.error("章纲批量任务 #{} 异常：{}", task.id(), e.getMessage(), e);
+        }
+    }
 
-    /** CHAPTERS 任务 DONE 后的续跑判定。 */
+    // ===== P3 书级无人续跑闭环 =====    /** CHAPTERS 任务 DONE 后的续跑判定。 */
     private void autoContinueAfterChapters(GenerationTaskDataService.TaskRow task) {
         try {
             continueChain(task.novelId(), "上批生成完成");

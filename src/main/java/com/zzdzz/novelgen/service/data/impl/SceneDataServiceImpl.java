@@ -23,6 +23,11 @@ public class SceneDataServiceImpl extends ServiceImpl<SceneMapper, SceneDTO> imp
     }
 
     @Override
+    public List<SceneDTO> listByNovel(long novelId) {
+        return baseMapper.listByNovel(novelId);
+    }
+
+    @Override
     public Long findId(long chapterId, int sceneNo) {
         return baseMapper.findId(chapterId, sceneNo);
     }
