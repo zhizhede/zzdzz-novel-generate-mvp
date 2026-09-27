@@ -9,9 +9,11 @@
       </template>
 
       <el-alert v-if="draftBook" type="warning" :closable="false" style="margin-bottom: 14px"
-                :title="`有未完成的草稿书《${draftBook.title}》（ID ${draftBook.id}）——离开页面也不会丢`">
+                :title="`有未完成的草稿书《${draftBook.title}》（ID ${draftBook.id}）${draftTotal > 1 ? `，另有 ${draftTotal - 1} 本草稿书可在书籍管理页处理` : ''}——离开页面也不会丢`">
         <el-button size="small" type="primary" @click="resumeDraft">继续这份草稿</el-button>
-        <span style="font-size: 12px; color: #999; margin-left: 8px">不需要时可在书籍管理页删除</span>
+        <el-button size="small" type="danger" plain @click="discardDraft(draftBook)">废弃草稿</el-button>
+        <el-button size="small" @click="ignoreDraft">不管它，直接开新书</el-button>
+        <span style="font-size: 12px; color: #999; margin-left: 8px">废弃为软删，之后仍可在数据库恢复</span>
       </el-alert>
 
       <el-steps :active="wizardStep" finish-status="success" simple style="margin-bottom: 20px">
@@ -219,6 +221,11 @@
       </template>
 
       <template v-else-if="wizardStep === 2">
+        <el-alert v-if="activeDraft" type="info" :closable="false" style="margin-bottom: 10px"
+                  :title="`本书是之前未完成的草稿书《${activeDraft.title}》（ID ${activeDraft.id}）——不要它了可废弃后重头开始`">
+          <el-button size="small" type="danger" plain @click="discardDraft(activeDraft)">废弃重开</el-button>
+          <el-button size="small" @click="startFresh(activeDraft)">留着草稿，开新书</el-button>
+        </el-alert>
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px">
           <el-button size="small" type="primary" plain :loading="outlineDrafting"
                      :disabled="(!wizardForm.title.trim() || !wizardForm.presetId) && !outlineDrafting"
@@ -250,6 +257,7 @@
                 <div>② 回工作台设好连跑范围（默认从第 1 章起），点「启动生成」</div>
               </template>
               <div>③ 生成中在工作台看实时逐字流；写完的章去「章节」页阅读/审批</div>
+              <div style="color: #999">所有生成参数已按本向导的设定落库；之后想改，到工作台点「本书生成参数」随时可改。</div>
             </div>
             <div style="display: flex; gap: 10px; justify-content: center">
               <el-button type="primary" @click="wizardDone">开始规划 →</el-button>
@@ -287,6 +295,9 @@ const wizardBusy = ref(false)
 const wizardCreated = ref(null)
 const createdNovelId = ref(null)
 const draftBook = ref(null)
+const draftTotal = ref(0)
+const activeDraft = ref(null)
+let outlinePollSeq = 0
 const wizardForm = ref({
   title: '', description: '', presetId: null, outline: '',
   sampleId: null,
@@ -320,13 +331,16 @@ const bestSim = computed(() => {
   return sims.length ? sims[0] : null
 })
 
-/** 页面进入即初始化新一轮向导（重新进入页面自动重置）。 */
-async function initWizard() {
+/** 同步重置向导到全新一轮（保留已加载的预设/样本下拉数据）。 */
+function resetWizardState() {
+  outlinePollSeq++ // 作废可能在途的大纲轮询，防止旧任务结果回填进新一轮表单
   wizardStep.value = 0
+  wizardBusy.value = false
   wizardCreated.value = null
   createdNovelId.value = null
+  activeDraft.value = null
   wizardForm.value = {
-    title: '', description: '', presetId: null, outline: '',
+    title: '', description: '', presetId: presets.value.length ? presets.value[0].id : null, outline: '',
     sampleId: null,
     cloneAssets: { cards: true, world: true, plotOutline: false },
     derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
@@ -338,6 +352,27 @@ async function initWizard() {
   chosenPresetName.value = ''
   outlineDrafting.value = false
   draftBook.value = null
+}
+
+/** 草稿检测：生大纲时书已落库，离开页面后回来提示接续；autoResume 且大纲已生成好时直接恢复填入。 */
+async function detectDraft(autoResume) {
+  try {
+    const books = await api.get('/api/novels')
+    const drafts = books.filter((b) => b.status === 'draft')
+    draftTotal.value = drafts.length
+    draftBook.value = drafts[0] || null
+    if (draftBook.value && autoResume) {
+      const task = await api.get(`/api/novels/${draftBook.value.id}/outline-draft/latest`).catch(() => null)
+      if (task && task.status === 'DONE') {
+        await resumeDraft()
+      }
+    }
+  } catch { /* 草稿检测失败不拦初始化 */ }
+}
+
+/** 页面进入即初始化新一轮向导（重新进入页面自动重置）。 */
+async function initWizard() {
+  resetWizardState()
   wizardSamples.value = await api.get('/api/preset/samples').catch(() => [])
   try {
     presets.value = await api.get('/api/preset/list')
@@ -346,17 +381,7 @@ async function initWizard() {
     presets.value = []
     ElMessage.error(e.message)
   }
-  // 草稿检测：生大纲时书已落库，离开页面后回来自动接续——大纲已生成好就直接恢复填入
-  try {
-    const books = await api.get('/api/novels')
-    draftBook.value = books.find((b) => b.status === 'draft') || null
-    if (draftBook.value) {
-      const task = await api.get(`/api/novels/${draftBook.value.id}/outline-draft/latest`).catch(() => null)
-      if (task && task.status === 'DONE') {
-        await resumeDraft()
-      }
-    }
-  } catch { /* 草稿检测失败不拦初始化 */ }
+  await detectDraft(true)
 }
 
 /** 继续草稿：恢复书名/样本/衍生设定到大纲步，并自动取回已生成/生成中的大纲。 */
@@ -366,6 +391,7 @@ async function resumeDraft() {
   try {
     const cfg = await api.get(`/api/novels/${b.id}/derive-config`)
     createdNovelId.value = b.id
+    activeDraft.value = b
     wizardForm.value.title = b.title
     wizardForm.value.description = b.description || ''
     wizardForm.value.sampleId = cfg.sourceSampleId || null
@@ -399,6 +425,39 @@ async function resumeDraft() {
   } catch (e) {
     ElMessage.error(e.message)
   }
+}
+
+/** 废弃草稿书（软删）：向导内直接了断，不用绕书籍管理页。若废弃的正是当前接续的书，重置向导回到第一步。 */
+async function discardDraft(b) {
+  if (!b) return
+  try {
+    await ElMessageBox.confirm(
+      `将废弃草稿书《${b.title}》（ID ${b.id}）：书籍管理页不再显示（软删，数据库可恢复）。确定废弃？`,
+      '废弃草稿', { type: 'warning', confirmButtonText: '废弃', cancelButtonText: '先留着' })
+  } catch { return }
+  try {
+    await api.delete(`/api/novels/${b.id}`)
+    ElMessage.success(`草稿书《${b.title}》已废弃，可以开新书了`)
+    if (createdNovelId.value === b.id || activeDraft.value?.id === b.id) {
+      startFresh(null)
+    }
+    await detectDraft(false) // 挂回剩余的下一本草稿书（没有则横幅消失）
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+/** 横幅上的忽略：草稿书保留不动，清出干净表单直接开新书。 */
+function ignoreDraft() {
+  draftBook.value = null
+  ElMessage.info('已忽略——草稿书仍在书籍管理页，不影响开新书')
+}
+
+/** 放下当前一切重头开始；kept 传草稿书时把它放回横幅，随时可再续接或废弃。 */
+function startFresh(kept) {
+  resetWizardState()
+  draftBook.value = kept || null
+  ElMessage.info(kept ? '已放下这份草稿，开始新向导——草稿书保留在书籍管理页' : '向导已重置，可以开新书了')
 }
 
 /** 导入小说分析：切块即落库（品类名唯一化，语料永久可复用），返回与现有品类的相似度与建议。 */
@@ -572,8 +631,10 @@ async function aiDraftOutline() {
 }
 
 async function pollOutlineTask(taskId) {
+  const seq = ++outlinePollSeq
   for (;;) {
     await new Promise((r) => setTimeout(r, 3000))
+    if (seq !== outlinePollSeq) return // 向导已重置/废弃重开，过期轮询作废
     let st
     try {
       st = await api.get(`/api/novels/outline-draft/${taskId}`)
