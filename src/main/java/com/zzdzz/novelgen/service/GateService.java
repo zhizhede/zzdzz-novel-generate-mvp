@@ -130,12 +130,13 @@ public class GateService {
         double dunhaoMax = upperBound(base, "dunhao_per1k", 1.0);
         double exclamMax = upperBound(base, "exclam_per1k", 2.0);
         double digitMax = upperBound(base, "digit_per1k", 12.0);
-        double endPunctMax = upperBound(base, "dialogue_end_punct_ratio", 0.35);
         double dlgMax = upperBound(base, "dialogue_density_per1k", 30.2);
         checks.add(check("dunhao_per1k", dunhao, null, dunhaoMax, dunhao <= dunhaoMax));
         checks.add(check("exclam_per1k", exclam, null, exclamMax, exclam <= exclamMax));
         checks.add(check("digit_per1k", digit, null, digitMax, digit <= digitMax));
-        checks.add(check("dialogue_end_punct_ratio", endPunct, null, endPunctMax, endPunct <= endPunctMax));
+        // 对白句末标点是下限指标（要高合规——曾按上限 0.35 执法，强制出「走吧」他说 式无标点对白，已翻转）
+        double endPunctFloor = lowerBound(base, "dialogue_end_punct_ratio", 0.5);
+        checks.add(check("dialogue_end_punct_ratio", endPunct, endPunctFloor, null, endPunct >= endPunctFloor));
         // 对话密度：场景级只防灌水（上界）；低界留章级——叙事型场景天然低对话，几百字样本下界误杀
         checks.add(check("dialogue_density_per1k", dlg, null, dlgMax, dlg <= dlgMax));
 
@@ -189,7 +190,8 @@ public class GateService {
         }
     }
 
-    /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance；abs_min 显式下界（对话密度防叙述铺场）。 */
+    /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance；abs_min 显式下界（对话密度防叙述铺场）。
+     * dialogue_end_punct_ratio 内置硬下限 0.5（基线缺失同样生效）——兜住「对话句末无标点」式文风污染。 */
     @SuppressWarnings("unchecked")
     private List<GateCheck> fingerprintChecks(Map<String, Object> base,
                                                         Map<String, Object> metrics) {
@@ -199,8 +201,20 @@ public class GateService {
             if (key.equals("cjk")) continue;
             Map<String, Object> baselineMap = (Map<String, Object>) base.get("baseline");
             Map<String, Object> rule = (Map<String, Object>) baselineMap.get(key);
-            if (rule == null) continue;
             double value = ((Number) e.getValue()).doubleValue();
+            if (key.equals("dialogue_end_punct_ratio")) {
+                double floor = 0.5;
+                if (rule != null && rule.containsKey("value")) {
+                    double v = ((Number) rule.get("value")).doubleValue();
+                    double tol = ((Number) rule.get("tolerance")).doubleValue();
+                    floor = rule.containsKey("abs_min")
+                            ? ((Number) rule.get("abs_min")).doubleValue()
+                            : Math.max(0.5, v * (1 - tol));
+                }
+                checks.add(check(key, value, floor, null, value >= floor));
+                continue;
+            }
+            if (rule == null) continue;
             double v = ((Number) rule.get("value")).doubleValue();
             double tol = ((Number) rule.get("tolerance")).doubleValue();
             double upper = rule.containsKey("abs_max")
@@ -291,6 +305,21 @@ public class GateService {
         return fallback;
     }
 
+    /** 指标的场景级下限（比例类合规指标用）：abs_min 优先，否则 max(硬下限, 基线*(1-容差))；基线缺失用硬下限。 */
+    @SuppressWarnings("unchecked")
+    private static double lowerBound(Map<String, Object> fingerprint, String key, double hardFloor) {
+        Map<String, Object> baselineMap = (Map<String, Object>) fingerprint.get("baseline");
+        if (baselineMap == null) return hardFloor;
+        Map<String, Object> rule = (Map<String, Object>) baselineMap.get(key);
+        if (rule == null || !rule.containsKey("value")) return hardFloor;
+        if (rule.containsKey("abs_min")) {
+            return ((Number) rule.get("abs_min")).doubleValue();
+        }
+        double v = ((Number) rule.get("value")).doubleValue();
+        double tol = ((Number) rule.getOrDefault("tolerance", 0.6)).doubleValue();
+        return Math.max(hardFloor, v * (1 - tol));
+    }
+
     @SuppressWarnings("unchecked")
     /** 指纹指标中文名（写作提示用；未收录的键回退指标名）。 */
     private static final Map<String, String> METRIC_LABELS = Map.ofEntries(
@@ -365,6 +394,8 @@ public class GateService {
     @SuppressWarnings("unchecked")
     private List<String> derivedDirectives(Map<String, Object> baselineMap) {
         List<String> out = new ArrayList<>();
+        // 对白句末标点：无条件下发（门禁内置下限 0.5 同口径）——曾有错配画像诱导模型全书写「走吧」他说 式无标点对白
+        out.add("对白句末必须带句末标点（。？！…），引号后接叙述动作时用逗号衔接——写「走吧。」他说，禁止「走吧」他说 式无标点对白");
         Map<String, Object> line = (Map<String, Object>) baselineMap.get("line_avg_len");
         if (line != null && line.containsKey("value")) {
             double v = ((Number) line.get("value")).doubleValue();

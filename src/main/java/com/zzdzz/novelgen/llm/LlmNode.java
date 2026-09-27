@@ -38,6 +38,7 @@ public final class LlmNode {
     public static final String SAMPLE_TAGS = "sample_tags";         // 样本类型/特征标签提取
     public static final String DERIVE_OUTLINE = "derive_outline";   // 开书向导·AI 生成全书大纲草稿
     public static final String DERIVE_ORIGINALITY = "derive_originality"; // 衍生大纲·原书复刻评审（判复刻→重写）
+    public static final String STYLE_RULES = "style_rules";         // 文风规则提炼（写回风格包 rules_md）
 
     private LlmNode() {}
 }

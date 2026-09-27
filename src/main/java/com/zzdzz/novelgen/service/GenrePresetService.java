@@ -3,6 +3,8 @@ package com.zzdzz.novelgen.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
+import com.zzdzz.novelgen.llm.LlmNode;
+import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.dto.NovelDTO;
 import com.zzdzz.novelgen.model.dto.PresetCorpusDTO;
 import com.zzdzz.novelgen.model.dto.StylePackDTO;
@@ -35,6 +37,8 @@ public class GenrePresetService {
     private final StylePackDataService stylePackData;
     private final NovelDataService novelData;
     private final com.zzdzz.novelgen.service.data.ImportedSampleDataService sampleData;
+    private final com.zzdzz.novelgen.llm.LlmPort llm;
+    private final PromptTemplateService promptTemplates;
     private final ObjectMapper mapper;
 
     // ===== 语料 CRUD =====
@@ -463,6 +467,61 @@ public class GenrePresetService {
 
     static double round2(double v) {
         return Math.round(v * 100) / 100.0;
+    }
+
+    /** 文风规则提炼：语料节选 → LLM 规则列表 → 写回本书风格包 rules_md（场景 system 直接采用）。
+     * 语料定位：本书 derive_config.sourceSampleId 的品类，其次风格包上直接关联的导入样本品类。 */
+    public String extractRulesForNovel(long novelId) {
+        NovelDTO novel = novelData.getById(novelId);
+        if (novel == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
+        }
+        String genre = resolveRulesGenre(novel);
+        if (genre == null || genre.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "本书没有关联样本语料（开书时选参考样本或克隆预设后才有）——无法提炼文风规则");
+        }
+        List<PresetCorpusDTO> rows = corpusData.listByGenre(genre);
+        if (rows.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "品类「" + genre + "」无语料，无法提炼规则");
+        }
+        StringBuilder corpus = new StringBuilder();
+        int budget = 16000;
+        for (PresetCorpusDTO row : rows) {
+            if (budget <= 0) break;
+            String c = row.getContent() == null ? "" : row.getContent();
+            String piece = "\n【语料块】\n" + c.substring(0, Math.min(c.length(), 3000));
+            corpus.append(piece, 0, Math.min(piece.length(), budget));
+            budget -= Math.min(piece.length(), budget);
+        }
+        String user = promptTemplates.format(LlmNode.STYLE_RULES, "user", genre, corpus.toString());
+        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(LlmNode.STYLE_RULES, novelId, null,
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.STYLE_RULES, "system")),
+                        LlmPort.Message.user(user)), 0.3));
+        String rules = r.content() == null ? "" : r.content().strip();
+        if (rules.isEmpty()) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "规则提炼空输出，请重试");
+        }
+        stylePackData.updateRulesMdByNovel(novelId, rules);
+        return rules;
+    }
+
+    /** 本书语料品类：优先 derive_config.sourceSampleId 的样本品类；回退风格包上直接关联的导入样本。 */
+    private String resolveRulesGenre(NovelDTO novel) {
+        Long sampleId = com.zzdzz.novelgen.service.DeriveSupport
+                .parse(novelData.findDeriveConfig(novel.getId())).sourceSampleId();
+        if (sampleId != null) {
+            var s = sampleData.getById(sampleId);
+            if (s != null && s.getGenre() != null && !s.getGenre().isBlank()) return s.getGenre();
+        }
+        if (novel.getStylePackId() != null) {
+            return sampleData.listAlive().stream()
+                    .filter(s -> novel.getStylePackId().equals(s.getPresetId()))
+                    .map(s -> s.getGenre())
+                    .filter(g -> g != null && !g.isBlank())
+                    .findFirst().orElse(null);
+        }
+        return null;
     }
 
     private static String requireText(String s, String message) {

@@ -87,14 +87,17 @@ public class ContextPackerService {
         return stylePackData.findRulesMdByNovel(novelId);
     }
 
-    /** 世界观设定 + 全书大纲（misc/大纲 文档存在时自动拼接，进入每章生成上下文）。 */
+    /** 世界观设定 + 全书大纲（misc/大纲 文档存在时自动拼接，进入每章生成上下文）。
+     * 世界观缺失时给占位说明（文案走 PromptCatalog world_placeholder）——此前 null 直接拼进提示词渲染成字面 "null"。 */
     public String world(long novelId) {
         String world = canonData.findFirstByKind(novelId, "world");
         String storyOutline = canonData.findContentByKindName(novelId, "misc", "大纲");
+        boolean noWorld = world == null || world.isBlank();
+        String worldPart = noWorld ? promptTemplates.get(LlmNode.SCENE_DRAFT, "world_placeholder") : world;
         if (storyOutline == null || storyOutline.isBlank()) {
-            return world;
+            return worldPart;
         }
-        return world + "\n\n【全书大纲】\n" + storyOutline;
+        return worldPart + "\n\n【全书大纲】\n" + storyOutline;
     }
 
     /**
@@ -373,9 +376,10 @@ public class ContextPackerService {
         List<String> ctx = new ArrayList<>();
         for (int i = Math.max(0, digests.size() - 3); i < digests.size(); i++) ctx.add(digests.get(i));
 
-        // 风格包自带量化红线（新风格包）时不再叠加手搓红线，避免两套阈值打架
+        // 场景 system = 本书规则正文（规则提炼/人工编辑）；量化口径唯一来源是本书指纹目标（下），
+        // 不再叠加全局兜底画像（夜班守则口径曾污染所有无规则书，与指纹目标互相矛盾）
         String rules = styleRules(novelId);
-        String system = rules.contains("【量化风格红线】") ? rules : rules + promptTemplates.get(LlmNode.SCENE_DRAFT, "style_redlines");
+        String system = rules == null ? "" : rules;
         // 指纹量化目标随提示词下发（提示词环节对齐门禁口径——第一稿就朝及格线写，而不是被门禁打回后试错）
         String fingerprintTargets = gateService.fingerprintGuidance(novelId);
         if (fingerprintTargets != null) {

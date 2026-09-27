@@ -50,6 +50,7 @@ public class LibraryController {
     private final EmbeddingService embeddingService;
     private final PromptTemplateService promptService;
     private final GateService gateService;
+    private final com.zzdzz.novelgen.service.GenrePresetService genrePresetService;
 
 
     // ===== 提示词注册表（平台级只读；阶段二开放从库读取与编辑） =====
@@ -308,6 +309,12 @@ public class LibraryController {
     public Result<Void> updateStyle(@PathVariable long novelId, @RequestBody StyleUpdateVO dto) {
         libraryService.updateStyleRules(novelId, dto.rulesMd());
         return Result.success();
+    }
+
+    /** AI 提炼本书文风规则（语料=关联样本品类；写回风格包 rules_md，同步返回规则文本供回显）。 */
+    @PostMapping("/novels/{novelId}/style/extract-rules")
+    public Result<String> extractRules(@PathVariable long novelId) {
+        return Result.success(genrePresetService.extractRulesForNovel(novelId));
     }
 
     @PutMapping("/novels/{novelId}/gate-config")

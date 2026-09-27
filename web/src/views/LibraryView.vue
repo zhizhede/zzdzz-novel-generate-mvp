@@ -395,7 +395,8 @@
             <el-input v-model="styleRules" type="textarea" :rows="20" />
             <div style="margin-top: 8px">
               <el-button type="primary" @click="saveStyle">保存规则正文</el-button>
-              <span style="color: #999; font-size: 12px; margin-left: 10px">直改生成时的文风指令；指纹阈值不在此改</span>
+              <el-button :loading="rulesExtracting" @click="extractRules">AI 提炼文风规则</el-button>
+              <span style="color: #999; font-size: 12px; margin-left: 10px">提炼需本书关联了样本语料；规则进场景生成 system，指纹阈值不在此改</span>
             </div>
           </el-tab-pane>
           <el-tab-pane label="指纹基线（只读）" name="fingerprint">
@@ -1767,6 +1768,20 @@ async function saveStyle() {
     ElMessage.success('风格规则已更新（立即影响后续生成）')
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+const rulesExtracting = ref(false)
+/** AI 提炼本书文风规则（LLM 逐条产出，写回风格包并回显，可再人工编辑）。 */
+async function extractRules() {
+  rulesExtracting.value = true
+  try {
+    styleRules.value = await api.post(`/api/novels/${novelId.value}/style/extract-rules`)
+    ElMessage.success('文风规则已提炼并写本书风格包（建议过目后微调保存）')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    rulesExtracting.value = false
   }
 }
 

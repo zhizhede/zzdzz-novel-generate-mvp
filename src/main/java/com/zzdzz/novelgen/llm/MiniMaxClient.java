@@ -170,7 +170,9 @@ public class MiniMaxClient implements LlmPort {
         return new ChatResult(id, content, reasoning, usage);
     }
 
-    /** 阻塞至流结束；线程中断即刻解除并取消订阅（关流）。 */
+    /** 阻塞至流结束；线程中断即刻解除并取消订阅（关流）。
+     * 帧间空闲看门狗：JDK HttpClient 的 request timeout 只覆盖到响应头，流体中途挂死会无限阻塞——
+     * 超过 idle 时长无任何新帧即视为传输失败（retryable，零帧场景客户端重试、有帧场景走自愈梯子）。 */
     private void streamPost(LlmProviderResolver.Resolved provider, Map<String, Object> body, StreamAccumulator acc) throws InterruptedException {
         HttpRequest httpRequest = HttpRequest.newBuilder()
                 .uri(URI.create(provider.baseUrl() + "/chat/completions"))
@@ -182,9 +184,13 @@ public class MiniMaxClient implements LlmPort {
         SseSubscriber subscriber = new SseSubscriber();
         CompletableFuture<HttpResponse<Void>> responseFuture =
                 httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.fromSubscriber(subscriber));
+        long idleMs = Math.max(60_000L, provider.readTimeout().toMillis());
         try {
             while (true) {
-                Object item = subscriber.queue().take();
+                Object item = subscriber.queue().poll(idleMs, TimeUnit.MILLISECONDS);
+                if (item == null) {
+                    throw new StreamIoException("流空闲超时：" + idleMs + "ms 无新帧（连接疑似挂死）", null, true);
+                }
                 if (item == SseSubscriber.DONE) break;
                 if (item instanceof SseSubscriber.Failed f) {
                     throw new StreamIoException("流中断: " + f.cause(), f.cause(), true);
