@@ -19,9 +19,10 @@ import java.util.List;
 public class LlmProviderDataServiceImpl extends ServiceImpl<LlmProviderMapper, LlmProviderDTO> implements LlmProviderDataService {
 
     @Override
-    public List<LlmProviderDTO> listEnabled() {
+    public List<LlmProviderDTO> listEnabled(String role) {
         return list(new QueryWrapper<LlmProviderDTO>()
                 .eq("enabled", true)
+                .eq("role", role)
                 .eq("is_deleted", false)
                 .orderByAsc("id"));
     }
@@ -57,9 +58,10 @@ public class LlmProviderDataServiceImpl extends ServiceImpl<LlmProviderMapper, L
     }
 
     @Override
-    public void disableAllOthers(long keepId) {
+    public void disableAllOthersInRole(long keepId, String role) {
         update(new UpdateWrapper<LlmProviderDTO>()
                 .ne("id", keepId)
+                .eq("role", role)
                 .eq("is_deleted", false)
                 .eq("enabled", true)
                 .set("enabled", false));

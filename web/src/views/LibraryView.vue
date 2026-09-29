@@ -240,14 +240,22 @@
         <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
           <el-button size="small" type="primary" plain @click="openProvider(null)">新建接入</el-button>
           <span style="color: #999; font-size: 12px">
-            启用的接入全平台唯一（启用新行自动停用旧行），下次调用即生效；API key 以 AES-GCM 密文落库，界面只回显掩码、永不回传明文。
-            无启用行时回退服务端本地配置。
+            按用途各留一条启用行——会话（正文/审校等 OpenAI 兼容调用）与向量化（RAG，MiniMax 私有协议）互不影响；
+            启用新行只自动停用同用途旧行，下次调用即生效。API key 以 AES-GCM 密文落库，界面只回显掩码、永不回传明文。
+            某用途无启用行时回退服务端本地配置。
           </span>
         </div>
-        <el-table :data="llmProviders" border size="small" style="max-width: 1020px">
+        <el-table :data="llmProviders" border size="small" style="max-width: 1080px">
           <el-table-column prop="name" label="名称" width="130" />
+          <el-table-column label="用途" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.role === 'embedding' ? 'warning' : 'primary'">
+                {{ row.role === 'embedding' ? '向量化' : '会话' }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="baseUrl" label="baseUrl" min-width="200" show-overflow-tooltip />
-          <el-table-column label="默认模型" width="130">
+          <el-table-column label="默认模型" width="150">
             <template #default="{ row }">{{ row.model || '（节点路由/调用方默认）' }}</template>
           </el-table-column>
           <el-table-column label="API key" width="150">
@@ -626,7 +634,7 @@
 
     <!-- 模型路由编辑 -->
     <el-dialog v-model="nodeEditor" :title="nodeForm.id ? `编辑节点：${nodeForm.node}` : `新建节点路由：${nodeForm.node}`" width="560px">
-      <el-input v-model="nodeForm.model" placeholder="模型名（留空 = 全局默认 MiniMax-M3）" style="margin-bottom: 10px" />
+      <el-input v-model="nodeForm.model" placeholder="模型名（留空 = 会话接入行的默认模型）" style="margin-bottom: 10px" />
       <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 10px">
         <span style="font-size: 13px">温度（留空=调用方默认）</span>
         <el-input-number v-model="nodeForm.temperature" :min="0" :max="2" :step="0.1" size="small" style="width: 110px" />
@@ -646,11 +654,19 @@
 
     <!-- 模型接入编辑 -->
     <el-dialog v-model="providerEditor" :title="providerForm.id ? `编辑接入：${providerForm.name}` : '新建接入'" width="560px">
-      <el-input v-model="providerForm.name" placeholder="名称（唯一，如：MiniMax 主接入）" style="margin-bottom: 10px" />
-      <el-input v-model="providerForm.baseUrl" placeholder="baseUrl（如 https://api.minimax.chat/v1，不带尾斜杠）" style="margin-bottom: 10px" />
+      <el-input v-model="providerForm.name" placeholder="名称（唯一，如：DeepSeek 会话 / MiniMax 向量）" style="margin-bottom: 10px" />
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+        <span style="font-size: 13px; white-space: nowrap">用途</span>
+        <el-select v-model="providerForm.role" size="small" style="width: 160px">
+          <el-option label="会话（正文/审校等）" value="chat" />
+          <el-option label="向量化（RAG 检索）" value="embedding" />
+        </el-select>
+        <span style="color: #999; font-size: 12px">同用途内只留一条启用行；向量化必须指 MiniMax 兼容端点</span>
+      </div>
+      <el-input v-model="providerForm.baseUrl" placeholder="baseUrl（服务根路径，如 https://api.deepseek.com/v1，不带尾斜杠）" style="margin-bottom: 10px" />
       <el-input v-model="providerForm.apiKey" type="password" show-password
                 :placeholder="providerForm.id ? 'API key（留空 = 保留原 key）' : 'API key（必填，加密后入库）'" style="margin-bottom: 10px" />
-      <el-input v-model="providerForm.model" placeholder="默认模型（留空 = 按节点路由/调用方默认）" style="margin-bottom: 10px" />
+      <el-input v-model="providerForm.model" placeholder="默认模型（会话如 deepseek-v4-flash；向量化如 embo-01）" style="margin-bottom: 10px" />
       <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 10px">
         <span style="font-size: 13px">连接超时(秒)</span>
         <el-input-number v-model="providerForm.connectTimeoutSec" :min="1" :max="120" size="small" style="width: 100px" />
@@ -658,7 +674,7 @@
         <el-input-number v-model="providerForm.readTimeoutSec" :min="10" :max="1800" :step="30" size="small" style="width: 130px" />
       </div>
       <div style="display: flex; gap: 14px; align-items: center">
-        <el-switch v-model="providerForm.enabled" active-text="启用（自动停用其它接入）" />
+        <el-switch v-model="providerForm.enabled" active-text="启用（自动停用同用途其它接入）" />
         <el-input v-model="providerForm.remark" placeholder="备注" size="small" style="flex: 1" />
       </div>
       <template #footer>
@@ -1455,11 +1471,11 @@ async function saveNode() {
 
 function openProvider(row) {
   providerForm.value = row
-    ? { id: row.id, name: row.name, baseUrl: row.baseUrl, apiKey: '', model: row.model || '',
+    ? { id: row.id, name: row.name, baseUrl: row.baseUrl, apiKey: '', model: row.model || '', role: row.role || 'chat',
         connectTimeoutSec: row.connectTimeoutMs == null ? null : Math.round(row.connectTimeoutMs / 1000),
         readTimeoutSec: row.readTimeoutMs == null ? null : Math.round(row.readTimeoutMs / 1000),
         enabled: row.enabled, remark: row.remark || '' }
-    : { id: null, name: '', baseUrl: '', apiKey: '', model: '', connectTimeoutSec: 10, readTimeoutSec: 600, enabled: true, remark: '' }
+    : { id: null, name: '', baseUrl: '', apiKey: '', model: '', role: 'chat', connectTimeoutSec: 10, readTimeoutSec: 600, enabled: true, remark: '' }
   providerEditor.value = true
 }
 
@@ -1473,6 +1489,7 @@ async function saveProvider() {
     const body = {
       name: f.name?.trim(), baseUrl: f.baseUrl?.trim(), apiKey: f.apiKey?.trim() || null,
       model: f.model?.trim() || null,
+      role: f.role || 'chat',
       connectTimeoutMs: f.connectTimeoutSec == null ? null : f.connectTimeoutSec * 1000,
       readTimeoutMs: f.readTimeoutSec == null ? null : f.readTimeoutSec * 1000,
       enabled: f.enabled, remark: f.remark

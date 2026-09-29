@@ -164,7 +164,7 @@ public class LibraryController {
 
     @PostMapping("/llm-providers")
     public Result<Void> createLlmProvider(@RequestBody LlmProviderUpsertVO dto) {
-        providerService.create(dto.name(), dto.baseUrl(), dto.apiKey(), dto.model(),
+        providerService.create(dto.name(), dto.baseUrl(), dto.apiKey(), dto.model(), dto.role(),
                 dto.connectTimeoutMs(), dto.readTimeoutMs(),
                 dto.enabled() == null || dto.enabled(), dto.remark());
         return Result.success();
@@ -172,7 +172,7 @@ public class LibraryController {
 
     @PutMapping("/llm-providers/{id}")
     public Result<Void> updateLlmProvider(@PathVariable long id, @RequestBody LlmProviderUpsertVO dto) {
-        providerService.update(id, dto.name(), dto.baseUrl(), dto.apiKey(), dto.model(),
+        providerService.update(id, dto.name(), dto.baseUrl(), dto.apiKey(), dto.model(), dto.role(),
                 dto.connectTimeoutMs(), dto.readTimeoutMs(), dto.enabled(), dto.remark());
         return Result.success();
     }
@@ -379,8 +379,8 @@ public class LibraryController {
     public record LlmNodeCreateVO(String node, String model, Double temperature, Integer maxTokens,
                                    String extraJson, Boolean enabled, String remark) {}
 
-    /** apiKey 编辑留空 = 保留原密文；明文只进加密器，不落日志不回显。 */
-    public record LlmProviderUpsertVO(String name, String baseUrl, String apiKey, String model,
+    /** apiKey 编辑留空 = 保留原密文；明文只进加密器，不落日志不回显。role 留空按 chat。 */
+    public record LlmProviderUpsertVO(String name, String baseUrl, String apiKey, String model, String role,
                                        Integer connectTimeoutMs, Integer readTimeoutMs,
                                        Boolean enabled, String remark) {}
 

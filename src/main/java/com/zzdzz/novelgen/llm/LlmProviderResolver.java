@@ -9,9 +9,11 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * LLM 接入解析：llm_providers 启用行优先（单活，取 id 最小），无行/查询失败回退 yaml 静态配置
- * （fail-open，老环境与本地开发零变化）。每次调用解析一次——与节点路由 resolveConfig 同口径，
- * 改库即生效，无需重启。
+ * LLM 接入解析：按用途（LlmRole）取 llm_providers 对应 role 的启用行（同 role 内取 id 最小），
+ * 无行/查询失败回退 yaml 静态配置（fail-open，老环境与本地开发零变化）。
+ * 每次调用解析一次——与节点路由 resolveConfig 同口径，改库即生效，无需重启。
+ * 会话与向量化分属两行：前者 OpenAI 兼容 /chat/completions，后者 MiniMax 私有 /embeddings，
+ * 共用一行会在切提供方时把向量化请求发到不支持该协议的服务上。
  */
 @Component
 @Slf4j
@@ -31,8 +33,8 @@ public class LlmProviderResolver {
         this.props = props;
     }
 
-    public Resolved resolve() {
-        List<LlmProviderDTO> enabled = providerData.listEnabled();
+    public Resolved resolve(LlmRole role) {
+        List<LlmProviderDTO> enabled = providerData.listEnabled(role.wire());
         if (!enabled.isEmpty()) {
             LlmProviderDTO p = enabled.get(0);
             try {
@@ -41,7 +43,8 @@ public class LlmProviderResolver {
                         Duration.ofMillis(p.getReadTimeoutMs() != null ? p.getReadTimeoutMs() : props.readTimeout().toMillis()),
                         p.getId());
             } catch (Exception e) {
-                log.error("LLM 接入行 id={} 解析失败（解密/配置损坏），回退 yaml 静态配置：{}", p.getId(), e.getMessage());
+                log.error("LLM 接入行 id={} role={} 解析失败（解密/配置损坏），回退 yaml 静态配置：{}",
+                        p.getId(), role.wire(), e.getMessage());
             }
         }
         return new Resolved(props.baseUrl(), props.apiKey(), props.model(),

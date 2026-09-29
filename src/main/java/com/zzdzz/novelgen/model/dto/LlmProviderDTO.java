@@ -19,6 +19,8 @@ public class LlmProviderDTO {
     private String apiKeyCipher;
     /** 默认模型（可空=走节点路由/调用方默认）。 */
     private String model;
+    /** 用途（llm/LlmRole：chat=会话 OpenAI 兼容 / embedding=MiniMax 私有向量化），同用途单活。 */
+    private String role;
     private Integer connectTimeoutMs;
     private Integer readTimeoutMs;
     private boolean enabled;

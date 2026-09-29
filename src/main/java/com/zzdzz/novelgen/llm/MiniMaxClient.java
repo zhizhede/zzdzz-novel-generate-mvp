@@ -35,10 +35,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * MiniMax OpenAI 兼容协议实现。除返回结果外，把请求/响应全量写入 llm_call_log，
+ * 会话 LLM 客户端（OpenAI 兼容协议 /chat/completions）。类名沿用历史：MiniMax-M3 曾是唯一接入，
+ * 现在会话接入由 llm_providers 里 role=chat 的行决定（可为 DeepSeek 等别家），向量化另走
+ * MiniMaxEmbeddingClient（MiniMax 私有协议）。除返回结果外，把请求/响应全量写入 llm_call_log，
  * 失败也落一行 error——这是断点重放与成本审计的依据。
  * 模型/参数按节点路由：llm_node_config 有 enabled 行则覆盖（model/temperature/max_tokens/extra_json），
- * 留空项走调用方或全局默认；配置查询失败不拦截调用。
+ * 留空项走调用方或接入行默认；配置查询失败不拦截调用。
+ * 思考内容两种形态都认：内联 &lt;think&gt; 标签（M3）与 delta/message.reasoning_content（DeepSeek 等）。
  */
 @Component
 @Slf4j
@@ -58,7 +61,7 @@ public class MiniMaxClient implements LlmPort {
     @Override
     public ChatResult chat(ChatRequest request) {
         long start = System.currentTimeMillis();
-        LlmProviderResolver.Resolved provider = providerResolver.resolve();
+        LlmProviderResolver.Resolved provider = providerResolver.resolve(LlmRole.CHAT);
         LlmNodeConfigDTO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
                 ? cfg.getModel() : defaultModel(provider);
@@ -101,7 +104,7 @@ public class MiniMaxClient implements LlmPort {
                 usageNode.path("prompt_tokens").asInt(0),
                 usageNode.path("completion_tokens").asInt(0),
                 usageNode.path("total_tokens").asInt(0));
-        int cachedTokens = usageNode.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+        int cachedTokens = cachedTokensOf(usageNode);
         long latency = elapsed(start);
         long id = insertLog(request, model, requestJson, response, reasoning,
                 usage.promptTokens(), cachedTokens, usage.completionTokens(), usage.totalTokens(),
@@ -116,8 +119,9 @@ public class MiniMaxClient implements LlmPort {
 
     /**
      * 流式调用（2026-09-20 实测协议依据：stream_options.include_usage 终帧返回精确 usage 含
-     * cached/reasoning 拆分；无 data:[DONE] 终止帧，以流关闭为准；M3 思考以 <think> 内联标签
-     * 随 content 增量下发，标签边界可能劈在两帧之间）。
+     * cached/reasoning 拆分；MiniMax 无 data:[DONE] 终止帧（DeepSeek 有，已防御性接收）；
+     * 思考内容两种形态都认：M3 以 &lt;think&gt; 内联标签随 content 增量下发（标签边界可能劈在两帧之间），
+     * DeepSeek 等以 delta.reasoning_content 独立字段下发）。
      * 记账与非流式同精度：完整 request/response（response 为聚合后的等价非流式形态）、精确 usage。
      * 中断契约：worker 线程 Thread.interrupt() 在队列 take() 上即刻解除，订阅 cancel 关流，
      * 落 error 行（部分内容进 response_json）后抛 LlmException——attemptChapter 据取消标记收敛 INTERRUPTED。
@@ -130,7 +134,7 @@ public class MiniMaxClient implements LlmPort {
     /** attempt=已重试次数：零帧传输失败最多重试 STREAM_RETRY_MAX 次（递归有界化，防持续性错误空转）。 */
     private ChatResult chatStream(ChatRequest request, StreamDelta onDelta, int attempt) {
         long start = System.currentTimeMillis();
-        LlmProviderResolver.Resolved provider = providerResolver.resolve();
+        LlmProviderResolver.Resolved provider = providerResolver.resolve(LlmRole.CHAT);
         LlmNodeConfigDTO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
                 ? cfg.getModel() : defaultModel(provider);
@@ -173,7 +177,7 @@ public class MiniMaxClient implements LlmPort {
                 usageNode.path("prompt_tokens").asInt(0),
                 usageNode.path("completion_tokens").asInt(0),
                 usageNode.path("total_tokens").asInt(0));
-        int cachedTokens = usageNode.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+        int cachedTokens = cachedTokensOf(usageNode);
         long latency = elapsed(start);
         long id = insertLog(request, model, requestJson, response, reasoning,
                 usage.promptTokens(), cachedTokens, usage.completionTokens(), usage.totalTokens(),
@@ -183,6 +187,18 @@ public class MiniMaxClient implements LlmPort {
                 request.node(), model, usage.totalTokens(), usage.promptTokens(),
                 usage.completionTokens(), latency, acc.frames(), id);
         return new ChatResult(id, content, reasoning, usage);
+    }
+
+    /**
+     * 缓存命中 token：MiniMax 报 prompt_tokens_details.cached_tokens，DeepSeek 系报 prompt_cache_hit_tokens
+     * （部分版本两者都给）。只读一个会把命中价永远算成 0——成本按全未命中计，故两种都认。
+     */
+    static int cachedTokensOf(JsonNode usageNode) {
+        int nested = usageNode.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+        if (nested > 0) {
+            return nested;
+        }
+        return usageNode.path("prompt_cache_hit_tokens").asInt(0);
     }
 
     /** 阻塞至流结束；线程中断即刻解除并取消订阅（关流）。
@@ -594,13 +610,21 @@ public class MiniMaxClient implements LlmPort {
         return body;
     }
 
-    /** 正文：content 剥掉 <think> 块；content 为空时回退 reasoning_content 字段 */
+    /**
+     * 正文：content 剥掉 &lt;think&gt; 块（M3 内联形态）；content 为空时**不再**回退 reasoning_content。
+     * 旧实现在 content 空时把思考字段当正文返回——对 DeepSeek 这类"思考在独立字段"的模型，
+     * 一旦输出上限耗尽/只回了思考，思考文本会被当作正文写进稿件。现在只记 warn 返回空，
+     * 由调用方按空内容处理（LlmJson 重试、场景门禁重写等既有路径）。
+     */
     static String extractContent(JsonNode response) {
         JsonNode choice = response.path("choices").path(0);
         String content = choice.path("message").path("content").asText("");
         if (content.isBlank()) {
-            content = choice.path("message").path("reasoning_content").asText("");
-            return content.strip();
+            String reasoning = choice.path("message").path("reasoning_content").asText("");
+            if (!reasoning.isBlank()) {
+                log.warn("LLM 响应正文为空但思考非空（{} 字）：不回退为正文，交由调用方按空内容处置", reasoning.length());
+            }
+            return "";
         }
         // MiniMax-M3 是推理模型，思考过程以 <think> 块混在 content 里，正文要剥出来
         return content.replaceAll("(?s)<think>.*?</think>", "").strip();
