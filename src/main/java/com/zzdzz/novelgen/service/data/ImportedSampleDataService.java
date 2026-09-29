@@ -14,4 +14,7 @@ public interface ImportedSampleDataService extends IService<ImportedSampleDTO> {
 
     /** 品类采纳为预设后回链：该品类全部样本记下 presetId。 */
     int linkPreset(String genre, long presetId);
+
+    /** 样本标签更新（AI 提取后写回；tags 为 JSON 数组文本，XML 内 ::jsonb 转型）。 */
+    int updateTags(long sampleId, String tagsJson);
 }

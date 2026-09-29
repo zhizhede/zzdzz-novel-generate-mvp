@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** 验证 MiniMax-M3 推理输出的 think 块与正文拆分（不发起真实调用） */
+/** 验证推理输出的思考/正文拆分（不发起真实调用）：M3 内联 think 块 + DeepSeek 式 reasoning_content 字段 */
 class MiniMaxClientExtractTest {
 
     private final ObjectMapper mapper = new ObjectMapper();
@@ -42,8 +42,13 @@ class MiniMaxClientExtractTest {
         assertThat(MiniMaxClient.extractReasoning(response)).isNull();
     }
 
+    /**
+     * 契约变更（2026-09-29）：content 为空时**不再**把 reasoning_content 当正文。
+     * 旧行为是为了救 M3 的纯思考响应，但对 DeepSeek 这类思考在独立字段的模型，
+     * 一旦输出被截断就会把思考写进稿件。空就是空，由调用方按空内容处置。
+     */
     @Test
-    void content为空时回退reasoning_content字段() throws Exception {
+    void content为空时不回退思考字段_正文为空() throws Exception {
         String json = """
         {
           "choices": [{"message": {"content": "", "reasoning_content": "只有思考没有正文"}}]
@@ -51,6 +56,19 @@ class MiniMaxClientExtractTest {
         """;
         var response = mapper.readTree(json);
 
-        assertThat(MiniMaxClient.extractContent(response)).isEqualTo("只有思考没有正文");
+        assertThat(MiniMaxClient.extractContent(response)).isEmpty();
+        assertThat(MiniMaxClient.extractReasoning(response)).isEqualTo("只有思考没有正文");
+    }
+
+    /** 缓存命中 token：MiniMax 报嵌套字段、DeepSeek 报平铺字段，两种都要认（否则命中价恒为 0）。 */
+    @Test
+    void 缓存命中token两种字段名都认() throws Exception {
+        var minimax = mapper.readTree("{\"prompt_tokens_details\": {\"cached_tokens\": 128}}");
+        var deepseek = mapper.readTree("{\"prompt_tokens\": 900, \"prompt_cache_hit_tokens\": 640}");
+        var neither = mapper.readTree("{\"prompt_tokens\": 900}");
+
+        assertThat(MiniMaxClient.cachedTokensOf(minimax)).isEqualTo(128);
+        assertThat(MiniMaxClient.cachedTokensOf(deepseek)).isEqualTo(640);
+        assertThat(MiniMaxClient.cachedTokensOf(neither)).isZero();
     }
 }

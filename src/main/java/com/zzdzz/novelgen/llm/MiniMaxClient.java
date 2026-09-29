@@ -11,7 +11,6 @@ import com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO;
 import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
@@ -36,10 +35,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * MiniMax OpenAI 兼容协议实现。除返回结果外，把请求/响应全量写入 llm_call_log，
+ * 会话 LLM 客户端（OpenAI 兼容协议 /chat/completions）。类名沿用历史：MiniMax-M3 曾是唯一接入，
+ * 现在会话接入由 llm_providers 里 role=chat 的行决定（可为 DeepSeek 等别家），向量化另走
+ * MiniMaxEmbeddingClient（MiniMax 私有协议）。除返回结果外，把请求/响应全量写入 llm_call_log，
  * 失败也落一行 error——这是断点重放与成本审计的依据。
  * 模型/参数按节点路由：llm_node_config 有 enabled 行则覆盖（model/temperature/max_tokens/extra_json），
- * 留空项走调用方或全局默认；配置查询失败不拦截调用。
+ * 留空项走调用方或接入行默认；配置查询失败不拦截调用。
+ * 思考内容两种形态都认：内联 &lt;think&gt; 标签（M3）与 delta/message.reasoning_content（DeepSeek 等）。
  */
 @Component
 @Slf4j
@@ -50,26 +52,37 @@ public class MiniMaxClient implements LlmPort {
     private final ObjectMapper mapper;
     private final LlmCallLogDataService callLogDAO;
     private final LlmNodeConfigDataService nodeConfigDAO;
-    private final RestClient restClient;
-    private final HttpClient streamClient;
+    private final LlmProviderResolver providerResolver;
+    private final HttpClient httpClient;
+
+    /** 零帧传输失败的最大重试次数。必须有限——曾无上限递归：422 内容过滤被当可重试，同一请求重试 1852 次/10 分钟。 */
+    private static final int STREAM_RETRY_MAX = 1;
 
     @Override
     public ChatResult chat(ChatRequest request) {
         long start = System.currentTimeMillis();
+        LlmProviderResolver.Resolved provider = providerResolver.resolve(LlmRole.CHAT);
         LlmNodeConfigDTO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
-                ? cfg.getModel() : props.model();
+                ? cfg.getModel() : defaultModel(provider);
         Map<String, Object> body = buildBody(request, cfg, model);
         String requestJson = serialize(body);
 
         JsonNode response;
         try {
-            response = post(body);
+            response = post(provider, body);
         } catch (Exception first) {
+            if (first instanceof StreamIoException sie && !sie.retryable) {
+                // 4xx 是确定性拒绝（402 余额/401 密钥/422 内容过滤/400 参数）：不重试，落 error 行后直接抛
+                log.error("LLM 调用被拒 node={} model={}: {}", request.node(), model, first.getMessage());
+                long id = insertLog(request, model, requestJson, null, null, 0, 0, 0, 0,
+                        elapsed(start), "error", truncate(first.toString(), 2000));
+                throw new LlmException("LLM 调用失败（llm_call_log id=" + id + "）: " + first.getMessage(), first);
+            }
             // 传输类失败（超时/网络）自动重试一次；注意重试可能造成服务端重复计费
             log.warn("LLM 调用传输失败，重试一次: {}", first.toString());
             try {
-                response = post(body);
+                response = post(provider, body);
             } catch (Exception second) {
                 log.error("LLM 调用失败 node={} model={}", request.node(), model, second);
                 long id = insertLog(request, model, requestJson, null, null, 0, 0, 0, 0,
@@ -91,7 +104,7 @@ public class MiniMaxClient implements LlmPort {
                 usageNode.path("prompt_tokens").asInt(0),
                 usageNode.path("completion_tokens").asInt(0),
                 usageNode.path("total_tokens").asInt(0));
-        int cachedTokens = usageNode.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+        int cachedTokens = cachedTokensOf(usageNode);
         long latency = elapsed(start);
         long id = insertLog(request, model, requestJson, response, reasoning,
                 usage.promptTokens(), cachedTokens, usage.completionTokens(), usage.totalTokens(),
@@ -106,18 +119,25 @@ public class MiniMaxClient implements LlmPort {
 
     /**
      * 流式调用（2026-09-20 实测协议依据：stream_options.include_usage 终帧返回精确 usage 含
-     * cached/reasoning 拆分；无 data:[DONE] 终止帧，以流关闭为准；M3 思考以 <think> 内联标签
-     * 随 content 增量下发，标签边界可能劈在两帧之间）。
+     * cached/reasoning 拆分；MiniMax 无 data:[DONE] 终止帧（DeepSeek 有，已防御性接收）；
+     * 思考内容两种形态都认：M3 以 &lt;think&gt; 内联标签随 content 增量下发（标签边界可能劈在两帧之间），
+     * DeepSeek 等以 delta.reasoning_content 独立字段下发）。
      * 记账与非流式同精度：完整 request/response（response 为聚合后的等价非流式形态）、精确 usage。
      * 中断契约：worker 线程 Thread.interrupt() 在队列 take() 上即刻解除，订阅 cancel 关流，
      * 落 error 行（部分内容进 response_json）后抛 LlmException——attemptChapter 据取消标记收敛 INTERRUPTED。
      */
     @Override
     public ChatResult chatStream(ChatRequest request, StreamDelta onDelta) {
+        return chatStream(request, onDelta, 0);
+    }
+
+    /** attempt=已重试次数：零帧传输失败最多重试 STREAM_RETRY_MAX 次（递归有界化，防持续性错误空转）。 */
+    private ChatResult chatStream(ChatRequest request, StreamDelta onDelta, int attempt) {
         long start = System.currentTimeMillis();
+        LlmProviderResolver.Resolved provider = providerResolver.resolve(LlmRole.CHAT);
         LlmNodeConfigDTO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
-                ? cfg.getModel() : props.model();
+                ? cfg.getModel() : defaultModel(provider);
         Map<String, Object> body = buildBody(request, cfg, model);
         body.put("stream", true);
         body.put("stream_options", Map.of("include_usage", true));
@@ -125,7 +145,7 @@ public class MiniMaxClient implements LlmPort {
 
         StreamAccumulator acc = new StreamAccumulator(mapper, onDelta);
         try {
-            streamPost(body, acc);
+            streamPost(provider, body, acc);
             acc.finish(); // 冲刷切分器扣住的尾部增量（未闭合思考等）
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt(); // 语义交还上层（attemptChapter 统一清理）
@@ -134,9 +154,9 @@ public class MiniMaxClient implements LlmPort {
             throw new LlmException("LLM 流式调用被中断（llm_call_log 已留痕）", ie);
         } catch (StreamIoException e) {
             // 与阻塞路径对齐：零帧阶段（连接/响应头）传输失败重试一次；帧已流出则不重试（部分 token 已花）
-            if (acc.frames() == 0 && e.retryable) {
-                log.warn("LLM 流式调用传输失败，重试一次: {}", e.getMessage());
-                return chatStream(request, onDelta);
+            if (acc.frames() == 0 && e.retryable && attempt < STREAM_RETRY_MAX) {
+                log.warn("LLM 流式调用传输失败，重试一次（第 {} 次）: {}", attempt + 1, e.getMessage());
+                return chatStream(request, onDelta, attempt + 1);
             }
             long errId = insertLog(request, model, requestJson, acc.assembledResponse(), acc.reasoningSoFar(),
                     0, 0, 0, 0, elapsed(start), "error", truncate(e.getMessage(), 2000));
@@ -157,7 +177,7 @@ public class MiniMaxClient implements LlmPort {
                 usageNode.path("prompt_tokens").asInt(0),
                 usageNode.path("completion_tokens").asInt(0),
                 usageNode.path("total_tokens").asInt(0));
-        int cachedTokens = usageNode.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+        int cachedTokens = cachedTokensOf(usageNode);
         long latency = elapsed(start);
         long id = insertLog(request, model, requestJson, response, reasoning,
                 usage.promptTokens(), cachedTokens, usage.completionTokens(), usage.totalTokens(),
@@ -169,21 +189,39 @@ public class MiniMaxClient implements LlmPort {
         return new ChatResult(id, content, reasoning, usage);
     }
 
-    /** 阻塞至流结束；线程中断即刻解除并取消订阅（关流）。 */
-    private void streamPost(Map<String, Object> body, StreamAccumulator acc) throws InterruptedException {
+    /**
+     * 缓存命中 token：MiniMax 报 prompt_tokens_details.cached_tokens，DeepSeek 系报 prompt_cache_hit_tokens
+     * （部分版本两者都给）。只读一个会把命中价永远算成 0——成本按全未命中计，故两种都认。
+     */
+    static int cachedTokensOf(JsonNode usageNode) {
+        int nested = usageNode.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+        if (nested > 0) {
+            return nested;
+        }
+        return usageNode.path("prompt_cache_hit_tokens").asInt(0);
+    }
+
+    /** 阻塞至流结束；线程中断即刻解除并取消订阅（关流）。
+     * 帧间空闲看门狗：JDK HttpClient 的 request timeout 只覆盖到响应头，流体中途挂死会无限阻塞——
+     * 超过 idle 时长无任何新帧即视为传输失败（retryable，零帧场景客户端重试、有帧场景走自愈梯子）。 */
+    private void streamPost(LlmProviderResolver.Resolved provider, Map<String, Object> body, StreamAccumulator acc) throws InterruptedException {
         HttpRequest httpRequest = HttpRequest.newBuilder()
-                .uri(URI.create(props.baseUrl() + "/chat/completions"))
-                .timeout(props.readTimeout())
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + props.apiKey())
+                .uri(URI.create(provider.baseUrl() + "/chat/completions"))
+                .timeout(provider.readTimeout())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + provider.apiKey())
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .POST(HttpRequest.BodyPublishers.ofString(serialize(body), StandardCharsets.UTF_8))
                 .build();
         SseSubscriber subscriber = new SseSubscriber();
         CompletableFuture<HttpResponse<Void>> responseFuture =
-                streamClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.fromSubscriber(subscriber));
+                httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.fromSubscriber(subscriber));
+        long idleMs = Math.max(60_000L, provider.readTimeout().toMillis());
         try {
             while (true) {
-                Object item = subscriber.queue().take();
+                Object item = subscriber.queue().poll(idleMs, TimeUnit.MILLISECONDS);
+                if (item == null) {
+                    throw new StreamIoException("流空闲超时：" + idleMs + "ms 无新帧（连接疑似挂死）", null, true);
+                }
                 if (item == SseSubscriber.DONE) break;
                 if (item instanceof SseSubscriber.Failed f) {
                     throw new StreamIoException("流中断: " + f.cause(), f.cause(), true);
@@ -194,7 +232,8 @@ public class MiniMaxClient implements LlmPort {
             }
             int status = awaitStatus(responseFuture);
             if (status >= 400) {
-                throw new StreamIoException("HTTP " + status + " " + subscriber.nonDataHint(), null, true);
+                // 4xx 是确定性拒绝（402 余额/401 密钥/422 内容过滤/400 参数/404 模型），重试不会变好 → 不可重试
+                throw new StreamIoException("HTTP " + status + " " + subscriber.nonDataHint(), null, status >= 500);
             }
         } finally {
             subscriber.cancel();
@@ -500,12 +539,47 @@ public class MiniMaxClient implements LlmPort {
         }
     }
 
-    private JsonNode post(Map<String, Object> body) {
-        return restClient.post()
-                .uri("/chat/completions")
-                .body(body)
-                .retrieve()
-                .body(JsonNode.class);
+    /**
+     * 阻塞 JSON 调用。超时双保险：JDK 客户端的 request timeout 不覆盖响应体读取阶段
+     * （2026-09-27 卷规划任务 #49 永久 RUNNING 实证：响应头已到、body 中途断供，worker 在
+     * HttpResponseInputStream.take() 上无超时 park）——因此 sendAsync + future.get(readTimeout)，
+     * 超时/中断即 cancel(true) 打断底层读取；异常沿既有"传输失败重试一次→error 落库→LlmException"语义。
+     */
+    private JsonNode post(LlmProviderResolver.Resolved provider, Map<String, Object> body) {
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(provider.baseUrl() + "/chat/completions"))
+                .timeout(provider.readTimeout())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + provider.apiKey())
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                .POST(HttpRequest.BodyPublishers.ofString(serialize(body), StandardCharsets.UTF_8))
+                .build();
+        CompletableFuture<HttpResponse<String>> future =
+                httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        try {
+            HttpResponse<String> resp = future.get(provider.readTimeout().toMillis(), TimeUnit.MILLISECONDS);
+            if (resp.statusCode() >= 400) {
+                // 与流式路径同口径：4xx 确定性拒绝不可重试（retryable=false），5xx 视为可重试
+                throw new StreamIoException("HTTP " + resp.statusCode() + ": " + truncate(resp.body(), 500), null,
+                        resp.statusCode() >= 500);
+            }
+            return mapper.readTree(resp.body());
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw new IllegalStateException("LLM 响应超时（>" + provider.readTimeout().toSeconds() + "s，含响应体读取）", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            throw new IllegalStateException("LLM 调用被中断", e);
+        } catch (ExecutionException e) {
+            throw new IllegalStateException("LLM 传输失败: " + String.valueOf(e.getCause()), e.getCause());
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("LLM 响应解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 全局默认模型：接入行覆盖 → yaml 兜底。 */
+    private String defaultModel(LlmProviderResolver.Resolved provider) {
+        return provider.model() != null && !provider.model().isBlank() ? provider.model() : props.model();
     }
 
     private Map<String, Object> buildBody(ChatRequest request,
@@ -536,13 +610,21 @@ public class MiniMaxClient implements LlmPort {
         return body;
     }
 
-    /** 正文：content 剥掉 <think> 块；content 为空时回退 reasoning_content 字段 */
+    /**
+     * 正文：content 剥掉 &lt;think&gt; 块（M3 内联形态）；content 为空时**不再**回退 reasoning_content。
+     * 旧实现在 content 空时把思考字段当正文返回——对 DeepSeek 这类"思考在独立字段"的模型，
+     * 一旦输出上限耗尽/只回了思考，思考文本会被当作正文写进稿件。现在只记 warn 返回空，
+     * 由调用方按空内容处理（LlmJson 重试、场景门禁重写等既有路径）。
+     */
     static String extractContent(JsonNode response) {
         JsonNode choice = response.path("choices").path(0);
         String content = choice.path("message").path("content").asText("");
         if (content.isBlank()) {
-            content = choice.path("message").path("reasoning_content").asText("");
-            return content.strip();
+            String reasoning = choice.path("message").path("reasoning_content").asText("");
+            if (!reasoning.isBlank()) {
+                log.warn("LLM 响应正文为空但思考非空（{} 字）：不回退为正文，交由调用方按空内容处置", reasoning.length());
+            }
+            return "";
         }
         // MiniMax-M3 是推理模型，思考过程以 <think> 块混在 content 里，正文要剥出来
         return content.replaceAll("(?s)<think>.*?</think>", "").strip();

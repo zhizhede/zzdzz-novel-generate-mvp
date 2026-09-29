@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.OutlineDraftTaskMapper">
+
+    <select id="insertTask" resultType="long">
+INSERT INTO outline_draft_tasks (title, request, novel_id)
+VALUES (#{title}, #{request}::jsonb, #{novelId})
+RETURNING id
+    </select>
+</mapper>

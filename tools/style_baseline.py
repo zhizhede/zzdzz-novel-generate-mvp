@@ -93,7 +93,6 @@ def main() -> None:
     baseline["dash_per1k"]["abs_max"] = round(max(6.0, metrics["dash_per1k"] * 1.8), 2)
     baseline["digit_per1k"]["abs_max"] = round(max(12.0, metrics["digit_per1k"] * 1.8), 2)
 
-    import sys
     label = sys.argv[3] if len(sys.argv) > 3 else "docs/novels/手搓 (corpus ignored, metrics only)"
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else OUT
     out.parent.mkdir(parents=True, exist_ok=True)

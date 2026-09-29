@@ -5,7 +5,7 @@ import com.zzdzz.novelgen.model.dto.LlmModelPriceDTO;
 
 import java.util.List;
 
-/** llm_model_prices 数据服务接口（原 LlmModelPriceDAO）。 */
+/** llm_model_price 数据服务接口（原 LlmModelPriceDAO）。 */
 public interface LlmModelPriceDataService extends IService<LlmModelPriceDTO> {
 
     List<LlmModelPriceDTO> listAll();

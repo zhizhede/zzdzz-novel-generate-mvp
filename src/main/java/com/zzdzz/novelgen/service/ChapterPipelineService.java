@@ -504,21 +504,11 @@ public class ChapterPipelineService {
                 ? "当前正文约 %d 字，超出预算上限：请把篇幅压缩到 %d–%d 字（删冗余描写与重复信息，情节与对白全保留）"
                         .formatted(curWords, ch.getBudgetMin(), cap)
                 : "总字数变化控制在 ±10%% 内，且不得超过 %d 字".formatted(cap);
-        String user = promptTemplates.format(LlmNode.CHAPTER_REVISE, "user", """
-                任务：修订第 %d 章全文。门禁检测出以下问题：
-                %s
-                要求：只针对被点名的问题做最小修改（例如破折号超标：把「——」改写为逗号、句号、拆句或直接删除）；
-                除被点名的指标外，其余风格特征必须原样保留——破折号「——」与省略号「……」的数量不得增加，分行节奏不得重排；
-                严禁改动情节、人物与对话内容；%s。
-                直接输出修订后的完整正文，不要输出思考过程。
-
-                【第 %d 章全文（在此版本上修改）】
-                %s
-                """, ch.getChapterNo(), feedback, lengthRule, ch.getChapterNo(), fullText);
+        String user = promptTemplates.format(LlmNode.CHAPTER_REVISE, "user",
+                ch.getChapterNo(), feedback, lengthRule, ch.getChapterNo(), fullText);
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(
                 LlmNode.CHAPTER_REVISE, novelId, ch.getId(),
-                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REVISE, "system",
-                                "你是执行门禁修订的网文编辑，只做被点名的最小修改。")),
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REVISE, "system")),
                         LlmPort.Message.user(user)),
                 LlmTemps.CHAPTER_REVISE);
         LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
@@ -846,6 +836,17 @@ public class ChapterPipelineService {
             chapterData.saveFullText(ch.getId(), fullText);
             stageLog.emit(novelId, ch.getChapterNo(), REVISE, isReader ? READER_FIX : REVIEW_FIX,
                     Map.of("chars", fullText.length()));
+            // 修订后机械复检：评审改写绕过章级门禁（第 3 章实测 行均长 17.97→21.50 出带无人知）。
+            // 只复检留痕（新报告 + 事件），不自动再改——内容修订优先级高于指纹，避免改写循环。
+            boolean onSpec = gateService.checkChapter(novelId, ch.getId(), ch.getChapterNo(), fullText,
+                    ch.getBudgetMin(), ch.getBudgetMax()).passed();
+            if (!onSpec) {
+                log.warn("第 {} 章{}修订后指纹漂移（机械复检未过，报告见 gate_reports；成品保留修订稿）",
+                        ch.getChapterNo(), stage.label());
+            }
+            stageLog.emit(novelId, ch.getChapterNo(), CHAPTER_GATE, NONE,
+                    Map.of("passed", onSpec, "recheck", true,
+                            "reason", onSpec ? "" : String.valueOf(gateService.failedChecksText(ch.getId()))));
         }
         stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked())));
         List<String> issues = outcome.issues().size() > 5 ? outcome.issues().subList(0, 5) : outcome.issues();
@@ -866,7 +867,10 @@ public class ChapterPipelineService {
      */
     private ChapterOutcome reviewBlockedDisposition(long novelId, int chapterNo, String approvalMode,
                                                     BooleanSupplier stopCheck, int attempt) {
-        boolean replanAllowed = tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
+        // 无人续跑的书按书覆盖为自动换目标重写（tuning 是平台级默认，derive_config.autoContinue 是书级口径）
+        boolean autoBook = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).autoContinueOn();
+        boolean replanAllowed = autoBook
+                || tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
         if (!replanAllowed || stopCheck.getAsBoolean()) {
             return markReviewPending(novelId, chapterNo);
         }

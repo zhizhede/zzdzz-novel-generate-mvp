@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
 import com.zzdzz.novelgen.model.dto.CanonDocDTO;
 import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.vo.ChapterSceneVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +18,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 规划三件套的系统管理：大纲（canon misc/大纲，进出生成上下文）、
@@ -235,6 +238,21 @@ public class PlanningService {
                 .map(s -> new OutlineService.SceneSpec(s.getSceneNo(), s.getGoal(),
                         toList(s.getPresent()), toList(s.getMustReveal()), toList(s.getMustNot()),
                         s.getWordsBudget()))
+                .toList();
+    }
+
+    /** 章纲全量跨章汇总（带所属章号/章题，按章号+场景号排序）：章纲 tab 全景展示与筛选。 */
+    public List<ChapterSceneVO> allScenes(long novelId) {
+        Map<Long, ChapterDTO> byId = chapterData.listSummariesByNovel(novelId).stream()
+                .collect(Collectors.toMap(ChapterDTO::getId, Function.identity()));
+        return sceneData.listByNovel(novelId).stream()
+                .map(s -> {
+                    ChapterDTO c = byId.get(s.getChapterId());
+                    return new ChapterSceneVO(c == null ? 0 : c.getChapterNo(),
+                            c == null ? "" : c.getTitle(), s.getSceneNo(), s.getGoal(),
+                            toList(s.getPresent()), toList(s.getMustReveal()), toList(s.getMustNot()),
+                            s.getWordsBudget());
+                })
                 .toList();
     }
 

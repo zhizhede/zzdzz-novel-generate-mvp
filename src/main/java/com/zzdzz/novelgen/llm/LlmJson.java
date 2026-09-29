@@ -28,6 +28,8 @@ public class LlmJson {
 
 
     private final LlmPort llm;
+    /** JSON 重试喂回句走提示词注册表（common/json_retry_feedback，库值优先可编辑）。 */
+    private final com.zzdzz.novelgen.service.PromptTemplateService promptTemplates;
     /** LLM 输出专用：容忍字符串内的裸换行/Tab 等控制字符 */
     private final ObjectMapper lenientMapper = JsonMapper.builder()
             .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
@@ -78,13 +80,14 @@ public class LlmJson {
         }
     }
 
-    /** 重试轮把失败原因追加到末条（应为 user）消息之后。 */
+    /** 重试轮把失败原因追加到末条（应为 user）消息之后；喂回句模板落库（common/json_retry_feedback）。 */
     private LlmPort.ChatRequest withFeedback(LlmPort.ChatRequest request, String feedback) {
         if (feedback == null || feedback.isEmpty()) return request;
         List<LlmPort.Message> ms = new ArrayList<>(request.messages());
         LlmPort.Message lastMsg = ms.get(ms.size() - 1);
-        ms.set(ms.size() - 1, new LlmPort.Message(lastMsg.role(),
-                lastMsg.content() + "\n\n【上一次输出不合规：" + feedback + "。请重新输出，只输出合法 JSON。】"));
+        String tail = promptTemplates.getSection("common", "json_retry_feedback",
+                java.util.Map.of("reason", feedback));
+        ms.set(ms.size() - 1, new LlmPort.Message(lastMsg.role(), lastMsg.content() + "\n\n" + tail));
         return new LlmPort.ChatRequest(request.node(), request.novelId(), request.chapterId(),
                 ms, request.temperature());
     }

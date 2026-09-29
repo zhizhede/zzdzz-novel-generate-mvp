@@ -7,4 +7,9 @@ INSERT INTO imported_samples (title, genre, chunks, total_chars, source, analysi
 VALUES (#{title}, #{genre}, #{chunks}, #{totalChars}, #{source}, #{analysis}::jsonb)
 RETURNING id
     </select>
+
+    <update id="updateTags">
+UPDATE imported_samples SET tags=#{tagsJson}::jsonb, update_time=NOW()
+WHERE id=#{sampleId} AND is_deleted=false
+    </update>
 </mapper>

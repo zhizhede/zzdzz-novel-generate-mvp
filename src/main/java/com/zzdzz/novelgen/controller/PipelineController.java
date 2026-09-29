@@ -33,7 +33,7 @@ public class PipelineController {
     private final PipelineSseService sseService;
 
 
-    /** 入队异步生成，立即返回任务 id；运行中提交不再 409，排队等待。 */
+    /** 入队异步生成，立即返回任务 id；运行中提交不再 409，排队等待。priority 0-2 可选（默认按书衍生配置）。 */
     @PostMapping("/run")
     public Result<Map<String, Object>> run(@RequestBody PipelineRunVO dto, HttpServletRequest request) {
         if (dto == null || dto.novel() == null || dto.from() == null || dto.to() == null
@@ -41,8 +41,20 @@ public class PipelineController {
             throw new BizException(ErrorCode.PARAM_ERROR, "参数不合法：novel/from/to 必填，from ≤ to");
         }
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
-        long taskId = queueService.submit(dto.novel(), dto.from(), dto.to(), userId);
+        long taskId = queueService.submit(dto.novel(), dto.from(), dto.to(), userId, dto.priority());
         return Result.success(Map.of("taskId", taskId));
+    }
+
+    /** 无人续跑链读数（目标进度/链状态/暂停原因）。 */
+    @GetMapping("/novels/{id}/auto-continue")
+    public Result<GenerationQueueService.AutoContinueVO> autoContinue(@PathVariable long id) {
+        return Result.success(queueService.chainStatus(id));
+    }
+
+    /** 无人续跑恢复/启动：PAUSED（或未启动）→ RUNNING 并立即推进。 */
+    @PostMapping("/novels/{id}/auto-continue/resume")
+    public Result<GenerationQueueService.AutoContinueVO> autoContinueResume(@PathVariable long id) {
+        return Result.success(queueService.resumeAutoContinue(id));
     }
 
     /** 生成队列：排队/运行中置顶，其后为近期已完成任务。 */

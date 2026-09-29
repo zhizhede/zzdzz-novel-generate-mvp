@@ -13,6 +13,9 @@ public interface SceneMapper extends BaseMapper<SceneDTO> {
 
     List<SceneDTO> findByChapter(@Param("chapterId") long chapterId);
 
+    /** 跨章全量：按章号+场景号排序（章纲 tab 全景展示）。 */
+    List<SceneDTO> listByNovel(@Param("novelId") long novelId);
+
     Long findId(@Param("chapterId") long chapterId, @Param("sceneNo") int sceneNo);
 
     int saveDraft(@Param("chapterId") long chapterId, @Param("sceneNo") int sceneNo, @Param("draftText") String draftText);

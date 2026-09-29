@@ -7,6 +7,8 @@
       <div style="padding: 18px 16px; font-weight: bold">小说生成平台</div>
       <el-menu :default-active="$route.path" router>
         <el-menu-item index="/">工作台</el-menu-item>
+        <el-menu-item index="/wizard">开新书</el-menu-item>
+        <el-menu-item index="/books">书籍管理</el-menu-item>
         <el-menu-item index="/chapters">章节</el-menu-item>
         <el-menu-item index="/planning">规划</el-menu-item>
         <el-menu-item index="/library">素材库</el-menu-item>

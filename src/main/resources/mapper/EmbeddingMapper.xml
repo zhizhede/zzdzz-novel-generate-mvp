@@ -18,8 +18,10 @@
                 ORDER BY embedding &lt;=&gt; #{vecStr}::vector
                 LIMIT #{limit}
     </select>
+    <!-- MissingRow 是五字段 record（构造器自动映射）：每条投影必须逐列对齐全字段，缺列不是少个值而是整个查询炸 -->
     <select id="findMissingDigests" resultType="com.zzdzz.novelgen.service.data.EmbeddingDataService$MissingRow">
-                SELECT d.id AS "sourceId", c.chapter_no AS "chapterNo", d.content_md AS content
+                SELECT d.id AS "sourceId", c.chapter_no AS "chapterNo", d.content_md AS content,
+                       NULL AS "kind", NULL AS "name"
                 FROM digests d
                 JOIN chapters c ON c.id = d.chapter_id
                 WHERE c.novel_id = #{novelId} AND d.is_deleted = FALSE
@@ -30,7 +32,7 @@
     </select>
 
     <select id="findMissingCards" resultType="com.zzdzz.novelgen.service.data.EmbeddingDataService$MissingRow">
-                SELECT id AS "sourceId", kind, name FROM material_cards
+                SELECT id AS "sourceId", NULL AS "chapterNo", summary AS content, kind, name FROM material_cards
                 WHERE novel_id = #{novelId} AND is_deleted = FALSE
                   AND NOT EXISTS (SELECT 1 FROM embeddings e
                                   WHERE e.source_type = 'card' AND e.source_id = material_cards.id AND e.is_deleted = FALSE)

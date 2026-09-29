@@ -1,6 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.model.enums.GateType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -22,6 +23,7 @@ import java.util.regex.Pattern;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class GateService {
 
     /**
@@ -130,12 +132,13 @@ public class GateService {
         double dunhaoMax = upperBound(base, "dunhao_per1k", 1.0);
         double exclamMax = upperBound(base, "exclam_per1k", 2.0);
         double digitMax = upperBound(base, "digit_per1k", 12.0);
-        double endPunctMax = upperBound(base, "dialogue_end_punct_ratio", 0.35);
         double dlgMax = upperBound(base, "dialogue_density_per1k", 30.2);
         checks.add(check("dunhao_per1k", dunhao, null, dunhaoMax, dunhao <= dunhaoMax));
         checks.add(check("exclam_per1k", exclam, null, exclamMax, exclam <= exclamMax));
         checks.add(check("digit_per1k", digit, null, digitMax, digit <= digitMax));
-        checks.add(check("dialogue_end_punct_ratio", endPunct, null, endPunctMax, endPunct <= endPunctMax));
+        // 对白句末标点是下限指标（要高合规——曾按上限 0.35 执法，强制出「走吧」他说 式无标点对白，已翻转）
+        double endPunctFloor = lowerBound(base, "dialogue_end_punct_ratio", 0.5);
+        checks.add(check("dialogue_end_punct_ratio", endPunct, endPunctFloor, null, endPunct >= endPunctFloor));
         // 对话密度：场景级只防灌水（上界）；低界留章级——叙事型场景天然低对话，几百字样本下界误杀
         checks.add(check("dialogue_density_per1k", dlg, null, dlgMax, dlg <= dlgMax));
 
@@ -185,11 +188,15 @@ public class GateService {
             }
             return sb.toString();
         } catch (Exception e) {
+            // fail-open 之前是静默的：前端只显示空原因、排查无痕（本次统一补日志，返回值不变）
+            log.warn("门禁失败摘要生成失败（前端将显示空原因）：{}；原始报告：{}", e.getMessage(),
+                    failureJson.length() > 200 ? failureJson.substring(0, 200) + "..." : failureJson);
             return "";
         }
     }
 
-    /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance；abs_min 显式下界（对话密度防叙述铺场）。 */
+    /** 指纹指标对照：稀疏特征（基线<3/千字）下界归零只防滥用，其余 ±tolerance；abs_min 显式下界（对话密度防叙述铺场）。
+     * dialogue_end_punct_ratio 内置硬下限 0.5（基线缺失同样生效）——兜住「对话句末无标点」式文风污染。 */
     @SuppressWarnings("unchecked")
     private List<GateCheck> fingerprintChecks(Map<String, Object> base,
                                                         Map<String, Object> metrics) {
@@ -199,8 +206,20 @@ public class GateService {
             if (key.equals("cjk")) continue;
             Map<String, Object> baselineMap = (Map<String, Object>) base.get("baseline");
             Map<String, Object> rule = (Map<String, Object>) baselineMap.get(key);
-            if (rule == null) continue;
             double value = ((Number) e.getValue()).doubleValue();
+            if (key.equals("dialogue_end_punct_ratio")) {
+                double floor = 0.5;
+                if (rule != null && rule.containsKey("value")) {
+                    double v = ((Number) rule.get("value")).doubleValue();
+                    double tol = ((Number) rule.get("tolerance")).doubleValue();
+                    floor = rule.containsKey("abs_min")
+                            ? ((Number) rule.get("abs_min")).doubleValue()
+                            : Math.max(0.5, v * (1 - tol));
+                }
+                checks.add(check(key, value, floor, null, value >= floor));
+                continue;
+            }
+            if (rule == null) continue;
             double v = ((Number) rule.get("value")).doubleValue();
             double tol = ((Number) rule.get("tolerance")).doubleValue();
             double upper = rule.containsKey("abs_max")
@@ -227,6 +246,8 @@ public class GateService {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
         } catch (Exception e) {
+            // 静默回默认会让黑名单/章长容差/评审阈值悄悄漂移——必须留痕
+            log.warn("门禁配置解析失败（作品 {}），本轮回退代码兜底值，质量口径可能漂移：{}", novelId, e.getMessage());
             return Map.of();
         }
     }
@@ -238,7 +259,8 @@ public class GateService {
         if (v instanceof String s) {
             try {
                 return Double.parseDouble(s.trim());
-            } catch (NumberFormatException ignored) {
+            } catch (NumberFormatException e) {
+                log.warn("门禁参数不是数字（作品 {} 键 {}={}），回退默认值 {}", novelId, key, s, fallback);
             }
         }
         return fallback;
@@ -260,6 +282,7 @@ public class GateService {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(readerStandards(novelId));
         } catch (Exception e) {
+            log.warn("评审标准快照序列化失败（作品 {}），该章不回看口径：{}", novelId, e.getMessage());
             return null;
         }
     }
@@ -291,7 +314,163 @@ public class GateService {
         return fallback;
     }
 
+    /** 指标的场景级下限（比例类合规指标用）：abs_min 优先，否则 max(硬下限, 基线*(1-容差))；基线缺失用硬下限。 */
     @SuppressWarnings("unchecked")
+    private static double lowerBound(Map<String, Object> fingerprint, String key, double hardFloor) {
+        Map<String, Object> baselineMap = (Map<String, Object>) fingerprint.get("baseline");
+        if (baselineMap == null) return hardFloor;
+        Map<String, Object> rule = (Map<String, Object>) baselineMap.get(key);
+        if (rule == null || !rule.containsKey("value")) return hardFloor;
+        if (rule.containsKey("abs_min")) {
+            return ((Number) rule.get("abs_min")).doubleValue();
+        }
+        double v = ((Number) rule.get("value")).doubleValue();
+        double tol = ((Number) rule.getOrDefault("tolerance", 0.6)).doubleValue();
+        return Math.max(hardFloor, v * (1 - tol));
+    }
+
+    @SuppressWarnings("unchecked")
+    /** 指纹指标中文名（写作提示用；未收录的键回退指标名）。 */
+    private static final Map<String, String> METRIC_LABELS = Map.ofEntries(
+            Map.entry("line_avg_len", "每行平均长度（字）"),
+            Map.entry("dash_per1k", "破折号"),
+            Map.entry("ellipsis_per1k", "省略号"),
+            Map.entry("exclam_per1k", "感叹号"),
+            Map.entry("question_per1k", "问号"),
+            Map.entry("dunhao_per1k", "顿号"),
+            Map.entry("digit_per1k", "阿拉伯数字"),
+            Map.entry("simile_per1k", "比喻"),
+            Map.entry("dialogue_density_per1k", "对白行"),
+            Map.entry("dialogue_end_punct_ratio", "对白句末标点占比"),
+            Map.entry("tic_haiyou_per1k", "口头禅「还有」"));
+
+    /**
+     * 指纹量化目标转写作口径（场景生成 system 注入）：与 fingerprintChecks 同一套判定数学
+     * （abs_min 两端 / 稀疏指标（基线<3）只设上限 / 其余 ±tolerance、abs_max 优先）——
+     * 写手第一稿就朝及格线写，而不是靠门禁打回后试错。无指纹返回 null。
+     */
+    @SuppressWarnings("unchecked")
+    public String fingerprintGuidance(long novelId) {
+        String json = stylePackData.findFingerprintByNovel(novelId);
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        Map<String, Object> base;
+        try {
+            base = new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
+        } catch (Exception e) {
+            log.warn("指纹量化目标解析失败（作品 {}），本章提示词不带量化目标（写手闭卷）：{}", novelId, e.getMessage());
+            return null;
+        }
+        Map<String, Object> baselineMap = (Map<String, Object>) base.get("baseline");
+        if (baselineMap == null || baselineMap.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Object> e : baselineMap.entrySet()) {
+            String key = e.getKey();
+            Map<String, Object> rule = (Map<String, Object>) e.getValue();
+            if (rule == null || !rule.containsKey("value")) {
+                continue;
+            }
+            double v = ((Number) rule.get("value")).doubleValue();
+            double tol = ((Number) rule.get("tolerance")).doubleValue();
+            double upper = rule.containsKey("abs_max")
+                    ? ((Number) rule.get("abs_max")).doubleValue() : v * (1 + tol);
+            String label = METRIC_LABELS.getOrDefault(key, key);
+            String unit = key.endsWith("_per1k") ? "每千字" : "";
+            String range;
+            if (rule.containsKey("abs_min")) {
+                range = num(((Number) rule.get("abs_min")).doubleValue()) + "–" + num(upper);
+            } else if (v < 3.0) {
+                range = "≤" + num(upper);
+            } else {
+                range = num(v * (1 - tol)) + "–" + num(upper);
+            }
+            sb.append(label).append(unit).append(' ').append(range)
+              .append("（目标 ").append(num(v)).append("）；");
+        }
+        List<String> directives = derivedDirectives(baselineMap);
+        if (!directives.isEmpty()) {
+            sb.append("\n执行口径：");
+            for (String d : directives) {
+                sb.append("\n- ").append(d);
+            }
+        }
+        return sb.isEmpty() ? null : sb.toString();
+    }
+
+    /** 从指纹数据推导写作口径（长句/碎句取向、标点禁用与保底、口头禅），与门禁判定同源。 */
+    @SuppressWarnings("unchecked")
+    private List<String> derivedDirectives(Map<String, Object> baselineMap) {
+        List<String> out = new ArrayList<>();
+        // 对白句末标点：无条件下发（门禁内置下限 0.5 同口径）——曾有错配画像诱导模型全书写「走吧」他说 式无标点对白
+        out.add("对白句末必须带句末标点（。？！…），引号后接叙述动作时用逗号衔接——写「走吧。」他说，禁止「走吧」他说 式无标点对白");
+        Map<String, Object> line = (Map<String, Object>) baselineMap.get("line_avg_len");
+        if (line != null && line.containsKey("value")) {
+            double v = ((Number) line.get("value")).doubleValue();
+            if (v >= 40) {
+                out.add("叙述段由多句长句构成，善用从句、排比与列举把信息延宕铺开——严禁一句一段的碎句排版");
+            } else if (v < 25) {
+                out.add("行文以短句为主，节奏干脆，少用长复合句");
+            }
+        }
+        Map<String, Object> ell = (Map<String, Object>) baselineMap.get("ellipsis_per1k");
+        if (ell != null) {
+            double up = ((Number) ell.get("value")).doubleValue() * (1 + ((Number) ell.get("tolerance")).doubleValue());
+            if (ell.containsKey("abs_max")) {
+                up = ((Number) ell.get("abs_max")).doubleValue();
+            }
+            if (up < 0.5) {
+                out.add("禁用省略号");
+            }
+        }
+        Map<String, Object> dash = (Map<String, Object>) baselineMap.get("dash_per1k");
+        if (dash != null) {
+            double up = ((Number) dash.get("value")).doubleValue() * (1 + ((Number) dash.get("tolerance")).doubleValue());
+            if (dash.containsKey("abs_max")) {
+                up = ((Number) dash.get("abs_max")).doubleValue();
+            }
+            if (up < 4) {
+                out.add("破折号克制（每千字 ≤" + num(up) + "），补充说明改用逗号或句号衔接");
+            }
+        }
+        for (String key : new String[]{"dunhao_per1k", "exclam_per1k"}) {
+            Map<String, Object> rule = (Map<String, Object>) baselineMap.get(key);
+            if (rule != null && rule.containsKey("value")) {
+                double v = ((Number) rule.get("value")).doubleValue();
+                double lo = v * (1 - ((Number) rule.get("tolerance")).doubleValue());
+                if (v >= 3 && lo > 0.3) {
+                    out.add("基线非零的标点有下界（通篇密度为 0 同样打回）——" + METRIC_LABELS.getOrDefault(key, key)
+                            + "按目标 " + num(v) + "/千字 左右安排");
+                    break;
+                }
+            }
+        }
+        for (Map.Entry<String, Object> e : baselineMap.entrySet()) {
+            String key = e.getKey();
+            if (!key.startsWith("tic_")) {
+                continue;
+            }
+            Map<String, Object> rule = (Map<String, Object>) e.getValue();
+            if (rule != null && rule.containsKey("abs_max")) {
+                String word = key.substring("tic_".length(), key.length() - "_per1k".length());
+                out.add("口头禅「" + word + "」能删则删（每千字 ≤" + num(((Number) rule.get("abs_max")).doubleValue()) + "）");
+            }
+        }
+        return out;
+    }
+
+    private static String num(double d) {
+        if (d >= 20) {
+            return String.valueOf(Math.round(d));
+        }
+        if (d >= 1) {
+            return String.format("%.1f", d);
+        }
+        return String.format("%.2f", d);
+    }
+
     private Map<String, Object> fingerprint(long novelId) {
         String json = stylePackData.findFingerprintByNovel(novelId);
         try {

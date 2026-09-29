@@ -52,6 +52,7 @@ public class GenerationQueueService {
     private final PlanningService planningService;
     private final TuningService tuning;
     private final LlmCallLogDataService llmCallLogData;
+    private final VolumeReviewService volumeReviewService;
 
     /** 运行中取消请求（taskId 集合），worker 在步骤/场景边界检查。 */
     private final Set<Long> cancelRequested = ConcurrentHashMap.newKeySet();
@@ -84,14 +85,14 @@ public class GenerationQueueService {
         }
     }
 
-    /** 入队：立即返回任务 id（异步执行）。 */
-    public long submit(String novelTitle, int from, int to, Long userId) {
+    /** 入队：立即返回任务 id（异步执行）。priority 0-2（null=按书 derive_config，缺省 1）。 */
+    public long submit(String novelTitle, int from, int to, Long userId, Integer priority) {
         Long novelId = novelData.findIdByTitle(novelTitle);
         if (novelId == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelTitle);
         }
         String title = novelData.getById(novelId).getTitle();
-        return submitById(novelId, title, from, to, userId);
+        return submitById(novelId, title, from, to, userId, priority);
     }
 
     /** 队列动作受理结果：已受理 / 任务不存在 / 状态不符（附实际状态，供如实报错与 detail 透出）。 */
@@ -156,7 +157,12 @@ public class GenerationQueueService {
 
     /** 按作品 id 入队（打回/否决重排队用，避免按标题反查）。 */
     public long submitById(long novelId, String novelTitle, int from, int to, Long userId) {
-        return enqueue(novelId, novelTitle, from, to, userId, TaskKind.CHAPTERS.wire(), null);
+        return submitById(novelId, novelTitle, from, to, userId, null);
+    }
+
+    /** 按作品 id 入队（priority null=按书衍生配置，缺省 1）。 */
+    public long submitById(long novelId, String novelTitle, int from, int to, Long userId, Integer priority) {
+        return enqueue(novelId, novelTitle, from, to, userId, TaskKind.CHAPTERS.wire(), null, priority);
     }
 
     /** ⑤ 任务化：卷纲自动规划入队（原同步 2-10 分钟 HTTP）。 */
@@ -173,13 +179,22 @@ public class GenerationQueueService {
         } catch (Exception e) {
             payload = null;
         }
-        return enqueue(novelId, novelTitle, from, to == null ? from : to, userId, TaskKind.PLAN.wire(), payload);
+        return enqueue(novelId, novelTitle, from, to == null ? from : to, userId, TaskKind.PLAN.wire(), payload, null);
     }
 
-    private long enqueue(long novelId, String novelTitle, int from, int to, Long userId, String kind, String payload) {
-        long id = taskDAO.insert(novelId, from, to, userId, kind, payload);
+    /** 章纲批量生成入队（from=to 即单章）：逐章出场景拆解，进度/事件走队列口径，工作台可见可停。 */
+    public long submitOutline(long novelId, String novelTitle, int from, int to, Long userId) {
+        return enqueue(novelId, novelTitle, from, to, userId, TaskKind.OUTLINE.wire(), null, null);
+    }
+
+    private long enqueue(long novelId, String novelTitle, int from, int to, Long userId, String kind,
+                         String payload, Integer priority) {
+        int prio = priority != null ? Math.max(0, Math.min(2, priority))
+                : Math.max(0, Math.min(2, java.util.Objects.requireNonNullElse(
+                        DeriveSupport.parse(novelData.findDeriveConfig(novelId)).priority(), 1)));
+        long id = taskDAO.insert(novelId, from, to, userId, kind, payload, prio);
         emitTask(novelId, id, novelTitle, from, to, StageLog.Phase.QUEUED, null);
-        log.info("任务 #{} 入队（{}）：{} 第 {}-{} 章", id, kind, novelTitle, from, to);
+        log.info("任务 #{} 入队（{}，优先级 {}）：{} 第 {}-{} 章", id, kind, prio, novelTitle, from, to);
         return id;
     }
 
@@ -190,6 +205,7 @@ public class GenerationQueueService {
                     Long chapterTokens = null;
                     if (TaskStatus.RUNNING.is(t.status())) {
                         currentStep = TaskKind.PLAN.is(t.kind()) ? "卷纲规划中"
+                                : TaskKind.OUTLINE.is(t.kind()) ? "章纲生成中"
                                 : currentStepLabel(t.novelId(), t.currentChapter());
                         if (t.currentChapter() != null) {
                             chapterTokens = chapterTokens(t.novelId(), t.currentChapter());
@@ -200,7 +216,7 @@ public class GenerationQueueService {
                             t.fromChapter(), t.toChapter(),
                             t.status(), t.doneChapters(), t.toChapter() - t.fromChapter() + 1,
                             t.currentChapter(), t.lastMessage(), t.createTime(), currentStep, chapterTokens,
-                            t.retryCount());
+                            t.retryCount(), t.priority());
                 })
                 .toList();
     }
@@ -300,6 +316,17 @@ public class GenerationQueueService {
             return;
         }
 
+        // 章纲批量生成：逐章出场景拆解（工作台可见进度，可硬停）
+        if (TaskKind.OUTLINE.is(task.kind())) {
+            try {
+                runOutlineTask(task);
+            } finally {
+                taskThreads.remove(task.id());
+                Thread.interrupted();
+            }
+            return;
+        }
+
         int total = task.toChapter() - task.fromChapter() + 1;
         int passed = pipeline.runChapters(task.novelId(), task.novelTitle(),
                 task.fromChapter(), task.toChapter(), new ChapterPipelineService.ProgressSink() {
@@ -333,12 +360,14 @@ public class GenerationQueueService {
             // 流 0：用户硬停——章节已标 INTERRUPTED，任务如实记终止
             taskDAO.updateStatus(task.id(), TaskStatus.INTERRUPTED.wire(), "用户终止（已完成 " + passed + " 章）");
             endPhase = StageLog.Phase.STOPPED;
+            breakChain(task.novelId(), "用户停止任务 #" + task.id() + "，续跑已暂停");
         } else if (TaskStatus.PAUSED.is(taskDAO.findStatus(task.id()))) {
-            // 插队暂停：保留任务行等 [继续]
+            // 插队暂停：保留任务行等 [继续]（链不动，恢复后按 DONE 钩子续走）
             endPhase = StageLog.Phase.NONE;
         } else if (cancelRequested.remove(task.id())) {
             taskDAO.updateStatus(task.id(), TaskStatus.CANCELED.wire(), "运行中取消（已完成 " + passed + " 章）");
             endPhase = StageLog.Phase.CANCELED;
+            breakChain(task.novelId(), "任务 #" + task.id() + " 被取消，续跑已暂停");
         } else if (passed >= total) {
             taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), "全部完成（" + passed + " 章）");
             endPhase = StageLog.Phase.DONE;
@@ -360,12 +389,17 @@ public class GenerationQueueService {
             taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "第 " + failedChapter
                     + " 章失败停止（自动重试已用尽），可断点重跑");
             endPhase = StageLog.Phase.STOPPED;
+            breakChain(task.novelId(), "第 " + failedChapter + " 章失败且重试已用尽，续跑已暂停——处理后再恢复");
         }
         taskThreads.remove(task.id());
         Thread.interrupted();
         emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
                 endPhase, "完成 " + passed + "/" + total + " 章");
         log.info("任务 #{} 结束：{}（{}/{} 章通过）", task.id(), endPhase.wire(), passed, total);
+        // P3 无人续跑：DONE 后续跑判定（失败/停止分支已在上方 breakChain）
+        if (endPhase == StageLog.Phase.DONE) {
+            autoContinueAfterChapters(task);
+        }
     }
 
     /** ⑤ 任务化：卷纲自动规划在 worker 内执行（同步 2-10 分钟的 HTTP 调用迁入队列）。 */
@@ -387,15 +421,214 @@ public class GenerationQueueService {
             if (volNo == null || from == null) {
                 throw new BizException(ErrorCode.PARAM_ERROR, "PLAN 任务缺 volNo/from");
             }
+            // P3 卷间复盘（fail-open）：上一卷存在则先复盘再规划，报告喂下卷规划上下文
+            if (volNo > 1) {
+                try {
+                    volumeReviewService.review(task.novelId(), volNo - 1);
+                } catch (Exception e) {
+                    log.warn("第 {} 卷复盘失败（fail-open 继续规划）：{}", volNo - 1, e.getMessage());
+                }
+            }
             planningService.autoPlan(task.novelId(), volNo, from, to, seed);
             taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), "卷纲规划完成并落库");
             emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
                     StageLog.Phase.DONE, "卷纲规划完成");
+            autoContinueAfterPlan(task);
         } catch (Exception e) {
             taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "卷纲规划失败：" + e.getMessage());
             emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
                     StageLog.Phase.STOPPED, "卷纲规划失败：" + e.getMessage());
+            breakChain(task.novelId(), "卷纲规划失败：" + e.getMessage() + "——续跑已暂停");
         }
+    }
+
+    /**
+     * 章纲批量生成（OUTLINE 任务）：逐章复用单章 regenerateOutline（守卫内置：已有正文拒绝）。
+     * 守卫失败/无规划行的章跳过不中断；LLM 异常记失败续走；支持章间硬停（在飞调用会被中断）。
+     */
+    private void runOutlineTask(GenerationTaskDataService.TaskRow task) {
+        int done = 0, skipped = 0, failed = 0;
+        Integer interrupted = null;
+        try {
+            for (int no = task.fromChapter(); no <= task.toChapter(); no++) {
+                if (cancelRequested.contains(task.id()) || taskDAO.isCancelRequested(task.id())) {
+                    interrupted = no;
+                    break;
+                }
+                taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章章纲生成中");
+                stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.START,
+                        Map.of("taskId", task.id(), "batch", true));
+                try {
+                    int scenes = pipeline.regenerateOutline(task.novelId(), no).size();
+                    done++;
+                    taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章章纲完成（" + scenes + " 场景）");
+                    stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.DONE,
+                            Map.of("taskId", task.id(), "sceneCount", scenes, "batch", true));
+                } catch (BizException e) {
+                    skipped++;
+                    taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章跳过：" + e.getMessage());
+                    stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.REUSE,
+                            Map.of("taskId", task.id(), "reason", e.getMessage()));
+                } catch (Exception e) {
+                    if (cancelRequested.contains(task.id()) || taskDAO.isCancelRequested(task.id())) {
+                        interrupted = no;
+                        break;
+                    }
+                    failed++;
+                    String reason = String.valueOf(e.getMessage());
+                    taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章失败：" + reason);
+                    stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.FAILED,
+                            Map.of("taskId", task.id(), "reason", reason));
+                }
+            }
+            if (interrupted != null) {
+                taskDAO.updateStatus(task.id(), TaskStatus.INTERRUPTED.wire(),
+                        "用户终止（生成 " + done + " 章，停在第 " + interrupted + " 章）");
+                emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                        StageLog.Phase.STOPPED, "章纲批量生成被终止（完成 " + done + " 章）");
+            } else {
+                String summary = "章纲批量完成：生成 " + done
+                        + (skipped > 0 ? " · 跳过 " + skipped : "")
+                        + (failed > 0 ? " · 失败 " + failed : "") + " 章";
+                taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), summary);
+                emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                        StageLog.Phase.DONE, summary);
+            }
+        } catch (Exception e) {
+            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "章纲批量生成异常：" + e.getMessage());
+            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                    StageLog.Phase.STOPPED, "章纲批量生成异常：" + e.getMessage());
+            log.error("章纲批量任务 #{} 异常：{}", task.id(), e.getMessage(), e);
+        }
+    }
+
+    // ===== P3 书级无人续跑闭环 =====    /** CHAPTERS 任务 DONE 后的续跑判定。 */
+    private void autoContinueAfterChapters(GenerationTaskDataService.TaskRow task) {
+        try {
+            continueChain(task.novelId(), "上批生成完成");
+        } catch (Exception e) {
+            log.error("无人续跑判定异常 novelId={}：{}", task.novelId(), e.getMessage(), e);
+            pauseChain(task.novelId(), "续跑判定异常：" + e.getMessage());
+        }
+    }
+
+    /** PLAN 任务 DONE 后：新落库的规划行存在即自动续批。 */
+    private void autoContinueAfterPlan(GenerationTaskDataService.TaskRow task) {
+        try {
+            continueChain(task.novelId(), "卷纲规划完成");
+        } catch (Exception e) {
+            log.error("无人续跑判定异常 novelId={}：{}", task.novelId(), e.getMessage(), e);
+            pauseChain(task.novelId(), "续跑判定异常：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 续跑链推进（幂等）：目标未达 → 有下章规划行则续批（cap=batch_max_chapters，钳到目标），
+     * 无规划行则规划下卷（先自动卷复盘）。链 PAUSED/REACHED 不动；保险丝到顶暂停。
+     */
+    private void continueChain(long novelId, String trigger) {
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        if (!cfg.autoContinueOn()) {
+            return;
+        }
+        NovelDataService.AutoStateRow st = novelData.findAutoState(novelId);
+        if (st != null && ("PAUSED".equals(st.autoState()) || "REACHED".equals(st.autoState()))) {
+            return;
+        }
+        int maxText = java.util.Objects.requireNonNullElse(chapterData.maxChapterWithText(novelId), 0);
+        if (cfg.targetChapters() != null && maxText >= cfg.targetChapters()) {
+            reachChain(novelId, "目标达成（已生成 " + maxText + " 章）");
+            return;
+        }
+        if (st != null && st.autoVolumes() >= tuning.i("auto_continue_max_volumes",
+                TuningDefaults.AUTO_CONTINUE_MAX_VOLUMES)) {
+            pauseChain(novelId, "规划卷数保险丝到顶（" + st.autoVolumes() + " 卷），续跑已暂停");
+            return;
+        }
+        String title = novelData.getById(novelId).getTitle();
+        Integer next = chapterData.nextPlannedChapterNo(novelId, maxText);
+        if (next != null) {
+            Integer lastPlanned = chapterData.maxPlannedChapterNo(novelId);
+            int cap = tuning.i("batch_max_chapters", TuningDefaults.BATCH_MAX_CHAPTERS);
+            int to = Math.min(next + cap - 1, lastPlanned == null ? next : lastPlanned);
+            if (cfg.targetChapters() != null) {
+                to = Math.min(to, cfg.targetChapters());
+            }
+            if (to < next) {
+                reachChain(novelId, "目标达成（已生成 " + maxText + " 章）");
+                return;
+            }
+            submitById(novelId, title, next, to, null);
+            novelData.updateAutoState(novelId, "RUNNING", "续跑中：" + trigger + "，续批第 " + next + "-" + to + " 章");
+            log.info("无人续跑：{} 续批第 {}-{} 章（{}）", title, next, to, trigger);
+            return;
+        }
+        int nextVol = chapterData.maxVolumeNo(novelId) + 1;
+        submitPlan(novelId, title, nextVol, maxText + 1, null, null, null);
+        novelData.bumpAutoVolumes(novelId);
+        novelData.updateAutoState(novelId, "RUNNING", "续跑中：" + trigger + "，规划第 " + nextVol + " 卷");
+        log.info("无人续跑：{} 规划第 {} 卷（{}）", title, nextVol, trigger);
+    }
+
+    /** 链断：非 DONE 终态（用户停/失败耗尽）→ PAUSED 等人工恢复。 */
+    private void breakChain(long novelId, String reason) {
+        if (!DeriveSupport.parse(novelData.findDeriveConfig(novelId)).autoContinueOn()) {
+            return;
+        }
+        pauseChain(novelId, reason);
+    }
+
+    private void pauseChain(long novelId, String message) {
+        novelData.updateAutoState(novelId, "PAUSED", message);
+        stageLog.emit(novelId, StageLog.Stage.RUN, StageLog.Phase.STOPPED,
+                Map.of("autoContinue", true, "message", message));
+        log.warn("无人续跑暂停 novelId={}：{}", novelId, message);
+    }
+
+    private void reachChain(long novelId, String message) {
+        novelData.updateAutoState(novelId, "REACHED", message);
+        stageLog.emit(novelId, StageLog.Stage.RUN, StageLog.Phase.DONE,
+                Map.of("autoContinue", true, "message", message));
+        log.info("无人续跑达成目标 novelId={}：{}", novelId, message);
+    }
+
+    /** 续跑链读数（工作台展示）。 */
+    public AutoContinueVO chainStatus(long novelId) {
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        NovelDataService.AutoStateRow st = novelData.findAutoState(novelId);
+        int maxText = java.util.Objects.requireNonNullElse(chapterData.maxChapterWithText(novelId), 0);
+        String state = st == null || st.autoState() == null
+                ? (cfg.autoContinueOn() ? "IDLE" : "OFF")
+                : st.autoState();
+        return new AutoContinueVO(cfg.autoContinueOn(), state, cfg.targetChapters(), maxText,
+                st == null ? 0 : st.autoVolumes(), st == null ? null : st.autoMessage());
+    }
+
+    /** 人工恢复/启动续跑链：PAUSED（或尚未启动）→ RUNNING 并立即推进。 */
+    public AutoContinueVO resumeAutoContinue(long novelId) {
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        if (!cfg.autoContinueOn()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "本书未开启无人续跑（开书向导可开启）");
+        }
+        NovelDataService.AutoStateRow st = novelData.findAutoState(novelId);
+        if (st != null && "REACHED".equals(st.autoState())) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "已达成目标章数，无需恢复（可在素材库改 derive_config 后另议）");
+        }
+        if (st != null && "RUNNING".equals(st.autoState())) {
+            // 链 RUNNING 且确有任务在跑/排队才拒绝；无活动任务=链卡死（提交前异常/重启丢失），允许恢复解卡
+            if (taskDAO.existsActiveForNovel(novelId)) {
+                throw new BizException(ErrorCode.STATE_CONFLICT, "续跑链正在运行中");
+            }
+            log.warn("链状态 RUNNING 但无活动任务（novelId={}），按恢复处理", novelId);
+        }
+        novelData.updateAutoState(novelId, "RUNNING", "人工恢复续跑");
+        continueChain(novelId, "人工恢复");
+        return chainStatus(novelId);
+    }
+
+    /** 无人续跑链状态读数（工作台「续跑状态」列）。 */
+    public record AutoContinueVO(boolean enabled, String state, Integer targetChapters,
+                                 int currentChapters, int volumes, String message) {
     }
 
     /** 插队暂停后继续（④）：PAUSED → QUEUED，从暂停点下一章接跑。 */

@@ -138,7 +138,7 @@ sequenceDiagram
 
 | # | 决定点 | 方案 | 备选 |
 |---|---|---|---|
-| 1 | 意见怎么进提示词 | 拼接进卷纲目标行末尾，不动 prompt_templates（零目录哈希扰动） | 模板加占位符（26 条目录全要对齐） |
+| 1 | 意见怎么进提示词 | 拼接进卷纲目标行末尾；注入句本体落库 outline/reject_suffix（{reason} 拼接段，库值可编辑）——2026-09-25 提示词全量接库收尾时从内联迁入 | 模板加占位符（目录全要对齐） |
 | 2 | 打回历史记哪 | pipeline_events 事件（可回放），独立 approval_records 表要查账时再建 | 现在就建表（MP 四层全套仪式） |
 | 3 | 打回范围 | 仅 PENDING_APPROVAL；FAILED 章继续走既有「重新生成本章」 | FAILED 也可打回（状态机多一条边） |
 | 4 | 重生成语义 | 全量重生成+意见（章纲重出，场景全重建）；局部重写属另一契约 | 保留未点名场景（复用判定复杂，容易假修复） |
@@ -167,3 +167,61 @@ sequenceDiagram
 - **传**：采纳条目 → 下卷规划上下文（FixB 自动注入已有，单条人工决策无通道）
 - **展示**：报告条目上直接操作，决策后状态可见
 - **异步**：采纳动作只写记录，规划时才消费，不阻塞
+
+## 五、样本资产化与衍生量产契约（2026-09-25 增补）
+
+> 本节为 2026-09-24/25 八批功能的契约补记。此前施工未先改本文，违反「改契约先改这个文件」——补记同时立此存照：**后续任何批次，完工前必须回写本文，否则不得 commit**。
+
+### 流 S：样本导入与深度解析
+
+```mermaid
+flowchart LR
+    A[导入 txt/mobi] --> B[analyze 秒级 文风指纹+切块落库+台账行]
+    B --> C[深度解析 FAST抽样40章 / FULL全书]
+    C --> D[逐章 sample_chapter 并发 幂等=断点checkpoint]
+    D --> E[实体归并+sample_merge] --> F[卷汇总/全书大纲/世界观/标签]
+```
+
+验收口径：①语料与资产全部落库（preset_corpus/imported_samples/sample_plot_nodes/sample_cards），删除仅软删；②FAST→FULL 升级与重启恢复不重析已析章（UNIQUE(sample,level,seq)）；③解析失败留缺口可续跑，不产生半截资产展示；④mobi/azw3 无 DRM 可提取，DRM/HUFF 人话拒绝。
+
+### 流 D：衍生开书与草稿态
+
+```mermaid
+flowchart LR
+    A[向导选预设+样本] --> B[衍生参数 用户定或AI帮定] --> C[点AI生成大纲]
+    C --> D[书即落库 status=draft 秒回任务id]
+    D --> E[大纲后台并发生成 注入克隆世界观+素材卡约束]
+    E --> O{derive_originality 复刻评审}
+    O -->|判复刻| P[带原因重写 ≤2轮]
+    P --> O
+    O -->|通过| F[完成并激活 draft-to-active 大纲进canon]
+    O -.重写耗尽仍复刻.-> X[任务 FAILED 消息含建议]
+    D -.中途离开.-> G[草稿恢复 自动取回设定与大纲]
+```
+
+验收口径：①生大纲即落库，书籍管理页立即可见（状态=草稿）；②克隆样本资产时 AI 大纲必须贴合克隆世界（derive_outline/world 段，PromptCatalog 可编辑）——否则卷规划审校必打回（书 9 实证）；③克隆预设的章长带约束卷规划预算；④掺水量/POV/标签/每卷章数/目标/无人续跑全参数书级可改（PUT derive-config，fail-open）。**已知约束**：克隆世界观与 AI 自创大纲是组合风险，向导须提示（TODO：勾选联动警告）。
+
+**复刻防线契约（2026-09-26 增补，书 9/10/11 悉达多换名复刻实证）**：
+
+- **cloneAssets 全路径生效**：AI 大纲异步路径与直接创建路径都必须传 cloneAssets（此前 buildOutlinePayload 丢弃勾选，后端 null 一律全克隆）；`plotOutline`（骨架预填）默认**关**。
+- **大纲原创性把关（derive_originality 节点）**：sampleId 存在且样本已有书级剧情骨架时，大纲生成后自动评审——对照样本骨架+原书人物名（★2+ 人物卡），判复刻（主角同一/换名对应物/主线同序同构/桥段搬用）→ 带原因重写（derive_outline/rewrite 段）≤2 轮 → 仍复刻 → 任务 FAILED，消息含可行动建议；评审调用本身故障时 fail-open 放行但必留 log.warn。llm_call_log node=derive_originality 可回放。
+- **骨架大纲激活门禁**：canon 大纲仍是样本剧情骨架原文（"> 由样本《" 开头）时 `POST /{id}/activate` 拒绝——防"骨架直通下游"（大纲=原书时章纲/正文全链复刻）。
+- **卷规划审校复刻判据**：sourceSampleId 存在时审校 user 注入 derive_no_copy 段（含样本骨架），复刻样本剧情=BLOCKER，与既有"贴合克隆世界"口径并行。
+
+### 流 C：无人续跑链
+
+```mermaid
+flowchart LR
+    A[derive_config.autoContinue=true] --> B[CHAPTERS任务 DONE] --> C{目标未达?}
+    C -->|有下章规划行| D[续批 cap=batch_max_chapters 钳目标]
+    C -->|无规划行| E[自动卷复盘 fail-open] --> F[submitPlan 下卷]
+    F -->|PLAN DONE| D
+    C -->|已达 targetChapters| G[REACHED 收链]
+    B -.非DONE终态.-> H[PAUSED 带原因 人工恢复]
+```
+
+验收口径：①链状态三列（auto_state/auto_message/auto_volumes）可观测，工作台状态卡展示；②用户停止/失败耗尽/规划失败 → 链必 PAUSED 且原因可读；③resume 允许解卡（RUNNING 但无活动任务）；④保险丝 auto_continue_max_volumes 防失控；⑤队列认领 priority DESC,id ASC。
+
+### 书籍管理契约
+
+查（GET /api/novels 含无人续跑读数）/改（PUT，书名全站唯一）/删（DELETE 软删；有活动任务拒绝；autoContinue 自动关闭+链置 OFF）/打开（设当前书→章节页）。删书相关 TODO：级联展示（书删后素材/任务在书外页签仍可见的口径）待产品定。

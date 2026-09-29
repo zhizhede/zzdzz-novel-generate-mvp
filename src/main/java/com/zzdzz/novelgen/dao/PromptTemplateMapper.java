@@ -12,6 +12,8 @@ public interface PromptTemplateMapper extends BaseMapper<PromptTemplateDTO> {
 
     int updateContent(@Param("id") long id, @Param("content") String content);
 
+    int updateEnabled(@Param("id") long id, @Param("enabled") boolean enabled);
+
     int reset(@Param("id") long id, @Param("content") String content, @Param("catalogHash") String catalogHash);
 
     List<PromptTemplateDTO> findAll();
@@ -27,5 +29,12 @@ public interface PromptTemplateMapper extends BaseMapper<PromptTemplateDTO> {
                             @Param("content") String content, @Param("exact") boolean exact, @Param("catalogHash") String catalogHash);
 
     List<PromptTemplateDataService.Reset> findNodePhase(@Param("id") long id);
+
+    PromptTemplateDTO findByNodeAndPhase(@Param("node") String node, @Param("phase") String phase);
+
+    long insertCustom(@Param("node") String node, @Param("phase") String phase,
+                      @Param("title") String title, @Param("content") String content);
+
+    int softDeleteById(@Param("id") long id);
 
 }

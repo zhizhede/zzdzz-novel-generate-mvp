@@ -13,7 +13,7 @@ public interface NovelMapper extends BaseMapper<NovelDTO> {
 
     Long findIdByTitle(@Param("title") String title);
 
-    long insert(@Param("userId") long userId, @Param("title") String title, @Param("description") String description, @Param("stylePackId") Long stylePackId, @Param("approvalMode") String approvalMode);
+    long insert(@Param("userId") long userId, @Param("title") String title, @Param("description") String description, @Param("stylePackId") Long stylePackId, @Param("approvalMode") String approvalMode, @Param("status") String status);
 
     String findApprovalMode(@Param("novelId") long novelId);
 
@@ -24,4 +24,14 @@ public interface NovelMapper extends BaseMapper<NovelDTO> {
     int updatePlanMode(@Param("novelId") long novelId, @Param("mode") String mode);
 
     int chapterCount(@Param("novelId") long novelId);
+
+    String findDeriveConfig(@Param("novelId") long novelId);
+
+    int updateDeriveConfig(@Param("novelId") long novelId, @Param("deriveConfigJson") String deriveConfigJson);
+
+    com.zzdzz.novelgen.service.data.NovelDataService.AutoStateRow findAutoState(@Param("novelId") long novelId);
+
+    int updateAutoState(@Param("novelId") long novelId, @Param("state") String state, @Param("message") String message);
+
+    int bumpAutoVolumes(@Param("novelId") long novelId);
 }

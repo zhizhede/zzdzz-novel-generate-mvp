@@ -40,6 +40,15 @@ public interface ChapterDataService extends IService<ChapterDTO> {
     /** 已有正文的最末章号（无任何正文时为 null）：卷纲规划必须接续其后来。 */
     Integer maxChapterWithText(long novelId);
 
+    /** 无人续跑用：afterNo 之后最小的规划章号（无规划行返回 null）。 */
+    Integer nextPlannedChapterNo(long novelId, int afterNo);
+
+    /** 无人续跑用：最大规划章号（无任何规划行返回 null）。 */
+    Integer maxPlannedChapterNo(long novelId);
+
+    /** 无人续跑用：最大卷号（无规划行返回 0）。 */
+    int maxVolumeNo(long novelId);
+
     boolean exists(long novelId, int chapterNo);
 
     void insertPlan(long novelId, int chapterNo, Integer volumeNo, String arc, String title,
@@ -77,8 +86,10 @@ public interface ChapterDataService extends IService<ChapterDTO> {
     /** 1..maxChapterNo 章的开篇样本（有正文的章）。 */
     List<Opening> findOpeningLines(long novelId, int maxChapterNo);
 
-    /** 对白推进范例：1..maxChapterNo 中「最密集的连续 lines 行对白段」（至少六成行带对白才算范例）。 */
-    Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines);
+    /** 对白推进范例：1..maxChapterNo 中「最密集的连续 lines 行对白段」（至少六成行带对白才算范例）。
+     *  onlyChapterIds 非空时只在这些章里找（风格范例只取过门禁的合格稿）；空集合直接返回 null。 */
+    Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines,
+                                java.util.Collection<Long> onlyChapterIds);
 
     /** 无该章（如第 1 章无“上一章”）时返回 null，由调用方决定降级文案。 */
     String findFullText(long novelId, int chapterNo);

@@ -28,5 +28,17 @@ public final class LlmNode {
     public static final String EMBEDDING = "embedding";             // embo-01 向量化（RAG 语义检索）
     public static final String SMOKE = "smoke";                     // 冒烟连通性测试
 
+    // ===== 导入小说深度解析（样本资产化） =====
+    public static final String SAMPLE_CHAPTER = "sample_chapter";   // 逐章摘要+场景拆解+实体抽取
+    public static final String SAMPLE_VOLUME = "sample_volume";     // 卷级汇总（arc/节奏）
+    public static final String SAMPLE_OUTLINE = "sample_outline";   // 全书大纲合成
+    public static final String SAMPLE_WORLD = "sample_world";       // 世界观文档合成
+    public static final String SAMPLE_MERGE = "sample_merge";       // 跨章实体名归并判定
+    public static final String SAMPLE_PARAMS = "sample_params";     // 衍生参数 AI 推荐（开书向导）
+    public static final String SAMPLE_TAGS = "sample_tags";         // 样本类型/特征标签提取
+    public static final String DERIVE_OUTLINE = "derive_outline";   // 开书向导·AI 生成全书大纲草稿
+    public static final String DERIVE_ORIGINALITY = "derive_originality"; // 衍生大纲·原书复刻评审（判复刻→重写）
+    public static final String STYLE_RULES = "style_rules";         // 文风规则提炼（写回风格包 rules_md）
+
     private LlmNode() {}
 }

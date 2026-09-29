@@ -31,6 +31,9 @@ public class ImportedSampleDTO {
     /** 本样本所在品类采纳出的预设（回链，采纳时统一更新）。 */
     private Long presetId;
 
+    /** 类型/特征标签（AI 深度解析提取，衍生开书沿用起点）；JSON 数组文本，XML 内 ::jsonb 转型。 */
+    private String tags;
+
     private Boolean isDeleted;
 
     private OffsetDateTime createTime;

@@ -18,6 +18,21 @@
                 WHERE novel_id=#{novelId} AND is_deleted=false AND full_text IS NOT NULL AND full_text != ''
     </select>
 
+    <select id="nextPlannedChapterNo" resultType="int">
+                SELECT MIN(chapter_no) FROM chapters
+                WHERE novel_id=#{novelId} AND is_deleted=false AND chapter_no > #{afterNo}
+    </select>
+
+    <select id="maxPlannedChapterNo" resultType="int">
+                SELECT MAX(chapter_no) FROM chapters
+                WHERE novel_id=#{novelId} AND is_deleted=false
+    </select>
+
+    <select id="maxVolumeNo" resultType="int">
+                SELECT MAX(volume_no) FROM chapters
+                WHERE novel_id=#{novelId} AND is_deleted=false AND volume_no IS NOT NULL
+    </select>
+
     <select id="findOpeningRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
                 SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
                 WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo} AND is_deleted=false

@@ -15,8 +15,9 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
         implements GenerationTaskDataService {
 
     @Override
-    public long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload) {
-        return baseMapper.insert(novelId, fromChapter, toChapter, submittedBy, kind, payload);
+    public long insert(long novelId, int fromChapter, int toChapter, Long submittedBy, String kind, String payload,
+                       int priority) {
+        return baseMapper.insert(novelId, fromChapter, toChapter, submittedBy, kind, payload, priority);
     }
 
     @Override
@@ -31,6 +32,11 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
         }
         var rows = baseMapper.findRunningById(queuedId);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    @Override
+    public boolean existsActiveForNovel(long novelId) {
+        return baseMapper.existsActiveForNovel(novelId);
     }
 
     @Override
@@ -71,12 +77,12 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
 
     @Override
     public void updateProgress(long id, int doneChapters, Integer currentChapter, String message) {
-        baseMapper.updateProgress(id, doneChapters, currentChapter, message);
+        baseMapper.updateProgress(id, doneChapters, currentChapter, fitMessage(message));
     }
 
     @Override
     public void updateStatus(long id, String status, String message) {
-        baseMapper.updateStatus(id, status, message);
+        baseMapper.updateStatus(id, status, fitMessage(message));
     }
 
     @Override
@@ -123,6 +129,18 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
 
     @Override
     public int requeueForRetry(long id, int fromChapter, int retryCount, String message) {
-        return baseMapper.requeueForRetry(id, fromChapter, retryCount, message);
+        return baseMapper.requeueForRetry(id, fromChapter, retryCount, fitMessage(message));
+    }
+
+    /**
+     * last_message 列为 varchar(256)：超长错误串必须在写入前截断。
+     * 实证（2026-09-29 任务 #58）：失败处理写超长错误 → UPDATE 抛 value too long → 终态未落库，
+     * 任务永久 RUNNING 而 worker 线程已空闲（僵尸任务，需手工收敛）。
+     */
+    private static String fitMessage(String message) {
+        if (message == null || message.length() <= 256) {
+            return message;
+        }
+        return message.substring(0, 253) + "...";
     }
 }

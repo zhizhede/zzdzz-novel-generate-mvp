@@ -42,4 +42,14 @@
                 WHERE chapter_id=#{chapterId} AND is_deleted=false
                 ORDER BY id ASC
     </select>
+
+    <!-- 通过了章级机械门禁的章 id（风格范例只从合格稿取） -->
+    <select id="passedChapterIds" resultType="long">
+                SELECT DISTINCT gr.chapter_id
+                FROM gate_reports gr
+                JOIN chapters c ON c.id = gr.chapter_id
+                WHERE gr.is_deleted = false AND gr.scene_id IS NULL
+                  AND gr.gate_type = 'mechanical' AND gr.passed = true
+                  AND c.is_deleted = false AND c.novel_id = #{novelId}
+    </select>
 </mapper>

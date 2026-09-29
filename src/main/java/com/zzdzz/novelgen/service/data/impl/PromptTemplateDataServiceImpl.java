@@ -19,6 +19,11 @@ public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMap
     }
 
     @Override
+    public int updateEnabled(long id, boolean enabled) {
+        return baseMapper.updateEnabled(id, enabled);
+    }
+
+    @Override
     public int reset(long id, String content, String catalogHash) {
         return baseMapper.reset(id, content, catalogHash);
     }
@@ -65,5 +70,20 @@ public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMap
         if (stale > 0) {
             baseMapper.syncTouch(node, phase);
         }
+    }
+
+    @Override
+    public java.util.Optional<PromptTemplateDTO> findByNodeAndPhase(String node, String phase) {
+        return java.util.Optional.ofNullable(baseMapper.findByNodeAndPhase(node, phase));
+    }
+
+    @Override
+    public long insertCustom(String node, String phase, String title, String content) {
+        return baseMapper.insertCustom(node, phase, title, content);
+    }
+
+    @Override
+    public int softDeleteById(long id) {
+        return baseMapper.softDeleteById(id);
     }
 }

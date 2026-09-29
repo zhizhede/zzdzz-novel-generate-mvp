@@ -16,6 +16,7 @@ import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.GateService;
 import com.zzdzz.novelgen.service.LibraryService;
 import com.zzdzz.novelgen.service.LlmNodeConfigService;
+import com.zzdzz.novelgen.service.LlmProviderService;
 import com.zzdzz.novelgen.service.MaterialCardService;
 import com.zzdzz.novelgen.service.PromptTemplateService;
 import com.zzdzz.novelgen.service.TuningService;
@@ -44,10 +45,12 @@ public class LibraryController {
     private final DigestService digestService;
     private final MaterialCardService cardService;
     private final LlmNodeConfigService nodeConfigService;
+    private final LlmProviderService providerService;
     private final TuningService tuningService;
     private final EmbeddingService embeddingService;
     private final PromptTemplateService promptService;
     private final GateService gateService;
+    private final com.zzdzz.novelgen.service.GenrePresetService genrePresetService;
 
 
     // ===== 提示词注册表（平台级只读；阶段二开放从库读取与编辑） =====
@@ -62,16 +65,38 @@ public class LibraryController {
         return Result.success(promptService.detail(id));
     }
 
-    /** 人工编辑模板（置 custom；占位符序列须与代码目录一致）。 */
+    /** 人工编辑模板（置 custom；目录行占位符序列须与代码目录一致，{key} 拼接段与自定义行直接保存）。 */
     @PutMapping("/prompts/{id}")
     public Result<PromptDetailVO> updatePrompt(@PathVariable long id, @RequestBody PromptUpdateVO dto) {
         return Result.success(promptService.updateContent(id, dto.content()));
+    }
+
+    /** 启用/停用（停用即该行不生效，运行时回退代码模板）。 */
+    @PutMapping("/prompts/{id}/enabled")
+    public Result<PromptDetailVO> togglePrompt(@PathVariable long id, @RequestBody PromptEnabledVO dto) {
+        return Result.success(promptService.setEnabled(id, Boolean.TRUE.equals(dto.enabled())));
     }
 
     /** 重置回代码目录版本（清 custom）。 */
     @PostMapping("/prompts/{id}/reset")
     public Result<PromptDetailVO> resetPrompt(@PathVariable long id) {
         return Result.success(promptService.reset(id));
+    }
+
+    /** 新建自定义模板/段（custom=true，可编辑可删除；目录同步不覆盖）。 */
+    @PostMapping("/prompts")
+    public Result<PromptDetailVO> createPrompt(@RequestBody PromptCreateVO dto) {
+        return Result.success(promptService.create(dto.node(), dto.phase(), dto.title(), dto.content()));
+    }
+
+    /** 删除自定义模板/段（软删；目录同步行不可删）。 */
+    @DeleteMapping("/prompts/{id}")
+    public Result<Void> deletePrompt(@PathVariable long id) {
+        promptService.delete(id);
+        return Result.success();
+    }
+
+    public record PromptCreateVO(String node, String phase, String title, String content) {
     }
 
     // ===== 调参（平台级行为参数，改后 30s 内生效） =====
@@ -128,6 +153,39 @@ public class LibraryController {
                 dto.peakEndHour() != null ? dto.peakEndHour() : 18,
                 dto.remark());
         return Result.success();
+    }
+
+    // ===== 模型接入（平台级 baseUrl/apiKey 密文/默认模型/超时） =====
+
+    @GetMapping("/llm-providers")
+    public Result<List<LlmProviderService.ProviderVO>> llmProviders() {
+        return Result.success(providerService.list());
+    }
+
+    @PostMapping("/llm-providers")
+    public Result<Void> createLlmProvider(@RequestBody LlmProviderUpsertVO dto) {
+        providerService.create(dto.name(), dto.baseUrl(), dto.apiKey(), dto.model(), dto.role(),
+                dto.connectTimeoutMs(), dto.readTimeoutMs(),
+                dto.enabled() == null || dto.enabled(), dto.remark());
+        return Result.success();
+    }
+
+    @PutMapping("/llm-providers/{id}")
+    public Result<Void> updateLlmProvider(@PathVariable long id, @RequestBody LlmProviderUpsertVO dto) {
+        providerService.update(id, dto.name(), dto.baseUrl(), dto.apiKey(), dto.model(), dto.role(),
+                dto.connectTimeoutMs(), dto.readTimeoutMs(), dto.enabled(), dto.remark());
+        return Result.success();
+    }
+
+    @DeleteMapping("/llm-providers/{id}")
+    public Result<Void> deleteLlmProvider(@PathVariable long id) {
+        providerService.delete(id);
+        return Result.success();
+    }
+
+    @PostMapping("/llm-providers/{id}/test")
+    public Result<LlmProviderService.TestResult> testLlmProvider(@PathVariable long id) {
+        return Result.success(providerService.test(id));
     }
 
     // ===== 向量索引（RAG 语义检索） =====
@@ -253,6 +311,12 @@ public class LibraryController {
         return Result.success();
     }
 
+    /** AI 提炼本书文风规则（语料=关联样本品类；写回风格包 rules_md，同步返回规则文本供回显）。 */
+    @PostMapping("/novels/{novelId}/style/extract-rules")
+    public Result<String> extractRules(@PathVariable long novelId) {
+        return Result.success(genrePresetService.extractRulesForNovel(novelId));
+    }
+
     @PutMapping("/novels/{novelId}/gate-config")
     public Result<Void> updateGateConfig(@PathVariable long novelId, @RequestBody GateConfigUpdateVO dto) {
         libraryService.updateGateConfig(novelId, dto.gateConfig());
@@ -269,6 +333,15 @@ public class LibraryController {
     @GetMapping("/novels/{novelId}/reader-standards")
     public Result<Map<String, Double>> readerStandards(@PathVariable long novelId) {
         return Result.success(gateService.readerStandards(novelId));
+    }
+
+    /** 掺水量→注水/审校三阈值换算预览（与开书/保存同一公式 DeriveSupport.waterGates，弹窗即时预览）。 */
+    @GetMapping("/novels/{novelId}/water-gates")
+    public Result<Map<String, Double>> waterGates(@PathVariable long novelId,
+                                                  @org.springframework.web.bind.annotation.RequestParam Integer water) {
+        double[] g = com.zzdzz.novelgen.service.DeriveSupport.waterGates(water == null ? 50 : water);
+        return Result.success(Map.of("reader_fat_ratio_block", g[0],
+                "reader_fat_ratio_hard", g[1], "ai_review_fix_floor", g[2]));
     }
 
     // ===== 世界状态账 =====
@@ -298,11 +371,18 @@ public class LibraryController {
 
     public record PromptUpdateVO(String content) {}
 
+    public record PromptEnabledVO(Boolean enabled) {}
+
     /** tuning 值库存为字符串，数字/文本都可能，绑定保持 Object。 */
     public record TuningUpdateVO(Object value) {}
 
     public record LlmNodeCreateVO(String node, String model, Double temperature, Integer maxTokens,
                                    String extraJson, Boolean enabled, String remark) {}
+
+    /** apiKey 编辑留空 = 保留原密文；明文只进加密器，不落日志不回显。role 留空按 chat。 */
+    public record LlmProviderUpsertVO(String name, String baseUrl, String apiKey, String model, String role,
+                                       Integer connectTimeoutMs, Integer readTimeoutMs,
+                                       Boolean enabled, String remark) {}
 
     public record LlmNodeUpdateVO(String model, Double temperature, Integer maxTokens,
                                    String extraJson, Boolean enabled, String remark) {}

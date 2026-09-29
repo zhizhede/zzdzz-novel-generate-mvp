@@ -7,21 +7,26 @@
         <el-select v-model="novelId" style="width: 240px" @change="onNovelChange">
           <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
         </el-select>
-        <el-button size="small" plain @click="openWizard">＋ 开新书</el-button>
+        <el-button size="small" plain @click="router.push('/wizard')">＋ 开新书</el-button>
         <span>共 {{ novel?.chapterCount || 0 }} 章</span>
-        <el-tooltip placement="bottom" content="卷纲由谁定稿。自动：AI 规划完整卷纲后直接落库，立即可开跑；人工：规划只出草稿，需到「规划」页采纳后才生效，不采纳不生成。">
-          <span>规划模式：
-            <el-switch v-model="planManual" active-text="人工" inactive-text="自动" @change="switchPlanMode" />
-          </span>
-        </el-tooltip>
         <el-tooltip placement="bottom" content="每章写完后由谁放行。自动：AI 审校无硬伤即放行、直接续写下一章；人工：每章停在「待审批」，去「章节」页逐章放行后才继续。">
           <span>审批模式：
             <el-switch v-model="manual" active-text="人工" inactive-text="自动" @change="switchMode" />
           </span>
         </el-tooltip>
         <el-divider direction="vertical" />
+        <el-tooltip placement="bottom" content="本书全部生成参数的唯一修改入口：掺水量/视角/节奏/无人续跑/优先级/规划模式/质量口径。开书时的设定已落库，此处改动立即生效。">
+          <el-button size="small" plain @click="openDeriveEditor">本书生成参数</el-button>
+        </el-tooltip>
         <span>连跑范围：第 <el-input-number v-model="from" :min="1" size="small" /> 至
           <el-input-number v-model="to" :min="from" size="small" /> 章</span>
+        <span>优先级：
+          <el-select v-model="runPriority" size="small" style="width: 72px">
+            <el-option :value="0" label="低" />
+            <el-option :value="1" label="中" />
+            <el-option :value="2" label="高" />
+          </el-select>
+        </span>
         <el-button type="primary" size="small" :loading="running" @click="run">启动生成</el-button>
         <el-button size="small" type="danger" plain @click="stopAllTasks">全部停止</el-button>
         <el-tag :type="running ? 'warning' : 'info'" size="small">{{ running ? '运行中' : '空闲' }}</el-tag>
@@ -46,157 +51,131 @@
       <div style="font-size: 12px; color: #999; margin-top: 8px">点行跳转章节页审批</div>
     </el-dialog>
 
-    <el-card shadow="never" style="margin-bottom: 12px">
-      <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
-        <b style="font-size: 13px">评审标准（本书）</b>
-        <span style="font-size: 12px; color: #606266">注水软阈值</span>
-        <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: 92px" />
-        <span style="font-size: 12px; color: #606266">硬上限</span>
-        <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: 92px" />
-        <span style="font-size: 12px; color: #606266">恢复线比例</span>
-        <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: 92px" />
-        <span style="font-size: 12px; color: #606266">扩写护栏</span>
-        <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: 92px" />
-        <span style="font-size: 12px; color: #606266">审校下限</span>
-        <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: 92px" />
-        <el-button size="small" :loading="stdSaving" @click="saveStd">保存到本书</el-button>
-        <span style="color:#999;font-size:12px">连贯性优先：四问全过时仅超硬上限才转人工；字数可让路剧情。保存写入本书门禁配置，立即生效</span>
-      </div>
+    <!-- 无人续跑链状态（开了无人续跑的书才有；目标进度/暂停原因/恢复入口） -->
+    <el-card v-if="autoChain && autoChain.enabled" shadow="never" style="margin-bottom: 12px">
+      <template #header>
+        <div style="display: flex; align-items: center; gap: 10px">
+          <b style="font-size: 13px">无人续跑</b>
+          <el-tag size="small" :type="autoChainTagType">{{ autoChainText }}</el-tag>
+          <span style="font-size: 12px; color: #999">
+            {{ autoChain.currentChapters }}/{{ autoChain.targetChapters ?? '∞' }} 章 · 已规划 {{ autoChain.volumes }} 卷
+          </span>
+          <el-button v-if="autoChain.state !== 'REACHED' && autoChain.state !== 'RUNNING'"
+                     size="small" type="primary" plain @click="resumeAutoChain">
+            {{ autoChain.state === 'PAUSED' ? '恢复续跑' : '启动续跑' }}
+          </el-button>
+          <el-button size="small" plain @click="openDeriveEditor">参数设置</el-button>
+          <span v-if="autoChain.message" style="font-size: 12px; color: #e6a23c; flex: 1; text-align: right">
+            {{ autoChain.message }}
+          </span>
+        </div>
+      </template>
+      <el-progress v-if="autoChain.targetChapters"
+                   :percentage="Math.min(100, Math.round(autoChain.currentChapters / autoChain.targetChapters * 100))" />
+      <div v-else style="font-size: 12px; color: #999">未设目标章数：续跑按卷推进，达到保险丝或人工停止为止</div>
     </el-card>
 
-    <!-- 开书向导：建书 → 选预设（克隆为本书风格包）→ 大纲，消灭"没建风格包就提交"式死路 -->
-    <el-dialog v-model="wizardOpen" title="开新书" width="640px" :close-on-click-modal="false">
-      <el-steps :active="wizardStep" finish-status="success" simple style="margin-bottom: 16px">
-        <el-step title="基本信息" />
-        <el-step title="全书大纲" />
-        <el-step title="完成" />
-      </el-steps>
-
-      <template v-if="wizardStep === 0">
-        <el-form label-width="80px">
-          <el-form-item label="书名" required>
-            <el-input v-model="wizardForm.title" maxlength="256" placeholder="作品名，全站唯一" />
-          </el-form-item>
-          <el-form-item label="简介">
-            <el-input v-model="wizardForm.description" type="textarea" :rows="2" placeholder="一句话简介（可选）" />
-          </el-form-item>
-          <el-form-item label="品类预设" required>
-            <el-radio-group v-model="presetMode" size="small" style="margin-bottom: 10px">
-              <el-radio-button value="select">选现有预设</el-radio-button>
-              <el-radio-button value="analyze">导入我的小说分析</el-radio-button>
-            </el-radio-group>
-
-            <template v-if="presetMode === 'select'">
-              <template v-if="presets.length">
-                <el-select v-model="wizardForm.presetId" placeholder="选择品类预设" style="width: 100%">
-                  <el-option v-for="p in presets" :key="p.id" :value="p.id" :label="p.name">
-                    <span>{{ p.name }}</span>
-                    <span style="float: right; color: #999; font-size: 12px">{{ p.description }}</span>
-                  </el-option>
-                </el-select>
-                <div style="font-size: 12px; color: #999; line-height: 1.7">
-                  预设决定文风指纹、门禁阈值与写作规则，创建时克隆为本书私有配置（之后在素材库可单独调整，互不影响）。
-                </div>
-              </template>
-              <el-alert v-else type="warning" :closable="false" title="还没有品类预设"
-                description="预设从语料提取（分位带宽指纹+门禁阈值）。可在下方「导入我的小说分析」直接建一个，或到素材库 → 质量与风格 → 品类预设。" />
-            </template>
-
-            <template v-else>
-              <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap">
-                <el-input v-model="sampleForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 200px" />
-                <label style="cursor: pointer; font-size: 13px; color: #409eff">上传 txt
-                  <input type="file" accept=".txt" style="display: none" @change="onSampleFile" />
-                </label>
-                <span v-if="sampleForm.text" style="font-size: 12px; color: #999">
-                  已载入 {{ (sampleForm.text.length / 10000).toFixed(1) }} 万字
-                </span>
-                <el-button type="primary" size="small" :loading="analyzing" :disabled="!sampleForm.text" @click="analyzeSample">
-                  分析文风
-                </el-button>
-              </div>
-              <el-input v-model="sampleForm.text" type="textarea" :rows="6"
-                placeholder="或直接粘贴小说正文（整本或长片段）。系统自动切块存入语料库（之后随时可补料/重提/采纳），只分析文风分布（用词/句式/节奏），不看情节。" />
-
-              <div v-if="analyzeResult" style="margin-top: 10px; font-size: 13px">
-                <div style="margin-bottom: 6px">
-                  {{ (analyzeResult.totalChars / 10000).toFixed(1) }} 万字 · {{ analyzeResult.chunks }} 块 ·
-                  章长预算 {{ analyzeResult.budgetMin }}-{{ analyzeResult.budgetMax }} 字 ·
-                  {{ analyzeResult.metricCount }} 项指标
-                  <el-tag v-if="analyzeResult.lowConfidence" size="small" type="warning">样本偏少·低置信</el-tag>
-                </div>
-                <div v-for="s in analyzeResult.similarities" :key="s.presetId"
-                     style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px">
-                  <span style="width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ s.name }}</span>
-                  <div style="flex: 1; height: 8px; background: #f0f2f5; border-radius: 4px; overflow: hidden">
-                    <div :style="{ width: Math.max(0, s.score) * 100 + '%', height: '100%', background: s.score >= 0.65 ? '#67c23a' : s.score >= 0.45 ? '#e6a23c' : '#c0c4cc' }" />
-                  </div>
-                  <span style="width: 48px; text-align: right; color: #606266">{{ s.comparable ? Math.round(s.score * 100) + '%' : '不可比' }}</span>
-                </div>
-
-                <el-alert v-if="analyzeResult.recommendation === 'match' && bestSim" type="success" :closable="false"
-                  :title="`与「${bestSim.name}」文风相近（${Math.round(bestSim.score * 100)}%），可直接使用`"
-                  style="margin-top: 8px">
-                  <el-button size="small" type="primary" plain @click="usePreset(bestSim)">用这个预设</el-button>
-                </el-alert>
-                <el-alert v-else-if="analyzeResult.recommendation === 'new'" type="info" :closable="false"
-                  :title="bestSim ? `与现有品类差异大（最相近 ${Math.round(bestSim.score * 100)}%），建议为它建新品类` : '还没有任何品类，建议为它建新品类'"
-                  style="margin-top: 8px" />
-                <el-alert v-else-if="bestSim" type="warning" :closable="false"
-                  :title="`与「${bestSim.name}」有一定相近（${Math.round(bestSim.score * 100)}%）：可直接用，也可以为它建新品类`"
-                  style="margin-top: 8px">
-                  <el-button size="small" type="primary" plain @click="usePreset(bestSim)">用这个预设</el-button>
-                </el-alert>
-
-                <div v-if="analyzeResult.recommendation !== 'match'"
-                     style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap">
-                  <el-tag size="small" type="info">品类「{{ newGenreForm.genre }}」（语料已存库）</el-tag>
-                  <el-input v-model="newGenreForm.presetName" size="small" placeholder="预设名" style="width: 200px" />
-                  <el-button size="small" type="primary" :loading="adopting" @click="adoptFromSample">建品类并使用</el-button>
-                </div>
-
-                <div v-if="chosenPresetName" style="margin-top: 10px">
-                  已选预设：<el-tag size="small" type="success">{{ chosenPresetName }}</el-tag>
-                </div>
-              </div>
-            </template>
-          </el-form-item>
-        </el-form>
-      </template>
-
-      <template v-else-if="wizardStep === 1">
-        <el-input v-model="wizardForm.outline" type="textarea" :rows="12"
-          placeholder="全书大纲：主题、主线、分卷走向、主要人物。生成每一章都会携带它作为方向约束。" />
-        <div style="font-size: 12px; color: #999; margin-top: 6px">
-          可先跳过、之后在「规划」页补写保存；但开跑生成前必须有——没有大纲的章会失去方向约束。
-        </div>
-      </template>
-
-      <template v-else>
-        <el-result v-if="wizardCreated" icon="success" :title="`《${wizardCreated.title}》已创建`"
-          :sub-title="`风格包已从预设克隆，当前 ${wizardCreated.chapterCount} 章。接下来三步：`">
-          <template #extra>
-            <div style="text-align: left; font-size: 13px; line-height: 2">
-              <div>① 到「<router-link to="/planning">规划</router-link>」页确认/补写大纲，点「AI 规划一卷」生成首卷卷纲（2-10 分钟）</div>
-              <div>② 回本页设好连跑范围（默认从第 1 章起），点「启动生成」</div>
-              <div>③ 生成中在本页看实时逐字流；写完的章去「章节」页阅读/审批</div>
-            </div>
-            <el-button type="primary" @click="wizardDone">开始规划 →</el-button>
-          </template>
-        </el-result>
-        <div v-else style="text-align: center; padding: 30px; color: #999">
-          创建中……（克隆预设、建风格包、落书、存大纲）
-        </div>
-      </template>
-
+    <!-- 本书生成参数（唯一修改入口：开书向导的设定落库后在此查看/修改） -->
+    <el-dialog v-model="deriveEditorOpen" title="本书生成参数" width="620px">
+      <el-form label-width="92px" v-if="deriveEdit">
+        <el-form-item label="掺水量">
+          <div style="display: flex; align-items: center; gap: 12px; width: 100%">
+            <span style="font-size: 12px; color: #999">干货</span>
+            <el-slider v-model="deriveEdit.water" :min="0" :max="100" :step="5" style="flex: 1" />
+            <span style="font-size: 12px; color: #999">舒缓</span>
+            <el-tag size="small" :type="deriveEdit.water >= 70 ? 'warning' : deriveEdit.water <= 30 ? 'success' : 'info'">
+              {{ deriveEdit.water >= 70 ? '可注水' : deriveEdit.water <= 30 ? '零注水' : '均衡' }}
+            </el-tag>
+          </div>
+          <div style="font-size: 12px; color: #999; line-height: 1.7; width: 100%">
+            保存时自动换算质量口径：注水软阈值 <b>{{ waterGates.reader_fat_ratio_block }}</b> ·
+            硬上限 <b>{{ waterGates.reader_fat_ratio_hard }}</b> ·
+            审校下限 <b>{{ waterGates.ai_review_fix_floor }}</b>（越干越严；高级区可手动覆盖）
+          </div>
+        </el-form-item>
+        <el-form-item label="叙事视角">
+          <el-select v-model="deriveEdit.pov" style="width: 200px">
+            <el-option value="第一人称（主角）" label="第一人称（主角）" />
+            <el-option value="第三人称限知" label="第三人称限知" />
+            <el-option value="第三人称全知" label="第三人称全知" />
+            <el-option value="多视角轮换" label="多视角轮换" />
+          </el-select>
+          <el-input v-if="deriveEdit.pov !== '多视角轮换'" v-model="deriveEdit.povCharacter"
+                    placeholder="主视角人物名（可选）" style="width: 180px; margin-left: 8px" />
+        </el-form-item>
+        <el-form-item label="节奏">
+          <el-input-number v-model="deriveEdit.chaptersPerVolume" :min="3" :max="30" size="small" />
+          <span style="margin-left: 6px; font-size: 13px">章/卷</span>
+          <el-input-number v-model="deriveEdit.targetChapters" :min="10" :max="2000" :step="50" size="small" style="margin-left: 16px" />
+          <span style="margin-left: 6px; font-size: 13px">章目标（总）</span>
+        </el-form-item>
+        <el-form-item label="节奏说明">
+          <el-input v-model="deriveEdit.pacingNote" type="textarea" :rows="2" placeholder="给卷规划的节奏交代（可选）" />
+        </el-form-item>
+        <el-form-item label="类型标签">
+          <div style="width: 100%">
+            <el-select v-model="deriveEdit.tags" multiple filterable allow-create default-first-option
+                       placeholder="选标签沿用，或输入新标签" style="width: 100%">
+              <el-option v-for="t in deriveTagOptions" :key="t" :value="t" :label="t" />
+            </el-select>
+            <el-button v-if="deriveTagOptions.length" size="small" link type="primary"
+                       @click="deriveEdit.tags = [...deriveTagOptions]">沿用样本标签</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item label="无人续跑">
+          <el-switch v-model="deriveEdit.autoContinue" />
+          <span style="margin-left: 8px; font-size: 12px; color: #999">开=写到总目标为止全自动（规划/审批强制自动）</span>
+        </el-form-item>
+        <el-form-item label="审批模式">
+          <el-radio-group v-model="deriveEdit.approvalMode" size="small">
+            <el-radio-button value="auto">自动放行</el-radio-button>
+            <el-radio-button value="manual">人工审批</el-radio-button>
+          </el-radio-group>
+          <span style="margin-left: 8px; font-size: 12px; color: #999">每章写完后的放行方式</span>
+        </el-form-item>
+        <el-form-item label="队列优先级">
+          <el-radio-group v-model="deriveEdit.priority" size="small">
+            <el-radio-button :value="0">低</el-radio-button>
+            <el-radio-button :value="1">中</el-radio-button>
+            <el-radio-button :value="2">高</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="规划模式">
+          <el-switch v-model="planManual" active-value="manual" inactive-value="auto" />
+          <span style="margin-left: 8px; font-size: 12px; color: #999">
+            {{ planManual === 'manual' ? '人工：卷纲出草稿，去「规划」页采纳后才生效' : '自动：AI 审校通过直接落库，立即可开跑' }}
+          </span>
+        </el-form-item>
+      </el-form>
+      <el-collapse style="margin-top: 4px">
+        <el-collapse-item name="quality">
+          <template #title><span style="font-size: 13px; color: #606266">质量口径（高级，一般不用动）</span></template>
+          <div style="font-size: 12px; color: #999; line-height: 1.8; margin-bottom: 8px">
+            每章写完由读者评审/审校把关，以下数值决定拦多狠：改掺水量保存后前三项会按新掺水量重新换算；
+            不动掺水量时此处手调优先。判定明细见各章门禁报告。
+          </div>
+          <div style="display: grid; grid-template-columns: 150px 110px 1fr; gap: 6px 10px; align-items: center; font-size: 12px">
+            <span>注水软阈值</span>
+            <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: 100px" />
+            <span style="color: #999">读者评审注水率超过→打回重写一轮（结构全过且未破硬上限时可放行）</span>
+            <span>注水硬上限</span>
+            <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: 100px" />
+            <span style="color: #999">注水率红线，超了必拦（结构再好也不放）</span>
+            <span>恢复线比例</span>
+            <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: 100px" />
+            <span style="color: #999">修订稿字数下限 = 章预算下限 × 此值，防删残</span>
+            <span>扩写护栏</span>
+            <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: 100px" />
+            <span style="color: #999">修订稿长度上限 = 章预算 × 此值，防膨胀</span>
+            <span>审校下限</span>
+            <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: 100px" />
+            <span style="color: #999">AI 修稿不足原文此比例→视为异常保留原文</span>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
       <template #footer>
-        <template v-if="wizardStep < 2">
-          <el-button v-if="wizardStep > 0" @click="wizardStep--">上一步</el-button>
-          <el-button v-if="wizardStep === 0" type="primary"
-            :disabled="!wizardForm.title.trim() || !wizardForm.presetId || !presets.length"
-            @click="wizardStep = 1">下一步</el-button>
-          <el-button v-else type="primary" :loading="wizardBusy" @click="createNovel">创建作品</el-button>
-        </template>
+        <el-button @click="deriveEditorOpen = false">取消</el-button>
+        <el-button type="primary" :loading="deriveSaving" @click="saveDeriveEditor">保存</el-button>
       </template>
     </el-dialog>
 
@@ -207,6 +186,7 @@
         <el-table-column label="范围" width="80">
           <template #default="{ row }">
             <span v-if="row.kind === 'PLAN'">卷纲规划</span>
+            <span v-else-if="row.kind === 'OUTLINE'">章纲 {{ row.fromChapter }}-{{ row.toChapter }}</span>
             <span v-else>{{ row.fromChapter }}-{{ row.toChapter }}</span>
           </template>
         </el-table-column>
@@ -219,6 +199,7 @@
           <template #default="{ row }">
             <el-progress :percentage="Math.round(row.doneChapters / row.totalChapters * 100)"
               :stroke-width="10" :format="() => `${row.doneChapters}/${row.totalChapters}`" />
+            <div v-if="taskPace(row)" style="font-size: 11px; color: #999; margin-top: 2px; line-height: 1.4">{{ taskPace(row) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="当前章" width="70">
@@ -240,7 +221,7 @@
         <el-table-column prop="createTime" label="提交时间" width="110" />
         <el-table-column label="操作" width="130">
           <template #default="{ row }">
-            <el-button v-if="row.status === 'RUNNING'" size="small" type="primary" plain @click="openSession(row)">会话</el-button>
+            <el-button v-if="row.status !== 'QUEUED'" size="small" type="primary" plain @click="openSession(row)">会话</el-button>
             <el-button v-if="row.status === 'QUEUED'" size="small" type="danger" plain @click="cancelTask(row)">取消</el-button>
             <el-button v-else-if="row.status === 'RUNNING'" size="small" type="danger" @click="stopTask(row)">停止</el-button>
             <el-button v-else-if="row.status === 'PAUSED'" size="small" type="success" @click="resumeTask(row)">继续</el-button>
@@ -287,12 +268,13 @@
 
     <!-- 会话视图：agent-IDE 式实时转录（RUNNING 任务点 [会话] 进入；断线/错过的历史见章节抽屉·档案） -->
     <el-dialog v-model="sessionOpen" fullscreen top="0" :show-close="true"
-      :title="sessionTask ? `会话 · 任务 #${sessionTask.id} ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '会话'">
+      :title="sessionTask ? `会话 · 任务 #${sessionTask.id} ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : sessionTask.kind === 'OUTLINE' ? ` · 章纲 ${sessionTask.fromChapter}-${sessionTask.toChapter}` : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '会话'">
       <template #header>
         <div style="display:flex; align-items:center; gap:12px; padding-right: 32px">
-          <b>{{ sessionTask ? `任务 #${sessionTask.id} · ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '' }}</b>
+          <b>{{ sessionTask ? `任务 #${sessionTask.id} · ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : sessionTask.kind === 'OUTLINE' ? ` · 章纲 ${sessionTask.fromChapter}-${sessionTask.toChapter}` : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '' }}</b>
           <el-tag v-if="sessionTask" size="small" :type="TASK_COLOR[sessionTask.status] || 'info'">{{ TASK_TEXT[sessionTask.status] || sessionTask.status }}</el-tag>
           <span v-if="sessionTask?.status === 'RUNNING'" style="color:#e6a23c;font-size:13px">{{ sessionTask.currentStep || '准备中' }}</span>
+          <span v-if="sessionTask?.status === 'RUNNING' && taskPace(sessionTask)" style="color:#999;font-size:12px">{{ taskPace(sessionTask) }}</span>
           <span v-if="sessionTask?.status === 'RUNNING' && sessionTask.chapterTokens != null" style="font-size:13px;color:#606266">本章 {{ sessionTask.chapterTokens.toLocaleString() }} tokens</span>
           <span style="flex:1"></span>
           <el-button v-if="sessionTask?.status === 'RUNNING'" size="small" type="danger" @click="stopTask(sessionTask)">停止</el-button>
@@ -324,12 +306,39 @@
                  style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
             <div style="white-space:pre-wrap; border-left: 3px solid #409eff; padding-left: 10px; font-size: 14px; line-height: 1.9">{{ t.text }}<span v-if="t.streaming && t.text" style="color:#409eff">▍</span></div>
           </div>
+          <!-- 卷规划/审校：流式思考块（JSON 正文不逐字展示，思考流才是透明化主体） -->
+          <div v-else-if="t.type === 'pstream'">
+            <div style="color:#e6a23c;font-size:13px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+              <b>{{ t.title }}</b>
+              <el-tag v-if="t.streaming" type="warning" size="small" effect="plain">{{ t.think ? '思考中…' : '打包上下文中…' }}</el-tag>
+              <el-link v-if="t.think" type="info" :underline="false" style="font-size:12px" @click="t.thinkOpen = !t.thinkOpen">
+                {{ t.thinkOpen ? '收起思考' : `思考（${t.think.length}字）` }}
+              </el-link>
+            </div>
+            <div v-if="t.think && (t.thinkOpen || t.streaming)"
+                 style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
+          </div>
           <!-- 通用步骤/判定行 -->
-          <div v-else style="font-size: 13px; display: flex; align-items: baseline; gap: 8px">
+          <div v-else style="font-size: 13px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap">
             <span :style="{ color: t.color || '#606266' }">▸ {{ t.title }}</span>
             <span v-if="t.note" style="color:#999;font-size:12px">{{ t.note }}</span>
             <el-link v-if="t.reason" type="danger" :underline="false" style="font-size:12px" @click="t.open = !t.open">{{ t.open ? '收起原因' : '原因' }}</el-link>
             <div v-if="t.reason && t.open" style="width:100%; white-space:pre-wrap; color:#c45656; font-size:12px; background:#fef0f0; padding:6px 10px; border-radius:4px; margin-top:4px">{{ t.reason }}</div>
+            <template v-if="t.logId">
+              <el-link type="primary" :underline="false" style="font-size:12px" @click="toggleLogDetail(t)">
+                {{ t.detailOpen ? '收起详情' : (t.detailLoading ? '加载中…' : '思考与结果') }}
+              </el-link>
+              <div v-if="t.detailOpen && t.detail" style="width:100%; margin-top:4px; border:1px solid #ebeef5; border-radius:6px; padding:8px 10px; background:#fafcff">
+                <div v-if="t.detail.reasoningText" style="margin-bottom:8px">
+                  <div style="font-size:12px; color:#8a8f99; margin-bottom:4px">▸ 思考（{{ t.detail.reasoningText.length }} 字）</div>
+                  <div style="white-space:pre-wrap; color:#8a8f99; font-size:12px; border-left:3px solid #d9dee5; padding-left:10px; max-height:260px; overflow-y:auto">{{ t.detail.reasoningText }}</div>
+                </div>
+                <div v-if="t.detail.content">
+                  <div style="font-size:12px; color:#606266; margin-bottom:4px">▸ 最终输出（{{ t.detail.content.length }} 字）</div>
+                  <div style="white-space:pre-wrap; font-size:13px; line-height:1.8; color:#303133; max-height:420px; overflow-y:auto">{{ t.detail.content }}</div>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
         <el-empty v-if="!transcript.length" description="暂无转录事件（打开后自动读取本章已完成部分，新事件实时追加）" :image-size="60" />
@@ -339,7 +348,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, nextTick, reactive, computed } from 'vue'
+import { onMounted, onUnmounted, ref, nextTick, reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
@@ -353,23 +362,9 @@ const novels = ref([])
 const novelId = ref(null)
 const manual = ref(false)
 const planManual = ref(false)
-const wizardOpen = ref(false)
-const wizardStep = ref(0)
-const wizardBusy = ref(false)
-const wizardCreated = ref(null)
-const wizardForm = ref({ title: '', description: '', presetId: null, outline: '' })
-const presets = ref([])
-// 开书向导·导入分析模式
-const presetMode = ref('select')
-const sampleForm = ref({ name: '', text: '' })
-const analyzing = ref(false)
-const analyzeResult = ref(null)
-const newGenreForm = ref({ genre: '', presetName: '' })
-const adopting = ref(false)
-const chosenPresetName = ref('')
-const bestSim = computed(() => analyzeResult.value?.similarities?.find((s) => s.comparable) || null)
 const from = ref(2)
 const to = ref(2)
+const runPriority = ref(1)
 const running = ref(false)
 const lastMessage = ref('')
 const queue = ref([])
@@ -410,8 +405,120 @@ function openSession(row) {
 /** 会话打底：中途打开/刷新后打开也不是空的——把当前章已完成的部分（步骤/调用/判定）从 trace 读回来。
  *  每章只打一次底；之后的增量继续走 SSE。 */
 let sessionSeededKey = ''
+
+function planEventPayload(e) {
+  try { return JSON.parse(e.payloadJson || '{}') } catch { return {} }
+}
+
+function planEventTitle(e) {
+  const p = planEventPayload(e)
+  if (e.stage === 'volume_plan') {
+    if (e.phase === 'start') return `卷纲规划开始（第 ${p.volNo} 卷，从第 ${p.from} 章${p.to ? ' 到第 ' + p.to : ''} 章）`
+    if (e.phase === 'retry') return `第 ${p.round} 轮重写（${p.check}）`
+    if (e.phase === 'failed') return '卷纲规划放弃（轮次用尽）'
+    if (e.phase === 'adopted') return '卷纲落库'
+    if (e.phase === 'draft') return '卷纲草稿完成（待采纳）'
+  }
+  if (e.stage === 'volume_plan_review') {
+    if (e.phase === 'start') return `卷纲审校中（第 ${p.round} 轮）`
+    if (e.phase === 'verdict') return `卷纲审校第 ${p.round} 轮：${p.verdict || 'PASS'}`
+    return `卷纲审校 · ${e.phase || '判定'}`
+  }
+  return `${e.stage} ${e.phase || ''}`
+}
+
+function planEventReason(e) {
+  const p = planEventPayload(e)
+  return p.reason || (p.issues && p.issues.join('；')) || ''
+}
+
+/** 会话行展开：懒加载该次调用的思考与最终输出（详情走台账接口，避免大文本随转录全量加载）。 */
+async function toggleLogDetail(t) {
+  t.detailOpen = !t.detailOpen
+  if (!t.detailOpen || t.detail || t.detailLoading || !t.logId) return
+  t.detailLoading = true
+  try {
+    const d = await api.get(`/api/llm-logs/${t.logId}`)
+    t.detail = { reasoningText: d.reasoningText || '', content: d.content || '' }
+  } catch (e) {
+    ElMessage.error(e.message)
+    t.detailOpen = false
+  } finally {
+    t.detailLoading = false
+  }
+}
+
+/** 门禁报告 → 失败项摘要（机械门禁逐项"指标=实测（限值，基线）"；读者/审校报告给判定+注水率+问题清单）。 */
+function gateFailBrief(result) {
+  try {
+    if (!result) return ''
+    if (Array.isArray(result.checks)) {
+      const bad = result.checks.filter((c) => c && c.ok === false)
+      if (!bad.length) return ''
+      return bad.map((c) => `${c.check}=${c.value}（限 ${c.abs_max}${c.baseline != null ? '，基线 ' + c.baseline : ''}）`).join('；')
+    }
+    if (result.verdict) {
+      return [result.verdict !== 'pass' ? `判定 ${result.verdict}` : '',
+        result.fat_ratio != null ? `注水率 ${result.fat_ratio}` : '',
+        ...(result.issues || [])].filter(Boolean).join('；')
+    }
+  } catch { /* 报告缺字段不拦回放 */ }
+  return ''
+}
+
 async function seedSession(row) {
-  if (!row || row.kind === 'PLAN' || !row.currentChapter || !novelId.value) return
+  // OUTLINE（章纲批量）任务：从事件流水打底，逐章出纲过程可见
+  if (row && row.kind === 'OUTLINE') {
+    const seedKey = `outline-${row.id}-${row.novelTitle}`
+    if (seedKey === sessionSeededKey) return
+    sessionSeededKey = seedKey
+    try {
+      const novel = novels.value.find((n) => n.title === row.novelTitle)
+      if (!novel) return
+      const all = await api.get(`/api/llm-logs/events?novelId=${novel.id}&limit=200`)
+      const scoped = all.filter((e) => e.stage === 'outline' && planEventPayload(e).taskId === row.id)
+        .slice(0, 40).reverse()
+        .map((e) => {
+          const p = planEventPayload(e)
+          return { type: 'line', title: `第 ${e.chapterNo ?? '?'} 章 · 章纲 ${e.phase}`,
+            note: p.sceneCount ? `${p.sceneCount} 个场景` : (p.reason || ''),
+            color: e.phase === 'failed' ? '#c45656' : e.phase === 'start' ? '#e6a23c' : '#67c23a' }
+        })
+      transcript.value.push({ type: 'header', chapterNo: 0, title: `章纲批量生成（任务 #${row.id}）——已发生的过程回放` })
+      transcript.value.push(...scoped)
+      if (!scoped.length) transcript.value.push({ type: 'line', title: '暂无章纲事件（生成中，完成后此处实时出现每章进度）' })
+      scrollSession()
+    } catch { /* 打底失败留空，SSE 增量照常 */ }
+    return
+  }
+  // PLAN（卷纲规划）任务：从事件流水打底，卷纲过程对用户可见
+  if (row && row.kind === 'PLAN') {
+    const seedKey = `plan-${row.id}-${row.novelTitle}`
+    if (seedKey === sessionSeededKey) return
+    sessionSeededKey = seedKey
+    try {
+      const novel = novels.value.find((n) => n.title === row.novelTitle)
+      if (!novel) return
+      // 事件按 id DESC（新→旧）。任务打界：载荷带 taskId 的任务级事件（queued/stopped）框定本任务的
+      // 事件区间——旧任务的失败史不再混进本次回放（多次重跑会话曾被误读成"一直失败"）。
+      const all = await api.get(`/api/llm-logs/events?novelId=${novel.id}&limit=200`)
+      const taskEvIds = all.filter((e) => planEventPayload(e).taskId === row.id).map((e) => e.id)
+      const lo = taskEvIds.length ? Math.min(...taskEvIds) : null
+      const scoped = lo == null ? all : all.filter((e) => e.id >= lo)
+      const seed = scoped
+        .filter((e) => ['volume_plan', 'volume_plan_review'].includes(e.stage))
+        .slice(0, 12)
+        .reverse() // 转录按时间正序展示（旧在上）；取最新 12 条
+        .map((e) => ({ type: 'line', title: planEventTitle(e), reason: planEventReason(e),
+          color: e.phase === 'failed' ? '#c45656' : e.phase === 'retry' ? '#e6a23c' : '#67c23a' }))
+      transcript.value.push({ type: 'header', chapterNo: 0, title: `卷纲规划（任务 #${row.id}）——已发生的过程回放` })
+      transcript.value.push(...seed)
+      if (!seed.length) transcript.value.push({ type: 'line', title: '暂无卷纲事件（首轮生成中，完成后此处实时出现轮次与判定）' })
+      scrollSession()
+    } catch { /* 打底失败留空，SSE 增量照常 */ }
+    return
+  }
+  if (!row || !row.currentChapter || !novelId.value) return
   const seedKey = `${row.id}-${row.currentChapter}`
   if (seedKey === sessionSeededKey) return
   try {
@@ -429,9 +536,11 @@ async function seedSession(row) {
     for (const c of t.calls || []) entries.push({ time: c.createTime,
       line: { type: 'line', title: `${NODE_LABEL[c.node] || c.node}${c.status === 'error' ? '（失败）' : ''}`,
         note: `${(c.totalTokens || 0).toLocaleString()} tok · ${(c.latencyMs / 1000).toFixed(0)}s${c.cost != null ? ' · ¥' + c.cost.toFixed(4) : ''}`,
+        logId: c.id,
         color: c.status === 'error' ? '#c45656' : '#606266' } })
     for (const k of t.checks || []) entries.push({ time: k.createTime,
       line: { type: 'line', title: `${GATE_LABEL[k.gateType] || k.gateType}${k.sceneId ? ' · 场景级' : ''} · 第 ${k.round || 1} 轮 · ${k.passed ? '通过' : '未过'}`,
+        reason: k.passed ? undefined : (gateFailBrief(k.result) || undefined),
         color: k.passed ? '#67c23a' : '#e6a23c' } })
     entries.sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
     for (const e of entries) seed.push(e.line)
@@ -444,6 +553,22 @@ async function seedSession(row) {
 
 function findTranscriptScene(d) {
   return [...transcript.value].reverse().find((t) => t.type === 'scene' && t.chapterNo === d.chapterNo && t.sceneNo === d.sceneNo)
+}
+
+/** 卷规划/审校思考流：同标签的流式块追加增量，没有就新开一块（重写轮各自成块）。 */
+function upsertPlanThink(label, delta) {
+  if (!delta) return
+  let t = [...transcript.value].reverse().find((x) => x.type === 'pstream' && x.title === label && x.streaming)
+  if (!t) {
+    t = { type: 'pstream', title: label, think: '', thinkOpen: false, streaming: true }
+    transcript.value.push(t)
+  }
+  t.think += delta
+}
+
+function closePlanThink(label) {
+  const t = [...transcript.value].reverse().find((x) => x.type === 'pstream' && x.title === label && x.streaming)
+  if (t) t.streaming = false
 }
 
 /** SSE 事件 → 转录条目（与日志并行累积；本页会话期间有效，历史回溯走章节抽屉·档案）。 */
@@ -500,15 +625,32 @@ function pushTranscript(event, d) {
   } else if (event === 'heal') {
     transcript.value.push({ type: 'line', title: '自愈', note: d.message, color: '#e6a23c' })
   } else if (event === 'outline') {
-    transcript.value.push({ type: 'line', title: `章纲 ${d.phase}`, note: d.sceneCount ? d.sceneCount + ' 个场景' : '', color: '#67c23a' })
+    const label = d.chapterNo ? `第 ${d.chapterNo} 章 · 章纲 ${d.phase}` : `章纲 ${d.phase}`
+    transcript.value.push({ type: 'line', title: label,
+      note: d.sceneCount ? d.sceneCount + ' 个场景' : (d.reason || ''),
+      color: d.phase === 'failed' ? '#c45656' : d.phase === 'start' ? '#e6a23c' : '#67c23a' })
   } else if (event === 'assemble') {
     transcript.value.push({ type: 'line', title: `拼章完成（${d.chars} 字），章级门禁检测中`, color: '#909399' })
-  } else if (event === 'volume_plan') {
-    if (d.phase === 'retry') transcript.value.push({ type: 'line', title: `卷纲规划第 ${d.round} 轮重写（${d.check}）`, reason: d.reason, color: '#e6a23c' })
-    else if (d.phase === 'failed') transcript.value.push({ type: 'line', title: '卷纲规划放弃（轮次用尽）', reason: d.reason, color: '#c45656' })
-    else if (d.phase === 'start') transcript.value.push({ type: 'line', title: `卷纲规划开始（第 ${d.volNo} 卷，从第 ${d.from} 章）`, color: '#67c23a' })
-    else if (d.phase === 'adopted') transcript.value.push({ type: 'line', title: `卷纲落库（${d.chapters} 章）`, color: '#67c23a' })
-    else if (d.phase === 'draft') transcript.value.push({ type: 'line', title: '卷纲草稿完成（manual 待采纳）', color: '#67c23a' })
+  } else if (event === 'volume_plan' || event === 'volume_plan_review') {
+    const label = event === 'volume_plan' ? '卷纲规划' : '卷纲审校'
+    if (d.phase === 'chunk') {
+      upsertPlanThink(label, d.delta)
+    } else if (event === 'volume_plan_review') {
+      if (d.phase === 'start') {
+        transcript.value.push({ type: 'line', title: `卷纲审校中（第 ${d.round} 轮）`, color: '#e6a23c' })
+      } else if (d.phase === 'verdict') {
+        transcript.value.push({ type: 'line', title: `卷纲审校第 ${d.round} 轮：${d.verdict}`,
+          reason: (d.issues || []).join('\n') || undefined, color: d.verdict === 'BLOCKER' ? '#e6a23c' : '#67c23a' })
+      }
+      closePlanThink(label)
+    } else {
+      closePlanThink(label)
+      if (d.phase === 'retry') transcript.value.push({ type: 'line', title: `卷纲规划第 ${d.round} 轮重写（${d.check}）`, reason: d.reason, color: '#e6a23c' })
+      else if (d.phase === 'failed') transcript.value.push({ type: 'line', title: '卷纲规划放弃（轮次用尽）', reason: d.reason, color: '#c45656' })
+      else if (d.phase === 'start') transcript.value.push({ type: 'line', title: `卷纲规划开始（第 ${d.volNo} 卷，从第 ${d.from} 章）`, color: '#67c23a' })
+      else if (d.phase === 'adopted') transcript.value.push({ type: 'line', title: `卷纲落库（${d.chapters} 章）`, color: '#67c23a' })
+      else if (d.phase === 'draft') transcript.value.push({ type: 'line', title: '卷纲草稿完成（manual 待采纳）', color: '#67c23a' })
+    }
   } else if (event === 'volume_retro') {
     transcript.value.push({ type: 'line', title: `卷级复盘 ${d.phase}`, color: '#909399' })
   }
@@ -518,28 +660,12 @@ let es = null
 let poll = null
 
 const readerStd = reactive({ reader_fat_ratio_block: 0.33, reader_fat_ratio_hard: 0.5, reader_fix_len_min: 0.75, reader_fix_len_max: 1.15, ai_review_fix_floor: 0.6 })
-const stdSaving = ref(false)
 
 async function loadStd() {
   if (!novelId.value) return
   try {
     Object.assign(readerStd, await api.get(`/api/novels/${novelId.value}/reader-standards`))
   } catch { /* 回显失败保持默认 */ }
-}
-
-async function saveStd() {
-  stdSaving.value = true
-  try {
-    const raw = await api.get(`/api/novels/${novelId.value}/gate-config`)
-    const cfg = JSON.parse(raw || '{}')
-    Object.assign(cfg, JSON.parse(JSON.stringify(readerStd)))
-    await api.put(`/api/novels/${novelId.value}/gate-config`, { gateConfig: JSON.stringify(cfg) })
-    ElMessage.success('评审标准已写入本书门禁配置，立即生效')
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    stdSaving.value = false
-  }
 }
 
 const COLORS = {
@@ -736,118 +862,10 @@ async function switchPlanMode() {
   }
 }
 
-/** 开书向导：预设列表加载 → 三步创建（基本信息 / 大纲 / 完成指引）。 */
-async function openWizard() {
-  wizardStep.value = 0
-  wizardCreated.value = null
-  wizardForm.value = { title: '', description: '', presetId: null, outline: '' }
-  presetMode.value = 'select'
-  sampleForm.value = { name: '', text: '' }
-  analyzeResult.value = null
-  newGenreForm.value = { genre: '', presetName: '' }
-  chosenPresetName.value = ''
-  try {
-    presets.value = await api.get('/api/preset/list')
-    if (presets.value.length) wizardForm.value.presetId = presets.value[0].id
-  } catch (e) {
-    presets.value = []
-    ElMessage.error(e.message)
-  }
-  wizardOpen.value = true
-}
-
-/** 导入小说分析：切块即落库（品类名唯一化，语料永久可复用），返回与现有品类的相似度与建议。 */
-async function analyzeSample() {
-  analyzing.value = true
-  try {
-    analyzeResult.value = await api.post('/api/preset/analyze', {
-      sampleName: sampleForm.value.name,
-      text: sampleForm.value.text
-    })
-    newGenreForm.value.genre = analyzeResult.value.genre
-    newGenreForm.value.presetName = (sampleForm.value.name.trim() || analyzeResult.value.genre) + '·自动提取v1'
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    analyzing.value = false
-  }
-}
-
-function usePreset(sim) {
-  wizardForm.value.presetId = sim.presetId
-  chosenPresetName.value = sim.name
-}
-
-/** 一键建品类：切块落语料 + 采纳为预设，随后当作普通预设继续向导。 */
-async function adoptFromSample() {
-  adopting.value = true
-  try {
-    const r = await api.post('/api/preset/from-sample', {
-      genre: newGenreForm.value.genre,
-      presetName: newGenreForm.value.presetName,
-      text: sampleForm.value.text
-    })
-    wizardForm.value.presetId = r.presetId
-    chosenPresetName.value = r.presetName
-    presets.value = await api.get('/api/preset/list')
-    ElMessage.success(`品类「${r.genre}」已建（${r.chunks} 块语料），预设已选用`)
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    adopting.value = false
-  }
-}
-
-function onSampleFile(ev) {
-  const f = ev.target.files && ev.target.files[0]
-  if (!f) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    sampleForm.value.text = String(reader.result || '')
-    if (!sampleForm.value.name) sampleForm.value.name = f.name.replace(/\.txt$/i, '')
-  }
-  reader.readAsText(f, 'utf-8')
-  ev.target.value = ''
-}
-
-async function createNovel() {
-  wizardBusy.value = true
-  wizardStep.value = 2
-  wizardCreated.value = null
-  try {
-    const n = await api.post('/api/novels', {
-      title: wizardForm.value.title.trim(),
-      description: wizardForm.value.description.trim(),
-      presetId: wizardForm.value.presetId
-    })
-    if (wizardForm.value.outline.trim()) {
-      try {
-        await api.put(`/api/novels/${n.id}/planning/story`, { content: wizardForm.value.outline.trim() })
-      } catch (e2) {
-        ElMessage.warning(`作品已创建，但大纲保存失败（${e2.message}）——请到「规划」页补写`)
-      }
-    }
-    wizardCreated.value = n
-    novels.value = await api.get('/api/novels')
-    novelId.value = n.id
-    onNovelChange()
-  } catch (e) {
-    ElMessage.error(e.message)
-    wizardStep.value = 0
-  } finally {
-    wizardBusy.value = false
-  }
-}
-
-/** 向导收尾：关弹窗并直接落到规划页，接上「AI 规划一卷」那一步。 */
-function wizardDone() {
-  wizardOpen.value = false
-  router.push('/planning')
-}
 
 async function run() {
   try {
-    await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value })
+    await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value, priority: runPriority.value })
     scenes.value = []
     transcript.value = []
     sessionSeededKey = ''
@@ -936,13 +954,157 @@ function goPending() {
 }
 
 async function pollStatus() {
+  nowTick.value = Date.now()
   try {
     const s = await api.get('/api/pipeline/status')
     running.value = s.running
     lastMessage.value = s.lastMessage
     await loadQueue()
     await loadPending()
+    await loadAutoChain()
   } catch { /* 忽略轮询错误 */ }
+}
+
+// ===== 任务节奏读数：已运行/均章耗时/预计剩余（随 3s 轮询刷新） =====
+const nowTick = ref(Date.now())
+
+function taskPace(row) {
+  if (!row || row.status !== 'RUNNING' || (row.kind && row.kind !== 'CHAPTERS')) return ''
+  const t0 = new Date(String(row.createTime || '').replace(' ', 'T')).getTime()
+  if (!t0 || Number.isNaN(t0)) return ''
+  const elapsed = (nowTick.value - t0) / 60000
+  if (elapsed < 0.5) return ''
+  const done = row.doneChapters || 0
+  const total = row.totalChapters || 0
+  if (done < 1) return `已运行 ${Math.round(elapsed)} 分 · 首章进行中（完成 1 章后给出预计）`
+  const per = elapsed / done
+  const remain = Math.max(0, total - done) * per
+  const remainText = remain >= 90 ? `~${(remain / 60).toFixed(1)} 小时` : `~${Math.max(1, Math.round(remain))} 分`
+  return `已运行 ${Math.round(elapsed)} 分 · 均 ${per.toFixed(0)} 分/章 · 预计还需 ${remainText}`
+}
+
+// ===== 无人续跑链（P3）：状态条 + 恢复/启动 =====
+const autoChain = ref(null)
+const autoChainText = { OFF: '未启用', IDLE: '待启动', RUNNING: '续跑中', PAUSED: '已暂停', REACHED: '目标达成' }
+const autoChainTagType = computed(() => ({
+  RUNNING: 'success', REACHED: 'info', PAUSED: 'warning'
+}[autoChain.value?.state] || 'info'))
+
+async function loadAutoChain() {
+  try {
+    autoChain.value = novelId.value
+      ? await api.get(`/api/pipeline/novels/${novelId.value}/auto-continue`)
+      : null
+  } catch { /* 未启用/查询失败不展示 */ }
+}
+
+async function resumeAutoChain() {
+  try {
+    autoChain.value = await api.post(`/api/pipeline/novels/${novelId.value}/auto-continue/resume`)
+    ElMessage.success(autoChain.state === 'RUNNING' ? '续跑已恢复，任务已入队' : '续跑已启动，任务已入队')
+    await loadQueue()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+// ===== 本书生成参数（唯一修改入口：开书向导的设定落库后在此查看/修改） =====
+const deriveEditorOpen = ref(false)
+const deriveSaving = ref(false)
+const deriveEdit = ref(null)
+const waterGates = ref({ reader_fat_ratio_block: 0.33, reader_fat_ratio_hard: 0.5, ai_review_fix_floor: 0.6 })
+
+/** 拖动掺水量：预览换算结果并同步高级区三阈值（此后仍可手动覆盖）。 */
+watch(() => deriveEdit.value && deriveEdit.value.water, (w, old) => {
+  if (w == null || old == null || w === old) return
+  refreshWaterGates().then(() => {
+    readerStd.reader_fat_ratio_block = waterGates.value.reader_fat_ratio_block
+    readerStd.reader_fat_ratio_hard = waterGates.value.reader_fat_ratio_hard
+    readerStd.ai_review_fix_floor = waterGates.value.ai_review_fix_floor
+  })
+})
+
+const deriveTagOptions = ref([])
+async function openDeriveEditor() {
+  try {
+    const c = await api.get(`/api/novels/${novelId.value}/derive-config`)
+    deriveEdit.value = {
+      water: c.water ?? 50,
+      pov: c.pov || '第三人称限知',
+      povCharacter: c.povCharacter || '',
+      pacingNote: c.pacingNote || '',
+      chaptersPerVolume: c.chaptersPerVolume ?? 10,
+      targetChapters: c.targetChapters ?? 300,
+      autoContinue: !!c.autoContinue,
+      priority: c.priority ?? 1,
+      approvalMode: novel.value?.approvalMode === 'manual' ? 'manual' : 'auto',
+      tags: c.tags || []
+    }
+    // 源样本的 AI 标签作沿用建议
+    deriveTagOptions.value = []
+    if (c.sourceSampleId) {
+      const s = (await api.get('/api/preset/samples').catch(() => [])).find((x) => x.id === c.sourceSampleId)
+      if (s) deriveTagOptions.value = s.tags || []
+    }
+    await loadPlanMode()
+    await loadStd()
+    await refreshWaterGates()
+    deriveEditorOpen.value = true
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+/** 掺水量→三阈值换算预览（后端同一公式，弹窗内即时跟随）。 */
+async function refreshWaterGates() {
+  try {
+    waterGates.value = await api.get(`/api/novels/${novelId.value}/water-gates?water=${deriveEdit.value.water}`)
+  } catch { /* 预览失败保留上次值 */ }
+}
+
+async function saveDeriveEditor() {
+  deriveSaving.value = true
+  try {
+    const d = deriveEdit.value
+    await api.put(`/api/novels/${novelId.value}/derive-config`, {
+      deriveConfig: {
+        water: d.water,
+        pov: d.pov,
+        povCharacter: d.povCharacter.trim() || undefined,
+        pacingNote: d.pacingNote.trim() || undefined,
+        chaptersPerVolume: d.chaptersPerVolume,
+        targetChapters: d.targetChapters,
+        autoContinue: d.autoContinue,
+        priority: d.priority,
+        tags: (d.tags || []).length ? d.tags : []
+      }
+    })
+    if (novel.value && (d.approvalMode === 'manual') !== (novel.value.approvalMode === 'manual')) {
+      await api.put(`/api/novels/${novel.value.id}/approval-mode`, { mode: d.approvalMode })
+      novel.value.approvalMode = d.approvalMode
+      manual.value = d.approvalMode === 'manual'
+    }
+    if ((planManual.value ? 'manual' : 'auto') !== await currentPlanMode()) {
+      await api.put(`/api/novels/${novel.value.id}/planning/plan-mode`, { mode: planManual.value ? 'manual' : 'auto' })
+    }
+    // 质量口径五项合并写入本书门禁配置（三阈值已按掺水量换算/可被高级区手动覆盖）
+    const raw = await api.get(`/api/novels/${novelId.value}/gate-config`)
+    const cfg = JSON.parse(raw || '{}')
+    Object.assign(cfg, JSON.parse(JSON.stringify(readerStd)))
+    await api.put(`/api/novels/${novelId.value}/gate-config`, { gateConfig: JSON.stringify(cfg) })
+    ElMessage.success(d.autoContinue ? '已保存：无人续跑已启用，可点「启动续跑」开始' : '已保存，立即生效')
+    deriveEditorOpen.value = false
+    await loadAutoChain()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    deriveSaving.value = false
+  }
+}
+
+async function currentPlanMode() {
+  const m = await api.get(`/api/novels/${novel.value.id}/planning/mode`)
+  return m.planMode
 }
 
 function onNovelChange() {

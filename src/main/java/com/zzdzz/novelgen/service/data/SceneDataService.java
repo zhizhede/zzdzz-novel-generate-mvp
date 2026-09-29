@@ -12,6 +12,9 @@ public interface SceneDataService extends IService<SceneDTO> {
 
     List<SceneDTO> findByChapter(long chapterId);
 
+    /** 跨章全量场景（章号+场景号排序）——章纲 tab 全景展示。 */
+    List<SceneDTO> listByNovel(long novelId);
+
     Long findId(long chapterId, int sceneNo);
 
     int saveDraft(long chapterId, int sceneNo, String draftText);

@@ -16,6 +16,7 @@ public class SceneService {
 
     private final LlmPort llm;
     private final SceneDataService sceneData;
+    private final PromptTemplateService promptTemplates;
 
 
     public String generate(long novelId, long chapterId, int chapterNo,
@@ -45,12 +46,15 @@ public class SceneService {
     public String revise(long novelId, long chapterId, long sceneId, int sceneNo,
                          String draft, String gateFeedback, ContextPackerService.Pack pack,
                          LlmPort.StreamDelta onDelta) {
+        // 门禁重写 user = 场景包 + 上一稿 + 门禁意见（scene_revise/user，{key} 拼接段，库值优先）
+        String user = promptTemplates.getSection(LlmNode.SCENE_REVISE, "user",
+                java.util.Map.of("scene_user", pack.user(),
+                        "draft", draft == null ? "" : draft,
+                        "gate_feedback", gateFeedback == null ? "" : gateFeedback));
         LlmPort.ChatRequest req = new LlmPort.ChatRequest(
                 LlmNode.SCENE_REVISE, novelId, chapterId,
                 List.of(LlmPort.Message.system(pack.system()),
-                        LlmPort.Message.user(pack.user() + "\n\n【你上一稿】\n" + draft
-                                + "\n\n【门禁意见（只改被点名的问题，保持其余原样）】\n" + gateFeedback
-                                + "\n\n只输出修订后的完整正文。")),
+                        LlmPort.Message.user(user)),
                 LlmTemps.SCENE_REVISE);
         LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
         String text = cleanDraft(r.content());

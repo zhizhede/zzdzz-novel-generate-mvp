@@ -3,6 +3,8 @@ package com.zzdzz.novelgen.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
+import com.zzdzz.novelgen.llm.LlmNode;
+import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.dto.NovelDTO;
 import com.zzdzz.novelgen.model.dto.PresetCorpusDTO;
 import com.zzdzz.novelgen.model.dto.StylePackDTO;
@@ -35,6 +37,8 @@ public class GenrePresetService {
     private final StylePackDataService stylePackData;
     private final NovelDataService novelData;
     private final com.zzdzz.novelgen.service.data.ImportedSampleDataService sampleData;
+    private final com.zzdzz.novelgen.llm.LlmPort llm;
+    private final PromptTemplateService promptTemplates;
     private final ObjectMapper mapper;
 
     // ===== 语料 CRUD =====
@@ -127,7 +131,8 @@ public class GenrePresetService {
     }
 
     public List<PresetVO> listPresets() {
-        return stylePackData.listPresets().stream().map(PresetVO::from).toList();
+        return stylePackData.listPresets().stream()
+                .map(p -> PresetVO.from(p, stylePackData.findGateConfigById(p.getId()))).toList();
     }
 
     // ===== 开书向导·导入小说分析（机械层，零 LLM；语料即分析即落库——资产可复用，之后随时采纳/补料/重提） =====
@@ -139,7 +144,26 @@ public class GenrePresetService {
     static final double MATCH_THRESHOLD = 0.65;
     static final double NEW_THRESHOLD = 0.45;
 
-    public SampleAnalyzeVO analyze(String sampleName, String text) {
+    public SampleAnalyzeVO analyze(String sampleName, String text, String mobiBase64) {
+        if (text == null || text.isBlank()) {
+            if (mobiBase64 == null || mobiBase64.isBlank()) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "请提供小说正文或上传 mobi/azw 电子书");
+            }
+            byte[] file;
+            try {
+                file = java.util.Base64.getDecoder().decode(mobiBase64.contains(",")
+                        ? mobiBase64.substring(mobiBase64.indexOf(',') + 1)
+                        : mobiBase64);
+            } catch (IllegalArgumentException e) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "电子书文件解码失败，请重新选择文件");
+            }
+            if (file.length > 64 * 1024 * 1024) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "电子书文件过大（>64MB）");
+            }
+            com.zzdzz.novelgen.common.util.MobiExtractor.Extracted ex =
+                    com.zzdzz.novelgen.common.util.MobiExtractor.extract(file);
+            text = ex.text();
+        }
         String t = requireText(text, "小说正文必填");
         if (t.length() > ANALYZE_MAX_CHARS) {
             throw new BizException(ErrorCode.PARAM_ERROR, "正文超长（" + (t.length() / 10000) + " 万字 > 上限 800 万），请分段导入");
@@ -160,17 +184,17 @@ public class GenrePresetService {
         SampleAnalyzeVO vo = analyzeRows(genre, chunks);
         List<String> notes = new ArrayList<>(vo.notes());
         notes.add(0, "语料已存为品类「" + genre + "」（" + chunks.size() + " 块）：之后可随时在素材库·品类预设里补料、重提或采纳");
-        SampleAnalyzeVO result = new SampleAnalyzeVO(vo.chunks(), vo.totalChars(), vo.lowConfidence(), vo.budgetMin(), vo.budgetMax(),
+        long sampleId = recordSample(base.isBlank() ? genre : base, genre, chunks.size(), vo.totalChars(), vo);
+        SampleAnalyzeVO result = new SampleAnalyzeVO(sampleId, vo.chunks(), vo.totalChars(), vo.lowConfidence(), vo.budgetMin(), vo.budgetMax(),
                 vo.metricCount(), vo.fingerprintJson(), genre, vo.recommendation(), vo.similarities(), notes);
-        recordSample(base.isBlank() ? genre : base, genre, chunks.size(), result.totalChars(), result);
         return result;
     }
 
-    /** 导入即入台账：素材库「导入小说」专页的一行（分析快照全文落库，可复用/回看）。 */
-    private void recordSample(String title, String genre, int chunks, long chars, SampleAnalyzeVO analysis) {
+    /** 导入即入台账：素材库「导入小说」专页的一行（分析快照全文落库，可复用/回看）。返回台账行 id。 */
+    private long recordSample(String title, String genre, int chunks, long chars, SampleAnalyzeVO analysis) {
         try {
             String json = mapper.writeValueAsString(analysis);
-            sampleData.insert(title.length() > 256 ? title.substring(0, 256) : title,
+            return sampleData.insert(title.length() > 256 ? title.substring(0, 256) : title,
                     genre, chunks, chars, "wizard", json);
         } catch (Exception e) {
             throw new IllegalStateException("导入样本台账落库失败", e);
@@ -232,7 +256,7 @@ public class GenrePresetService {
             notes.add("样本 " + chunks.size() + " 块偏少（低置信）：带宽按 min/max 放宽计算，建议继续补语料");
         }
         notes.add("分析只看机械指标（用词/句式/节奏的分布），题材与情节维度属后续 LLM 提取批");
-        return new SampleAnalyzeVO(chunks.size(), totalChars, chunks.size() < 10,
+        return new SampleAnalyzeVO(null, chunks.size(), totalChars, chunks.size() < 10,
                 (int) band[0], (int) band[1], baseline.size(), fingerprintJson,
                 genre, recommendation, sims, notes);
     }
@@ -443,6 +467,61 @@ public class GenrePresetService {
 
     static double round2(double v) {
         return Math.round(v * 100) / 100.0;
+    }
+
+    /** 文风规则提炼：语料节选 → LLM 规则列表 → 写回本书风格包 rules_md（场景 system 直接采用）。
+     * 语料定位：本书 derive_config.sourceSampleId 的品类，其次风格包上直接关联的导入样本品类。 */
+    public String extractRulesForNovel(long novelId) {
+        NovelDTO novel = novelData.getById(novelId);
+        if (novel == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
+        }
+        String genre = resolveRulesGenre(novel);
+        if (genre == null || genre.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "本书没有关联样本语料（开书时选参考样本或克隆预设后才有）——无法提炼文风规则");
+        }
+        List<PresetCorpusDTO> rows = corpusData.listByGenre(genre);
+        if (rows.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "品类「" + genre + "」无语料，无法提炼规则");
+        }
+        StringBuilder corpus = new StringBuilder();
+        int budget = 16000;
+        for (PresetCorpusDTO row : rows) {
+            if (budget <= 0) break;
+            String c = row.getContent() == null ? "" : row.getContent();
+            String piece = "\n【语料块】\n" + c.substring(0, Math.min(c.length(), 3000));
+            corpus.append(piece, 0, Math.min(piece.length(), budget));
+            budget -= Math.min(piece.length(), budget);
+        }
+        String user = promptTemplates.format(LlmNode.STYLE_RULES, "user", genre, corpus.toString());
+        LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(LlmNode.STYLE_RULES, novelId, null,
+                List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.STYLE_RULES, "system")),
+                        LlmPort.Message.user(user)), 0.3));
+        String rules = r.content() == null ? "" : r.content().strip();
+        if (rules.isEmpty()) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "规则提炼空输出，请重试");
+        }
+        stylePackData.updateRulesMdByNovel(novelId, rules);
+        return rules;
+    }
+
+    /** 本书语料品类：优先 derive_config.sourceSampleId 的样本品类；回退风格包上直接关联的导入样本。 */
+    private String resolveRulesGenre(NovelDTO novel) {
+        Long sampleId = com.zzdzz.novelgen.service.DeriveSupport
+                .parse(novelData.findDeriveConfig(novel.getId())).sourceSampleId();
+        if (sampleId != null) {
+            var s = sampleData.getById(sampleId);
+            if (s != null && s.getGenre() != null && !s.getGenre().isBlank()) return s.getGenre();
+        }
+        if (novel.getStylePackId() != null) {
+            return sampleData.listAlive().stream()
+                    .filter(s -> novel.getStylePackId().equals(s.getPresetId()))
+                    .map(s -> s.getGenre())
+                    .filter(g -> g != null && !g.isBlank())
+                    .findFirst().orElse(null);
+        }
+        return null;
     }
 
     private static String requireText(String s, String message) {

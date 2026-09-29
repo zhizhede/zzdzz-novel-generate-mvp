@@ -6,8 +6,10 @@ import java.util.List;
  * 开书向导·导入小说分析结果（纯机械，零 LLM）：
  * 切块即落库（preset_corpus，品类名唯一化——语料是可复用资产，之后随时补料/重提/采纳）
  * → 指纹基线 + 章长预算带 → 与现有品类逐个算相似度 → 复用/新建建议。
+ * sampleId=本次导入在 imported_samples 的台账行 id（前端跳素材库深度解析定位用）。
  */
 public record SampleAnalyzeVO(
+        Long sampleId,
         int chunks,
         long totalChars,
         boolean lowConfidence,

@@ -13,6 +13,12 @@ public interface ChapterMapper extends BaseMapper<ChapterDTO> {
 
     Integer maxChapterWithText(@Param("novelId") long novelId);
 
+    Integer nextPlannedChapterNo(@Param("novelId") long novelId, @Param("afterNo") int afterNo);
+
+    Integer maxPlannedChapterNo(@Param("novelId") long novelId);
+
+    Integer maxVolumeNo(@Param("novelId") long novelId);
+
     ChapterDTO findByNovelAndNo(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
 
     List<ChapterDTO> listSummaries(@Param("novelId") long novelId);

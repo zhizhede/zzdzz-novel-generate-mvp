@@ -235,6 +235,51 @@
         </el-table>
       </el-tab-pane>
 
+      <!-- 模型接入（baseUrl/apiKey 落库，密文存储） -->
+      <el-tab-pane :label="`模型接入（${llmProviders.length}）`">
+        <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
+          <el-button size="small" type="primary" plain @click="openProvider(null)">新建接入</el-button>
+          <span style="color: #999; font-size: 12px">
+            按用途各留一条启用行——会话（正文/审校等 OpenAI 兼容调用）与向量化（RAG，MiniMax 私有协议）互不影响；
+            启用新行只自动停用同用途旧行，下次调用即生效。API key 以 AES-GCM 密文落库，界面只回显掩码、永不回传明文。
+            某用途无启用行时回退服务端本地配置。
+          </span>
+        </div>
+        <el-table :data="llmProviders" border size="small" style="max-width: 1080px">
+          <el-table-column prop="name" label="名称" width="130" />
+          <el-table-column label="用途" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.role === 'embedding' ? 'warning' : 'primary'">
+                {{ row.role === 'embedding' ? '向量化' : '会话' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="baseUrl" label="baseUrl" min-width="200" show-overflow-tooltip />
+          <el-table-column label="默认模型" width="150">
+            <template #default="{ row }">{{ row.model || '（节点路由/调用方默认）' }}</template>
+          </el-table-column>
+          <el-table-column label="API key" width="150">
+            <template #default="{ row }"><code style="font-size: 12px">{{ row.keyMasked }}</code></template>
+          </el-table-column>
+          <el-table-column label="超时（连/读 秒）" width="120">
+            <template #default="{ row }">{{ row.connectTimeoutMs == null ? '默认' : Math.round(row.connectTimeoutMs / 1000) }} / {{ row.readTimeoutMs == null ? '默认' : Math.round(row.readTimeoutMs / 1000) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="70">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '使用中' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="remark" label="备注" min-width="100" show-overflow-tooltip />
+          <el-table-column label="操作" width="200">
+            <template #default="{ row }">
+              <el-button size="small" @click="openProvider(row)">编辑</el-button>
+              <el-button size="small" type="primary" plain :loading="providerTesting" @click="testProvider(row)">测试</el-button>
+              <el-button size="small" type="danger" plain @click="delProvider(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <!-- 调参（平台级行为参数） -->
       <el-tab-pane :label="`调参（${tunings.length}）`">
         <div style="color: #999; font-size: 12px; margin-bottom: 8px">
@@ -261,23 +306,31 @@
       <el-tab-pane :label="`提示词（${prompts.length}）`">
         <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px">
           <span style="color: #999; font-size: 12px">
-            各 LLM 节点的提示词模板（启动时与代码同步落库）。本页只读；%s/%d 为运行时占位。
+            所有 LLM 节点提示词与拼装段全量落库：运行时库值优先、代码为回退。%s/%d 为 format 占位（保存时校验序列），{key} 为拼装段占位（代码填参）；停用行即回退代码版。
           </span>
           <el-input v-model="promptFilter" placeholder="按节点/标题筛选" size="small" clearable style="width: 220px" />
+          <el-button type="primary" size="small" @click="openPromptCreate">新建提示词</el-button>
         </div>
-        <el-table :data="filteredPrompts" border size="small" style="max-width: 1020px" @row-click="(r) => viewPrompt(r.id)">
+        <el-table :data="filteredPrompts" border size="small" style="max-width: 1180px" @row-click="(r) => viewPrompt(r.id)">
           <el-table-column prop="node" label="节点" width="150" />
-          <el-table-column prop="phase" label="阶段" width="70" />
-          <el-table-column prop="title" label="用途" min-width="260" show-overflow-tooltip />
-          <el-table-column label="形态" width="80">
+          <el-table-column prop="phase" label="阶段" width="110" />
+          <el-table-column prop="title" label="用途" min-width="240" show-overflow-tooltip />
+          <el-table-column label="形态" width="90">
             <template #default="{ row }">
-              <el-tag :type="row.exact ? 'success' : 'warning'" size="small">{{ row.exact ? '逐字' : '骨架' }}</el-tag>
+              <el-tag :type="row.exact ? 'success' : 'info'" size="small">{{ row.exact ? 'format' : '{key}段' }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column label="来源" width="70">
             <template #default="{ row }">
               <el-tag v-if="row.custom" type="danger" size="small">已改</el-tag>
               <span v-else style="color: #999; font-size: 12px">代码</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="启用" width="70">
+            <template #default="{ row }">
+              <span @click.stop>
+                <el-switch :model-value="row.enabled" size="small" @change="(v) => togglePromptEnabled(row, v)" />
+              </span>
             </template>
           </el-table-column>
           <el-table-column prop="version" label="版" width="50" />
@@ -287,31 +340,54 @@
           <el-table-column label="更新时间" width="150">
             <template #default="{ row }">{{ fmtTime(row.updateTime) }}</template>
           </el-table-column>
+          <el-table-column v-if="showPromptDelete" label="删" width="60">
+            <template #default="{ row }">
+              <el-button v-if="row.custom" size="small" type="danger" link
+                         @click.stop="deletePrompt(row)">删</el-button>
+            </template>
+          </el-table-column>
         </el-table>
 
         <el-drawer v-model="promptOpen" :title="promptDetail ? promptDetail.node + ' · ' + promptDetail.phase : '提示词'" size="55%">
           <template v-if="promptDetail">
             <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px; flex-wrap: wrap">
-              <el-tag size="small" :type="promptDetail.exact ? 'success' : 'warning'">
-                {{ promptDetail.exact ? '与代码逐字一致' : '运行时拼接骨架' }}
+              <el-tag size="small" :type="promptDetail.exact ? 'success' : 'info'">
+                {{ promptDetail.exact ? 'format 模板' : '{key} 拼接段' }}
               </el-tag>
               <el-tag v-if="promptDetail.custom" type="danger" size="small">人工已改</el-tag>
+              <el-tag v-if="!promptDetail.enabled" type="warning" size="small">已停用（走代码版）</el-tag>
               <span style="color: #999; font-size: 12px">v{{ promptDetail.version }} · {{ promptDetail.title }}</span>
               <el-button size="small" plain @click="copyPrompt">复制全文</el-button>
-              <template v-if="promptDetail.exact">
-                <el-button v-if="!promptEditing" size="small" type="primary" plain @click="promptContent = promptDetail.content; promptEditing = true">编辑</el-button>
-                <el-button v-else size="small" type="primary" :loading="promptSaving" @click="savePrompt">保存</el-button>
-                <el-button v-if="promptEditing" size="small" @click="promptEditing = false; loadPrompt()">取消</el-button>
-                <el-button v-if="promptDetail.custom" size="small" type="warning" plain @click="resetPrompt">重置回代码版</el-button>
-              </template>
+              <el-button v-if="!promptEditing" size="small" type="primary" plain @click="promptContent = promptDetail.content; promptEditing = true">编辑</el-button>
+              <el-button v-else size="small" type="primary" :loading="promptSaving" @click="savePrompt">保存</el-button>
+              <el-button v-if="promptEditing" size="small" @click="promptEditing = false; loadPrompt()">取消</el-button>
+              <el-button v-if="!promptDetail.custom" size="small" type="warning" plain @click="resetPrompt">重置回代码版</el-button>
             </div>
             <div style="color: #999; font-size: 12px; margin-bottom: 8px" v-if="promptEditing">
-              可直接改文案；%s/%d 占位符的数量与顺序必须保持不变（保存时校验）。保存后 30 秒内对新生效，格式化失败会自动回退代码模板。
+              可直接改文案：format 模板的 %s/%d 占位符数量与顺序必须保持不变（保存时校验）；{key} 拼接段的占位由代码填参，改文案即可。保存后 30 秒内对新生效，格式化失败会自动回退代码模板。
             </div>
             <el-input v-if="promptEditing" v-model="promptContent" type="textarea" :rows="24" />
             <pre v-else style="white-space: pre-wrap; background: #f7f8fa; padding: 12px; border-radius: 6px; font-size: 12px; line-height: 1.7">{{ promptDetail.content }}</pre>
           </template>
         </el-drawer>
+
+        <!-- 新建提示词 -->
+        <el-dialog v-model="promptCreateOpen" title="新建提示词" width="640px" append-to-body>
+          <div style="display: flex; gap: 10px; margin-bottom: 10px">
+            <el-input v-model="promptCreateForm.node" placeholder="节点（如 scene_draft）" />
+            <el-input v-model="promptCreateForm.phase" placeholder="阶段（≤32 字符，如 my_rule）" />
+          </div>
+          <el-input v-model="promptCreateForm.title" placeholder="用途说明（可选）" style="margin-bottom: 10px" />
+          <el-input v-model="promptCreateForm.content" type="textarea" :rows="10"
+                    placeholder="提示词内容。{key} 为运行时参数占位（由代码填充）；%s/%d 由 String.format 填充。" />
+          <div style="font-size: 12px; color: #999; margin-top: 6px">
+            自定义行永久保留（目录同步不覆盖）；删除仅限自定义行。内容是否生效取决于消费方是否读取该 node/phase。
+          </div>
+          <template #footer>
+            <el-button @click="promptCreateOpen = false">取消</el-button>
+            <el-button type="primary" :loading="promptCreating" @click="createPrompt">创建</el-button>
+          </template>
+        </el-dialog>
       </el-tab-pane>
 
         </el-tabs>
@@ -327,7 +403,8 @@
             <el-input v-model="styleRules" type="textarea" :rows="20" />
             <div style="margin-top: 8px">
               <el-button type="primary" @click="saveStyle">保存规则正文</el-button>
-              <span style="color: #999; font-size: 12px; margin-left: 10px">直改生成时的文风指令；指纹阈值不在此改</span>
+              <el-button :loading="rulesExtracting" @click="extractRules">AI 提炼文风规则</el-button>
+              <span style="color: #999; font-size: 12px; margin-left: 10px">提炼需本书关联了样本语料；规则进场景生成 system，指纹阈值不在此改</span>
             </div>
           </el-tab-pane>
           <el-tab-pane label="指纹基线（只读）" name="fingerprint">
@@ -343,9 +420,13 @@
               <div style="font-size: 13px; margin-bottom: 6px">AI 腔黑名单（每行一个，正文中出现即判未过）</div>
               <el-input v-model="bannedText" type="textarea" :rows="8" placeholder="心中暗想" />
               <div style="display: flex; gap: 12px; align-items: center; margin: 10px 0">
+                <span style="font-size: 13px">每章字数带（期望字数）</span>
+                <el-input-number v-model="budgetMin" :min="300" :max="20000" :step="100" size="small" style="width: 110px" />
+                <span style="font-size: 13px">至</span>
+                <el-input-number v-model="budgetMax" :min="300" :max="20000" :step="100" size="small" style="width: 110px" />
                 <span style="font-size: 13px">章长容差（±）</span>
                 <el-input-number v-model="lenTol" :min="0" :max="0.5" :step="0.05" size="small" />
-                <span style="color: #999; font-size: 12px">预算 2400-3200、容差 0.15 → 实际允许 2040-3680 字</span>
+                <span style="color: #999; font-size: 12px">卷规划按此带出预算并钳制；容差决定门禁实际允许宽度</span>
               </div>
               <div style="font-size: 13px; margin: 10px 0 6px">评审标准（本书覆盖，未列出的键继承平台调参）</div>
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
@@ -422,16 +503,21 @@
         </el-table>
       </el-tab-pane>
 
-      <!-- 导入小说（用户定调：输入的小说与全部分析落库可复用，专门分类展示） -->
+      <!-- 导入小说（用户定调：输入的小说与全部分析落库可复用，专门分类展示；深度解析出剧情/角色/世界观资产） -->
       <el-tab-pane :label="`导入小说（${samples.length}）`">
-        <div style="font-size: 12px; color: #999; margin-bottom: 8px">
-          在「工作台 → 开新书 → 导入我的小说分析」导入的每一本小说都在这里：切块语料入品类库（可补料/重提/采纳），当次分析结论（指纹基线/章长带/相似度/建议）全文留档可回看。
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px">
+          <el-button type="primary" size="small" @click="openSampleImport">导入新小说</el-button>
+          <span style="font-size: 12px; color: #999">
+            每本导入的小说：文风指纹/章长带即时分析留档；「深度解析」由 AI 拆出剧情结构（书/卷/章+场景拆解）、角色/物品/地点/组织资产卡与关系、世界观文档——全部落库，可在下方浏览、纠偏，衍生开书时克隆复用。
+            快速档抽样前 40 章出骨架（约几分钟）；完整档全书逐章（长篇 1-3 小时，可断点续跑）。
+          </span>
         </div>
-        <el-table :data="samples" border size="small" style="max-width: 980px">
+        <el-table :data="samples" border size="small" style="max-width: 1080px"
+                  :row-class-name="({ row }) => (row.id === highlightSampleId ? 'sample-highlight' : '')">
           <el-table-column type="expand">
             <template #default="{ row }">
               <div v-if="sampleAnalysis(row)" style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
-                <div><b>分析快照</b>（{{ sampleAnalysis(row).chunks }} 块 · {{ Math.round(sampleAnalysis(row).totalChars / 100) / 100 }} 万字 ·
+                <div><b>文风分析快照</b>（{{ sampleAnalysis(row).chunks }} 块 · {{ Math.round(sampleAnalysis(row).totalChars / 100) / 100 }} 万字 ·
                   章长带 {{ sampleAnalysis(row).budgetMin }}-{{ sampleAnalysis(row).budgetMax }} ·
                   {{ sampleAnalysis(row).metricCount }} 项指标 ·
                   建议：{{ { match: '复用现有', new: '建新品类', choice: '两可' }[sampleAnalysis(row).recommendation] || sampleAnalysis(row).recommendation }}）</div>
@@ -445,24 +531,66 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="title" label="小说名" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="genre" label="入库品类" min-width="120" show-overflow-tooltip />
-          <el-table-column label="块数" width="70">
-            <template #default="{ row }">{{ row.chunks }}</template>
-          </el-table-column>
-          <el-table-column label="字数" width="90">
+          <el-table-column prop="title" label="小说名" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="genre" label="入库品类" min-width="100" show-overflow-tooltip />
+          <el-table-column label="字数" width="85">
             <template #default="{ row }">{{ (row.totalChars / 10000).toFixed(1) }} 万</template>
           </el-table-column>
-          <el-table-column label="来源" width="80">
-            <template #default="{ row }">{{ row.source === 'wizard' ? '开书向导' : row.source === 'backfill' ? '历史回填' : row.source }}</template>
-          </el-table-column>
-          <el-table-column label="采纳预设" width="120">
+          <el-table-column label="采纳预设" width="85">
             <template #default="{ row }">
               <el-tag v-if="row.presetId" size="small" type="success">#{{ row.presetId }}</el-tag>
               <span v-else style="color: #999; font-size: 12px">未采纳</span>
             </template>
           </el-table-column>
-          <el-table-column label="导入时间" width="150">
+          <el-table-column label="深度解析" width="200">
+            <template #default="{ row }">
+              <template v-if="parseStatuses[row.id] && parseStatuses[row.id].status !== 'NONE'">
+                <div v-if="['QUEUED', 'RUNNING'].includes(parseStatuses[row.id].status)" style="width: 100%">
+                  <el-progress :percentage="parsePercent(row)" :stroke-width="10"
+                               :format="() => `${parseStatuses[row.id].doneUnits}/${parseStatuses[row.id].totalUnits}`" />
+                  <span style="font-size: 12px; color: #e6a23c">{{ stageLabel(parseStatuses[row.id].stage) }}</span>
+                </div>
+                <div v-else-if="parseStatuses[row.id].status === 'DONE'" style="font-size: 12px">
+                  <el-tag size="small" type="success">{{ parseStatuses[row.id].mode === 'FAST' ? '快速骨架' : '完整解析' }}</el-tag>
+                  <span style="color: #999; margin-left: 4px">
+                    {{ parseStatuses[row.id].chapterCount }} 章
+                    <template v-if="parseStatuses[row.id].volumeCount">/ {{ parseStatuses[row.id].volumeCount }} 卷</template>
+                    / {{ parseStatuses[row.id].cardCount }} 卡
+                  </span>
+                </div>
+                <el-tooltip v-else :content="parseStatuses[row.id].message || parseStatuses[row.id].status" placement="top">
+                  <el-tag size="small" type="danger">{{ parseStatuses[row.id].status === 'FAILED' ? '失败' : '已中断' }}</el-tag>
+                </el-tooltip>
+              </template>
+              <span v-else style="color: #999; font-size: 12px">未解析</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="标签" min-width="150">
+            <template #default="{ row }">
+              <template v-if="(row.tags || []).length">
+                <el-tag v-for="t in row.tags.slice(0, 4)" :key="t" size="small" style="margin-right: 4px">{{ t }}</el-tag>
+                <span v-if="row.tags.length > 4" style="font-size: 12px; color: #999">+{{ row.tags.length - 4 }}</span>
+              </template>
+              <span v-else style="color: #999; font-size: 12px">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="340">
+            <template #default="{ row }">
+              <el-button v-if="parseStatuses[row.id] && parseStatuses[row.id].chapterCount > 0"
+                         size="small" type="primary" link @click="openAssets(row)">资产</el-button>
+              <el-button v-if="parseStatuses[row.id] && parseStatuses[row.id].chapterCount > 0"
+                         size="small" link :loading="taggingId === row.id" @click="extractTags(row)">提标签</el-button>
+              <el-button v-if="!row.presetId" size="small" type="warning" link
+                         :loading="adoptingId === row.id" @click="adoptSamplePreset(row)">提预设</el-button>
+              <el-button v-if="canParse(row, 'FAST')" size="small" link @click="submitParse(row, 'FAST')">快速解析</el-button>
+              <el-button v-if="canParse(row, 'FULL')" size="small" link @click="submitParse(row, 'FULL')">
+                {{ parseStatuses[row.id] && parseStatuses[row.id].mode === 'FAST' ? '升级完整' : '完整解析' }}
+              </el-button>
+              <el-button v-if="parseStatuses[row.id] && ['FAILED', 'INTERRUPTED'].includes(parseStatuses[row.id].status)"
+                         size="small" type="warning" link @click="resumeParse(row)">继续解析</el-button>
+            </template>
+          </el-table-column>
+          <el-table-column label="导入时间" width="140">
             <template #default="{ row }">{{ (row.createTime || '').replace('T', ' ').slice(0, 16) }}</template>
           </el-table-column>
         </el-table>
@@ -506,7 +634,7 @@
 
     <!-- 模型路由编辑 -->
     <el-dialog v-model="nodeEditor" :title="nodeForm.id ? `编辑节点：${nodeForm.node}` : `新建节点路由：${nodeForm.node}`" width="560px">
-      <el-input v-model="nodeForm.model" placeholder="模型名（留空 = 全局默认 MiniMax-M3）" style="margin-bottom: 10px" />
+      <el-input v-model="nodeForm.model" placeholder="模型名（留空 = 会话接入行的默认模型）" style="margin-bottom: 10px" />
       <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 10px">
         <span style="font-size: 13px">温度（留空=调用方默认）</span>
         <el-input-number v-model="nodeForm.temperature" :min="0" :max="2" :step="0.1" size="small" style="width: 110px" />
@@ -521,6 +649,37 @@
       <template #footer>
         <el-button @click="nodeEditor = false">取消</el-button>
         <el-button type="primary" @click="saveNode">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 模型接入编辑 -->
+    <el-dialog v-model="providerEditor" :title="providerForm.id ? `编辑接入：${providerForm.name}` : '新建接入'" width="560px">
+      <el-input v-model="providerForm.name" placeholder="名称（唯一，如：DeepSeek 会话 / MiniMax 向量）" style="margin-bottom: 10px" />
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+        <span style="font-size: 13px; white-space: nowrap">用途</span>
+        <el-select v-model="providerForm.role" size="small" style="width: 160px">
+          <el-option label="会话（正文/审校等）" value="chat" />
+          <el-option label="向量化（RAG 检索）" value="embedding" />
+        </el-select>
+        <span style="color: #999; font-size: 12px">同用途内只留一条启用行；向量化必须指 MiniMax 兼容端点</span>
+      </div>
+      <el-input v-model="providerForm.baseUrl" placeholder="baseUrl（服务根路径，如 https://api.deepseek.com/v1，不带尾斜杠）" style="margin-bottom: 10px" />
+      <el-input v-model="providerForm.apiKey" type="password" show-password
+                :placeholder="providerForm.id ? 'API key（留空 = 保留原 key）' : 'API key（必填，加密后入库）'" style="margin-bottom: 10px" />
+      <el-input v-model="providerForm.model" placeholder="默认模型（会话如 deepseek-v4-flash；向量化如 embo-01）" style="margin-bottom: 10px" />
+      <div style="display: flex; gap: 14px; align-items: center; margin-bottom: 10px">
+        <span style="font-size: 13px">连接超时(秒)</span>
+        <el-input-number v-model="providerForm.connectTimeoutSec" :min="1" :max="120" size="small" style="width: 100px" />
+        <span style="font-size: 13px">读超时(秒，含响应体)</span>
+        <el-input-number v-model="providerForm.readTimeoutSec" :min="10" :max="1800" :step="30" size="small" style="width: 130px" />
+      </div>
+      <div style="display: flex; gap: 14px; align-items: center">
+        <el-switch v-model="providerForm.enabled" active-text="启用（自动停用同用途其它接入）" />
+        <el-input v-model="providerForm.remark" placeholder="备注" size="small" style="flex: 1" />
+      </div>
+      <template #footer>
+        <el-button @click="providerEditor = false">取消</el-button>
+        <el-button type="primary" @click="saveProvider">保存</el-button>
       </template>
     </el-dialog>
 
@@ -593,11 +752,143 @@
         </div>
       </template>
     </el-drawer>
+
+    <!-- 导入样本·解析资产浏览 -->
+    <el-drawer v-model="assetsOpen" :title="assetsData ? `《${assetsData.title}》解析资产` : ''" size="65%">
+      <template v-if="assetsData">
+        <el-tabs v-model="assetsTab">
+          <el-tab-pane name="plot" label="剧情结构">
+            <div v-if="assetsData.book" class="sample-book-summary">{{ assetsData.book.summary }}</div>
+            <div v-else style="color: #999; font-size: 13px">尚无全书大纲（解析完成或升级完整解析后生成）</div>
+            <div style="display: flex; gap: 12px; margin-top: 10px">
+              <el-tree :data="plotTree" node-key="key" highlight-current default-expand-all
+                       style="min-width: 260px; max-width: 340px; border: 1px solid #eee; padding: 4px"
+                       @node-click="onPlotNodeClick" />
+              <div style="flex: 1; min-width: 0">
+                <template v-if="plotDetail">
+                  <div style="font-weight: 600; margin-bottom: 6px">{{ plotDetail.title }}</div>
+                  <div style="font-size: 13px; line-height: 1.8; margin-bottom: 10px">{{ plotDetail.summary }}</div>
+                  <el-table v-if="(plotDetail.beats || []).length" :data="plotDetail.beats" border size="small">
+                    <el-table-column prop="goal" label="场景目标" min-width="160" show-overflow-tooltip />
+                    <el-table-column prop="conflict" label="冲突" min-width="160" show-overflow-tooltip />
+                    <el-table-column prop="outcome" label="收束" min-width="160" show-overflow-tooltip />
+                  </el-table>
+                  <div v-if="plotDetail.meta && plotDetail.meta.pseudo" style="color: #999; font-size: 12px; margin-top: 6px">
+                    原文无标准章标题，此段为自动伪章切分
+                  </div>
+                </template>
+                <div v-else style="color: #999; font-size: 13px; padding-top: 6px">点左侧树节点查看章节摘要与场景拆解</div>
+              </div>
+            </div>
+          </el-tab-pane>
+          <el-tab-pane name="cards" :label="`资产卡（${sampleCards.length}）`">
+            <div style="margin-bottom: 8px">
+              <el-button size="small" type="primary" plain @click="openSampleCardCreate">新建卡</el-button>
+              <span style="font-size: 12px; color: #999; margin-left: 6px">AI 漏抽的实体在这里手工补录（重新解析会重建全部卡）</span>
+            </div>
+            <el-table :data="sampleCards" border size="small">
+              <el-table-column type="expand">
+                <template #default="{ row }">
+                  <div style="padding: 4px 12px; font-size: 13px">
+                    <div v-if="row.contentMd" style="white-space: pre-wrap; margin-bottom: 8px">{{ row.contentMd }}</div>
+                    <div v-for="(r, i) in row.relations || []" :key="i" style="color: #666">
+                      关系 · {{ r.target }}（{{ r.kind }}）{{ r.note ? '：' + r.note : '' }}
+                    </div>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="类型" width="70">
+                <template #default="{ row }">{{ sampleKindLabel[row.kind] || row.kind }}</template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" min-width="120" />
+              <el-table-column label="别名" min-width="140" show-overflow-tooltip>
+                <template #default="{ row }">{{ (row.aliases || []).join('、') }}</template>
+              </el-table-column>
+              <el-table-column label="重要度" width="70">
+                <template #default="{ row }">{{ '★'.repeat(row.importance || 1) }}</template>
+              </el-table-column>
+              <el-table-column prop="mentions" label="提及章数" width="80" />
+              <el-table-column prop="firstSeq" label="首现章" width="70" />
+              <el-table-column prop="summary" label="摘要" min-width="200" show-overflow-tooltip />
+              <el-table-column label="操作" width="110">
+                <template #default="{ row }">
+                  <el-button size="small" link @click="openSampleCard(row)">编辑</el-button>
+                  <el-button size="small" type="danger" link @click="delSampleCard(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane name="relations" :label="`关系（${sampleRelations.length}）`">
+            <el-table :data="sampleRelations" border size="small">
+              <el-table-column prop="from" label="主体" min-width="120" />
+              <el-table-column prop="kind" label="关系" min-width="110" />
+              <el-table-column prop="target" label="对象" min-width="120" />
+              <el-table-column prop="note" label="说明" min-width="220" show-overflow-tooltip />
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane name="world" label="世界观">
+            <div v-if="worldCard" style="white-space: pre-wrap; font-size: 13px; line-height: 1.9">{{ worldCard.contentMd }}</div>
+            <div v-else style="color: #999; font-size: 13px">尚无世界观文档（解析完成后生成）</div>
+          </el-tab-pane>
+        </el-tabs>
+      </template>
+    </el-drawer>
+
+    <!-- 导入样本·资产卡纠偏/新建 -->
+    <el-dialog v-model="sampleCardEditor" :title="sampleCardForm.id ? '资产卡纠偏' : '新建资产卡'" width="640px">
+      <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+        <template v-if="sampleCardForm.id">
+          <b>{{ sampleCardForm.name }}</b>
+          <span style="color: #999; font-size: 12px">{{ sampleKindLabel[sampleCardForm.kind] || sampleCardForm.kind }}（重新解析会重建全部卡）</span>
+        </template>
+        <template v-else>
+          <el-select v-model="sampleCardForm.kind" size="small" style="width: 110px">
+            <el-option v-for="(label, k) in sampleKindLabel" :key="k" :value="k" :label="label" />
+          </el-select>
+          <el-input v-model="sampleCardForm.name" placeholder="名称（必填）" size="small" style="width: 200px" />
+          <el-input v-model="sampleCardForm.aliasesText" placeholder="别名（逗号分隔，可选）" size="small" style="width: 220px" />
+        </template>
+        <span style="font-size: 13px">重要度</span>
+        <el-select v-model="sampleCardForm.importance" size="small" style="width: 90px">
+          <el-option :value="1" label="★" />
+          <el-option :value="2" label="★★" />
+          <el-option :value="3" label="★★★" />
+        </el-select>
+      </div>
+      <el-input v-model="sampleCardForm.summary" type="textarea" :rows="3" placeholder="摘要" style="margin-bottom: 10px" />
+      <el-input v-model="sampleCardForm.contentMd" type="textarea" :rows="8" placeholder="全文（开书克隆时随卡进新书的素材卡）" />
+      <template #footer>
+        <el-button @click="sampleCardEditor = false">取消</el-button>
+        <el-button type="primary" @click="saveSampleCard">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 素材库·导入新小说（不开书也能囤素材：分析落台账，之后随时深度解析/采纳预设/衍生开书） -->
+    <el-dialog v-model="sampleImportOpen" title="导入新小说" width="640px">
+      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px">
+        <el-input v-model="sampleImportForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 220px" />
+        <label style="cursor: pointer; font-size: 13px; color: #409eff">上传 txt / mobi
+          <input type="file" accept=".txt,.mobi,.azw3,.azw" style="display: none" @change="onSampleImportFile" />
+        </label>
+        <span v-if="sampleImportForm.text" style="font-size: 12px; color: #999">
+          已载入 {{ (sampleImportForm.text.length / 10000).toFixed(1) }} 万字
+        </span>
+      </div>
+      <el-input v-model="sampleImportForm.text" type="textarea" :rows="8"
+                placeholder="或直接粘贴小说正文（整本或长片段，最多 800 万字）。系统自动切块存入语料库并出文风分析，之后可在列表里深度解析。" />
+      <div style="font-size: 12px; color: #999; margin-top: 6px">分析为纯机械指标（秒级、零 LLM 成本）；深度解析（LLM）在列表行单独触发。</div>
+      <template #footer>
+        <el-button @click="sampleImportOpen = false">取消</el-button>
+        <el-button type="primary" :loading="sampleImporting" :disabled="!sampleImportForm.text && !sampleImportForm.mobiBase64" @click="importSample">
+          分析并入库
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch, reactive } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
@@ -628,6 +919,7 @@ async function loadPresets() {
 async function loadSamples() {
   try {
     samples.value = await api.get('/api/preset/samples')
+    loadParseStatuses()
   } catch { /* 导入小说页签加载失败不拦其他页签 */ }
 }
 
@@ -642,6 +934,267 @@ function sampleAnalysis(row) {
     }
   }
   return sampleAnalysisCache.get(row.id)
+}
+
+// ===== 导入小说·深度解析（样本资产化：剧情结构/资产卡/关系/世界观） =====
+const parseStatuses = ref({})
+const assetsOpen = ref(false)
+const assetsTab = ref('plot')
+const assetsData = ref(null)
+const plotDetail = ref(null)
+const sampleCardEditor = ref(false)
+const sampleCardForm = ref({})
+const sampleKindLabel = { character: '角色', item: '物品', location: '地点', phenomenon: '现象', landmark: '地标', disaster: '灾害', org: '组织', misc: '其他', world: '世界观' }
+let parsePollTimer = null
+
+const sampleCards = computed(() => (assetsData.value?.cards || []).filter((c) => c.kind !== 'world'))
+const worldCard = computed(() => (assetsData.value?.cards || []).find((c) => c.kind === 'world'))
+const sampleRelations = computed(() => {
+  const out = []
+  for (const c of sampleCards.value) {
+    for (const r of c.relations || []) {
+      out.push({ from: c.name, kind: r.kind, target: r.target, note: r.note || '' })
+    }
+  }
+  return out
+})
+
+const plotTree = computed(() => {
+  const d = assetsData.value
+  if (!d) return []
+  if ((d.volumes || []).length) {
+    return d.volumes.map((v) => ({
+      key: `v${v.seq}`,
+      label: `${v.title}（${v.meta?.chapters || ''} ${v.meta?.chapters ? '章' : ''}）`.replace('（）', ''),
+      children: d.chapters.filter((c) => c.parentSeq === v.seq).map((c) => ({ key: `c${c.seq}`, label: c.title, raw: c }))
+    }))
+  }
+  return [{ key: 'chapters', label: `章节（${d.chapters.length}）`, children: d.chapters.map((c) => ({ key: `c${c.seq}`, label: c.title, raw: c })) }]
+})
+
+/** 解析状态轮询：有活跃任务时每 3s 刷新（ QUEUED/RUNNING ），无则停。 */
+async function loadParseStatuses() {
+  for (const s of samples.value) {
+    try {
+      parseStatuses.value[s.id] = await api.get(`/api/preset/samples/${s.id}/parse`)
+    } catch { /* 单样本状态失败不拦整体 */ }
+  }
+  scheduleParsePoll()
+}
+
+function scheduleParsePoll() {
+  clearTimeout(parsePollTimer)
+  parsePollTimer = null
+  const active = Object.values(parseStatuses.value).some((st) => ['QUEUED', 'RUNNING'].includes(st?.status))
+  if (active) parsePollTimer = setTimeout(loadParseStatuses, 3000)
+}
+
+function parsePercent(row) {
+  const st = parseStatuses.value[row.id]
+  if (!st || !st.totalUnits) return 0
+  return Math.min(100, Math.round((st.doneUnits / st.totalUnits) * 100))
+}
+
+function stageLabel(stage) {
+  return { chapter: '逐章解析', merge: '实体归并', volume: '卷级汇总', outline: '大纲合成', world: '世界观', done: '完成' }[stage] || stage || ''
+}
+
+/** FAST：尚无章资产才可跑；FULL：无资产可跑，或快速骨架完成后可升级（已析章跳过）。 */
+function canParse(row, mode) {
+  const st = parseStatuses.value[row.id]
+  if (st && ['QUEUED', 'RUNNING'].includes(st.status)) return false
+  if (st && ['FAILED', 'INTERRUPTED'].includes(st.status)) return false
+  if (!st || !st.chapterCount) return true
+  return mode === 'FULL' && st.mode === 'FAST' && st.status === 'DONE'
+}
+
+async function submitParse(row, mode) {
+  try {
+    if (mode === 'FULL') {
+      await ElMessageBox.confirm(
+        '完整解析全书逐章进行（长篇约 1-3 小时、约 10-30 元），中途可断点续跑；快速骨架已析的章自动跳过。继续？',
+        '完整深度解析', { type: 'info' })
+    }
+    await api.post(`/api/preset/samples/${row.id}/parse`, { mode })
+    ElMessage.success('已提交解析')
+    await loadParseStatuses()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message)
+  }
+}
+
+async function resumeParse(row) {
+  try {
+    await api.post(`/api/preset/samples/${row.id}/parse/resume`)
+    ElMessage.success('已从断点继续')
+    await loadParseStatuses()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function openAssets(row) {
+  try {
+    assetsData.value = await api.get(`/api/preset/samples/${row.id}/assets`)
+    assetsTab.value = 'plot'
+    plotDetail.value = null
+    assetsOpen.value = true
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+/** 样本类型/特征标签手动提取/重提（解析管线 DONE 前会自动跑一次）。 */
+const taggingId = ref(null)
+const adoptingId = ref(null)
+
+/** 一键把该样本品类的文风采纳为预设（之后开书下拉即可选）。 */
+async function adoptSamplePreset(row) {
+  adoptingId.value = row.id
+  try {
+    const r = await api.post('/api/preset/from-sample', {
+      genre: row.genre,
+      presetName: row.genre + '·文风v1',
+      description: '源品类：' + row.genre + '，' + row.chunks + ' 块语料'
+    })
+    ElMessage.success(`文风预设已生成（#${r.presetId}），开书向导可直接选`)
+    await loadSamples()
+    await loadPresets()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    adoptingId.value = null
+  }
+}
+async function extractTags(row) {
+  taggingId.value = row.id
+  try {
+    const tags = await api.post(`/api/preset/samples/${row.id}/tags`)
+    ElMessage.success(`标签已更新：${tags.join('、')}`)
+    await loadSamples()
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    taggingId.value = null
+  }
+}
+
+function onPlotNodeClick(node) {
+  if (node.raw) plotDetail.value = node.raw
+}
+
+async function reloadAssets() {
+  if (!assetsData.value) return
+  try {
+    assetsData.value = await api.get(`/api/preset/samples/${assetsData.value.sampleId}/assets`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function openSampleCard(row) {
+  sampleCardForm.value = { ...row }
+  sampleCardEditor.value = true
+}
+
+function openSampleCardCreate() {
+  sampleCardForm.value = { id: null, kind: 'character', name: '', aliasesText: '', summary: '', contentMd: '', importance: 2 }
+  sampleCardEditor.value = true
+}
+
+async function saveSampleCard() {
+  try {
+    if (sampleCardForm.value.id) {
+      await api.put(`/api/preset/cards/${sampleCardForm.value.id}`, {
+        summary: sampleCardForm.value.summary,
+        contentMd: sampleCardForm.value.contentMd,
+        importance: sampleCardForm.value.importance
+      })
+    } else {
+      if (!sampleCardForm.value.name.trim()) {
+        ElMessage.warning('名称必填')
+        return
+      }
+      await api.post(`/api/preset/samples/${assetsData.value.sampleId}/cards`, {
+        kind: sampleCardForm.value.kind,
+        name: sampleCardForm.value.name.trim(),
+        aliases: sampleCardForm.value.aliasesText || '',
+        summary: sampleCardForm.value.summary || '',
+        contentMd: sampleCardForm.value.contentMd || '',
+        importance: sampleCardForm.value.importance
+      })
+    }
+    ElMessage.success('已保存')
+    sampleCardEditor.value = false
+    await reloadAssets()
+    await loadParseStatuses()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+// ===== 素材库直接导入新小说（不开书囤素材） + 来源定位高亮 =====
+const sampleImportOpen = ref(false)
+const sampleImportForm = ref({ name: '', text: '' })
+const sampleImporting = ref(false)
+const highlightSampleId = ref(null)
+
+function openSampleImport() {
+  sampleImportForm.value = { name: '', text: '', mobiBase64: '' }
+  sampleImportOpen.value = true
+}
+
+function onSampleImportFile(ev) {
+  const f = ev.target.files && ev.target.files[0]
+  if (!f) return
+  if (/\.(mobi|azw3|azw)$/i.test(f.name)) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      sampleImportForm.value.mobiBase64 = String(reader.result || '')
+      sampleImportForm.value.text = ''
+      if (!sampleImportForm.value.name) sampleImportForm.value.name = f.name.replace(/\.(mobi|azw3|azw)$/i, '')
+    }
+    reader.readAsDataURL(f)
+  } else {
+    const reader = new FileReader()
+    reader.onload = () => {
+      sampleImportForm.value.text = String(reader.result || '')
+      sampleImportForm.value.mobiBase64 = ''
+      if (!sampleImportForm.value.name) sampleImportForm.value.name = f.name.replace(/\.txt$/i, '')
+    }
+    reader.readAsText(f, 'utf-8')
+  }
+  ev.target.value = ''
+}
+
+async function importSample() {
+  sampleImporting.value = true
+  try {
+    const r = await api.post('/api/preset/analyze', {
+      sampleName: sampleImportForm.value.name,
+      text: sampleImportForm.value.text,
+      mobiBase64: sampleImportForm.value.mobiBase64 || undefined
+    })
+    sampleImportOpen.value = false
+    highlightSampleId.value = r.sampleId
+    await loadSamples()
+    ElMessage.success(`已入库（${r.chunks} 块语料，品类「${r.genre}」）——点行内「深度解析」拆剧情与资产`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    sampleImporting.value = false
+  }
+}
+
+async function delSampleCard(row) {
+  try {
+    await ElMessageBox.confirm(`删除资产卡「${row.name}」？（重新解析会重建全部卡）`, '删除', { type: 'warning' })
+    await api.delete(`/api/preset/cards/${row.id}`)
+    await reloadAssets()
+    await loadParseStatuses()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message)
+  }
 }
 
 async function loadCorpus() {
@@ -692,6 +1245,8 @@ const styleRules = ref('')
 const styleFingerprint = ref('')
 const bannedText = ref('')
 const lenTol = ref(0.15)
+const budgetMin = ref(2400)
+const budgetMax = ref(3400)
 const styleTab = ref('rules')
 const editing = ref(null)
 const canonEditor = ref(false)
@@ -708,6 +1263,10 @@ const nodeForm = ref({})
 const llmPrices = ref([])
 const priceEditor = ref(false)
 const priceForm = ref({})
+const llmProviders = ref([])
+const providerEditor = ref(false)
+const providerTesting = ref(false)
+const providerForm = ref({})
 const tunings = ref([])
 const readerStd = reactive({ reader_fat_ratio_block: 0.33, reader_fat_ratio_hard: 0.5, reader_fix_len_min: 0.75, reader_fix_len_max: 1.15, ai_review_fix_floor: 0.6 })
 const prompts = ref([])
@@ -725,6 +1284,66 @@ const filteredPrompts = computed(() => {
   if (!kw) return prompts.value
   return prompts.value.filter((p) => p.node.toLowerCase().includes(kw) || p.title.toLowerCase().includes(kw))
 })
+
+// ===== 提示词新建/删除（增删改查补齐） =====
+const promptCreateOpen = ref(false)
+const promptCreateForm = ref({ node: '', phase: '', title: '', content: '' })
+const promptCreating = ref(false)
+const showPromptDelete = ref(false)
+
+function openPromptCreate() {
+  promptCreateForm.value = { node: '', phase: '', title: '', content: '' }
+  promptCreateOpen.value = true
+}
+
+async function createPrompt() {
+  const f = promptCreateForm.value
+  if (!f.node.trim() || !f.phase.trim() || !f.content.trim()) {
+    ElMessage.warning('节点/阶段/内容必填')
+    return
+  }
+  if (f.phase.trim().length > 32) {
+    ElMessage.warning('阶段过长（≤32 字符）')
+    return
+  }
+  promptCreating.value = true
+  try {
+    await api.post('/api/prompts', {
+      node: f.node.trim(),
+      phase: f.phase.trim(),
+      title: f.title.trim(),
+      content: f.content
+    })
+    ElMessage.success('提示词已创建')
+    promptCreateOpen.value = false
+    prompts.value = await api.get('/api/prompts')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    promptCreating.value = false
+  }
+}
+
+async function deletePrompt(row) {
+  try {
+    await ElMessageBox.confirm(`删除提示词「${row.node}/${row.phase}」？（软删，可数据库恢复）`, '删除', { type: 'warning' })
+    await api.delete(`/api/prompts/${row.id}`)
+    ElMessage.success('已删除')
+    prompts.value = await api.get('/api/prompts')
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message)
+  }
+}
+
+async function togglePromptEnabled(row, enabled) {
+  try {
+    await api.put(`/api/prompts/${row.id}/enabled`, { enabled })
+    row.enabled = enabled
+    ElMessage.success(enabled ? '已启用（30 秒内生效）' : '已停用（回退代码版）')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
 
 async function viewPrompt(id) {
   promptDetail.value = await api.get(`/api/prompts/${id}`)
@@ -850,6 +1469,69 @@ async function saveNode() {
   }
 }
 
+function openProvider(row) {
+  providerForm.value = row
+    ? { id: row.id, name: row.name, baseUrl: row.baseUrl, apiKey: '', model: row.model || '', role: row.role || 'chat',
+        connectTimeoutSec: row.connectTimeoutMs == null ? null : Math.round(row.connectTimeoutMs / 1000),
+        readTimeoutSec: row.readTimeoutMs == null ? null : Math.round(row.readTimeoutMs / 1000),
+        enabled: row.enabled, remark: row.remark || '' }
+    : { id: null, name: '', baseUrl: '', apiKey: '', model: '', role: 'chat', connectTimeoutSec: 10, readTimeoutSec: 600, enabled: true, remark: '' }
+  providerEditor.value = true
+}
+
+async function saveProvider() {
+  const f = providerForm.value
+  if (!f.id && !f.apiKey?.trim()) {
+    ElMessage.error('新建接入必须填 API key')
+    return
+  }
+  try {
+    const body = {
+      name: f.name?.trim(), baseUrl: f.baseUrl?.trim(), apiKey: f.apiKey?.trim() || null,
+      model: f.model?.trim() || null,
+      role: f.role || 'chat',
+      connectTimeoutMs: f.connectTimeoutSec == null ? null : f.connectTimeoutSec * 1000,
+      readTimeoutMs: f.readTimeoutSec == null ? null : f.readTimeoutSec * 1000,
+      enabled: f.enabled, remark: f.remark
+    }
+    if (f.id) await api.put(`/api/llm-providers/${f.id}`, body)
+    else await api.post('/api/llm-providers', body)
+    ElMessage.success('已保存，下一次调用即生效')
+    providerEditor.value = false
+    llmProviders.value = await api.get('/api/llm-providers')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function testProvider(row) {
+  providerTesting.value = true
+  try {
+    const r = await api.post(`/api/llm-providers/${row.id}/test`)
+    if (r.ok) ElMessage.success(`连通正常（${r.latencyMs}ms）`)
+    else ElMessage.error(`测试失败：${r.message}`)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    providerTesting.value = false
+  }
+}
+
+async function delProvider(row) {
+  try {
+    await ElMessageBox.confirm(`删除接入「${row.name}」？（软删，可 psql 恢复）`, '删除确认', { type: 'warning' })
+  } catch (e) {
+    return
+  }
+  try {
+    await api.delete(`/api/llm-providers/${row.id}`)
+    ElMessage.success('已删除')
+    llmProviders.value = await api.get('/api/llm-providers')
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
 function openCard(row) {
   cardForm.value = row
     ? { ...row, aliasesText: (row.aliases || []).join(',') }
@@ -954,6 +1636,7 @@ async function loadAll() {
   cards.value = await api.get(`/api/novels/${novelId.value}/cards`)
   llmNodes.value = await api.get('/api/llm-nodes')
   llmPrices.value = await api.get('/api/llm-prices')
+  llmProviders.value = await api.get('/api/llm-providers')
   tunings.value = (await api.get('/api/tuning')).map(t => ({ ...t, editValue: t.value }))
   prompts.value = await api.get('/api/prompts')
   try {
@@ -980,6 +1663,8 @@ async function loadAll() {
     const cfg = JSON.parse(s.gateConfigJson || '{}')
     bannedText.value = (cfg.banned_phrases || []).join('\n')
     lenTol.value = typeof cfg.chapter_length_tolerance === 'number' ? cfg.chapter_length_tolerance : 0.15
+    budgetMin.value = typeof cfg.budget_min === 'number' && cfg.budget_min > 0 ? cfg.budget_min : 2400
+    budgetMax.value = typeof cfg.budget_max === 'number' && cfg.budget_max > 0 ? cfg.budget_max : 3400
   } catch {
     bannedText.value = ''
   }
@@ -1079,7 +1764,14 @@ async function saveDigest() {
 async function saveGateConfig() {
   try {
     const phrases = bannedText.value.split('\n').map((s) => s.trim()).filter(Boolean)
-    const cfg = { banned_phrases: phrases, chapter_length_tolerance: lenTol.value, no_straight_quote: true, ...JSON.parse(JSON.stringify(readerStd)) }
+    const cfg = {
+      banned_phrases: phrases,
+      chapter_length_tolerance: lenTol.value,
+      budget_min: Math.min(budgetMin.value, budgetMax.value),
+      budget_max: Math.max(budgetMin.value, budgetMax.value),
+      no_straight_quote: true,
+      ...JSON.parse(JSON.stringify(readerStd))
+    }
     await api.put(`/api/novels/${novelId.value}/gate-config`, { gateConfig: JSON.stringify(cfg) })
     ElMessage.success('门禁配置已落库（下一次门禁检测即生效）')
   } catch (e) {
@@ -1096,12 +1788,38 @@ async function saveStyle() {
   }
 }
 
+const rulesExtracting = ref(false)
+/** AI 提炼本书文风规则（LLM 逐条产出，写回风格包并回显，可再人工编辑）。 */
+async function extractRules() {
+  rulesExtracting.value = true
+  try {
+    styleRules.value = await api.post(`/api/novels/${novelId.value}/style/extract-rules`)
+    ElMessage.success('文风规则已提炼并写本书风格包（建议过目后微调保存）')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    rulesExtracting.value = false
+  }
+}
+
 onMounted(async () => {
   novels.value = await api.get('/api/novels')
   novelId.value = getSelectedNovelId() ?? novels.value[0]?.id
   if (!novels.value.some((n) => n.id === novelId.value)) novelId.value = novels.value[0]?.id
+  // 向导「去深度解析」跳转定位：/?sampleId=N 高亮对应行
+  const q = new URLSearchParams((location.hash.split('?')[1] || ''))
+  const sid = Number(q.get('sampleId'))
+  if (sid) highlightSampleId.value = sid
   await loadAll()
 })
 
+onUnmounted(() => clearTimeout(parsePollTimer))
+
 watch(novelId, loadAll)
 </script>
+
+<style scoped>
+:deep(.sample-highlight td) {
+  background: #ecf5ff !important;
+}
+</style>

@@ -15,6 +15,7 @@ import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.service.data.PipelineEventDataService;
+import com.zzdzz.novelgen.service.data.SamplePlotNodeDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -64,6 +65,7 @@ public class VolumePlanService {
     private final ForeshadowDataService foreshadowData;
     private final NovelDataService novelData;
     private final CanonDocDataService canonData;
+    private final SamplePlotNodeDataService plotData;
     private final com.zzdzz.novelgen.service.data.StylePackDataService stylePackData;
     private final StageLog stageLog;
     private final TuningService tuning;
@@ -113,7 +115,7 @@ public class VolumePlanService {
         }
         int fromNo = draft.rows().get(0).chapterNo();
         int toNo = draft.rows().get(draft.rows().size() - 1).chapterNo();
-        String structural = structuralCheck(draft, fromNo, toNo);
+        String structural = structuralCheck(draft, fromNo, toNo, null);
         if (structural != null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "草稿结构不合规：" + structural);
         }
@@ -125,10 +127,11 @@ public class VolumePlanService {
     private PlanDraft generateWithReview(long novelId, int volNo, int fromNo, Integer toNo, String seedOutline) {
         String context = packer.packVolumePlan(novelId, volNo, fromNo, seedOutline);
         String feedback = "";
+        Integer target = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).chaptersPerVolume();
         int maxRounds = tuning.i("volume_plan_review_rounds", TuningDefaults.VOLUME_PLAN_REVIEW_ROUNDS);
         for (int round = 1; round <= maxRounds; round++) {
-            PlanDraft draft = askPlan(novelId, volNo, fromNo, toNo, context, feedback);
-            String structural = structuralCheck(draft, fromNo, toNo);
+            PlanDraft draft = askPlan(novelId, volNo, fromNo, toNo, target, context, feedback);
+            String structural = structuralCheck(draft, fromNo, toNo, target);
             if (structural != null) {
                 log.warn("卷纲第 {} 轮结构校验未过：{}", round, structural);
                 stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.RETRY,
@@ -137,7 +140,7 @@ public class VolumePlanService {
                 feedback = "【结构校验】" + structural;
                 continue;
             }
-            String issues = reviewPlan(novelId, draft);
+            String issues = reviewPlan(novelId, round, draft);
             if (issues != null) {
                 log.warn("卷纲第 {} 轮 AI 审校 BLOCKER：{}", round, issues);
                 stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN, StageLog.Phase.RETRY,
@@ -161,37 +164,36 @@ public class VolumePlanService {
         return t.length() <= 500 ? t : t.substring(0, 500) + "…";
     }
 
-    private PlanDraft askPlan(long novelId, int volNo, int fromNo, Integer toNo, String context, String feedback) {
-        String span = toNo == null
-                ? "章数 6-15 章由你定夺（决定本卷篇幅，在 no 字段连续编号体现）"
-                : "到第 " + toNo + " 章结束，共 " + (toNo - fromNo + 1) + " 章";
+    private PlanDraft askPlan(long novelId, int volNo, int fromNo, Integer toNo, Integer targetChapters,
+                              String context, String feedback) {
+        String span;
+        if (toNo != null) {
+            span = "到第 " + toNo + " 章结束，共 " + (toNo - fromNo + 1) + " 章";
+        } else if (targetChapters != null) {
+            // 衍生配置的每卷章数目标（开书向导）：提示词给目标、结构校验按容差收口
+            span = promptTemplates.getSection("common", "plan_span_target",
+                    java.util.Map.of("target", String.valueOf(targetChapters),
+                            "slack", String.valueOf(Math.max(1, targetChapters / 8))));
+        } else {
+            span = promptTemplates.getSection("common", "plan_span_free", java.util.Map.of());
+        }
         // 品类预设的章长带（开书克隆自 gate_config）：有带则预算必须进带，无带回旧口径（往卷水平自估）
         int[] band = budgetBand(novelId);
         String budgetRule = band == null
-                ? "4. budget_min/budget_max 为单章字数预算，参考往卷实际水平 2800-4000。"
-                : "4. budget_min/budget_max 为单章字数预算，本书风格基线（源自品类预设）为 "
-                        + band[0] + "-" + band[1] + " 字，各章预算必须落在该带内。";
-        String user = promptTemplates.format(LlmNode.VOLUME_PLAN, "user", """
-                任务：规划第 %d 卷，从第 %d 章开始，%s。
-
-                规划规则：
-                1. brief 为 150-300 字卷简报，必须写清四个决策：本卷核心悬念与谜底展开节奏（人物身份/动机类问题的答案在本卷如何推进）、卷终点钩子（终章留给下一卷的最大悬念）、伏笔取舍（哪些回收、哪些继续悬置及理由）、节奏曲线（紧张章与舒缓章如何分布）。
-                2. chapters.no 从 %d 开始连续编号；title 不超过 12 字；goal 100-200 字且按戏剧结构写四件套——欲望（本章谁想要什么）、阻碍（什么在阻止）、转折（章内如何升级或翻转）、情绪落点，供下游场景拆解器使用；hook 为一句话章末钩子；time_note 为本章距上一章的故事时间跨度（如「紧接」「次日清晨」「三天后」，不得与时间线矛盾）。
-                3. foreshadows 只列本章要「埋设」或「回收」的伏笔：账本中 proposed/planned 的编码被引用即排期埋设，planted 的被引用即安排回收（action=recover）；账本里没有的新伏笔省略 code、必须给 content（一句话）且 action=plant，将自动建账；已 recovered 的不要引用（旧线呼应写进 goal 即可）；与本章无关的不要列。
-                %s
-                5. 卷尾必须留下强钩子；不得与已有卷纲重复桥段。
-                6. 若上下文给出【上卷复盘要点】，必须在 brief 决策与章节安排中做出回应：点名的悬置伏笔优先安排兑现（引用编码即排期）或给出明确悬置理由；漂移项须有对应修正安排。
-
-                只输出 JSON，格式：
-                {"arc":"卷名（8字内）","brief":"…","chapters":[{"no":%d,"title":"…","goal":"…","hook":"…","time_note":"…","foreshadows":[{"code":"F4","action":"recover","content":""},{"code":"","action":"plant","content":"新伏笔一句话"}],"budget_min":2400,"budget_max":3400}]}
-                字符串值内部禁止英文双引号，引用一律用「」。
-
-                %s
-                """, volNo, fromNo, span, fromNo, budgetRule, fromNo, context);
-        return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
-                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN, "system",
-                                        "你是网文主编，负责整卷卷纲规划。只输出合法 JSON，不要任何解释或 markdown 代码块。"
-                                                + "字符串值内部禁止英文双引号，引用一律用「」。")),
+                ? promptTemplates.getSection("common", "plan_budget_without", java.util.Map.of())
+                : promptTemplates.getSection("common", "plan_budget_with",
+                        java.util.Map.of("lo", String.valueOf(band[0]), "hi", String.valueOf(band[1])));
+        String user = promptTemplates.format(LlmNode.VOLUME_PLAN, "user",
+                volNo, fromNo, span, fromNo, budgetRule, fromNo, context);
+        // 结构校验/AI 审校未过原因喂回下一轮（common/plan_retry_feedback 落库可编辑；此前 feedback 是死参，失败轮在盲试）
+        if (feedback != null && !feedback.isBlank()) {
+            user += promptTemplates.getSection("common", "plan_retry_feedback",
+                    java.util.Map.of("feedback", feedback));
+        }
+        PlanThinkRelay relay = new PlanThinkRelay(novelId, StageLog.Stage.VOLUME_PLAN);
+        try {
+            return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN, novelId, null,
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN, "system")),
                                 LlmPort.Message.user(user)),
                         LlmTemps.VOLUME_PLAN),
                 node -> {
@@ -232,7 +234,10 @@ public class VolumePlanService {
                                         Math.min(r.budgetMax(), band[1]))));
                     }
                     return new PlanDraft(arc, brief, rows);
-                }, 2);
+                }, 2, relay);
+        } finally {
+            relay.close();
+        }
     }
 
     /** 读本书 gate_config 的章长带（开书时克隆自品类预设）；无带返回 null 走旧口径。 */
@@ -252,14 +257,22 @@ public class VolumePlanService {
         }
     }
 
-    /** 确定性结构校验：章号连续、章数、字段非空、预算区间。返回 null 即通过。 */
-    private String structuralCheck(PlanDraft draft, int fromNo, Integer toNo) {
+    /** 确定性结构校验：章号连续、章数、字段非空、预算区间。返回 null 即通过。
+     * targetChapters=衍生配置的每卷章数目标（±章数容差收口，超差打回重写）；null 走旧 6-15 口径。 */
+    private String structuralCheck(PlanDraft draft, int fromNo, Integer toNo, Integer targetChapters) {
         List<PlanRow> rows = draft.rows();
         if (toNo != null && rows.size() != toNo - fromNo + 1) {
             return "章数应为 " + (toNo - fromNo + 1) + "，实际 " + rows.size();
         }
-        if (toNo == null && (rows.size() < 6 || rows.size() > 15)) {
-            return "章数须 6-15，实际 " + rows.size();
+        if (toNo == null) {
+            if (targetChapters != null) {
+                int slack = Math.max(1, targetChapters / 8);
+                if (rows.size() < targetChapters - slack || rows.size() > targetChapters + slack) {
+                    return "章数目标 " + targetChapters + "±" + slack + "，实际 " + rows.size();
+                }
+            } else if (rows.size() < 6 || rows.size() > 15) {
+                return "章数须 6-15，实际 " + rows.size();
+            }
         }
         for (int i = 0; i < rows.size(); i++) {
             PlanRow r = rows.get(i);
@@ -287,10 +300,10 @@ public class VolumePlanService {
     }
 
     /**
-     * AI 规划审校：对照账本查连续性/重复/伏笔悬空/节奏。返回 null 即 PASS，否则 BLOCKER 清单文本。
+     * AI 规划审校：对照账本查连续性/重复/伏笔悬空/节奏（衍生书另查样本复刻）。返回 null 即 PASS，否则 BLOCKER 清单文本。
      * 审校调用异常 fail-open（放行）——规划行没有不可逆下游，正文生成端还有已验证的审校管线兜底。
      */
-    private String reviewPlan(long novelId, PlanDraft draft) {
+    private String reviewPlan(long novelId, int round, PlanDraft draft) {
         StringBuilder plan = new StringBuilder("卷名：").append(draft.arc()).append("\n卷简报：").append(draft.brief()).append('\n');
         for (PlanRow r : draft.rows()) {
             plan.append("第").append(r.chapterNo()).append("章《").append(r.title())
@@ -300,29 +313,18 @@ public class VolumePlanService {
                     .append(" 伏笔：").append(r.foreshadows().isEmpty() ? "无" : renderRefs(r.foreshadows()))
                     .append('\n');
         }
-        String user = promptTemplates.format(LlmNode.VOLUME_PLAN_REVIEW, "user", """
-                【待审卷纲】
-                %s
-                【对照材料（人物设定卡 + 账本）】
-                %s
-                %s
-                审校清单：① 连续性——是否与世界观/人物卡/世界状态/事实账矛盾（人物已死复活、物品凭空转移、时间倒流、凭空发明人物卡与账本中不存在的人名）；
-                ② 重复——卷内相邻章目标是否雷同、是否与往卷炒冷饭；③ 伏笔——planted 未回收项是否被安排回收或给出悬置理由、proposed 取舍是否合理；
-                ④ 节奏——张弛是否有曲线、卷尾钩子是否成立。
-                只输出 JSON：{"verdict":"PASS"或"BLOCKER","issues":["问题（指明章号）"]}
-                存在必须修复的硬伤才 BLOCKER；风格偏好类意见写进 issues 但给 PASS。
-                """, plan, packer.characters(novelId),
-                packer.packLedgers(novelId, draft.rows().get(0).chapterNo()));
+        String user = promptTemplates.format(LlmNode.VOLUME_PLAN_REVIEW, "user", plan, packer.characters(novelId),
+                packer.packLedgers(novelId, draft.rows().get(0).chapterNo()), deriveNoCopySection(novelId));
+        stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.START, Map.of("round", round));
+        PlanThinkRelay relay = new PlanThinkRelay(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW);
         try {
-            return llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN_REVIEW, novelId, null,
-                            List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN_REVIEW, "system",
-                                            "你是网文规划审校员，在卷纲落库前把关。只输出合法 JSON。"
-                                                    + "字符串值内部禁止英文双引号，引用一律用「」。")),
+            String verdict = llmJson.ask(new LlmPort.ChatRequest(LlmNode.VOLUME_PLAN_REVIEW, novelId, null,
+                            List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.VOLUME_PLAN_REVIEW, "system")),
                                     LlmPort.Message.user(user)),
                             LlmTemps.VOLUME_PLAN_REVIEW),
                     node -> {
-                        String verdict = node.path("verdict").asText("PASS").strip().toUpperCase();
-                        if ("BLOCKER".equals(verdict)) {
+                        String v = node.path("verdict").asText("PASS").strip().toUpperCase();
+                        if ("BLOCKER".equals(v)) {
                             List<String> issues = new ArrayList<>();
                             for (JsonNode i : node.path("issues")) {
                                 String t = i.asText("").strip();
@@ -332,12 +334,83 @@ public class VolumePlanService {
                             return String.join("；", issues);
                         }
                         return null;
-                    }, 2);
+                    }, 2, relay);
+            stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.VERDICT,
+                    verdict == null ? Map.of("round", round, "verdict", "PASS")
+                            : Map.of("round", round, "verdict", "BLOCKER", "issues", List.of(brief(verdict))));
+            return verdict;
         } catch (Exception e) {
             log.warn("卷纲审校调用异常，fail-open 放行：{}", e.getMessage());
             stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.ERROR,
                     Map.of("message", String.valueOf(e.getMessage())));
             return null;
+        } finally {
+            relay.close();
+        }
+    }
+
+    /**
+     * 衍生复刻判据段（审校 user 第 4 参）：sourceSampleId 存在且样本有书级骨架时，注入骨架+复刻=BLOCKER 口径；
+     * 非衍生书/无骨架返回空串（占位符仍需参数，空串即不出现该段）。
+     */
+    private String deriveNoCopySection(long novelId) {
+        Long sampleId = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).sourceSampleId();
+        if (sampleId == null) {
+            return "";
+        }
+        for (var n : plotData.listBySample(sampleId)) {
+            if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
+                String skeleton = n.getSummary().strip();
+                if (skeleton.length() > 1200) {
+                    skeleton = skeleton.substring(0, 1200);
+                }
+                return promptTemplates.getSection(LlmNode.VOLUME_PLAN_REVIEW, "derive_no_copy",
+                        Map.of("skeleton", skeleton));
+            }
+        }
+        return "";
+    }
+
+    /**
+     * 卷规划/审校思考流转发（VOLUME_PLAN/VOLUME_PLAN_REVIEW + CHUNK，emitLive 只推 SSE 不落库）：
+     * 只转 think 增量——两者的正文输出都是 JSON，逐字流是噪音；「规划在想什么」才是透明化主体。
+     * 章级同款见 ChapterPipelineService.ReviewThinkRelay（卷级无章号）。
+     */
+    final class PlanThinkRelay implements LlmPort.StreamDelta {
+        private static final long FLUSH_INTERVAL_MS = 200;
+
+        private final long novelId;
+        private final StageLog.Stage stage;
+        private final StringBuilder buf = new StringBuilder();
+        private long lastFlush = System.currentTimeMillis();
+
+        PlanThinkRelay(long novelId, StageLog.Stage stage) {
+            this.novelId = novelId;
+            this.stage = stage;
+        }
+
+        @Override
+        public void accept(boolean think, String piece) {
+            if (!think || piece == null || piece.isEmpty()) {
+                return;
+            }
+            buf.append(piece);
+            if (System.currentTimeMillis() - lastFlush >= FLUSH_INTERVAL_MS) {
+                flush();
+            }
+        }
+
+        void flush() {
+            if (buf.length() > 0) {
+                stageLog.emitLive(novelId, null, stage, StageLog.Phase.CHUNK,
+                        Map.of("type", "think", "delta", buf.toString()));
+                buf.setLength(0);
+            }
+            lastFlush = System.currentTimeMillis();
+        }
+
+        void close() {
+            flush();
         }
     }
 
@@ -465,26 +538,13 @@ public class VolumePlanService {
         if (ch.getFullText() != null && !ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + chapterNo + " 章已有正文，禁止重写其卷纲");
         }
-        String user = promptTemplates.format(LlmNode.CHAPTER_REPLAN, "user", """
-                任务：第 %d 章《%s》按现有卷纲目标生成反复失败，需要换一个写法。失败原因：
-                %s
-                现目标：%s
-                现钩子：%s
-                请重写该章的 title/goal/hook/time_note：目标必须换一条可行路径完成本章在卷中的使命（可改事件、改场景、改信息揭示顺序），不得与相邻章（第 %d、%d 章）目标雷同。
-                只输出 JSON：{"title":"…","goal":"…","hook":"…","time_note":"…"}
-                字符串值内部禁止英文双引号，引用一律用「」。
-
-                %s
-
-                【账本上下文】
-                %s
-                """, chapterNo, Objects.toString(ch.getTitle(), ""), failureReason,
+        String user = promptTemplates.format(LlmNode.CHAPTER_REPLAN, "user",
+                chapterNo, Objects.toString(ch.getTitle(), ""), failureReason,
                 Objects.toString(ch.getGoal(), ""), Objects.toString(ch.getHook(), ""),
                 chapterNo - 1, chapterNo + 1, packer.characters(novelId),
                 packer.packLedgers(novelId, chapterNo));
         Replan replan = llmJson.ask(new LlmPort.ChatRequest(LlmNode.CHAPTER_REPLAN, novelId, ch.getId(),
-                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REPLAN, "system",
-                                        "你是网文主编，只输出合法 JSON，字符串内禁英文双引号，引用一律用「」。")),
+                        List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.CHAPTER_REPLAN, "system")),
                                 LlmPort.Message.user(user)),
                         LlmTemps.CHAPTER_REPLAN),
                 node -> {

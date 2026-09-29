@@ -70,4 +70,9 @@ public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, Gat
         return baseMapper.listByChapter(chapterId);
     }
 
+    @Override
+    public List<Long> passedChapterIds(long novelId) {
+        return baseMapper.passedChapterIds(novelId);
+    }
+
 }

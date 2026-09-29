@@ -8,7 +8,7 @@ import lombok.Data;
 
 /** 模型价目（元/百万 tokens）：空闲/高峰两档，输入拆缓存命中与未命中；高峰时段按行配置。 */
 @Data
-@TableName(value = "llm_model_prices")
+@TableName(value = "llm_model_price")
 public class LlmModelPriceDTO {
     @TableId(type = IdType.AUTO)
     private Long id;

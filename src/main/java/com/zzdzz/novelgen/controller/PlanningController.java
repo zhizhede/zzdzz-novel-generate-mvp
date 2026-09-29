@@ -113,6 +113,24 @@ public class PlanningController {
         return Result.success(Map.of("taskId", taskId));
     }
 
+    /** 章纲全量跨章汇总（带所属章号/章题）：章纲 tab 全景展示与筛选。 */
+    @GetMapping("/scenes")
+    public Result<List<com.zzdzz.novelgen.model.vo.ChapterSceneVO>> allScenes(@PathVariable long novelId) {
+        return Result.success(planningService.allScenes(novelId));
+    }
+
+    /** 章纲批量生成入队（from=to 即单章）：秒回任务 id，逐章出场景拆解；进度见工作台队列与规划页。 */
+    @PostMapping("/outline/batch")
+    public Result<Map<String, Object>> outlineBatch(@PathVariable long novelId,
+                                                    @RequestBody OutlineBatchVO dto) {
+        if (dto.from() == null || dto.to() == null || dto.from() > dto.to()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "参数不合法：from/to 必填且 from ≤ to");
+        }
+        String title = String.valueOf(novelData.getById(novelId).getTitle());
+        long taskId = queueService.submitOutline(novelId, title, dto.from(), dto.to(), null);
+        return Result.success(Map.of("taskId", taskId));
+    }
+
     /** 流 D：某卷复盘建议/提案列表（含采纳状态）。 */
     @GetMapping("/volumes/{volNo}/proposals")
     public Result<List<RetroProposalVO>> proposals(@PathVariable long novelId, @PathVariable int volNo) {
@@ -196,6 +214,8 @@ public class PlanningController {
 
     /** AI 规划一卷（同步 auto-plan / 异步 auto-plan-async 共用）。 */
     public record VolumeAutoPlanVO(Integer volNo, Integer from, Integer to, String seedOutline) {}
+
+    public record OutlineBatchVO(Integer from, Integer to) {}
 
     /** manual 草稿采纳；rows 为动态结构保持 Map。 */
     public record VolumeAdoptVO(Integer volNo, String arc, String brief, List<Map<String, Object>> rows) {}

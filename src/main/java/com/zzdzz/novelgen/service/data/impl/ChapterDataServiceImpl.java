@@ -42,6 +42,22 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
     }
 
     @Override
+    public Integer nextPlannedChapterNo(long novelId, int afterNo) {
+        return baseMapper.nextPlannedChapterNo(novelId, afterNo);
+    }
+
+    @Override
+    public Integer maxPlannedChapterNo(long novelId) {
+        return baseMapper.maxPlannedChapterNo(novelId);
+    }
+
+    @Override
+    public int maxVolumeNo(long novelId) {
+        Integer v = baseMapper.maxVolumeNo(novelId);
+        return v == null ? 0 : v;
+    }
+
+    @Override
     public boolean exists(long novelId, int chapterNo) {
         Long count = baseMapper.existsCount(novelId, chapterNo);
         return count != null && count > 0;
@@ -123,10 +139,17 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
     }
 
     @Override
-    public Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines) {
+    public Opening findDialogueExcerpt(long novelId, int maxChapterNo, int lines,
+                                       java.util.Collection<Long> onlyChapterIds) {
+        if (onlyChapterIds != null && onlyChapterIds.isEmpty()) {
+            return null;
+        }
         record Row(int no, String text) {}
         List<Row> rows = new ArrayList<>();
         for (var m : baseMapper.findDialogueRows(novelId, maxChapterNo)) {
+            if (onlyChapterIds != null && !onlyChapterIds.contains((long) m.chapterNo())) {
+                continue;
+            }
             rows.add(new Row(m.chapterNo(), m.fullText()));
         }
         Opening best = null;
