@@ -168,6 +168,10 @@ public class ReviewService {
         for (JsonNode i : review.path("issues")) {
             fb.append("- ").append(i.asText()).append('\n');
         }
+        // 复沓清单（评审第 6 问产出，带次数）：不消费它就只是落库报告，重写轮拿不到（提示词里承诺"直接喂给下一稿"）
+        for (JsonNode r : review.path("repeat")) {
+            fb.append("- 复沓（同一句/近似句反复）：").append(r.asText()).append("　只保留一处，其余删掉\n");
+        }
         if (review.path("hook").asText().equals("fail")) {
             fb.append("- 开头未过钩：前三行必须从上一章结尾的张力里直接推进，禁止环境/氛围铺陈。\n");
         }

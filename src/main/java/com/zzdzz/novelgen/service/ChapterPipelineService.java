@@ -836,6 +836,17 @@ public class ChapterPipelineService {
             chapterData.saveFullText(ch.getId(), fullText);
             stageLog.emit(novelId, ch.getChapterNo(), REVISE, isReader ? READER_FIX : REVIEW_FIX,
                     Map.of("chars", fullText.length()));
+            // 修订后机械复检：评审改写绕过章级门禁（第 3 章实测 行均长 17.97→21.50 出带无人知）。
+            // 只复检留痕（新报告 + 事件），不自动再改——内容修订优先级高于指纹，避免改写循环。
+            boolean onSpec = gateService.checkChapter(novelId, ch.getId(), ch.getChapterNo(), fullText,
+                    ch.getBudgetMin(), ch.getBudgetMax()).passed();
+            if (!onSpec) {
+                log.warn("第 {} 章{}修订后指纹漂移（机械复检未过，报告见 gate_reports；成品保留修订稿）",
+                        ch.getChapterNo(), stage.label());
+            }
+            stageLog.emit(novelId, ch.getChapterNo(), CHAPTER_GATE, NONE,
+                    Map.of("passed", onSpec, "recheck", true,
+                            "reason", onSpec ? "" : String.valueOf(gateService.failedChecksText(ch.getId()))));
         }
         stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked())));
         List<String> issues = outcome.issues().size() > 5 ? outcome.issues().subList(0, 5) : outcome.issues();
