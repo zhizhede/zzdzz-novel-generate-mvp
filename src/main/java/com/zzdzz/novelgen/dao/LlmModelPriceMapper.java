@@ -6,7 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-/** llm_model_prices 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/LlmModelPriceMapper.xml。 */
+/** llm_model_price 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/LlmModelPriceMapper.xml。 */
 public interface LlmModelPriceMapper extends BaseMapper<LlmModelPriceDTO> {
 
     List<LlmModelPriceDTO> listAll();

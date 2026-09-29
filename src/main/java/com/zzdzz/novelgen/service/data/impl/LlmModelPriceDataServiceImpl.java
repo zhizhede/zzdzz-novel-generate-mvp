@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/** llm_model_prices 数据服务实现。 */
+/** llm_model_price 数据服务实现。 */
 @Service
 public class LlmModelPriceDataServiceImpl extends ServiceImpl<LlmModelPriceMapper, LlmModelPriceDTO> implements LlmModelPriceDataService {
 
