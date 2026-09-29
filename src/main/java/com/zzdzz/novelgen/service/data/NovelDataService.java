@@ -12,7 +12,7 @@ public interface NovelDataService extends IService<NovelDTO> {
 
     Long findIdByTitle(String title);
 
-    long insert(long userId, String title, String description, Long stylePackId, String approvalMode, String status);
+    long insert(long userId, String title, String description, Long stylePackId, String approvalMode, String status, String sourceType);
 
     /** 草稿书转正式（draft → active）。 */
     int activate(long novelId);

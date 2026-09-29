@@ -27,6 +27,22 @@ public interface ChapterDataService extends IService<ChapterDTO> {
     record ApprovedNoDigest(long id, long novelId, int chapterNo) {
     }
 
+    /**
+     * 规划资产页的行（全库跨书一次取齐）：规划字段 + 章纲/正文的**长度**，不取正文全文
+     * （194 章 × 约 4 千字，带上正文列表就会是近 1MB 的响应）。章纲本身要展示故原样带出。
+     */
+    record ChapterPlanRow(long id, long novelId, int chapterNo, Integer volumeNo, String arc, String title,
+                          String goal, String hook, String timeNote, String outlineYaml, long outlineChars,
+                          int budgetMin, int budgetMax, String status, long textChars, String foreshadowRefs,
+                          String ruleRefs, java.time.OffsetDateTime createTime, java.time.OffsetDateTime updateTime) {
+    }
+
+    /** 全书有正文的章（章号升序）：按本书正文统计文风指纹用（一次查询，避免逐章 N+1）。 */
+    List<ChapterTextRow> listTextsByNovel(long novelId);
+
+    /** 全库规划行（书升序 + 章号升序）：规划资产页读模型用，一次查询覆盖所有书。 */
+    List<ChapterPlanRow> listPlanRows();
+
     Optional<ChapterDTO> find(long novelId, int chapterNo);
 
     Optional<ChapterDTO> findById(long chapterId);

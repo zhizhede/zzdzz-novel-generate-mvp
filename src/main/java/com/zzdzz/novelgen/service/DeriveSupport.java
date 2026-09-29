@@ -87,6 +87,25 @@ public final class DeriveSupport {
         return node.toString();
     }
 
+    /**
+     * 把章长带三元组写进风格包 gate_config JSON（缺失键补齐，既有键覆盖，其余键不动）——与 applyWaterGates 同一套合并语义。
+     * 用于「按本书正文重提指纹」：本书自己各章的字数分布比克隆来的预设带宽更贴合后续续写。纯函数可单测。
+     */
+    public static String applyBudgetBand(String gateJson, int budgetMin, int budgetMax, double tolerance) {
+        ObjectNode node;
+        try {
+            node = (gateJson == null || gateJson.isBlank())
+                    ? MAPPER.createObjectNode()
+                    : (ObjectNode) MAPPER.readTree(gateJson);
+        } catch (Exception e) {
+            node = MAPPER.createObjectNode();
+        }
+        node.put("budget_min", budgetMin);
+        node.put("budget_max", budgetMax);
+        node.put("chapter_length_tolerance", tolerance);
+        return node.toString();
+    }
+
     /** 掺水量的人话提示词口径（场景生成密度段用）；null=未设置不注入。 */
     public static String densityHint(Integer water) {
         if (water == null) {

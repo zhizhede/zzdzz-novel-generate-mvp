@@ -14,4 +14,7 @@ public interface VolumeReviewMapper extends BaseMapper<VolumeReviewDTO> {
     int upsert(@Param("novelId") long novelId, @Param("volNo") int volNo, @Param("report") String report);
 
     String findJson(@Param("novelId") long novelId, @Param("volNo") int volNo);
+
+    /** 全库卷复盘（report 取 text，解析在 service）。 */
+    List<com.zzdzz.novelgen.service.data.VolumeReviewDataService.VolumeReviewRow> listAll();
 }

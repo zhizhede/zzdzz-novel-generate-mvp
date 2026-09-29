@@ -23,8 +23,8 @@ public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDTO> imp
     }
 
     @Override
-    public long insert(long userId, String title, String description, Long stylePackId, String approvalMode, String status) {
-        return baseMapper.insert(userId, title, description, stylePackId, approvalMode, status);
+    public long insert(long userId, String title, String description, Long stylePackId, String approvalMode, String status, String sourceType) {
+        return baseMapper.insert(userId, title, description, stylePackId, approvalMode, status, sourceType);
     }
 
     @Override

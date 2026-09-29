@@ -58,18 +58,18 @@
             <template v-else>
               <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap">
                 <el-input v-model="sampleForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 200px" />
-                <label style="cursor: pointer; font-size: 13px; color: #409eff">上传 txt / mobi
-                  <input type="file" accept=".txt,.mobi,.azw3,.azw" style="display: none" @change="onSampleFile" />
-                </label>
                 <span v-if="sampleForm.text" style="font-size: 12px; color: #999">
                   已载入 {{ (sampleForm.text.length / 10000).toFixed(1) }} 万字
                 </span>
-                <span v-else-if="sampleForm.mobiBase64" style="font-size: 12px; color: #999">已载入电子书文件</span>
+                <span v-else-if="sampleForm.fileBase64" style="font-size: 12px; color: #999">已载入文档/电子书</span>
                 <el-button type="primary" size="small" :loading="analyzing"
-                           :disabled="!sampleForm.text && !sampleForm.mobiBase64" @click="analyzeSample">
+                           :disabled="!sampleForm.text && !sampleForm.fileBase64" @click="analyzeSample">
                   分析文风
                 </el-button>
               </div>
+              <TextFileDropZone style="margin-bottom: 6px"
+                                sub-hint="支持 txt / docx 与无 DRM 的 mobi/azw3；也可直接粘贴到下方正文框"
+                                @loaded="onSampleFileLoaded" />
               <el-input v-model="sampleForm.text" type="textarea" :rows="6"
                 placeholder="或直接粘贴小说正文（整本或长片段）。系统自动切块存入语料库（之后随时可补料/重提/采纳），只分析文风分布（用词/句式/节奏），不看情节。支持 txt 与无 DRM 的 mobi/azw3。" />
 
@@ -287,6 +287,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import TextFileDropZone from '../components/TextFileDropZone.vue'
 
 const router = useRouter()
 
@@ -319,7 +320,7 @@ const selectedSample = computed(() => wizardSamples.value.find((x) => x.id === w
 const sampleAdopting = ref(false)
 const presets = ref([])
 const presetMode = ref('select')
-const sampleForm = ref({ name: '', text: '', mobiBase64: '' })
+const sampleForm = ref({ name: '', text: '', fileBase64: '' })
 const analyzing = ref(false)
 const analyzeResult = ref(null)
 const newGenreForm = ref({ genre: '', presetName: '' })
@@ -346,7 +347,7 @@ function resetWizardState() {
     derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
   }
   presetMode.value = 'select'
-  sampleForm.value = { name: '', text: '', mobiBase64: '' }
+  sampleForm.value = { name: '', text: '', fileBase64: '' }
   analyzeResult.value = null
   newGenreForm.value = { genre: '', presetName: '' }
   chosenPresetName.value = ''
@@ -467,7 +468,7 @@ async function analyzeSample() {
     analyzeResult.value = await api.post('/api/preset/analyze', {
       sampleName: sampleForm.value.name,
       text: sampleForm.value.text,
-      mobiBase64: sampleForm.value.mobiBase64 || undefined
+      fileBase64: sampleForm.value.fileBase64 || undefined
     })
     newGenreForm.value.genre = analyzeResult.value.genre
     newGenreForm.value.presetName = (sampleForm.value.name.trim() || analyzeResult.value.genre) + '·自动提取v1'
@@ -503,27 +504,11 @@ async function adoptFromSample() {
   }
 }
 
-function onSampleFile(ev) {
-  const f = ev.target.files && ev.target.files[0]
-  if (!f) return
-  if (/\.(mobi|azw3|azw)$/i.test(f.name)) {
-    const reader = new FileReader()
-    reader.onload = () => {
-      sampleForm.value.mobiBase64 = String(reader.result || '')
-      sampleForm.value.text = ''
-      if (!sampleForm.value.name) sampleForm.value.name = f.name.replace(/\.(mobi|azw3|azw)$/i, '')
-    }
-    reader.readAsDataURL(f)
-  } else {
-    const reader = new FileReader()
-    reader.onload = () => {
-      sampleForm.value.text = String(reader.result || '')
-      sampleForm.value.mobiBase64 = ''
-      if (!sampleForm.value.name) sampleForm.value.name = f.name.replace(/\.txt$/i, '')
-    }
-    reader.readAsText(f, 'utf-8')
-  }
-  ev.target.value = ''
+/** 拖拽/选择载入：txt 给文本，电子书给 base64 由后端提取正文；小说名空着时用文件名兜底。 */
+function onSampleFileLoaded({ name, text, fileBase64 }) {
+  sampleForm.value.text = text
+  sampleForm.value.fileBase64 = fileBase64
+  if (!sampleForm.value.name) sampleForm.value.name = name
 }
 
 /** 向导内分析完直接跳素材库深度解析（带 sampleId 定位高亮）。 */

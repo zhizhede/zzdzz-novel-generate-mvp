@@ -34,8 +34,20 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
             row.setDoneUnits(0);
             row.setStage("");
             row.setMessage(null);
-            save(row);
-            return row.getId();
+            try {
+                save(row);
+                return row.getId();
+            } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                // 「先查没有 → 再插入」之间的并发窗口：同一样本被同时点了两次解析（活跃唯一索引
+                // uq_sample_parse_task_alive）。捕父类而不是 DuplicateKeyException——不让修复取决于
+                // Spring 把 23505 翻成哪个子类；是否真的是并发插入，由「能不能重查到那一行」判定：
+                // 查得到说明另一方刚插好，复用它；查不到（外键/非空等其它约束）原样往上抛。
+                // 双跑本身由 runParse 的 QUEUED→RUNNING CAS 兜住，这里只是把状态重置回 QUEUED。
+                row = findAliveBySample(sampleId);
+                if (row == null) {
+                    throw e;
+                }
+            }
         }
         update(new UpdateWrapper<SampleParseTaskDTO>()
                 .eq("id", row.getId())

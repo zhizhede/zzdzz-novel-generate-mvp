@@ -25,6 +25,12 @@ public interface ChapterMapper extends BaseMapper<ChapterDTO> {
 
     List<ChapterDataService.ChapterTextRow> findOpeningRows(@Param("novelId") long novelId, @Param("maxChapterNo") int maxChapterNo);
 
+    /** 全书有正文的章（按章号升序）：按本书正文统计文风指纹用。 */
+    List<ChapterDataService.ChapterTextRow> listTextsByNovel(@Param("novelId") long novelId);
+
+    /** 全库规划行（书升序 + 章号升序，正文只取长度不取全文）：规划资产页读模型用。 */
+    List<ChapterDataService.ChapterPlanRow> listPlanRows();
+
     String findFullText(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
 
     List<ChapterDataService.ApprovedNoDigest> findApprovedWithoutDigest();

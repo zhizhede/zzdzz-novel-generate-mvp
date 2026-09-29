@@ -74,4 +74,20 @@ public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, Style
     public long insertPack(String name, String description, String rulesMd, String fingerprint, String gateConfig) {
         return baseMapper.insertPack(name, description, rulesMd, fingerprint, gateConfig);
     }
+
+    @Override
+    public Long findReusablePackId(String name) {
+        return baseMapper.findReusablePackId(name);
+    }
+
+    @Override
+    public int reusePack(long id, String name, String description, String rulesMd, String fingerprint,
+                         String gateConfig) {
+        return baseMapper.reusePack(id, name, description, rulesMd, fingerprint, gateConfig);
+    }
+
+    @Override
+    public int softDeleteOrphanOfNovel(long novelId) {
+        return baseMapper.softDeleteOrphanOfNovel(novelId);
+    }
 }

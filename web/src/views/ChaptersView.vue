@@ -13,7 +13,11 @@
         <template #default="{ row }"><el-tag size="small" :type="STATUS_COLOR[row.status] || 'info'">{{ STATUS_TEXT[row.status] || row.status }}</el-tag></template>
       </el-table-column>
       <el-table-column prop="budgetMin" label="预算" width="100">
-        <template #default="{ row }">{{ row.budgetMin }}-{{ row.budgetMax }}</template>
+        <!-- 导入正文的章没有预算（不进生成管线）——显示 — 而不是 0-0 -->
+        <template #default="{ row }">
+          <span v-if="row.budgetMin">{{ row.budgetMin }}-{{ row.budgetMax }}</span>
+          <span v-else style="color: #bbb">—</span>
+        </template>
       </el-table-column>
     </el-table>
 
@@ -254,8 +258,8 @@ import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import { NODE_LABEL, GATE_LABEL, STEP_LABEL } from '../labels'
 
-const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', OUTLINE_APPROVED: 'success', GATE_MECHANICAL: '', GATE_AI_REVIEW: 'warning', INTERRUPTED: 'info' }
-const STATUS_TEXT = { NEW: '待生成', OUTLINED: '章纲就绪', OUTLINE_APPROVED: '章纲已批', GATE_MECHANICAL: '门禁修订中', GATE_AI_REVIEW: '审校中', REVISING: '修订中', DIGESTED: '已完成', PENDING_APPROVAL: '待审批', FAILED: '失败', INTERRUPTED: '已中断' }
+const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FINAL: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', OUTLINE_APPROVED: 'success', GATE_MECHANICAL: '', GATE_AI_REVIEW: 'warning', INTERRUPTED: 'info' }
+const STATUS_TEXT = { NEW: '待生成', OUTLINED: '章纲就绪', OUTLINE_APPROVED: '章纲已批', GATE_MECHANICAL: '门禁修订中', GATE_AI_REVIEW: '审校中', REVISING: '修订中', DIGESTED: '已完成', FINAL: '导入正文', PENDING_APPROVAL: '待审批', FAILED: '失败', INTERRUPTED: '已中断' }
 const VERDICT_TEXT = { pass: '通过', minor: '轻微', blocker: '严重', skipped: '跳过' }
 const VERDICT_COLOR = { pass: 'success', minor: 'warning', blocker: 'danger', skipped: 'info' }
 

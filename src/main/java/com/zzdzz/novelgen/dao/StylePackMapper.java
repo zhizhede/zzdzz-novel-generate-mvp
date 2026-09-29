@@ -37,4 +37,18 @@ public interface StylePackMapper extends BaseMapper<StylePackDTO> {
     long insertPack(@Param("name") String name, @Param("description") String description,
                     @Param("rulesMd") String rulesMd, @Param("fingerprint") String fingerprint,
                     @Param("gateConfig") String gateConfig);
+
+    /**
+     * 同名可复用包 id：非预设，且「已软删」或「活着但没有活书引用」（删书残留的孤儿包）。
+     * 开书/导入优先原地复用而不是 INSERT——活名唯一约束 uq_style_packs_name_alive 不认历史残留。
+     */
+    Long findReusablePackId(@Param("name") String name);
+
+    /** 复用包：整包字段原地改写并复活（清 is_deleted/delete_time），返回影响行数。 */
+    int reusePack(@Param("id") long id, @Param("name") String name, @Param("description") String description,
+                  @Param("rulesMd") String rulesMd, @Param("fingerprint") String fingerprint,
+                  @Param("gateConfig") String gateConfig);
+
+    /** 删书级联：本书的专属风格包（非预设、且已无活书引用）一并软删，返回影响行数。 */
+    int softDeleteOrphanOfNovel(@Param("novelId") long novelId);
 }

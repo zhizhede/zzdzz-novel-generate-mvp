@@ -13,6 +13,8 @@ public enum ChapterStatus {
     REVISING("REVISING"),
     PENDING_APPROVAL("PENDING_APPROVAL"),
     DIGESTED("DIGESTED"),
+    /** 现成正文终态：导入书籍/原稿导入（ImportRunner）落的章，不经生成管线，故不占生成状态机的任一环节。 */
+    FINAL("FINAL"),
     FAILED("FAILED"),
     INTERRUPTED("INTERRUPTED");
 

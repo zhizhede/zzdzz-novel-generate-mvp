@@ -22,4 +22,9 @@ public class VolumeReviewDataServiceImpl extends ServiceImpl<VolumeReviewMapper,
     public String findJson(long novelId, int volNo) {
         return baseMapper.findJson(novelId, volNo);
     }
+
+    @Override
+    public List<VolumeReviewRow> listAll() {
+        return baseMapper.listAll();
+    }
 }

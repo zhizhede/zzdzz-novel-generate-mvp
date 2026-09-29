@@ -18,9 +18,7 @@ public class StylePackDTO {
     private boolean isDeleted;
     /** 预设模板（未被书引用）：应用到书 = 拷贝 fingerprint/gate_config/rules_md。 */
     private boolean isPreset;
-
-
-
-
+    private java.time.OffsetDateTime createTime;
+    private java.time.OffsetDateTime updateTime;
 
 }

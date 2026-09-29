@@ -37,4 +37,13 @@ public interface StylePackDataService extends IService<StylePackDTO> {
 
     /** 开书克隆：复制预设为书的私有风格包（is_preset=FALSE），返回 id。 */
     long insertPack(String name, String description, String rulesMd, String fingerprint, String gateConfig);
+
+    /** 同名可复用包（非预设；已软删或无活书引用的孤儿包），无则 null。 */
+    Long findReusablePackId(String name);
+
+    /** 复用包：整包字段原地改写并复活（清软删标记）。 */
+    int reusePack(long id, String name, String description, String rulesMd, String fingerprint, String gateConfig);
+
+    /** 删书级联：本书专属风格包若无其他活书引用则一并软删。 */
+    int softDeleteOrphanOfNovel(long novelId);
 }

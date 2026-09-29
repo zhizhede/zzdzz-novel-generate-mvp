@@ -15,6 +15,10 @@ public interface MaterialCardMapper extends BaseMapper<MaterialCardDTO> {
 
     boolean exists(@Param("novelId") long novelId, @Param("kind") String kind, @Param("name") String name);
 
+    /** 除自己以外是否还有同名活卡：改名时的撞键前置校验（唯一索引 uq_material_cards_novel_kind_name）。 */
+    boolean existsOther(@Param("novelId") long novelId, @Param("kind") String kind, @Param("name") String name,
+                        @Param("excludeId") long excludeId);
+
     int softDelete(@Param("id") long id);
 
     boolean hasCards(@Param("novelId") long novelId);

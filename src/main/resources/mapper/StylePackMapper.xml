@@ -66,4 +66,32 @@ INSERT INTO style_packs (name, description, rules_md, fingerprint, gate_config)
 VALUES (#{name}, #{description}, #{rulesMd}, #{fingerprint}::jsonb, #{gateConfig}::jsonb)
 RETURNING id
     </select>
+
+    <!-- 同名可复用包：非预设，且已软删 或 活着但无活书引用（删书残留孤儿包）。活着优先于已删，同档取新。 -->
+    <select id="findReusablePackId" resultType="long">
+SELECT sp.id FROM style_packs sp
+WHERE sp.name = #{name} AND sp.is_preset = FALSE
+  AND (sp.is_deleted = TRUE
+       OR NOT EXISTS (SELECT 1 FROM novels n WHERE n.style_pack_id = sp.id AND n.is_deleted = FALSE))
+ORDER BY sp.is_deleted ASC, sp.id DESC
+LIMIT 1
+    </select>
+
+    <!-- 复用：整包字段原地改写并复活（清软删标记）。与 insertPack 字段口径一致，只是打在既有行上。 -->
+    <update id="reusePack">
+UPDATE style_packs
+SET name=#{name}, description=#{description}, rules_md=#{rulesMd},
+    fingerprint=#{fingerprint}::jsonb, gate_config=#{gateConfig}::jsonb,
+    is_preset=FALSE, is_deleted=FALSE, delete_time=NULL, update_time=NOW()
+WHERE id=#{id}
+    </update>
+
+    <!-- 删书级联：本书的专属风格包若非预设且已无活书引用，一并软删（否则活名唯一约束会挡住同名重导）。 -->
+    <update id="softDeleteOrphanOfNovel">
+UPDATE style_packs sp
+SET is_deleted=TRUE, delete_time=NOW(), update_time=NOW()
+WHERE sp.id = (SELECT style_pack_id FROM novels WHERE id=#{novelId})
+  AND sp.is_preset = FALSE
+  AND NOT EXISTS (SELECT 1 FROM novels n WHERE n.style_pack_id = sp.id AND n.is_deleted = FALSE)
+    </update>
 </mapper>

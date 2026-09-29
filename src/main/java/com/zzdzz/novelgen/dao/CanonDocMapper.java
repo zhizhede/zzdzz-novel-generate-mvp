@@ -17,6 +17,9 @@ public interface CanonDocMapper extends BaseMapper<CanonDocDTO> {
 
     List<CanonDocDTO> listByNovel(@Param("novelId") long novelId);
 
+    /** 全库同类同名文档（规划资产页读「各书大纲」用）。 */
+    List<CanonDocDTO> listAliveByKindName(@Param("kind") String kind, @Param("name") String name);
+
     Long findId(@Param("novelId") long novelId, @Param("kind") String kind, @Param("name") String name);
 
     String findContentByKindName(@Param("novelId") long novelId, @Param("kind") String kind, @Param("name") String name);

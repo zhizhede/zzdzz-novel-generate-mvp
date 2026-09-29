@@ -28,6 +28,11 @@ public class MaterialCardDataServiceImpl extends ServiceImpl<MaterialCardMapper,
     }
 
     @Override
+    public boolean existsOther(long novelId, String kind, String name, long excludeId) {
+        return baseMapper.existsOther(novelId, kind, name, excludeId);
+    }
+
+    @Override
     public int softDelete(long id) {
         return baseMapper.softDelete(id);
     }

@@ -97,6 +97,11 @@ public class MaterialCardService {
                        Boolean pinned, String status, Integer sourceChapter) {
         MaterialCardDTO card = get(id);
         validate(card.getKind(), name, status);
+        // create 一直查重、update 原先没查：把卡名改成同类型下另一张活卡的名字，会直接撞
+        // uq_material_cards_novel_kind_name（界面只看到数据库键冲突）。这里补齐，自己除外。
+        if (cardDAO.existsOther(card.getNovelId(), card.getKind(), name, id)) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "同类型下已存在同名卡: " + name);
+        }
         cardDAO.update(id, name, aliases, summary, contentMd, pinned,
                 status == null ? card.getStatus() : status, sourceChapter);
     }

@@ -27,6 +27,12 @@ SELECT * FROM material_cards WHERE id=#{id} AND is_deleted=false
                 
     </select>
 
+    <!-- 改名用：唯一索引 uq_material_cards_novel_kind_name 认活行的 (novel_id,kind,name)，自己除外 -->
+    <select id="existsOther" resultType="boolean">
+SELECT COUNT(*) FROM material_cards
+WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND is_deleted=false AND id &lt;&gt; #{excludeId}
+    </select>
+
     <update id="softDelete">
 UPDATE material_cards SET is_deleted=true, delete_time=NOW() WHERE id=#{id} AND is_deleted=false
     </update>

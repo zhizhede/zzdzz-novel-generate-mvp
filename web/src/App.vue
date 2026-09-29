@@ -11,7 +11,9 @@
         <el-menu-item index="/books">书籍管理</el-menu-item>
         <el-menu-item index="/chapters">章节</el-menu-item>
         <el-menu-item index="/planning">规划</el-menu-item>
+        <el-menu-item index="/plans">规划资产</el-menu-item>
         <el-menu-item index="/library">素材库</el-menu-item>
+        <el-menu-item index="/fingerprints">文风指纹</el-menu-item>
         <el-menu-item index="/logs">调用台账</el-menu-item>
       </el-menu>
       <div style="position: absolute; bottom: 16px; padding: 0 16px">

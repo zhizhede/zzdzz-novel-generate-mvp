@@ -28,6 +28,12 @@ INSERT INTO canon_docs (novel_id, kind, name, content) VALUES (#{novelId}, #{kin
 SELECT id FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND is_deleted=false
     </select>
 
+    <!-- 规划资产页：全库同类同名文档（各书大纲）连正文一起取，带创建/更新时间 -->
+    <select id="listAliveByKindName" resultType="com.zzdzz.novelgen.model.dto.CanonDocDTO">
+SELECT id, novel_id, kind, name, content, sort_no, is_deleted, create_time, update_time
+FROM canon_docs WHERE kind=#{kind} AND name=#{name} AND is_deleted=false ORDER BY novel_id
+    </select>
+
     <select id="findContentByKindName" resultType="string">
 
                 SELECT content FROM canon_docs

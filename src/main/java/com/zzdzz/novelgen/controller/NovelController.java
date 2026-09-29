@@ -30,8 +30,32 @@ public class NovelController {
 
 
     @GetMapping
-    public Result<List<NovelVO>> list() {
-        return Result.success(novelService.list());
+    public Result<List<NovelVO>> list(com.zzdzz.novelgen.model.vo.NovelQueryVO condition) {
+        return Result.success(novelService.list(condition));
+    }
+
+    /**
+     * 导入书籍：粘贴正文或上传 txt/mobi/azw → 按「第N章」切章落库（status=FINAL，不经生成管线），
+     * 书行入库类型标 IMPORTED。文风预设必填（克隆为本书风格包——无风格包的书跑门禁会直接失败）。
+     * 耗时与正文规模成正比（纯落库无 LLM）；补事实账另走 /{id}/digest-backfill。
+     */
+    @PostMapping("/import")
+    public Result<com.zzdzz.novelgen.service.NovelService.NovelImportResultVO> importBook(
+            @RequestBody com.zzdzz.novelgen.model.vo.NovelImportVO dto, HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
+        return Result.success(novelService.importBook(dto, userId));
+    }
+
+    /** 为最新章节补 AI 事实账（导入正文后的续写前情来源）：逐章 LLM 调用，慢且计费，由前端导入后显式触发。 */
+    @PostMapping("/{id}/digest-backfill")
+    public Result<com.zzdzz.novelgen.service.NovelService.DigestBackfillVO> backfillDigests(
+            @PathVariable long id, @RequestBody(required = false) DigestBackfillBody body) {
+        return Result.success(novelService.backfillDigests(id,
+                body == null || body.recent() == null ? 0 : body.recent()));
+    }
+
+    /** 补事实账入参：recent=最近多少章（0/空 = 不补）。 */
+    public record DigestBackfillBody(Integer recent) {
     }
 
     /** 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选样本资产克隆与衍生配置（P2）。 */

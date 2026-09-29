@@ -864,26 +864,7 @@
     </el-dialog>
 
     <!-- 素材库·导入新小说（不开书也能囤素材：分析落台账，之后随时深度解析/采纳预设/衍生开书） -->
-    <el-dialog v-model="sampleImportOpen" title="导入新小说" width="640px">
-      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px">
-        <el-input v-model="sampleImportForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 220px" />
-        <label style="cursor: pointer; font-size: 13px; color: #409eff">上传 txt / mobi
-          <input type="file" accept=".txt,.mobi,.azw3,.azw" style="display: none" @change="onSampleImportFile" />
-        </label>
-        <span v-if="sampleImportForm.text" style="font-size: 12px; color: #999">
-          已载入 {{ (sampleImportForm.text.length / 10000).toFixed(1) }} 万字
-        </span>
-      </div>
-      <el-input v-model="sampleImportForm.text" type="textarea" :rows="8"
-                placeholder="或直接粘贴小说正文（整本或长片段，最多 800 万字）。系统自动切块存入语料库并出文风分析，之后可在列表里深度解析。" />
-      <div style="font-size: 12px; color: #999; margin-top: 6px">分析为纯机械指标（秒级、零 LLM 成本）；深度解析（LLM）在列表行单独触发。</div>
-      <template #footer>
-        <el-button @click="sampleImportOpen = false">取消</el-button>
-        <el-button type="primary" :loading="sampleImporting" :disabled="!sampleImportForm.text && !sampleImportForm.mobiBase64" @click="importSample">
-          分析并入库
-        </el-button>
-      </template>
-    </el-dialog>
+    <SampleImportDialog v-model="sampleImportOpen" @imported="onSampleImported" />
   </div>
 </template>
 
@@ -892,6 +873,7 @@ import { computed, onMounted, onUnmounted, ref, watch, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
+import SampleImportDialog from '../components/SampleImportDialog.vue'
 
 const novels = ref([])
 const novelId = ref(null)
@@ -1134,56 +1116,19 @@ async function saveSampleCard() {
 }
 
 // ===== 素材库直接导入新小说（不开书囤素材） + 来源定位高亮 =====
+// 弹窗本体在 components/SampleImportDialog.vue（与文风指纹页共用同一条落库口径）
 const sampleImportOpen = ref(false)
-const sampleImportForm = ref({ name: '', text: '' })
-const sampleImporting = ref(false)
 const highlightSampleId = ref(null)
 
 function openSampleImport() {
-  sampleImportForm.value = { name: '', text: '', mobiBase64: '' }
   sampleImportOpen.value = true
 }
 
-function onSampleImportFile(ev) {
-  const f = ev.target.files && ev.target.files[0]
-  if (!f) return
-  if (/\.(mobi|azw3|azw)$/i.test(f.name)) {
-    const reader = new FileReader()
-    reader.onload = () => {
-      sampleImportForm.value.mobiBase64 = String(reader.result || '')
-      sampleImportForm.value.text = ''
-      if (!sampleImportForm.value.name) sampleImportForm.value.name = f.name.replace(/\.(mobi|azw3|azw)$/i, '')
-    }
-    reader.readAsDataURL(f)
-  } else {
-    const reader = new FileReader()
-    reader.onload = () => {
-      sampleImportForm.value.text = String(reader.result || '')
-      sampleImportForm.value.mobiBase64 = ''
-      if (!sampleImportForm.value.name) sampleImportForm.value.name = f.name.replace(/\.txt$/i, '')
-    }
-    reader.readAsText(f, 'utf-8')
-  }
-  ev.target.value = ''
-}
-
-async function importSample() {
-  sampleImporting.value = true
-  try {
-    const r = await api.post('/api/preset/analyze', {
-      sampleName: sampleImportForm.value.name,
-      text: sampleImportForm.value.text,
-      mobiBase64: sampleImportForm.value.mobiBase64 || undefined
-    })
-    sampleImportOpen.value = false
-    highlightSampleId.value = r.sampleId
-    await loadSamples()
-    ElMessage.success(`已入库（${r.chunks} 块语料，品类「${r.genre}」）——点行内「深度解析」拆剧情与资产`)
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    sampleImporting.value = false
-  }
+/** 导入成功：高亮新行 + 提示后续可深度解析。 */
+async function onSampleImported(r) {
+  highlightSampleId.value = r.sampleId
+  await loadSamples()
+  ElMessage.success(`已入库（${r.chunks} 块语料，品类「${r.genre}」）——点行内「深度解析」拆剧情与资产`)
 }
 
 async function delSampleCard(row) {

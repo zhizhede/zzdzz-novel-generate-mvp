@@ -59,7 +59,9 @@ class NovelServiceOriginalityTest {
         // 真实 PromptTemplateService + 空 DAO：全部回退 PromptCatalog 目录正文（顺带验证新提示词条目可用）
         PromptTemplateDataService promptDao = mock(PromptTemplateDataService.class);
         when(promptDao.findAll()).thenReturn(List.of());
-        service = new NovelService(mock(NovelDataService.class), stylePackData, sampleCardData, plotData,
+        service = new NovelService(mock(NovelDataService.class), stylePackData,
+                mock(com.zzdzz.novelgen.service.data.ChapterDataService.class), mock(DigestService.class),
+                sampleCardData, plotData,
                 sampleData, mock(MaterialCardDataService.class), mock(CanonDocDataService.class),
                 mock(GenerationTaskDataService.class), llm, llmJson,
                 new PromptTemplateService(promptDao), new ObjectMapper());

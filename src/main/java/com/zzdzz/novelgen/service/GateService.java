@@ -342,7 +342,15 @@ public class GateService {
             Map.entry("simile_per1k", "比喻"),
             Map.entry("dialogue_density_per1k", "对白行"),
             Map.entry("dialogue_end_punct_ratio", "对白句末标点占比"),
-            Map.entry("tic_haiyou_per1k", "口头禅「还有」"));
+            // 口头禅类指标按「口头禅『X』」命名：这三项是现有风格包里实际出现的全部（少了会以键名裸奔到界面上）
+            Map.entry("tic_haiyou_per1k", "口头禅「还有」"),
+            Map.entry("tic_laizhe_per1k", "口头禅「来着」"),
+            Map.entry("tic_shunbian_per1k", "口头禅「顺便」"));
+
+    /** 指纹指标中文名（未收录的键回退键名本身）：写作提示与文风指纹页共用这一份口径，勿在他处另建映射。 */
+    public static String metricLabel(String key) {
+        return METRIC_LABELS.getOrDefault(key, key);
+    }
 
     /**
      * 指纹量化目标转写作口径（场景生成 system 注入）：与 fingerprintChecks 同一套判定数学
@@ -377,7 +385,7 @@ public class GateService {
             double tol = ((Number) rule.get("tolerance")).doubleValue();
             double upper = rule.containsKey("abs_max")
                     ? ((Number) rule.get("abs_max")).doubleValue() : v * (1 + tol);
-            String label = METRIC_LABELS.getOrDefault(key, key);
+            String label = metricLabel(key);
             String unit = key.endsWith("_per1k") ? "每千字" : "";
             String range;
             if (rule.containsKey("abs_min")) {
@@ -441,7 +449,7 @@ public class GateService {
                 double v = ((Number) rule.get("value")).doubleValue();
                 double lo = v * (1 - ((Number) rule.get("tolerance")).doubleValue());
                 if (v >= 3 && lo > 0.3) {
-                    out.add("基线非零的标点有下界（通篇密度为 0 同样打回）——" + METRIC_LABELS.getOrDefault(key, key)
+                    out.add("基线非零的标点有下界（通篇密度为 0 同样打回）——" + metricLabel(key)
                             + "按目标 " + num(v) + "/千字 左右安排");
                     break;
                 }
@@ -471,8 +479,19 @@ public class GateService {
         return String.format("%.2f", d);
     }
 
+    /**
+     * 本书指纹基线。**没有指纹时返回空基线（fail-open）而不是抛异常**——「未选预设导入的书」在用户
+     * 采纳「按本书正文提指纹」草稿之前就是这种状态，抛异常会让这本书的门禁直接炸（B0001 + 章 FAILED），
+     * 而空基线的实际语义是「跳过指纹类指标校验」，其余硬规则（字数带/黑名单/直引号/比喻上限）照常执行。
+     */
     private Map<String, Object> fingerprint(long novelId) {
         String json = stylePackData.findFingerprintByNovel(novelId);
+        if (json == null || json.isBlank()) {
+            log.warn("本书没有指纹基线，门禁跳过指纹类指标（只跑字数带/黑名单/直引号/比喻上限）：novelId={}", novelId);
+            // 必须是「有 baseline 键但空对象」的形状：下游 fingerprintChecks/upperBound 直接取 fingerprint.get("baseline")，
+            // 给裸空 Map 会在取 baseline 时 NPE（fail-open 变成换个地方炸——单测实测踩到过）。
+            return Map.of("baseline", Map.of());
+        }
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
         } catch (Exception e) {

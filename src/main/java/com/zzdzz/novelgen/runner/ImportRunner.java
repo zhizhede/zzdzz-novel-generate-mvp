@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.runner;
 
 import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.enums.NovelSourceType;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
@@ -89,7 +90,8 @@ public class ImportRunner implements ApplicationRunner {
         long packId = importBookStylePack(cfg);
         Long exist = novelData.findIdByTitle(title);
         long novelId = exist != null ? exist
-                : novelData.insert(userId, title, (String) cfg.get("description"), packId, "auto", "active");
+                : novelData.insert(userId, title, (String) cfg.get("description"), packId, "auto", "active",
+                        NovelSourceType.IMPORTED.wire());
         if (exist == null) {
             log.info("书目导入：新作品 {} (novelId={})", title, novelId);
         }
@@ -201,7 +203,8 @@ public class ImportRunner implements ApplicationRunner {
         Long exist = novelData.findIdByTitle("夜班守则");
         if (exist != null) return exist;
         return novelData.insert(userId, "夜班守则",
-                "规则怪谈：便利店夜班与不对劲的守则（管线测试作）", packId, "auto", "active");
+                "规则怪谈：便利店夜班与不对劲的守则（管线测试作）", packId, "auto", "active",
+                NovelSourceType.IMPORTED.wire());
     }
 
     private void importCanonDocs(long novelId) throws Exception {

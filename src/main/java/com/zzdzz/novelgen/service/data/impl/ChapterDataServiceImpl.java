@@ -22,6 +22,11 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
     }
 
     @Override
+    public List<ChapterPlanRow> listPlanRows() {
+        return baseMapper.listPlanRows();
+    }
+
+    @Override
     public Optional<ChapterDTO> findById(long chapterId) {
         return Optional.ofNullable(getById(chapterId));
     }
@@ -127,6 +132,11 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
     @Override
     public void saveFullText(long chapterId, String fullText) {
         baseMapper.saveFullText(chapterId, fullText);
+    }
+
+    @Override
+    public List<ChapterTextRow> listTextsByNovel(long novelId) {
+        return baseMapper.listTextsByNovel(novelId);
     }
 
     @Override

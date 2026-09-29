@@ -33,6 +33,11 @@ public class CanonDocDataServiceImpl extends ServiceImpl<CanonDocMapper, CanonDo
     }
 
     @Override
+    public List<CanonDocDTO> listAliveByKindName(String kind, String name) {
+        return baseMapper.listAliveByKindName(kind, name);
+    }
+
+    @Override
     public Long findId(long novelId, String kind, String name) {
         return baseMapper.findId(novelId, kind, name);
     }
