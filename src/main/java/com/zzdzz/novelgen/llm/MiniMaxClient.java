@@ -52,6 +52,9 @@ public class MiniMaxClient implements LlmPort {
     private final LlmProviderResolver providerResolver;
     private final HttpClient httpClient;
 
+    /** 零帧传输失败的最大重试次数。必须有限——曾无上限递归：422 内容过滤被当可重试，同一请求重试 1852 次/10 分钟。 */
+    private static final int STREAM_RETRY_MAX = 1;
+
     @Override
     public ChatResult chat(ChatRequest request) {
         long start = System.currentTimeMillis();
@@ -66,6 +69,13 @@ public class MiniMaxClient implements LlmPort {
         try {
             response = post(provider, body);
         } catch (Exception first) {
+            if (first instanceof StreamIoException sie && !sie.retryable) {
+                // 4xx 是确定性拒绝（402 余额/401 密钥/422 内容过滤/400 参数）：不重试，落 error 行后直接抛
+                log.error("LLM 调用被拒 node={} model={}: {}", request.node(), model, first.getMessage());
+                long id = insertLog(request, model, requestJson, null, null, 0, 0, 0, 0,
+                        elapsed(start), "error", truncate(first.toString(), 2000));
+                throw new LlmException("LLM 调用失败（llm_call_log id=" + id + "）: " + first.getMessage(), first);
+            }
             // 传输类失败（超时/网络）自动重试一次；注意重试可能造成服务端重复计费
             log.warn("LLM 调用传输失败，重试一次: {}", first.toString());
             try {
@@ -114,6 +124,11 @@ public class MiniMaxClient implements LlmPort {
      */
     @Override
     public ChatResult chatStream(ChatRequest request, StreamDelta onDelta) {
+        return chatStream(request, onDelta, 0);
+    }
+
+    /** attempt=已重试次数：零帧传输失败最多重试 STREAM_RETRY_MAX 次（递归有界化，防持续性错误空转）。 */
+    private ChatResult chatStream(ChatRequest request, StreamDelta onDelta, int attempt) {
         long start = System.currentTimeMillis();
         LlmProviderResolver.Resolved provider = providerResolver.resolve();
         LlmNodeConfigDTO cfg = resolveConfig(request.node());
@@ -135,9 +150,9 @@ public class MiniMaxClient implements LlmPort {
             throw new LlmException("LLM 流式调用被中断（llm_call_log 已留痕）", ie);
         } catch (StreamIoException e) {
             // 与阻塞路径对齐：零帧阶段（连接/响应头）传输失败重试一次；帧已流出则不重试（部分 token 已花）
-            if (acc.frames() == 0 && e.retryable) {
-                log.warn("LLM 流式调用传输失败，重试一次: {}", e.getMessage());
-                return chatStream(request, onDelta);
+            if (acc.frames() == 0 && e.retryable && attempt < STREAM_RETRY_MAX) {
+                log.warn("LLM 流式调用传输失败，重试一次（第 {} 次）: {}", attempt + 1, e.getMessage());
+                return chatStream(request, onDelta, attempt + 1);
             }
             long errId = insertLog(request, model, requestJson, acc.assembledResponse(), acc.reasoningSoFar(),
                     0, 0, 0, 0, elapsed(start), "error", truncate(e.getMessage(), 2000));
@@ -201,7 +216,8 @@ public class MiniMaxClient implements LlmPort {
             }
             int status = awaitStatus(responseFuture);
             if (status >= 400) {
-                throw new StreamIoException("HTTP " + status + " " + subscriber.nonDataHint(), null, true);
+                // 4xx 是确定性拒绝（402 余额/401 密钥/422 内容过滤/400 参数/404 模型），重试不会变好 → 不可重试
+                throw new StreamIoException("HTTP " + status + " " + subscriber.nonDataHint(), null, status >= 500);
             }
         } finally {
             subscriber.cancel();
@@ -526,7 +542,9 @@ public class MiniMaxClient implements LlmPort {
         try {
             HttpResponse<String> resp = future.get(provider.readTimeout().toMillis(), TimeUnit.MILLISECONDS);
             if (resp.statusCode() >= 400) {
-                throw new IllegalStateException("HTTP " + resp.statusCode() + ": " + truncate(resp.body(), 500));
+                // 与流式路径同口径：4xx 确定性拒绝不可重试（retryable=false），5xx 视为可重试
+                throw new StreamIoException("HTTP " + resp.statusCode() + ": " + truncate(resp.body(), 500), null,
+                        resp.statusCode() >= 500);
             }
             return mapper.readTree(resp.body());
         } catch (TimeoutException e) {

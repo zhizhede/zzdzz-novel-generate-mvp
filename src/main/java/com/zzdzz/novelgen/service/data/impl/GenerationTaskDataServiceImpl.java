@@ -77,12 +77,12 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
 
     @Override
     public void updateProgress(long id, int doneChapters, Integer currentChapter, String message) {
-        baseMapper.updateProgress(id, doneChapters, currentChapter, message);
+        baseMapper.updateProgress(id, doneChapters, currentChapter, fitMessage(message));
     }
 
     @Override
     public void updateStatus(long id, String status, String message) {
-        baseMapper.updateStatus(id, status, message);
+        baseMapper.updateStatus(id, status, fitMessage(message));
     }
 
     @Override
@@ -129,6 +129,18 @@ public class GenerationTaskDataServiceImpl extends ServiceImpl<GenerationTaskMap
 
     @Override
     public int requeueForRetry(long id, int fromChapter, int retryCount, String message) {
-        return baseMapper.requeueForRetry(id, fromChapter, retryCount, message);
+        return baseMapper.requeueForRetry(id, fromChapter, retryCount, fitMessage(message));
+    }
+
+    /**
+     * last_message 列为 varchar(256)：超长错误串必须在写入前截断。
+     * 实证（2026-09-29 任务 #58）：失败处理写超长错误 → UPDATE 抛 value too long → 终态未落库，
+     * 任务永久 RUNNING 而 worker 线程已空闲（僵尸任务，需手工收敛）。
+     */
+    private static String fitMessage(String message) {
+        if (message == null || message.length() <= 256) {
+            return message;
+        }
+        return message.substring(0, 253) + "...";
     }
 }
