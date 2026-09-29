@@ -1,6 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.model.dto.ChapterDTO;
@@ -25,6 +26,7 @@ import java.util.Objects;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ContextPackerService {
 
     private final StylePackDataService stylePackData;
@@ -176,6 +178,8 @@ public class ContextPackerService {
             appendEntries(sb, "未解", n.get("unresolved"));
             return sb.isEmpty() ? null : sb.toString().strip();
         } catch (Exception e) {
+            // 快照损坏时静默不注入会让「物品归属凭空变化」的漂移无痕（本类此前无 logger，这是第一处留痕点）
+            log.warn("世界状态快照解析失败（作品 {} 第 {} 章），本场景不注入：{}", novelId, chapterNo, e.getMessage());
             return null;
         }
     }

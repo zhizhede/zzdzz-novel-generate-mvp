@@ -43,3 +43,9 @@ docs/STATUS.md
 
 # 一次性迁移脚本
 scripts/
+
+# 原稿原件不入 git（docx/mobi/txt 原件；canon 与元数据仍可提交）
+novel/**/*.docx
+novel/**/*.mobi
+novel/**/*.azw3
+novel/**/*.txt

@@ -1,6 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.model.enums.GateType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -22,6 +23,7 @@ import java.util.regex.Pattern;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class GateService {
 
     /**
@@ -186,6 +188,9 @@ public class GateService {
             }
             return sb.toString();
         } catch (Exception e) {
+            // fail-open 之前是静默的：前端只显示空原因、排查无痕（本次统一补日志，返回值不变）
+            log.warn("门禁失败摘要生成失败（前端将显示空原因）：{}；原始报告：{}", e.getMessage(),
+                    failureJson.length() > 200 ? failureJson.substring(0, 200) + "..." : failureJson);
             return "";
         }
     }
@@ -241,6 +246,8 @@ public class GateService {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
         } catch (Exception e) {
+            // 静默回默认会让黑名单/章长容差/评审阈值悄悄漂移——必须留痕
+            log.warn("门禁配置解析失败（作品 {}），本轮回退代码兜底值，质量口径可能漂移：{}", novelId, e.getMessage());
             return Map.of();
         }
     }
@@ -252,7 +259,8 @@ public class GateService {
         if (v instanceof String s) {
             try {
                 return Double.parseDouble(s.trim());
-            } catch (NumberFormatException ignored) {
+            } catch (NumberFormatException e) {
+                log.warn("门禁参数不是数字（作品 {} 键 {}={}），回退默认值 {}", novelId, key, s, fallback);
             }
         }
         return fallback;
@@ -274,6 +282,7 @@ public class GateService {
         try {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(readerStandards(novelId));
         } catch (Exception e) {
+            log.warn("评审标准快照序列化失败（作品 {}），该章不回看口径：{}", novelId, e.getMessage());
             return null;
         }
     }
@@ -350,6 +359,7 @@ public class GateService {
         try {
             base = new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, Map.class);
         } catch (Exception e) {
+            log.warn("指纹量化目标解析失败（作品 {}），本章提示词不带量化目标（写手闭卷）：{}", novelId, e.getMessage());
             return null;
         }
         Map<String, Object> baselineMap = (Map<String, Object>) base.get("baseline");
