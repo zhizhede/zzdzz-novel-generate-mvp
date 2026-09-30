@@ -129,7 +129,7 @@
                        @click="router.push('/wizard')">继续向导</el-button>
             <el-button size="small" link @click="openEdit(row)">编辑</el-button>
             <el-button size="small" link @click="openFingerprint(row)">提指纹</el-button>
-            <el-button size="small" link @click="openDigestBackfill(row)">补事实账</el-button>
+            <el-button size="small" link @click="openAnalyze(row)">解析</el-button>
             <el-button size="small" type="danger" link @click="delBook(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -187,15 +187,21 @@
           <el-input v-model="importForm.text" type="textarea" :rows="8" style="margin-top: 6px"
                     placeholder="或直接粘贴正文（整本或已有部分）。按行首标题切章：第N章 / 第一章 / 一、标题；识别不到标题则整篇作为第 1 章。" />
         </el-form-item>
-        <el-form-item label="补事实账">
-          <div>
-            <el-checkbox v-model="importForm.digestOn">导入后为最近
-              <el-input-number v-model="importForm.digestRecent" :min="1" :max="20" size="small" style="width: 80px; margin: 0 4px" />
-              章生成 AI 事实账
-            </el-checkbox>
-            <div style="font-size: 12px; color: #999">
-              事实账是「续写前情链」的唯一来源（卷规划与后续章节都读它）；不生成则续写没有前情，可能与人设/剧情脱节。
-              每章一次 LLM 调用（约 1-2 分钟），计入调用台账。
+        <el-form-item label="导入后解析">
+          <div style="width: 100%">
+            <div style="font-size: 12px; color: #999; margin-bottom: 4px">
+              落库后自动跑一轮 LLM 解析把这本书的资产补齐（<b>默认全勾</b>，可逐项取消；不勾＝只落库不解析）。
+              解析在后台跑，关掉页面也继续；进度随时在「解析」入口或本书解析任务里查看。
+            </div>
+            <el-checkbox-group v-model="importForm.analyzeSteps">
+              <div v-for="s in ANALYZE_STEPS" :key="s.key" style="line-height: 1.9">
+                <el-checkbox :label="s.key"><span style="font-size: 13px">{{ s.label }}</span></el-checkbox>
+                <span style="font-size: 12px; color: #999; margin-left: 6px">{{ s.hint }}</span>
+              </div>
+            </el-checkbox-group>
+            <div style="margin-top: 4px">
+              <el-button size="small" link type="primary" @click="importForm.analyzeSteps = allStepKeys()">全选</el-button>
+              <el-button size="small" link @click="importForm.analyzeSteps = []">全不选</el-button>
             </div>
           </div>
         </el-form-item>
@@ -233,21 +239,8 @@
     <FingerprintDraftDialog v-model="fpOpen" :novel-id="fpTargetId"
                             @applied="onFingerprintApplied" @closed="onFingerprintClosed" />
 
-    <el-dialog v-model="digestOpen" title="补事实账" width="520px">
-      <div style="font-size: 13px; line-height: 1.9">
-        <div>为《{{ digestTarget ? digestTarget.title : '' }}》最新章节生成 AI 事实账（续写前情链）。</div>
-        <div style="margin: 8px 0">
-          最近
-          <el-input-number v-model="digestRecent" :min="1" :max="20" size="small" style="width: 90px; margin: 0 4px" />
-          章 · 每章一次 LLM 调用（约 1-2 分钟）
-        </div>
-        <div style="color: #999; font-size: 12px">重复补同一章会重复计费；只补新章时把数字调小。</div>
-      </div>
-      <template #footer>
-        <el-button @click="digestOpen = false">取消</el-button>
-        <el-button type="primary" :loading="digesting" @click="runDigestBackfill">开始补账</el-button>
-      </template>
-    </el-dialog>
+    <!-- 解析链：导入后自动打开（也用于给已有书补资产/重跑），逐步进度 + 结果 -->
+    <ImportAnalyzeDialog v-model="analyzeOpen" :novel-id="analyzeNovelId" :title="analyzeTitle" />
   </div>
 </template>
 
@@ -259,6 +252,8 @@ import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import TextFileDropZone from '../components/TextFileDropZone.vue'
 import FingerprintDraftDialog from '../components/FingerprintDraftDialog.vue'
+import ImportAnalyzeDialog from '../components/ImportAnalyzeDialog.vue'
+import { ANALYZE_STEPS, allStepKeys } from '../importAnalyze'
 
 const SOURCE_LABEL = { IMPORTED: '手动导入', DERIVED: '系统衍生', ORIGINAL: '系统纯原创' }
 const SOURCE_TYPE = { IMPORTED: 'warning', DERIVED: 'success', ORIGINAL: 'info' }
@@ -394,13 +389,14 @@ async function delBook(row) {
   }
 }
 
-// ===== 导入书籍（粘贴正文 / 上传 txt、mobi、azw → 切章入库，入库类型 = 手动导入）=====
+// ===== 导入书籍（粘贴正文 / 上传 txt、docx、mobi、azw → 切章入库，入库类型 = 手动导入）=====
 const importOpen = ref(false)
 const importing = ref(false)
 const importStatus = ref('导入并入库')
 const importForm = reactive({
   title: '', description: '', presetId: null, text: '', fileBase64: '',
-  digestOn: true, digestRecent: 3, fingerprintOn: false
+  // 导入后解析的勾选项（默认全勾，用户可逐项取消）＋机械提指纹（零 LLM，仍是独立开关）
+  analyzeSteps: allStepKeys(), fingerprintOn: false
 })
 const presets = ref([])
 
@@ -419,7 +415,10 @@ function onImportFileLoaded({ name, text, fileBase64 }) {
   if (!importForm.title) importForm.title = name
 }
 
-/** 两步：先落库（快、无 LLM），再按勾选决定是否补事实账（慢、计费）——两步结果都单独反馈。 */
+/**
+ * 一次请求两步：后端先落库（快、无 LLM）再把勾选的解析链入队（慢、计费、后台跑）。
+ * 解析进度不在这个弹窗里等——关掉导入框后打开「解析」面板看逐步进度。
+ */
 async function submitImport() {
   importing.value = true
   importStatus.value = '正在导入…'
@@ -430,22 +429,15 @@ async function submitImport() {
       description: importForm.description,
       presetId: importForm.presetId,
       text: importForm.text,
-      fileBase64: importForm.fileBase64 || undefined
+      fileBase64: importForm.fileBase64 || undefined,
+      analyzeSteps: importForm.analyzeSteps
     })
     highlightNovelId.value = r.novelId
     ElMessage.success(`已导入《${r.title}》：${r.chapterCount} 章`)
     if (r.notes && r.notes.length) {
       await ElMessageBox.alert(r.notes.join('\n\n'), '导入完成，请注意口径', { confirmButtonText: '知道了' })
     }
-    if (importForm.digestOn) {
-      importStatus.value = '正在补事实账…'
-      const d = await api.post(`/api/novels/${r.novelId}/digest-backfill`, { recent: importForm.digestRecent })
-      if (d.notes && d.notes.length) {
-        ElMessage.warning(d.notes.join('；'))
-      } else {
-        ElMessage.success(`事实账已补 ${d.digested} 章——续写前情已就绪`)
-      }
-    }
+    const analyzeSubmitted = importForm.analyzeSteps.length > 0
     // 是否要在导入后就地提指纹：没选预设（后端 pendingFingerprint）或用户手动勾了，都要走。
     // 注意顺序——下面会重置表单，所以先算好再清。
     const wantFingerprint = r.pendingFingerprint || importForm.fingerprintOn
@@ -455,10 +447,16 @@ async function submitImport() {
     importForm.presetId = null
     importForm.text = ''
     importForm.fileBase64 = ''
+    importForm.analyzeSteps = allStepKeys()
     importForm.fingerprintOn = false
     await reloadAll()
     if (!books.value.some((b) => b.id === r.novelId)) {
       ElMessage.warning('当前查询条件没命中这本新书——点「重置」即可看到')
+    }
+    // 解析链与提指纹都会弹窗：先提指纹（快、要人确认），一关就打开解析进度（长跑，后台继续）
+    pendingAnalyze.value = analyzeSubmitted ? { id: r.novelId, title: r.title } : null
+    if (analyzeSubmitted) {
+      ElMessage.info('解析已在后台开始——逐步进度在接下来的面板里看')
     }
     // 提指纹：草稿 → 确认 → 采纳（覆盖本书风格包指纹）。未选预设时这是必走的一步——否则本书无门禁阈值。
     if (wantFingerprint) {
@@ -466,6 +464,13 @@ async function submitImport() {
         ElMessage.info('未选文风预设——接下来按本书正文提指纹，采纳后本书门禁阈值才生效')
       }
       openFingerprint({ id: r.novelId, title: r.title }, r.pendingFingerprint)
+    } else if (pendingAnalyze.value) {
+      // 不提指纹就直接看解析进度（否则这个任务要等下一次关窗才显示）
+      const t = pendingAnalyze.value
+      pendingAnalyze.value = null
+      analyzeNovelId.value = t.id
+      analyzeTitle.value = t.title
+      analyzeOpen.value = true
     }
   } catch (e) {
     ElMessage.error(e.message)
@@ -499,37 +504,27 @@ function onFingerprintClosed() {
     fpRequired.value = false
     ElMessage.warning('本书尚未提指纹——门禁暂用平台默认阈值，随时可在列表行点「提指纹」补上')
   }
-}
-
-// ===== 补事实账（导入时没补，或后续想给更多章补：续写前情链的来源）=====
-const digestOpen = ref(false)
-const digesting = ref(false)
-const digestRecent = ref(3)
-const digestTarget = ref(null)
-
-function openDigestBackfill(row) {
-  digestTarget.value = row
-  digestRecent.value = 3
-  digestOpen.value = true
-}
-
-async function runDigestBackfill() {
-  digesting.value = true
-  try {
-    const d = await api.post(`/api/novels/${digestTarget.value.id}/digest-backfill`, { recent: digestRecent.value })
-    if (d.requested === 0) {
-      ElMessage.warning('这本书还没有正文，无需补事实账')
-    } else if (d.notes && d.notes.length) {
-      ElMessage.warning(d.notes.join('；'))
-    } else {
-      ElMessage.success(`事实账已补 ${d.digested} 章`)
-    }
-    digestOpen.value = false
-  } catch (e) {
-    ElMessage.error(e.message)
-  } finally {
-    digesting.value = false
+  // 提指纹关窗后打开解析进度面板（导入时已入队的那条链；两窗不同时压着）
+  if (pendingAnalyze.value) {
+    const t = pendingAnalyze.value
+    pendingAnalyze.value = null
+    analyzeNovelId.value = t.id
+    analyzeTitle.value = t.title
+    analyzeOpen.value = true
   }
+}
+
+// ===== 解析链（导入后自动打开；行内「解析」用于给已有书补资产/重跑）=====
+const analyzeOpen = ref(false)
+const analyzeNovelId = ref(null)
+const analyzeTitle = ref('')
+/** 导入时已入队、待提指纹关窗后再展示的解析任务。 */
+const pendingAnalyze = ref(null)
+
+function openAnalyze(row) {
+  analyzeNovelId.value = row.id
+  analyzeTitle.value = row.title
+  analyzeOpen.value = true
 }
 
 onMounted(() => {
