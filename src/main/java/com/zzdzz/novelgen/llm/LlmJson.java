@@ -8,13 +8,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.function.Function;
 
 /**
- * JSON 类 LLM 节点公共件：容错解析（截取首尾大括号 + 容忍裸控制字符 + 修复字符串内裸引号）
- * + 校验失败带原因喂回重试。新节点一律经此调用；outline/digest/review 的内联副本待顺手迁移。
+ * JSON 类 LLM 节点公共件：容错解析（截取首尾大括号 + 容忍裸控制字符 + 修复字符串内裸引号
+ * + 补齐漏写的收口括号）+ 校验失败带原因喂回重试。新节点一律经此调用；outline/digest/review 的内联副本待顺手迁移。
  */
 @Component
 @Slf4j
@@ -66,7 +68,7 @@ public class LlmJson {
         throw new IllegalStateException("LLM JSON 输出连续 " + tries + " 轮不合规，末次原因：" + feedback, last);
     }
 
-    /** 容错解析：截取首个 { 到末个 }，失败再试修复字符串值内未转义英文引号。 */
+    /** 容错解析：截取首个 { 到末个 }，失败逐级降级修复（字符串内裸引号 → 补齐漏写闭符）。 */
     public JsonNode read(String content) throws Exception {
         String s = content.strip();
         int start = s.indexOf('{');
@@ -76,8 +78,55 @@ public class LlmJson {
         try {
             return lenientMapper.readTree(json);
         } catch (Exception first) {
-            return lenientMapper.readTree(repairStraightQuotes(json));
+            for (String candidate : List.of(repairStraightQuotes(json), closeUnclosed(json),
+                    closeUnclosed(repairStraightQuotes(json)))) {
+                try {
+                    return lenientMapper.readTree(candidate);
+                } catch (Exception ignored) {
+                    // 逐级降级，全败抛首轮原因——它最贴近真实畸形点
+                }
+            }
+            throw first;
         }
+    }
+
+    /**
+     * 补齐未收口的容器：模型偶发漏写末尾若干个 } / ]（症状是报错点落在输出末尾的
+     * 「expecting ',' delimiter」），正文本身完好时补上闭符即可解析。
+     * 字符串未收口一律不动——那多半是被 max_tokens 截断，半截事实账必须显性失败，不许悄悄放行。
+     */
+    static String closeUnclosed(String json) {
+        Deque<Character> open = new ArrayDeque<>();
+        boolean inStr = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inStr) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    inStr = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inStr = true;
+            } else if (c == '{' || c == '[') {
+                open.push(c);
+            } else if (c == '}' || c == ']') {
+                if (open.isEmpty() || open.peek() != (c == '}' ? '{' : '[')) {
+                    return json; // 括号种类都对不上，不是「漏写收口」：不动，交给上层报错
+                }
+                open.pop();
+            }
+        }
+        if (inStr || open.isEmpty()) {
+            return json;
+        }
+        StringBuilder sb = new StringBuilder(json);
+        while (!open.isEmpty()) {
+            sb.append(open.pop() == '{' ? '}' : ']');
+        }
+        return sb.toString();
     }
 
     /** 重试轮把失败原因追加到末条（应为 user）消息之后；喂回句模板落库（common/json_retry_feedback）。 */

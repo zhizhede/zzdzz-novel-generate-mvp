@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.llm.LlmTemps;
 import com.zzdzz.novelgen.model.enums.ChapterStatus;
 import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmJson;
@@ -64,13 +65,14 @@ public class DigestService {
         // 模型偶发无视指令在摘要前加「## 事实账」标题行：入库前剥掉
         String summary = node.path("summary_md").asText("")
                 .replaceAll("(?m)^#{1,6}[^\\n]*\\n?", "").strip();
-        digestData.insert(chapterId, summary, node.path("facts").toString());
         JsonNode state = node.path("state");
+        JsonNode threads = threadsOf(node, state); // 内含「误嵌 state」的抬升 + 快照剔除，必须在 upsert 之前
+        digestData.insert(chapterId, summary, node.path("facts").toString());
         if (state.isObject() && state.size() > 0) {
             worldStateData.upsert(novelId, chapterNo, state);
             log.info("第 {} 章世界状态快照落库", chapterNo);
         }
-        proposeThreads(novelId, chapterNo, node.path("new_threads"));
+        proposeThreads(novelId, chapterNo, threads);
         foreshadowData.markPlanted(novelId, chapterNo);
         foreshadowData.markRecovered(novelId, chapterNo);
         sweepStaleProposals(novelId, chapterNo);
@@ -118,6 +120,26 @@ public class DigestService {
         }
         return promptTemplates.getSection(LlmNode.DIGEST, "user",
                 java.util.Map.of("time_anchor", timeAnchor, "ledger", ledger, "full_text", fullText == null ? "" : fullText));
+    }
+
+    /**
+     * 取 new_threads：正常在根层。模型偶发把它写到 state 内部（连带漏写一个收口括号——
+     * 靠 LlmJson 结构补齐才解析得出来），此时抬回根层并从 state 剔除：否则该键会随世界状态
+     * 快照注入后续章节，而伏笔提议会被静默丢掉。两种情况都逐条 warn，不闷声改语义。
+     */
+    private JsonNode threadsOf(JsonNode root, JsonNode state) {
+        if (state instanceof ObjectNode stateObj && stateObj.has("new_threads")) {
+            JsonNode nested = stateObj.get("new_threads");
+            stateObj.remove("new_threads");
+            JsonNode rootThreads = root.get("new_threads");
+            if (rootThreads == null || !rootThreads.isArray() || rootThreads.isEmpty()) {
+                log.warn("digest 输出的 new_threads 嵌在 state 内（根层缺失），已抬回根层处理：{} 条",
+                        nested.isArray() ? nested.size() : 0);
+                return nested;
+            }
+            log.warn("digest 输出的 new_threads 根层与 state 内都在，state 内副本已剔除");
+        }
+        return root.path("new_threads");
     }
 
     /** 自动提议落库：status='proposed'，等素材库人工采纳（→planned）或忽略（→dropped）。 */

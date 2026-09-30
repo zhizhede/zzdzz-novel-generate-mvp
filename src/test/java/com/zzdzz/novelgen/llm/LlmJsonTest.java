@@ -74,4 +74,69 @@ class LlmJsonTest {
         assertThat(LlmJson.repairStraightQuotes("{\"a\":\"say \\\"hi\\\"\",\"b\":1}"))
                 .isEqualTo("{\"a\":\"say \\\"hi\\\"\",\"b\":1}");
     }
+
+    // ===== 漏写收口括号（2026-09-30 探针书第 3 章 digest 实测畸形，原文见 fixtures）=====
+
+    @Test
+    void missingClosingBraceCompleted() throws Exception {
+        // 模型漏写末尾一个 }：报错落在输出末尾，正文完好
+        JsonNode n = llmJson.read("{\"a\":1,\"state\":{\"time\":\"夜\"}");
+        assertThat(n.get("a").asInt()).isEqualTo(1);
+        assertThat(n.path("state").path("time").asText()).isEqualTo("夜");
+    }
+
+    @Test
+    void multipleMissingClosersCompleted() throws Exception {
+        // 内层已收口、外层连着漏几个：按未闭合栈逆序补齐
+        JsonNode n = llmJson.read("{\"facts\":[\"一\",\"二\"],\"state\":{\"time\":\"夜\",\"locations\":{\"灯塔\":\"岸边\"}}");
+        assertThat(n.path("facts").size()).isEqualTo(2);
+        assertThat(n.path("state").path("locations").path("灯塔").asText()).isEqualTo("岸边");
+    }
+
+    @Test
+    void noClosingBraceAtAllStaysLoud() {
+        // 通篇没有收口括号 = 更可能是截断：不猜，照旧报错（read 只能截到末个 }，够不着就够不着）
+        assertThatThrownBy(() -> llmJson.read("{\"facts\":[\"一\",\"二\"],\"state\":{\"time\":\"夜\""))
+                .isInstanceOf(LlmJson.Bad.class);
+    }
+
+    @Test
+    void realDigestSlipParses() throws Exception {
+        // 实测原文：new_threads 被写进 state 内部 + 末尾少一个收口 }（finish_reason=stop，非截断）
+        String raw = new String(getClass().getResourceAsStream(
+                "/fixtures/digest_new_threads_nested_in_state.txt").readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        JsonNode n = llmJson.read(raw);
+        assertThat(n.path("summary_md").asText()).startsWith("第三夜");
+        assertThat(n.fieldNames()).toIterable().containsExactly("summary_md", "facts", "state");
+        assertThat(n.path("facts").size()).isEqualTo(9);
+        assertThat(n.path("state").path("unresolved").size()).isEqualTo(5);
+        // 畸形照原样保留：new_threads 确实在 state 里（语义纠正归 DigestService）
+        assertThat(n.path("state").path("new_threads").size()).isEqualTo(2);
+        assertThat(n.path("state").path("new_threads").get(0).path("name").asText()).isEqualTo("黑潮递补");
+    }
+
+    @Test
+    void truncatedStringNotRepaired() {
+        // 截断（字符串未收口）必须显性失败：不许补括号后把半截事实账当成功放行
+        assertThatThrownBy(() -> llmJson.read("{\"a\":1,\"state\":{\"time\":\"天还没"))
+                .isInstanceOf(Exception.class);
+    }
+
+    @Test
+    void balancedJsonUntouchedByCloseUnclosed() {
+        assertThat(LlmJson.closeUnclosed("{\"a\":[1,2]}")).isEqualTo("{\"a\":[1,2]}");
+    }
+
+    @Test
+    void mismatchedCloserUntouched() {
+        // 种类都对不上（多写的 }、结构错乱）：不猜，原样返回让上层报错
+        assertThat(LlmJson.closeUnclosed("{\"a\":1}}")).isEqualTo("{\"a\":1}}");
+    }
+
+    @Test
+    void bracesInsideStringIgnored() {
+        assertThat(LlmJson.closeUnclosed("{\"a\":\"含 } 和 ] 的正文\"}"))
+                .isEqualTo("{\"a\":\"含 } 和 ] 的正文\"}");
+    }
 }
