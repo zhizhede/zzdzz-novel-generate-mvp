@@ -264,3 +264,39 @@ flowchart LR
 2. **缺口清单是主线**：没有大纲的活书、没有章纲的卷/章**也出行**并标 `hasOutline=false`——导入书籍（`IMPORTED`）本来就没有这三样，正是这一页要暴露的东西：导入书只有正文（`status=FINAL`），要接着写必须先补大纲/卷纲/章纲。
 3. **与层级无关的条件在不适用的层上不生效**（大纲层不判章状态/正文，卷层用章号区间**相交**判定，「未分卷」用 `volumeNo=0` 表达）——语义由 `PlanAssetService.matches/comparator` 纯函数锁定，改动必须同步单测。
 4. **软删书的残留章行不进列表**（按活书过滤），与文风指纹页同一口径。
+
+## 八、导入书籍「解析链」契约（2026-09-30 增补）
+
+**一句话**：导入只落库（快、无 LLM）；「把这本书的资产用 LLM 补齐」是**用户勾选的可选链**，默认全勾，串行跑在后台，逐步落库。
+
+**八步（顺序＝依赖顺序，勾选不改顺序）**：
+
+| 步 | 产出与落库位置 | 复用哪套口径 |
+|---|---|---|
+| DIGESTS | 事实账 `digests` + 世界状态 `world_states` + 伏笔提议 `foreshadows(PROPOSED)`；取末尾 ≤20 章，已有事实账的章跳过 | `NovelService.backfillDigests` → `DigestService`（`LlmNode.DIGEST`） |
+| OUTLINE | 全书大纲 → `canon_docs(misc/大纲)` | 复用 `LlmNode.SAMPLE_OUTLINE` 提示词（**不新造第二份提示词**） |
+| CARDS | 设定层素材卡 → `material_cards`（已有同名同类卡跳过） | 新节点 `LlmNode.BOOK_CARDS`（从「章节结构+事实账」抽卡，不是逐章 SAMPLE_CHAPTER） |
+| WORLD | 世界观文档 → `canon_docs(world/世界观)` | 复用 `LlmNode.SAMPLE_WORLD` 提示词（输入＝章节摘要块 + 已抽出的素材卡块，故排在 CARDS 之后） |
+| RULES | 文风规则 → 本书风格包 `rules_md` | `LlmNode.STYLE_RULES`；语料优先话题材语料，**没有则回落到本书正文**（导入书只有正文） |
+| EMBEDDINGS | 事实账/素材卡向量 → `embeddings`（RAG 召回前置） | `EmbeddingService.backfillNovel`（走 embedding 模型，与会话 LLM 分开接入） |
+| VOLUME_PLAN | 新一卷规划行 → `chapters`（规划第 2 卷起还会写前置卷复盘 `volume_reviews`） | `PlanningService.autoPlan`：卷号＝现有最大卷+1，起点＝已有正文最末章+1；auto 模式直接落库、manual 出草稿。**导入书首次跑会把这卷编为「第 1 卷」**（导入章是未分卷的，卷 1 从正文之后接续） |
+| CHAPTER_OUTLINES | 新规划那卷的章纲 → 生成队列（`kind=OUTLINE` 任务） | `GenerationQueueService.submitOutline`；**本链只提交**，生成进度看工作台 |
+
+**运行形态与硬约束**：
+1. **任务行 `import_analyze_tasks`（V36）**：一本活书一行活跃任务（`uq_import_analyze_task_alive`），重复提交＝重置同一行；两个 JSONB 列（`steps`/`done_steps`）走 XML 显式 `::jsonb`，`INSERT ... RETURNING id` 走 `<select resultType="long">`。
+2. **全局单线程 runner**（与样本深度解析同构）：一本一本地跑，瓶颈在 LLM；**每步跑完立即落 `done_steps`**（断点事实，前端进度与刷新后状态都靠它），关页面/重启进程都不会「看起来没跑」。
+3. **逐步 fail-open**：某步失败只记该步 `FAILED` 并继续下一步，链终态＝「有失败步则 FAILED，否则 DONE」；`SKIPPED` 用于前置不满足（如没有规划章行就跳过章纲入队）。
+4. **提交在事务外**：导入是短事务，解析链入队在 `NovelController` 里于 `importBook` 返回后提交——否则 runner 线程读不到未提交的章行。
+5. **API 语义**：`analyzeSteps` 不传/空＝**不解析**（纯接口建书不会默默烧一轮 LLM）；界面默认全勾。`GET /api/novels/{id}/import-analyze` 无任务时返回 null。
+6. **幂等口径各不相同，必须按步记清**：事实账与素材卡**跳过已有**、大纲/世界观/规则**覆盖**、向量 **upsert**、卷规划**新增一卷**（所以对同一本书重复跑 VOLUME_PLAN 会一卷接一卷地往后规划，不会覆盖旧卷）。
+
+## 九、digest 输出契约：字段归位 + 容错解析边界（2026-09-30 增补）
+
+**一句话**：`new_threads` 归**根层**，`state` 只含 `state_spec` 那五个键；模型走神把二者混在一起时，**解析层补齐结构、语义层把字段抬回原位并显性告警**，绝不让提议静默消失。
+
+1. **根层键**：`summary_md` / `facts` / `state` / `new_threads`。`state` 内部只许 `time` / `locations` / `possessions` / `new_promises` / `unresolved`（`state_spec` 提示词即此五键）——世界状态快照会**原文注入后续章节上下文**，塞进去的越界键就是上下文污染（真库曾出现 1 行：书 5 第 1 章快照带 `new_threads`）。
+2. **容错解析（`LlmJson.read`）**：截首个 `{` 到末个 `}` → 原样 → 修字符串内裸引号 → **补齐漏写的收口括号**（`closeUnclosed`，按未闭合栈逆序补 `}`/`]`）。**不救**两种情况：字符串未收口（典型 `max_tokens` 截断，半截事实账必须显性失败）与括号种类对不上（结构错乱，不猜）。
+3. **语义纠正（`DigestService.threadsOf`）**：`state` 内出现 `new_threads` 时抬回根层处理并**从快照剔除**；根层与 `state` 内都有则以根层为准、剔除副本；两种情况都 `warn`。
+4. **为什么不能只在解析层修**：畸形有两支——①「误嵌 + 漏收口」→ 老代码整章解析失败（fail-open 记「n/m 章」，事实账/状态/提议全丢）；②「只误嵌、语法合法」→ **解析得过，提议静默丢失且零报错**。②更阴，真库已留下脚印（书 5 第 1 章，2 条提议被吃，2026-09-30 已按快照原文回填 F10/F11）。
+5. **诊断口径**：这类问题**先取 `llm_call_log` 的 `response_json->'choices'->0->'message'->>'content'` 原文**逐字节看（`finish_reason` 能排除截断），别用被日志截断过的错误文案下结论；`closeUnclosed` 单独能救回的行 = 该类的精确指纹（全库回放命中 digest 5 行 + sample_chapter 1 行）。
+6. **已知边界**：无法区分「模型漏收口」与「截断恰好落在干净边界」，二者现在都补——真正区分要靠 provider 的 `finish_reason`，`LlmPort.ChatResult` 目前不带该字段，留作后续。
