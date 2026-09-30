@@ -36,6 +36,7 @@ public class GenrePresetService {
     private final PresetCorpusDataService corpusData;
     private final StylePackDataService stylePackData;
     private final NovelDataService novelData;
+    private final com.zzdzz.novelgen.service.data.ChapterDataService chapterData;
     private final com.zzdzz.novelgen.service.data.ImportedSampleDataService sampleData;
     private final com.zzdzz.novelgen.llm.LlmPort llm;
     private final PromptTemplateService promptTemplates;
@@ -460,31 +461,36 @@ public class GenrePresetService {
     }
 
     /** 文风规则提炼：语料节选 → LLM 规则列表 → 写回本书风格包 rules_md（场景 system 直接采用）。
-     * 语料定位：本书 derive_config.sourceSampleId 的品类，其次风格包上直接关联的导入样本品类。 */
+     *  语料定位：①本书 derive_config.sourceSampleId 的品类语料；②风格包上直接关联的导入样本品类；
+     *  ③都没有（典型：手动导入的书）时**回落到本书自己的正文**——导入书本就自带全文，这是它唯一可用的口径
+     *  （此前这条路径直接抛错，等于「导入书永远提不出规则」）。 */
     public String extractRulesForNovel(long novelId) {
         NovelDTO novel = novelData.getById(novelId);
         if (novel == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }
         String genre = resolveRulesGenre(novel);
-        if (genre == null || genre.isBlank()) {
-            throw new BizException(ErrorCode.PARAM_ERROR,
-                    "本书没有关联样本语料（开书时选参考样本或克隆预设后才有）——无法提炼文风规则");
-        }
-        List<PresetCorpusDTO> rows = corpusData.listByGenre(genre);
-        if (rows.isEmpty()) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "品类「" + genre + "」无语料，无法提炼规则");
-        }
         StringBuilder corpus = new StringBuilder();
         int budget = 16000;
-        for (PresetCorpusDTO row : rows) {
-            if (budget <= 0) break;
-            String c = row.getContent() == null ? "" : row.getContent();
-            String piece = "\n【语料块】\n" + c.substring(0, Math.min(c.length(), 3000));
-            corpus.append(piece, 0, Math.min(piece.length(), budget));
-            budget -= Math.min(piece.length(), budget);
+        if (genre != null && !genre.isBlank()) {
+            for (PresetCorpusDTO row : corpusData.listByGenre(genre)) {
+                if (budget <= 0) break;
+                String c = row.getContent() == null ? "" : row.getContent();
+                String piece = "\n【语料块】\n" + c.substring(0, Math.min(c.length(), 3000));
+                corpus.append(piece, 0, Math.min(piece.length(), budget));
+                budget -= Math.min(piece.length(), budget);
+            }
         }
-        String user = promptTemplates.format(LlmNode.STYLE_RULES, "user", genre, corpus.toString());
+        String label = genre;
+        if (corpus.isEmpty()) {
+            label = "本书正文";
+            corpus.append(bookTextCorpus(novelId, budget));
+            if (corpus.isEmpty()) {
+                throw new BizException(ErrorCode.PARAM_ERROR,
+                        "本书没有关联样本语料，也没有可用于提炼的正文——先导入或生成几章再提炼规则");
+            }
+        }
+        String user = promptTemplates.format(LlmNode.STYLE_RULES, "user", label, corpus.toString());
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(LlmNode.STYLE_RULES, novelId, null,
                 List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.STYLE_RULES, "system")),
                         LlmPort.Message.user(user)), 0.3));
@@ -494,6 +500,25 @@ public class GenrePresetService {
         }
         stylePackData.updateRulesMdByNovel(novelId, rules);
         return rules;
+    }
+
+    /** 本书正文节选（按章切块、最多 budget 字）：导入书的规则提炼语料来源（与品类语料同一个提示词口径）。 */
+    private String bookTextCorpus(long novelId, int budget) {
+        StringBuilder sb = new StringBuilder();
+        for (com.zzdzz.novelgen.service.data.ChapterDataService.ChapterTextRow row
+                : chapterData.listTextsByNovel(novelId)) {
+            if (budget <= 0) {
+                break;
+            }
+            String text = row.fullText() == null ? "" : row.fullText().strip();
+            if (text.isEmpty()) {
+                continue;
+            }
+            String piece = "\n【语料块】第" + row.chapterNo() + "章\n" + text;
+            sb.append(piece, 0, Math.min(piece.length(), budget));
+            budget -= Math.min(piece.length(), budget);
+        }
+        return sb.toString().strip();
     }
 
     /** 本书语料品类：优先 derive_config.sourceSampleId 的样本品类；回退风格包上直接关联的导入样本。 */

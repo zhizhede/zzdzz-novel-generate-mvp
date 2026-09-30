@@ -482,6 +482,27 @@ public final class PromptCatalog {
                 %s
                 """),
 
+        // ===== 导入书籍·解析链：素材卡提取（大纲/世界观复用上面的 SAMPLE_OUTLINE/SAMPLE_WORLD，避免双源漂移） =====
+        new TemplateDef(LlmNode.BOOK_CARDS, "system", "书籍素材卡提取系统提示", true,
+                "你是小说设定档案员。读章节结构与剧情摘要，抽出这本书的设定层素材卡；"
+                        + "只输出一个 JSON 对象，字符串值内部禁止英文双引号，引用一律用「」。"),
+
+        new TemplateDef(LlmNode.BOOK_CARDS, "user", "书籍素材卡提取（章节摘要→设定卡）", true, """
+                任务：读下面这本书的章节结构与剧情摘要，抽出它的**设定层素材卡**，输出 JSON：
+                {"cards":[{"name":"规范名","kind":"character|item|location|org|phenomenon|landmark|disaster|misc",
+                  "aliases":["别名"],"summary":"一句话身份或用途（≤40 字）",
+                  "content":"书中的关键设定、当前状态、与其他卡的关系（100-300 字）",
+                  "pinned":true,"sourceChapter":首次出现的章号}]}
+                要求：①只抽摘要里真实出现过的实体，按重要性取前 %s 张（人物优先，含关键物品/地点/组织/现象/地标/灾害）；
+                ②同一实体只出一行、别名并入 aliases；③pinned 只给贯穿全书的常驻设定（主角、核心设定），不超过 6 张；
+                ④kind 只能用给定英文枚举；⑤sourceChapter 给首次出现的章号，不确定就给 null。
+
+                【书：%s】
+
+                【章节结构与摘要】
+                %s
+                """),
+
         new TemplateDef(LlmNode.SAMPLE_MERGE, "system", "实体名归并判定系统提示", true,
                 "你是数据清洗员：判断实体列表里哪些行指的是同一个实体；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
 

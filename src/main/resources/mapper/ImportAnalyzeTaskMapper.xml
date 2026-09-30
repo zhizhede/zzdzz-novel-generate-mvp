@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.ImportAnalyzeTaskMapper">
+
+    <!-- 两个 JSONB 列（steps / done_steps）必须显式 ::jsonb：MyBatis 绑的是 varchar，
+         PostgreSQL 不会自动把 varchar 塞进 jsonb（踩过：column "steps" is of type jsonb but expression is of type character varying）。 -->
+    <!-- INSERT ... RETURNING 必须用 <select resultType>：用 <update> 时 MyBatis 返回的是影响行数（踩过：拿回 -1） -->
+    <select id="insertTask" resultType="long">
+INSERT INTO import_analyze_tasks (novel_id, steps, status, done_steps)
+VALUES (#{novelId}, #{stepsJson}::jsonb, 'QUEUED', '[]'::jsonb)
+RETURNING id
+    </select>
+
+    <update id="resetTask">
+UPDATE import_analyze_tasks
+SET steps=#{stepsJson}::jsonb, status='QUEUED', current_step=NULL, done_steps='[]'::jsonb,
+    message=NULL, update_time=NOW()
+WHERE id=#{id}
+    </update>
+
+    <update id="updateDoneSteps">
+UPDATE import_analyze_tasks SET done_steps=#{doneStepsJson}::jsonb, update_time=NOW() WHERE id=#{id}
+    </update>
+</mapper>

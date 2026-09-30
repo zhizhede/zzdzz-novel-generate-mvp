@@ -27,6 +27,7 @@ public class NovelController {
 
     private final NovelService novelService;
     private final com.zzdzz.novelgen.service.OutlineDraftService outlineDraftService;
+    private final com.zzdzz.novelgen.service.ImportAnalyzeService importAnalyzeService;
 
 
     @GetMapping
@@ -35,15 +36,36 @@ public class NovelController {
     }
 
     /**
-     * 导入书籍：粘贴正文或上传 txt/mobi/azw → 按「第N章」切章落库（status=FINAL，不经生成管线），
-     * 书行入库类型标 IMPORTED。文风预设必填（克隆为本书风格包——无风格包的书跑门禁会直接失败）。
-     * 耗时与正文规模成正比（纯落库无 LLM）；补事实账另走 /{id}/digest-backfill。
+     * 导入书籍：粘贴正文或上传 txt/docx/mobi/azw → 按行首标题切章落库（status=FINAL，不经生成管线），
+     * 书行入库类型标 IMPORTED。文风预设可选（不选按本书正文提指纹回填）。
+     * 落库是纯落库无 LLM、秒级返回；带 analyzeSteps 时**先落库再入队解析链**（提交在事务外，避免 runner 读不到未提交行）。
      */
     @PostMapping("/import")
     public Result<com.zzdzz.novelgen.service.NovelService.NovelImportResultVO> importBook(
             @RequestBody com.zzdzz.novelgen.model.vo.NovelImportVO dto, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
-        return Result.success(novelService.importBook(dto, userId));
+        com.zzdzz.novelgen.service.NovelService.NovelImportResultVO result = novelService.importBook(dto, userId);
+        if (dto.analyzeSteps() != null && !dto.analyzeSteps().isEmpty()) {
+            importAnalyzeService.submit(result.novelId(), dto.analyzeSteps());
+        }
+        return Result.success(result);
+    }
+
+    /**
+     * 解析链：把素材库能通过 LLM 生成的东西（事实账/世界状态/伏笔提议、素材卡、世界观、文风规则、向量索引）
+     * 与大纲/卷纲/章纲按勾选跑一遍（异步，进度见 GET）。导入弹窗默认全勾；也可对任何已有书补跑/重跑。
+     */
+    @PostMapping("/{id}/import-analyze")
+    public Result<java.util.Map<String, Object>> submitAnalyze(@PathVariable long id,
+                                                     @RequestBody com.zzdzz.novelgen.model.vo.ImportAnalyzeRequestVO dto) {
+        long taskId = importAnalyzeService.submit(id, dto == null ? null : dto.steps());
+        return Result.success(java.util.Map.of("taskId", taskId));
+    }
+
+    /** 解析链进度与逐步结果（无任务时 data=null，前端据此隐藏面板）。 */
+    @GetMapping("/{id}/import-analyze")
+    public Result<com.zzdzz.novelgen.model.vo.ImportAnalyzeStatusVO> analyzeStatus(@PathVariable long id) {
+        return Result.success(importAnalyzeService.status(id));
     }
 
     /** 为最新章节补 AI 事实账（导入正文后的续写前情来源）：逐章 LLM 调用，慢且计费，由前端导入后显式触发。 */

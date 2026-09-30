@@ -1,5 +1,7 @@
 package com.zzdzz.novelgen.model.vo;
 
+import java.util.List;
+
 /**
  * 导入书籍入参（书籍管理页「导入书籍」）：正文来自粘贴文本框或上传 txt/docx/mobi/azw 文件（二选一）。
  * presetId 可选——导入的书必须有一个风格包（门禁阈值载体），但来源二选一：
@@ -13,6 +15,9 @@ public record NovelImportVO(
         Long presetId,
         String text,
         String fileBase64,
-        /** 导入后为最新章节补 AI 事实账的章数（0/空 = 不补；补则续写有前情链，但要花 LLM 时间与费用）。 */
-        Integer digestRecent) {
+        /**
+         * 导入后要跑的解析链步骤键（ImportAnalyzeStep；不传/空 = 只落库不解析，界面默认全勾）。
+         * 落库是短事务、解析是长时间 LLM，故二者在同一次请求里**先落库再入队**（提交在事务外，见 NovelController）。
+         */
+        List<String> analyzeSteps) {
 }
