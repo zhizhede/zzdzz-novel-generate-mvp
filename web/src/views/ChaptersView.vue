@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader title="章节">
-      <el-select v-model="novelId" style="width: 260px" @change="() => { setSelectedNovelId(novelId); loadChapters() }">
+      <el-select v-model="novelId" style="width: var(--ctrl-w-3xl)" @change="() => { setSelectedNovelId(novelId); loadChapters() }">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
     </PageHeader>

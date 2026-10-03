@@ -3,7 +3,7 @@
     <PageHeader
       title="规划"
       hint="大纲 / 卷纲 / 章纲 三级管理：大纲进生成上下文，卷纲驱动逐章生成，章纲为 AI 场景拆解">
-      <el-select v-model="novelId" style="width: 260px" @change="() => { setSelectedNovelId(novelId); loadAll() }">
+      <el-select v-model="novelId" style="width: var(--ctrl-w-3xl)" @change="() => { setSelectedNovelId(novelId); loadAll() }">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
     </PageHeader>
@@ -80,9 +80,9 @@
       <el-tab-pane :label="`章纲（场景拆解${allScenes.length ? ' · ' + allScenes.length + ' 场景' : ''}）`">
         <div class="toolbar">
           <span>批量生成章纲：第</span>
-          <el-input-number v-model="outlineFrom" :min="1" size="small" style="width: 92px" />
+          <el-input-number v-model="outlineFrom" :min="1" size="small" style="width: var(--ctrl-w-sm)" />
           <span>至</span>
-          <el-input-number v-model="outlineTo" :min="outlineFrom || 1" size="small" style="width: 92px" />
+          <el-input-number v-model="outlineTo" :min="outlineFrom || 1" size="small" style="width: var(--ctrl-w-sm)" />
           <span>章</span>
           <el-checkbox v-model="outlineIncludeText" size="small">
             含已有正文的章（默认跳过——勾上就为它们补章纲，状态与正文不动）
@@ -120,20 +120,20 @@
         </div>
         <div class="toolbar">
           <span style="font-size: var(--text-sm); color: var(--fg-2)">筛选：</span>
-          <el-select v-model="sceneFilterChapter" clearable placeholder="全部章纲（按章）" size="small" style="width: 210px">
+          <el-select v-model="sceneFilterChapter" clearable placeholder="全部章纲（按章）" size="small" style="width: var(--ctrl-w-2xl)">
             <el-option v-for="c in sceneChapterOptions" :key="c.value" :value="c.value" :label="c.label">
               <span>{{ c.label }}</span>
               <span class="hint" style="float: right">{{ c.count }} 场景</span>
             </el-option>
           </el-select>
-          <el-select v-model="sceneFilterMaterial" clearable filterable placeholder="按素材（出场人物/事物）" size="small" style="width: 210px">
+          <el-select v-model="sceneFilterMaterial" clearable filterable placeholder="按素材（出场人物/事物）" size="small" style="width: var(--ctrl-w-2xl)">
             <el-option v-for="m in sceneMaterialOptions" :key="m.name" :value="m.name" :label="m.name">
               <span>{{ m.name }}</span>
               <span class="hint" style="float: right">{{ m.count }} 场景</span>
             </el-option>
           </el-select>
           <el-input v-model="sceneFilterText" clearable placeholder="搜内容：目标 / 必揭示 / 禁出现" size="small"
-                    style="width: 230px" />
+                    style="width: var(--ctrl-w-2xl)" />
           <el-button v-if="sceneFiltersActive" size="small" link type="primary" @click="clearSceneFilters">清空筛选</el-button>
           <span class="hint" style="margin-left: auto">
             {{ filteredScenes.length }} / {{ allScenes.length }} 场景 · 涉及 {{ filteredChapterCount }} 章
@@ -166,11 +166,11 @@
     <el-dialog v-model="autoPlanOpen" title="AI 规划一卷" width="600px">
       <div class="toolbar">
         <span>卷号</span>
-        <el-input-number v-model="autoPlanForm.volNo" :min="1" size="small" style="width: 90px" />
+        <el-input-number v-model="autoPlanForm.volNo" :min="1" size="small" style="width: var(--ctrl-w-sm)" />
         <span>起始章</span>
-        <el-input-number v-model="autoPlanForm.from" :min="1" size="small" style="width: 100px" />
+        <el-input-number v-model="autoPlanForm.from" :min="1" size="small" style="width: var(--ctrl-w-md)" />
         <span>结束章</span>
-        <el-input-number v-model="autoPlanForm.to" :min="autoPlanForm.from || 1" size="small" style="width: 100px" placeholder="AI 自定" />
+        <el-input-number v-model="autoPlanForm.to" :min="autoPlanForm.from || 1" size="small" style="width: var(--ctrl-w-md)" placeholder="AI 自定" />
       </div>
       <el-input v-model="autoPlanForm.seedOutline" type="textarea" :rows="6"
                 placeholder="本卷种子大纲（可空——留空则 AI 依据全书大纲与事实账/世界状态/伏笔账自主设计本卷主线，并在卷简报里说明四个关键决策）" />
@@ -187,7 +187,7 @@
     <el-dialog v-model="draftOpen" title="卷纲草稿（人工审核）" width="920px" top="4vh">
       <div class="toolbar">
         <span>卷名</span>
-        <el-input v-model="draft.arc" style="width: 200px" size="small" />
+        <el-input v-model="draft.arc" style="width: var(--ctrl-w-2xl)" size="small" />
         <span class="hint">可直接编辑；采纳后不再过 AI 审校</span>
       </div>
       <el-input v-model="draft.brief" type="textarea" :rows="4" style="margin-bottom: 10px" placeholder="卷简报" />
@@ -210,9 +210,9 @@
         </el-table-column>
         <el-table-column label="预算" width="140">
           <template #default="{ row }">
-            <el-input-number v-model="row.budgetMin" size="small" :min="600" :max="10000" controls-position="right" style="width: 62px" />
+            <el-input-number v-model="row.budgetMin" size="small" :min="600" :max="10000" controls-position="right" style="width: var(--ctrl-w-xs)" />
             –
-            <el-input-number v-model="row.budgetMax" size="small" :min="600" :max="10000" controls-position="right" style="width: 62px" />
+            <el-input-number v-model="row.budgetMax" size="small" :min="600" :max="10000" controls-position="right" style="width: var(--ctrl-w-xs)" />
           </template>
         </el-table-column>
       </DataTable>
@@ -231,7 +231,7 @@
         <div style="display: flex; gap: 10px; margin-bottom: 10px">
           <el-input-number v-model="editing.chapterNo" :min="1" size="small" :disabled="!!editing.id" />
           <el-input-number v-model="editing.volNo" :min="1" size="small" placeholder="卷" />
-          <el-input v-model="editing.arc" placeholder="卷名/弧名" size="small" style="width: 180px" />
+          <el-input v-model="editing.arc" placeholder="卷名/弧名" size="small" style="width: var(--ctrl-w-xl)" />
         </div>
         <el-input v-model="editing.title" placeholder="章节标题" style="margin-bottom: 10px" />
         <el-input v-model="editing.goal" type="textarea" :rows="3" placeholder="本章目标（AI 章纲的种子）" style="margin-bottom: 10px" />

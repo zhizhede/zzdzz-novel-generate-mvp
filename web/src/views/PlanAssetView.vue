@@ -15,12 +15,12 @@
     <!-- 筛选查询条件：条件全空 = 该层全量，默认按「书 + 卷号 + 章号」通读序 -->
     <FilterBar :loading="loading" @search="load" @reset="resetFilters">
         <el-form-item label="作品">
-          <el-select v-model="filters.novelId" placeholder="全部作品" clearable filterable style="width: 190px" @change="load">
+          <el-select v-model="filters.novelId" placeholder="全部作品" clearable filterable style="width: var(--ctrl-w-xl)" @change="load">
             <el-option v-for="n in novels" :key="n.id" :label="n.title" :value="n.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="入库类型">
-          <el-select v-model="filters.sourceType" style="width: 130px" @change="load">
+          <el-select v-model="filters.sourceType" style="width: var(--ctrl-w-lg)" @change="load">
             <el-option label="全部类型" value="ALL" />
             <el-option label="手动导入" value="IMPORTED" />
             <el-option label="系统衍生" value="DERIVED" />
@@ -28,42 +28,42 @@
           </el-select>
         </el-form-item>
         <el-form-item label="关键字">
-          <el-input v-model="filters.keyword" :placeholder="keywordPlaceholder" clearable style="width: 190px"
+          <el-input v-model="filters.keyword" :placeholder="keywordPlaceholder" clearable style="width: var(--ctrl-w-xl)"
                     @keyup.enter="load" @clear="load" @blur="load" />
         </el-form-item>
         <el-form-item v-if="filters.level !== 'OUTLINE'" label="卷号">
           <el-input-number v-model="filters.volumeNo" :min="0" :max="9999" :controls="false" placeholder="不限"
-                           size="small" style="width: 80px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
           <span style="font-size: var(--text-xs); color: var(--meta); margin-left: 4px">0＝未分卷</span>
         </el-form-item>
         <el-form-item v-if="filters.level !== 'OUTLINE'" label="章号">
           <el-input-number v-model="filters.fromChapter" :min="1" :max="99999" :controls="false" placeholder="起"
-                           size="small" style="width: 80px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
           <span style="margin: 0 4px">至</span>
           <el-input-number v-model="filters.toChapter" :min="1" :max="99999" :controls="false" placeholder="止"
-                           size="small" style="width: 80px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
         </el-form-item>
         <el-form-item v-if="filters.level === 'CHAPTER'" label="章状态">
-          <el-select v-model="filters.status" placeholder="全部状态" clearable style="width: 140px" @change="load">
+          <el-select v-model="filters.status" placeholder="全部状态" clearable style="width: var(--ctrl-w-lg)" @change="load">
             <el-option v-for="(label, key) in STATUS_TEXT" :key="key" :label="label" :value="key" />
           </el-select>
         </el-form-item>
         <el-form-item :label="filters.level === 'OUTLINE' ? '有无大纲' : '有无章纲'">
-          <el-select v-model="filters.hasOutline" style="width: 110px" @change="load">
+          <el-select v-model="filters.hasOutline" style="width: var(--ctrl-w-md)" @change="load">
             <el-option label="不限" value="ALL" />
             <el-option label="有" value="YES" />
             <el-option label="无（缺口）" value="NO" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="filters.level !== 'OUTLINE'" label="有无正文">
-          <el-select v-model="filters.hasText" style="width: 110px" @change="load">
+          <el-select v-model="filters.hasText" style="width: var(--ctrl-w-md)" @change="load">
             <el-option label="不限" value="ALL" />
             <el-option label="有" value="YES" />
             <el-option label="无（缺口）" value="NO" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="filters.level === 'OUTLINE'" label="样本骨架">
-          <el-select v-model="filters.skeleton" style="width: 150px" @change="load">
+          <el-select v-model="filters.skeleton" style="width: var(--ctrl-w-lg)" @change="load">
             <el-option label="不限" value="ALL" />
             <el-option label="只看未改写骨架" value="YES" />
             <el-option label="排除骨架" value="NO" />
@@ -71,18 +71,18 @@
         </el-form-item>
         <el-form-item :label="filters.level === 'OUTLINE' ? '大纲字数' : '正文字数'">
           <el-input-number v-model="filters.minChars" :min="0" :max="99999999" :controls="false" placeholder="下限"
-                           size="small" style="width: 90px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
           <span style="margin: 0 4px">至</span>
           <el-input-number v-model="filters.maxChars" :min="0" :max="99999999" :controls="false" placeholder="上限"
-                           size="small" style="width: 90px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
         </el-form-item>
         <el-form-item label="创建时间">
           <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" unlink-panels
-                          start-placeholder="开始" end-placeholder="结束" size="small" style="width: 230px"
+                          start-placeholder="开始" end-placeholder="结束" size="small" style="width: var(--ctrl-w-2xl)"
                           @change="load" />
         </el-form-item>
         <el-form-item label="排序">
-          <el-select v-model="filters.sort" style="width: 160px" @change="load">
+          <el-select v-model="filters.sort" style="width: var(--ctrl-w-xl)" @change="load">
             <el-option label="书+卷+章（通读序）" value="ORDER_ASC" />
             <el-option label="书+卷+章倒序" value="ORDER_DESC" />
             <el-option label="创建时间倒序" value="TIME_DESC" />

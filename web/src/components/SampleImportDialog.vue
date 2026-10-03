@@ -3,7 +3,7 @@
   <el-dialog :model-value="modelValue" title="导入新小说" width="640px"
              @update:model-value="(open) => emit('update:modelValue', open)">
     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px">
-      <el-input v-model="form.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 220px" />
+      <el-input v-model="form.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: var(--ctrl-w-2xl)" />
       <span class="hint" v-if="form.text" >
         已载入 {{ (form.text.length / 10000).toFixed(1) }} 万字
       </span>

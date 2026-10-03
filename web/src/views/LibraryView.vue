@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader title="素材库" hint="所有素材按作品隔离">
-      <el-select v-model="novelId" style="width: 260px" @change="() => { setSelectedNovelId(novelId); loadAll() }">
+      <el-select v-model="novelId" style="width: var(--ctrl-w-3xl)" @change="() => { setSelectedNovelId(novelId); loadAll() }">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
     </PageHeader>
@@ -58,12 +58,12 @@
       <!-- 正典 -->
       <el-tab-pane :label="`正典文档（${canon.length}）`">
         <div style="display: flex; gap: 8px; margin-bottom: 10px">
-          <el-select v-model="newCanon.kind" style="width: 130px" size="small">
+          <el-select v-model="newCanon.kind" style="width: var(--ctrl-w-lg)" size="small">
             <el-option value="world" label="world 世界观" />
             <el-option value="character" label="character 人物" />
             <el-option value="misc" label="misc 其他" />
           </el-select>
-          <el-input v-model="newCanon.name" placeholder="文档名称" style="width: 200px" size="small" />
+          <el-input v-model="newCanon.name" placeholder="文档名称" style="width: var(--ctrl-w-2xl)" size="small" />
           <el-button type="primary" size="small" @click="createCanon">新增文档</el-button>
         </div>
         <DataTable :data="canon" border size="small">
@@ -143,7 +143,7 @@
           每章一份结构化快照（时间/位置/随身物/新承诺/未解），随事实账自动产出并注入后续生成上下文——写错时在此人工纠偏
         </div>
         <div class="toolbar">
-          <el-select v-model="wsChapter" placeholder="选择章号" size="small" style="width: 160px" @change="loadWsForEdit">
+          <el-select v-model="wsChapter" placeholder="选择章号" size="small" style="width: var(--ctrl-w-xl)" @change="loadWsForEdit">
             <el-option v-for="w in worldStates" :key="w.chapterNo" :value="w.chapterNo" :label="`第${w.chapterNo}章`" />
           </el-select>
           <el-button size="small" @click="backfillWs" :loading="wsBackfilling">对本章重新抽取</el-button>
@@ -306,7 +306,7 @@
           <span class="hint">
             所有 LLM 节点提示词与拼装段全量落库：运行时库值优先、代码为回退。%s/%d 为 format 占位（保存时校验序列），{key} 为拼装段占位（代码填参）；停用行即回退代码版。
           </span>
-          <el-input v-model="promptFilter" placeholder="按节点/标题筛选" size="small" clearable style="width: 220px" />
+          <el-input v-model="promptFilter" placeholder="按节点/标题筛选" size="small" clearable style="width: var(--ctrl-w-2xl)" />
           <el-button type="primary" size="small" @click="openPromptCreate">新建提示词</el-button>
         </div>
         <DataTable :data="filteredPrompts" border size="small" @row-click="(r) => viewPrompt(r.id)">
@@ -419,9 +419,9 @@
               <el-input v-model="bannedText" type="textarea" :rows="8" placeholder="心中暗想" />
               <div style="display: flex; gap: 12px; align-items: center; margin: 10px 0">
                 <span style="font-size: var(--text-sm)">每章字数带（期望字数）</span>
-                <el-input-number v-model="budgetMin" :min="300" :max="20000" :step="100" size="small" style="width: 110px" />
+                <el-input-number v-model="budgetMin" :min="300" :max="20000" :step="100" size="small" style="width: var(--ctrl-w-md)" />
                 <span style="font-size: var(--text-sm)">至</span>
-                <el-input-number v-model="budgetMax" :min="300" :max="20000" :step="100" size="small" style="width: 110px" />
+                <el-input-number v-model="budgetMax" :min="300" :max="20000" :step="100" size="small" style="width: var(--ctrl-w-md)" />
                 <span style="font-size: var(--text-sm)">章长容差（±）</span>
                 <el-input-number v-model="lenTol" :min="0" :max="0.5" :step="0.05" size="small" />
                 <span class="hint">卷规划按此带出预算并钳制；容差决定门禁实际允许宽度</span>
@@ -429,15 +429,15 @@
               <div style="font-size: var(--text-sm); margin: 10px 0 6px">评审标准（本书覆盖，未列出的键继承平台调参）</div>
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
                 <span style="font-size: var(--text-sm)">注水软阈值</span>
-                <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: 92px" />
+                <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: var(--ctrl-w-sm)" />
                 <span style="font-size: var(--text-sm)">硬上限</span>
-                <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: 92px" />
+                <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: var(--ctrl-w-sm)" />
                 <span style="font-size: var(--text-sm)">恢复线比例</span>
-                <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: 92px" />
+                <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: var(--ctrl-w-sm)" />
                 <span style="font-size: var(--text-sm)">扩写护栏</span>
-                <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: 92px" />
+                <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: var(--ctrl-w-sm)" />
                 <span style="font-size: var(--text-sm)">审校下限</span>
-                <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: 92px" />
+                <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: var(--ctrl-w-sm)" />
               </div>
               <div class="hint" style="margin-top: 4px">软阈值只提示不拦；结构性四问全过且超硬上限才转人工；恢复线 = 预算下限 × 比例</div>
               <el-button type="primary" @click="saveGateConfig">保存门禁配置</el-button>
@@ -451,11 +451,11 @@
       <el-tab-pane label="品类预设">
         <div class="toolbar">
           <el-select v-model="presetGenre" filterable allow-create default-first-option placeholder="选择或输入新品类"
-                     size="small" style="width: 180px" @change="loadCorpus">
+                     size="small" style="width: var(--ctrl-w-xl)" @change="loadCorpus">
             <el-option v-for="g in presetGenres" :key="g.genre" :value="g.genre"
                        :label="`${g.genre}（${g.chapters} 章 / ${g.words} 字）`" />
           </el-select>
-          <el-input v-model="corpusTitle" placeholder="章标题（可选）" size="small" style="width: 200px" />
+          <el-input v-model="corpusTitle" placeholder="章标题（可选）" size="small" style="width: var(--ctrl-w-2xl)" />
           <el-button type="primary" size="small" :disabled="!presetGenre || !corpusText" @click="addCorpus">导入语料章</el-button>
           <el-button size="small" :disabled="!presetGenre" @click="extractDraft">提取基线草稿</el-button>
           <span class="hint">品类随时新增；机械指标零成本；n&lt;10 低置信提示不拒绝</span>
@@ -484,7 +484,7 @@
           <div class="hint" style="margin-bottom: 8px; white-space: pre-wrap">{{ draft.notes.join('\n') }}</div>
           <div class="hint" style="max-height: 120px; overflow: auto; margin-bottom: 8px">{{ draft.fingerprintJson.slice(0, 600) }}</div>
           <div style="display: flex; gap: 8px; align-items: center">
-            <el-input v-model="presetName" placeholder="预设名（如：漱石猫·日常推理）" size="small" style="width: 240px" />
+            <el-input v-model="presetName" placeholder="预设名（如：漱石猫·日常推理）" size="small" style="width: var(--ctrl-w-3xl)" />
             <el-button type="primary" size="small" :disabled="!presetName" @click="adoptPreset">保存为预设</el-button>
           </div>
         </el-card>
@@ -602,26 +602,26 @@
       <div style="font-size: var(--text-sm); margin-bottom: 6px">空闲时段</div>
       <div class="toolbar">
         <span style="font-size: var(--text-sm)">输入命中</span>
-        <el-input-number v-model="priceForm.idleInputHit" :min="0" :step="0.01" size="small" style="width: 110px" />
+        <el-input-number v-model="priceForm.idleInputHit" :min="0" :step="0.01" size="small" style="width: var(--ctrl-w-md)" />
         <span style="font-size: var(--text-sm)">未命中</span>
-        <el-input-number v-model="priceForm.idleInputMiss" :min="0" :step="0.1" size="small" style="width: 110px" />
+        <el-input-number v-model="priceForm.idleInputMiss" :min="0" :step="0.1" size="small" style="width: var(--ctrl-w-md)" />
         <span style="font-size: var(--text-sm)">输出</span>
-        <el-input-number v-model="priceForm.idleOutput" :min="0" :step="0.5" size="small" style="width: 110px" />
+        <el-input-number v-model="priceForm.idleOutput" :min="0" :step="0.5" size="small" style="width: var(--ctrl-w-md)" />
       </div>
       <div style="font-size: var(--text-sm); margin-bottom: 6px">高峰时段</div>
       <div class="toolbar">
         <span style="font-size: var(--text-sm)">输入命中</span>
-        <el-input-number v-model="priceForm.peakInputHit" :min="0" :step="0.01" size="small" style="width: 110px" />
+        <el-input-number v-model="priceForm.peakInputHit" :min="0" :step="0.01" size="small" style="width: var(--ctrl-w-md)" />
         <span style="font-size: var(--text-sm)">未命中</span>
-        <el-input-number v-model="priceForm.peakInputMiss" :min="0" :step="0.1" size="small" style="width: 110px" />
+        <el-input-number v-model="priceForm.peakInputMiss" :min="0" :step="0.1" size="small" style="width: var(--ctrl-w-md)" />
         <span style="font-size: var(--text-sm)">输出</span>
-        <el-input-number v-model="priceForm.peakOutput" :min="0" :step="0.5" size="small" style="width: 110px" />
+        <el-input-number v-model="priceForm.peakOutput" :min="0" :step="0.5" size="small" style="width: var(--ctrl-w-md)" />
       </div>
       <div style="display: flex; gap: 10px; align-items: center">
         <span style="font-size: var(--text-sm)">高峰时段</span>
-        <el-input-number v-model="priceForm.peakStartHour" :min="0" :max="23" size="small" style="width: 90px" />
+        <el-input-number v-model="priceForm.peakStartHour" :min="0" :max="23" size="small" style="width: var(--ctrl-w-sm)" />
         <span>:00 –</span>
-        <el-input-number v-model="priceForm.peakEndHour" :min="0" :max="23" size="small" style="width: 90px" />
+        <el-input-number v-model="priceForm.peakEndHour" :min="0" :max="23" size="small" style="width: var(--ctrl-w-sm)" />
         <span>:00</span>
       </div>
       <template #footer>
@@ -635,9 +635,9 @@
       <el-input v-model="nodeForm.model" placeholder="模型名（留空 = 会话接入行的默认模型）" style="margin-bottom: 10px" />
       <div class="toolbar">
         <span style="font-size: var(--text-sm)">温度（留空=调用方默认）</span>
-        <el-input-number v-model="nodeForm.temperature" :min="0" :max="2" :step="0.1" size="small" style="width: 110px" />
+        <el-input-number v-model="nodeForm.temperature" :min="0" :max="2" :step="0.1" size="small" style="width: var(--ctrl-w-md)" />
         <span style="font-size: var(--text-sm)">max_tokens</span>
-        <el-input-number v-model="nodeForm.maxTokens" :min="0" :step="1000" size="small" style="width: 130px" />
+        <el-input-number v-model="nodeForm.maxTokens" :min="0" :step="1000" size="small" style="width: var(--ctrl-w-lg)" />
       </div>
       <el-input v-model="nodeForm.extraJson" type="textarea" :rows="3" placeholder='extra 请求参数（JSON 对象，如 {"thinking":{"type":"disabled"}}；留空不传）' style="margin-bottom: 10px" />
       <div style="display: flex; gap: 14px; align-items: center">
@@ -655,7 +655,7 @@
       <el-input v-model="providerForm.name" placeholder="名称（唯一，如：DeepSeek 会话 / MiniMax 向量）" style="margin-bottom: 10px" />
       <div class="toolbar">
         <span style="font-size: var(--text-sm); white-space: nowrap">用途</span>
-        <el-select v-model="providerForm.role" size="small" style="width: 160px">
+        <el-select v-model="providerForm.role" size="small" style="width: var(--ctrl-w-xl)">
           <el-option label="会话（正文/审校等）" value="chat" />
           <el-option label="向量化（RAG 检索）" value="embedding" />
         </el-select>
@@ -667,9 +667,9 @@
       <el-input v-model="providerForm.model" placeholder="默认模型（会话如 deepseek-v4-flash；向量化如 embo-01）" style="margin-bottom: 10px" />
       <div class="toolbar">
         <span style="font-size: var(--text-sm)">连接超时(秒)</span>
-        <el-input-number v-model="providerForm.connectTimeoutSec" :min="1" :max="120" size="small" style="width: 100px" />
+        <el-input-number v-model="providerForm.connectTimeoutSec" :min="1" :max="120" size="small" style="width: var(--ctrl-w-md)" />
         <span style="font-size: var(--text-sm)">读超时(秒，含响应体)</span>
-        <el-input-number v-model="providerForm.readTimeoutSec" :min="10" :max="1800" :step="30" size="small" style="width: 130px" />
+        <el-input-number v-model="providerForm.readTimeoutSec" :min="10" :max="1800" :step="30" size="small" style="width: var(--ctrl-w-lg)" />
       </div>
       <div style="display: flex; gap: 14px; align-items: center">
         <el-switch v-model="providerForm.enabled" active-text="启用（自动停用同用途其它接入）" />
@@ -684,22 +684,22 @@
     <!-- 素材卡编辑 -->
     <el-dialog v-model="cardEditor" :title="cardForm.id ? '编辑素材卡' : '新增素材卡'" width="640px">
       <div class="toolbar">
-        <el-select v-model="cardForm.kind" style="width: 110px" size="small">
+        <el-select v-model="cardForm.kind" style="width: var(--ctrl-w-md)" size="small">
           <el-option v-for="(label, k) in kindLabel" :key="k" :value="k" :label="label" />
         </el-select>
-        <el-input v-model="cardForm.name" placeholder="名称" style="width: 170px" size="small" />
+        <el-input v-model="cardForm.name" placeholder="名称" style="width: var(--ctrl-w-xl)" size="small" />
         <el-input v-model="cardForm.aliasesText" placeholder="别名（逗号分隔，场景匹配用）" size="small" style="flex: 1" />
       </div>
       <div class="toolbar">
         <el-switch v-model="cardForm.pinned" active-text="常驻（每场景必注入全文）" />
-        <el-select v-model="cardForm.status" size="small" style="width: 100px">
+        <el-select v-model="cardForm.status" size="small" style="width: var(--ctrl-w-md)">
           <el-option value="active" label="在场" />
           <el-option value="retired" label="退场" />
           <el-option value="dead" label="死亡" />
           <el-option value="merged" label="合并" />
         </el-select>
         <span style="font-size: var(--text-sm)">首现章</span>
-        <el-input-number v-model="cardForm.sourceChapter" :min="1" size="small" style="width: 100px" />
+        <el-input-number v-model="cardForm.sourceChapter" :min="1" size="small" style="width: var(--ctrl-w-md)" />
       </div>
       <el-input v-model="cardForm.summary" type="textarea" :rows="2" placeholder="摘要（2-3 句；匹配命中时注入的就是它）" style="margin-bottom: 10px" />
       <el-input v-model="cardForm.contentMd" type="textarea" :rows="8" placeholder="全文（常驻卡注入全文；其余卡只注入摘要）" />
@@ -724,7 +724,7 @@
         <div style="display: flex; gap: 10px; margin-top: 10px; align-items: center">
           <span>埋设章 <el-input-number v-model="editing.plantedIn" :min="1" size="small" /></span>
           <span>回收章 <el-input-number v-model="editing.recoveredIn" :min="1" size="small" /></span>
-          <el-select v-model="editing.status" size="small" style="width: 110px">
+          <el-select v-model="editing.status" size="small" style="width: var(--ctrl-w-md)">
             <el-option value="planned" label="计划" />
             <el-option value="planted" label="已埋" />
             <el-option value="recovered" label="已收" />
@@ -840,14 +840,14 @@
           <span class="hint">{{ sampleKindLabel[sampleCardForm.kind] || sampleCardForm.kind }}（重新解析会重建全部卡）</span>
         </template>
         <template v-else>
-          <el-select v-model="sampleCardForm.kind" size="small" style="width: 110px">
+          <el-select v-model="sampleCardForm.kind" size="small" style="width: var(--ctrl-w-md)">
             <el-option v-for="(label, k) in sampleKindLabel" :key="k" :value="k" :label="label" />
           </el-select>
-          <el-input v-model="sampleCardForm.name" placeholder="名称（必填）" size="small" style="width: 200px" />
-          <el-input v-model="sampleCardForm.aliasesText" placeholder="别名（逗号分隔，可选）" size="small" style="width: 220px" />
+          <el-input v-model="sampleCardForm.name" placeholder="名称（必填）" size="small" style="width: var(--ctrl-w-2xl)" />
+          <el-input v-model="sampleCardForm.aliasesText" placeholder="别名（逗号分隔，可选）" size="small" style="width: var(--ctrl-w-2xl)" />
         </template>
         <span style="font-size: var(--text-sm)">重要度</span>
-        <el-select v-model="sampleCardForm.importance" size="small" style="width: 90px">
+        <el-select v-model="sampleCardForm.importance" size="small" style="width: var(--ctrl-w-sm)">
           <el-option :value="1" label="★" />
           <el-option :value="2" label="★★" />
           <el-option :value="3" label="★★★" />

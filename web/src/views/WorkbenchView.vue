@@ -4,7 +4,7 @@
 
     <el-card shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
-        <el-select v-model="novelId" style="width: 240px" @change="onNovelChange">
+        <el-select v-model="novelId" style="width: var(--ctrl-w-3xl)" @change="onNovelChange">
           <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
         </el-select>
         <el-button size="small" plain @click="router.push('/wizard')">＋ 开新书</el-button>
@@ -21,7 +21,7 @@
         <span>连跑范围：第 <el-input-number v-model="from" :min="1" size="small" /> 至
           <el-input-number v-model="to" :min="from" size="small" /> 章</span>
         <span>优先级：
-          <el-select v-model="runPriority" size="small" style="width: 72px">
+          <el-select v-model="runPriority" size="small" style="width: var(--ctrl-w-xs)">
             <el-option :value="0" label="低" />
             <el-option :value="1" label="中" />
             <el-option :value="2" label="高" />
@@ -94,14 +94,14 @@
           </div>
         </el-form-item>
         <el-form-item label="叙事视角">
-          <el-select v-model="deriveEdit.pov" style="width: 200px">
+          <el-select v-model="deriveEdit.pov" style="width: var(--ctrl-w-2xl)">
             <el-option value="第一人称（主角）" label="第一人称（主角）" />
             <el-option value="第三人称限知" label="第三人称限知" />
             <el-option value="第三人称全知" label="第三人称全知" />
             <el-option value="多视角轮换" label="多视角轮换" />
           </el-select>
           <el-input v-if="deriveEdit.pov !== '多视角轮换'" v-model="deriveEdit.povCharacter"
-                    placeholder="主视角人物名（可选）" style="width: 180px; margin-left: 8px" />
+                    placeholder="主视角人物名（可选）" style="width: var(--ctrl-w-xl); margin-left: 8px" />
         </el-form-item>
         <el-form-item label="节奏">
           <el-input-number v-model="deriveEdit.chaptersPerVolume" :min="3" :max="30" size="small" />
@@ -156,19 +156,19 @@
           </div>
           <div style="display: grid; grid-template-columns: 150px 110px 1fr; gap: 6px 10px; align-items: center; font-size: var(--text-xs)">
             <span>注水软阈值</span>
-            <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: 100px" />
+            <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: var(--ctrl-w-md)" />
             <span style="color: var(--muted)">读者评审注水率超过→打回重写一轮（结构全过且未破硬上限时可放行）</span>
             <span>注水硬上限</span>
-            <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: 100px" />
+            <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: var(--ctrl-w-md)" />
             <span style="color: var(--muted)">注水率红线，超了必拦（结构再好也不放）</span>
             <span>恢复线比例</span>
-            <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: 100px" />
+            <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: var(--ctrl-w-md)" />
             <span style="color: var(--muted)">修订稿字数下限 = 章预算下限 × 此值，防删残</span>
             <span>扩写护栏</span>
-            <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: 100px" />
+            <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: var(--ctrl-w-md)" />
             <span style="color: var(--muted)">修订稿长度上限 = 章预算 × 此值，防膨胀</span>
             <span>审校下限</span>
-            <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: 100px" />
+            <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: var(--ctrl-w-md)" />
             <span style="color: var(--muted)">AI 修稿不足原文此比例→视为异常保留原文</span>
           </div>
         </el-collapse-item>

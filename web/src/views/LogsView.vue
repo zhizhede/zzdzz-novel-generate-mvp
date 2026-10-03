@@ -3,14 +3,14 @@
     <PageHeader title="日志" hint="LLM 调用台账与生成事件流水；点行看完整 prompt/输出与思考过程" />
     <div class="toolbar">
       <span style="font-size: var(--text-sm); color: var(--fg-2)">筛选：</span>
-      <el-select v-model="novelId" placeholder="全部作品" clearable size="small" style="width: 220px" @change="loadAll">
+      <el-select v-model="novelId" placeholder="全部作品" clearable size="small" style="width: var(--ctrl-w-2xl)" @change="loadAll">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
       <template v-if="tab === 'calls'">
-        <el-input-number v-model="chapterId" :min="1" size="small" placeholder="章ID" controls-position="right" style="width: 130px" />
+        <el-input-number v-model="chapterId" :min="1" size="small" placeholder="章ID" controls-position="right" style="width: var(--ctrl-w-lg)" />
       </template>
       <template v-else>
-        <el-input-number v-model="eventChapterNo" :min="1" size="small" placeholder="章号(可选)" controls-position="right" style="width: 140px" />
+        <el-input-number v-model="eventChapterNo" :min="1" size="small" placeholder="章号(可选)" controls-position="right" style="width: var(--ctrl-w-lg)" />
       </template>
       <el-button size="small" @click="loadAll">查询</el-button>
     </div>

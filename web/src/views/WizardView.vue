@@ -57,7 +57,7 @@
 
             <template v-else>
               <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap">
-                <el-input v-model="sampleForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 200px" />
+                <el-input v-model="sampleForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: var(--ctrl-w-2xl)" />
                 <span class="hint" v-if="sampleForm.text" >
                   已载入 {{ (sampleForm.text.length / 10000).toFixed(1) }} 万字
                 </span>
@@ -106,7 +106,7 @@
                 <div v-if="analyzeResult.recommendation !== 'match'"
                      style="display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap">
                   <el-tag size="small" type="info">品类「{{ newGenreForm.genre }}」（语料已存库）</el-tag>
-                  <el-input v-model="newGenreForm.presetName" size="small" placeholder="预设名" style="width: 200px" />
+                  <el-input v-model="newGenreForm.presetName" size="small" placeholder="预设名" style="width: var(--ctrl-w-2xl)" />
                   <el-button size="small" type="primary" :loading="adopting" @click="adoptFromSample">建品类并使用</el-button>
                 </div>
 
@@ -182,14 +182,14 @@
             <div class="hint">决定读者评审的注水拦截线：越干修剪越狠，越水容忍度越高（写入本书门禁）</div>
           </el-form-item>
           <el-form-item label="叙事视角">
-            <el-select v-model="wizardForm.derive.pov" style="width: 200px">
+            <el-select v-model="wizardForm.derive.pov" style="width: var(--ctrl-w-2xl)">
               <el-option value="第一人称（主角）" label="第一人称（主角）" />
               <el-option value="第三人称限知" label="第三人称限知" />
               <el-option value="第三人称全知" label="第三人称全知" />
               <el-option value="多视角轮换" label="多视角轮换" />
             </el-select>
             <el-input v-if="wizardForm.derive.pov !== '多视角轮换'" v-model="wizardForm.derive.povCharacter"
-                      placeholder="主视角人物名（可选）" style="width: 200px; margin-left: 8px" />
+                      placeholder="主视角人物名（可选）" style="width: var(--ctrl-w-2xl); margin-left: 8px" />
           </el-form-item>
           <el-form-item label="节奏">
             <el-input-number v-model="wizardForm.derive.chaptersPerVolume" :min="3" :max="30" size="small" />

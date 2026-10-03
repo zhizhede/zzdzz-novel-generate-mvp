@@ -9,31 +9,31 @@
     <!-- 查询条件：条件全空 = 全量（默认按创建时间倒序，见 filters.sort） -->
     <FilterBar :loading="loading" @search="load" @reset="resetFilters">
         <el-form-item label="关键字">
-          <el-input v-model="filters.keyword" placeholder="书名/简介" clearable style="width: 180px"
+          <el-input v-model="filters.keyword" placeholder="书名/简介" clearable style="width: var(--ctrl-w-xl)"
                     @keyup.enter="load" @clear="load" @blur="load" />
         </el-form-item>
         <el-form-item label="入库类型">
-          <el-select v-model="filters.sourceType" style="width: 140px" @change="load">
+          <el-select v-model="filters.sourceType" style="width: var(--ctrl-w-lg)" @change="load">
             <el-option label="全部类型" value="ALL" />
             <el-option v-for="(label, key) in SOURCE_LABEL" :key="key" :label="label" :value="key" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="filters.status" style="width: 110px" @change="load">
+          <el-select v-model="filters.status" style="width: var(--ctrl-w-md)" @change="load">
             <el-option label="全部" value="ALL" />
             <el-option label="正式" value="active" />
             <el-option label="草稿" value="draft" />
           </el-select>
         </el-form-item>
         <el-form-item label="审批模式">
-          <el-select v-model="filters.approvalMode" style="width: 110px" @change="load">
+          <el-select v-model="filters.approvalMode" style="width: var(--ctrl-w-md)" @change="load">
             <el-option label="全部" value="ALL" />
             <el-option label="自动" value="auto" />
             <el-option label="人工" value="manual" />
           </el-select>
         </el-form-item>
         <el-form-item label="无人续跑">
-          <el-select v-model="filters.autoContinue" style="width: 100px" @change="load">
+          <el-select v-model="filters.autoContinue" style="width: var(--ctrl-w-md)" @change="load">
             <el-option label="全部" value="ALL" />
             <el-option label="已开" value="ON" />
             <el-option label="已关" value="OFF" />
@@ -41,18 +41,18 @@
         </el-form-item>
         <el-form-item label="章数">
           <el-input-number v-model="filters.minChapters" :min="0" :max="99999" :controls="false" placeholder="下限"
-                           size="small" style="width: 80px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
           <span style="margin: 0 4px">至</span>
           <el-input-number v-model="filters.maxChapters" :min="0" :max="99999" :controls="false" placeholder="上限"
-                           size="small" style="width: 80px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
         </el-form-item>
         <el-form-item label="创建时间">
           <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" unlink-panels
-                          start-placeholder="开始" end-placeholder="结束" size="small" style="width: 230px"
+                          start-placeholder="开始" end-placeholder="结束" size="small" style="width: var(--ctrl-w-2xl)"
                           @change="load" />
         </el-form-item>
         <el-form-item label="排序">
-          <el-select v-model="filters.sort" style="width: 140px" @change="load">
+          <el-select v-model="filters.sort" style="width: var(--ctrl-w-lg)" @change="load">
             <el-option label="创建时间倒序" value="TIME_DESC" />
             <el-option label="创建时间正序" value="TIME_ASC" />
             <el-option label="章数多→少" value="CHAPTERS_DESC" />

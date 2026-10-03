@@ -10,22 +10,22 @@
     <!-- 筛选查询条件：条件全空 = 全量按提取时间倒序 -->
     <FilterBar :loading="loading" @search="load" @reset="resetFilters">
         <el-form-item label="来源">
-          <el-select v-model="filters.source" style="width: 130px" @change="load">
+          <el-select v-model="filters.source" style="width: var(--ctrl-w-lg)" @change="load">
             <el-option label="全部来源" value="ALL" />
             <el-option v-for="(label, key) in SOURCE_LABEL" :key="key" :label="label" :value="key" />
           </el-select>
         </el-form-item>
         <el-form-item label="关键字">
-          <el-input v-model="filters.keyword" placeholder="名称/品类/说明/标签" clearable style="width: 200px"
+          <el-input v-model="filters.keyword" placeholder="名称/品类/说明/标签" clearable style="width: var(--ctrl-w-2xl)"
                     @keyup.enter="load" @clear="load" @blur="load" />
         </el-form-item>
         <el-form-item label="品类">
-          <el-select v-model="filters.genre" placeholder="全部品类" clearable filterable style="width: 170px" @change="load">
+          <el-select v-model="filters.genre" placeholder="全部品类" clearable filterable style="width: var(--ctrl-w-xl)" @change="load">
             <el-option v-for="g in genreOptions" :key="g" :label="g" :value="g" />
           </el-select>
         </el-form-item>
         <el-form-item label="置信度">
-          <el-select v-model="filters.confidence" style="width: 110px" @change="load">
+          <el-select v-model="filters.confidence" style="width: var(--ctrl-w-md)" @change="load">
             <el-option label="全部" value="ALL" />
             <el-option label="正常" value="HIGH" />
             <el-option label="低置信" value="LOW" />
@@ -33,22 +33,22 @@
         </el-form-item>
         <el-form-item label="指标数 ≥">
           <el-input-number v-model="filters.minMetrics" :min="0" :max="200" :controls="false" placeholder="不限"
-                           size="small" style="width: 80px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
         </el-form-item>
         <el-form-item label="语料字数">
           <el-input-number v-model="filters.minChars" :min="0" :max="99999999" :controls="false" placeholder="下限"
-                           size="small" style="width: 90px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
           <span style="margin: 0 4px">至</span>
           <el-input-number v-model="filters.maxChars" :min="0" :max="99999999" :controls="false" placeholder="上限"
-                           size="small" style="width: 90px" @change="load" />
+                           size="small" style="width: var(--ctrl-w-sm)" @change="load" />
         </el-form-item>
         <el-form-item label="提取时间">
           <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" unlink-panels
-                          start-placeholder="开始" end-placeholder="结束" size="small" style="width: 230px"
+                          start-placeholder="开始" end-placeholder="结束" size="small" style="width: var(--ctrl-w-2xl)"
                           @change="load" />
         </el-form-item>
         <el-form-item label="排序">
-          <el-select v-model="filters.sort" style="width: 150px" @change="load">
+          <el-select v-model="filters.sort" style="width: var(--ctrl-w-lg)" @change="load">
             <el-option label="提取时间倒序" value="TIME_DESC" />
             <el-option label="提取时间正序" value="TIME_ASC" />
             <el-option label="指标数多→少" value="METRICS_DESC" />
