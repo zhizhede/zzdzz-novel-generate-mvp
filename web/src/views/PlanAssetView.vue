@@ -249,17 +249,21 @@
       <el-table-column label="章名" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">{{ row.chapterTitle || '—' }}</template>
       </el-table-column>
-      <el-table-column label="目标" min-width="180" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.goal || '—' }}</template>
-      </el-table-column>
-      <el-table-column label="时间跨度" width="110" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.timeNote || '—' }}</template>
-      </el-table-column>
+      <!-- 章纲先于「目标/时间跨度」：本页主用途是找缺口，「有没有章纲」是第一等信号。
+           原先它排在第 9 列（起点 x≈888，而内容区仅约 770px），被这两个纯内容字段挤出
+           首屏，于是用户唯一看得见的缺口信号只剩那层没人解释的行底色。目标/时间跨度在
+           展开行里本来就有（见上方 expand 模板），放列上属重复。 -->
       <el-table-column label="章纲" width="90">
         <template #default="{ row }">
           <el-tag v-if="row.hasOutline" size="small" type="success">{{ row.outlineChars }} 字</el-tag>
           <el-tag v-else size="small" type="warning">未生成</el-tag>
         </template>
+      </el-table-column>
+      <el-table-column label="目标" min-width="180" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.goal || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="时间跨度" width="110" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.timeNote || '—' }}</template>
       </el-table-column>
       <el-table-column label="预算" width="100">
         <template #default="{ row }">
