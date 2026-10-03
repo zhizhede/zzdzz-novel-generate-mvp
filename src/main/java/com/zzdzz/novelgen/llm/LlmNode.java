@@ -42,6 +42,7 @@ public final class LlmNode {
 
     // ===== 导入书籍·解析链（把样本资产化那套 LLM 能力接到书上；大纲/世界观复用 SAMPLE_OUTLINE/SAMPLE_WORLD） =====
     public static final String BOOK_CARDS = "book_cards";           // 从本书正文摘要抽设定层素材卡（写 material_cards）
+    public static final String BOOK_CHAPTER_OUTLINE = "book_chapter_outline"; // 从**已有正文**反推章纲（场景拆解）
 
     private LlmNode() {}
 }
