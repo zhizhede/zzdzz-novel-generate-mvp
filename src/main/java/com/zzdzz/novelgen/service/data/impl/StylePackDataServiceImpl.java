@@ -61,7 +61,6 @@ public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, Style
     public List<StylePackDO> listPresets() {
         return list(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<StylePackDO>()
                 .eq("is_preset", true)
-                .eq("is_deleted", false)
                 .orderByDesc("id"));
     }
 
@@ -87,7 +86,7 @@ public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, Style
     }
 
     @Override
-    public int softDeleteOrphanOfNovel(long novelId) {
-        return baseMapper.softDeleteOrphanOfNovel(novelId);
+    public int deleteOrphanPack(long packId) {
+        return baseMapper.deleteOrphanPack(packId);
     }
 }

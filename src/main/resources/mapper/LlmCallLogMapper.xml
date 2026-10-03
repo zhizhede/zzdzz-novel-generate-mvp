@@ -14,20 +14,18 @@
 
     <select id="findPage" resultType="com.zzdzz.novelgen.model.entity.LlmCallLogDO">
                 SELECT * FROM llm_call_log
-                WHERE is_deleted=false
-                  AND (#{novelId,jdbcType=BIGINT} IS NULL OR novel_id=#{novelId})
+                WHERE (#{novelId,jdbcType=BIGINT} IS NULL OR novel_id=#{novelId})
                   AND (#{chapterId,jdbcType=BIGINT} IS NULL OR chapter_id=#{chapterId})
                 ORDER BY id DESC LIMIT #{limit} OFFSET #{offset}
     </select>
 
     <select id="findById" resultType="com.zzdzz.novelgen.model.entity.LlmCallLogDO">
-                SELECT * FROM llm_call_log WHERE id=#{id} AND is_deleted=false
+                SELECT * FROM llm_call_log WHERE id=#{id}
     </select>
 
     <select id="countBy" resultType="long">
                 SELECT COUNT(*) FROM llm_call_log
-                WHERE is_deleted=false
-                  AND (#{novelId,jdbcType=BIGINT} IS NULL OR novel_id=#{novelId})
+                WHERE (#{novelId,jdbcType=BIGINT} IS NULL OR novel_id=#{novelId})
                   AND (#{chapterId,jdbcType=BIGINT} IS NULL OR chapter_id=#{chapterId})
     </select>
 
@@ -36,8 +34,7 @@
                        COALESCE(SUM(completion_tokens),0)::bigint AS "completionTokens", COALESCE(SUM(total_tokens),0)::bigint AS "totalTokens",
                        COALESCE(AVG(latency_ms),0)::bigint AS "avgLatencyMs"
                 FROM llm_call_log
-                WHERE is_deleted=false
-                  AND (#{novelId,jdbcType=BIGINT} IS NULL OR novel_id=#{novelId})
+                WHERE (#{novelId,jdbcType=BIGINT} IS NULL OR novel_id=#{novelId})
                   AND (#{chapterId,jdbcType=BIGINT} IS NULL OR chapter_id=#{chapterId})
     </select>
 
@@ -51,8 +48,8 @@
                        COALESCE(SUM(l.completion_tokens),0)::bigint AS "completionTokens",
                        COALESCE(SUM(l.latency_ms),0)::bigint AS "latencySum"
                 FROM llm_call_log l
-                LEFT JOIN llm_model_price p ON p.model = l.model AND p.is_deleted=false AND p.enabled=true
-                WHERE l.is_deleted=false AND l.create_time &gt; NOW() - ((#{days}) || ' days')::interval
+                LEFT JOIN llm_model_price p ON p.model = l.model AND p.enabled=true
+                WHERE l.create_time &gt; NOW() - ((#{days}) || ' days')::interval
                 GROUP BY 1, 2, 3
                 ORDER BY 1
     </select>

@@ -67,7 +67,9 @@ class NovelServiceStylePackTest {
         service = new NovelService(novelData, stylePackData, chapterData, mock(DigestService.class),
                 mock(SampleCardDataService.class), mock(SamplePlotNodeDataService.class),
                 mock(ImportedSampleDataService.class), mock(MaterialCardDataService.class),
-                mock(CanonDocDataService.class), taskData, mock(LlmPort.class), mock(LlmJson.class),
+                mock(CanonDocDataService.class), taskData,
+                mock(com.zzdzz.novelgen.service.data.EmbeddingDataService.class),
+                mock(LlmPort.class), mock(LlmJson.class),
                 new PromptTemplateService(promptDao), new ObjectMapper());
     }
 
@@ -160,13 +162,16 @@ class NovelServiceStylePackTest {
 
     @Test
     void deletingBookAlsoFreesItsExclusivePack() {
-        when(novelData.getById(25L)).thenReturn(novel(25L, "黑潮号"));
+        NovelDO book = novel(25L, "黑潮号");
+        book.setStylePackId(77L);
+        when(novelData.getById(25L)).thenReturn(book);
         when(taskData.existsActiveForNovel(25L)).thenReturn(false);
 
         service.deleteNovel(25L);
 
-        verify(novelData).softDelete(25L);
-        verify(stylePackData).softDeleteOrphanOfNovel(25L);
+        verify(novelData).delete(25L);
+        // 包 id 必须在删书前取出：删完书就再查不到这本书的 style_pack_id 了
+        verify(stylePackData).deleteOrphanPack(77L);
     }
 
     @Test
@@ -176,7 +181,7 @@ class NovelServiceStylePackTest {
 
         assertThatThrownBy(() -> service.deleteNovel(25L)).isInstanceOf(BizException.class);
 
-        verify(novelData, never()).softDelete(anyLong());
-        verify(stylePackData, never()).softDeleteOrphanOfNovel(anyLong());
+        verify(novelData, never()).delete(anyLong());
+        verify(stylePackData, never()).deleteOrphanPack(anyLong());
     }
 }

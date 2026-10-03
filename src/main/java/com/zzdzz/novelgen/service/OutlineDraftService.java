@@ -81,7 +81,7 @@ public class OutlineDraftService {
         List<OutlineDraftTaskDO> running = taskData.list(
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<OutlineDraftTaskDO>()
                         .eq("status", "RUNNING")
-                        .eq("is_deleted", false));
+                        );
         for (OutlineDraftTaskDO t : running) {
             if (taskData.casStatus(t.getId(), "RUNNING", "QUEUED") > 0) {
                 try {

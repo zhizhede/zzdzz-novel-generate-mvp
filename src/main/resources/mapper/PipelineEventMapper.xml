@@ -9,7 +9,7 @@
 
     <select id="list" resultType="com.zzdzz.novelgen.service.data.PipelineEventDataService$EventRow">
                 SELECT id, chapter_no AS "chapterNo", stage, phase, payload::text AS "payloadJson", to_char(create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime" FROM pipeline_events
-                WHERE is_deleted = FALSE AND novel_id = #{novelId}
+                WHERE novel_id = #{novelId}
                   AND (#{chapterNo,jdbcType=INTEGER} IS NULL OR chapter_no = #{chapterNo})
                 ORDER BY id DESC LIMIT #{limit}
     </select>

@@ -83,7 +83,7 @@ public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMap
     }
 
     @Override
-    public int softDeleteById(long id) {
-        return baseMapper.softDeleteById(id);
+    public int deleteCustom(long id) {
+        return baseMapper.deleteCustom(id);
     }
 }

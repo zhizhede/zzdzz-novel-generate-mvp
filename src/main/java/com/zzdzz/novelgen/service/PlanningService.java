@@ -132,7 +132,7 @@ public class PlanningService {
         if (ch.getFullText() != null && !ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + ch.getChapterNo() + " 章已有正文，禁止删除");
         }
-        chapterData.softDeletePlan(chapterId);
+        chapterData.deletePlan(chapterId);
     }
 
     // ===== AI 卷纲规划 =====

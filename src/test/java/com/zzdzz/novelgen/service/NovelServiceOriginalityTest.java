@@ -63,7 +63,8 @@ class NovelServiceOriginalityTest {
                 mock(com.zzdzz.novelgen.service.data.ChapterDataService.class), mock(DigestService.class),
                 sampleCardData, plotData,
                 sampleData, mock(MaterialCardDataService.class), mock(CanonDocDataService.class),
-                mock(GenerationTaskDataService.class), llm, llmJson,
+                mock(GenerationTaskDataService.class), mock(com.zzdzz.novelgen.service.data.EmbeddingDataService.class),
+                llm, llmJson,
                 new PromptTemplateService(promptDao), new ObjectMapper());
     }
 

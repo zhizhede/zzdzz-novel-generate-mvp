@@ -33,8 +33,8 @@ public class LlmNodeConfigDataServiceImpl extends ServiceImpl<LlmNodeConfigMappe
     }
 
     @Override
-    public int softDelete(long id) {
-        return baseMapper.softDelete(id);
+    public int delete(long id) {
+        return baseMapper.delete(id);
     }
 
     @Override

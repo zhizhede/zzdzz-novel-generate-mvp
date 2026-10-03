@@ -426,7 +426,7 @@ public class SampleParseService {
         }, 3);
     }
 
-    /** 跨章实体归并：纯函数聚合（同名/别名相并）→ LLM 补判模糊组 → 落卡（重建式：先软删旧卡）。 */
+    /** 跨章实体归并：纯函数聚合（同名/别名相并）→ LLM 补判模糊组 → 落卡（重建式：先清旧卡）。 */
     int mergeEntities(long sampleId, Set<Integer> parsedSeqs, int parsedCount) {
         Map<String, MergedEntity> byKey = new LinkedHashMap<>();
         for (SamplePlotNodeDO node : plotData.listBySample(sampleId)) {
@@ -475,7 +475,7 @@ public class SampleParseService {
         if (list.size() > 20) {
             applyLlmGroups(list, askMerge(list));
         }
-        cardData.softDeleteBySample(sampleId);
+        cardData.deleteBySample(sampleId);
         int written = 0;
         for (MergedEntity m : list) {
             if (m.absorbed) {
@@ -556,7 +556,7 @@ public class SampleParseService {
         if (byVolume.isEmpty()) {
             return 0;
         }
-        plotData.softDeleteByLevel(sampleId, "volume");
+        plotData.deleteByLevel(sampleId, "volume");
         int written = 0;
         for (Map.Entry<Integer, List<ChapterSeg>> e : byVolume.entrySet()) {
             List<ChapterSeg> segs = e.getValue();
@@ -649,7 +649,7 @@ public class SampleParseService {
         meta.set("arcs", outline.path("arcs"));
         meta.set("themes", outline.path("themes"));
         meta.put("chapters", limit);
-        plotData.softDeleteByLevel(sampleId, "book");
+        plotData.deleteByLevel(sampleId, "book");
         plotData.insertNode(sampleId, "book", 1, 0, sample.getTitle(), md.toString(), "[]",
                 toJsonOrEmpty(meta));
     }
@@ -693,7 +693,7 @@ public class SampleParseService {
         }
         for (SampleCardDO c : cardData.listBySample(sampleId)) {
             if (c.getKind().equals("world")) {
-                cardData.softDeleteById(c.getId());
+                cardData.deleteCard(c.getId());
             }
         }
         cardData.insertCard(sampleId, "world", "世界观", "[]", "世界观设定文档", world, "[]", 2, null, 0);
@@ -748,7 +748,7 @@ public class SampleParseService {
     public void recoverInterrupted() {
         List<SampleParseTaskDO> running = taskData.list(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<SampleParseTaskDO>()
                 .eq("status", "RUNNING")
-                .eq("is_deleted", false));
+                );
         for (SampleParseTaskDO t : running) {
             if (taskData.casStatus(t.getId(), "RUNNING", "INTERRUPTED") > 0) {
                 taskData.finish(t.getId(), "INTERRUPTED", "", "后端重启中断，可继续解析断点续跑");
@@ -884,12 +884,12 @@ public class SampleParseService {
                 .set("importance", importance == null ? card.getImportance() : importance));
     }
 
-    /** 卡人工删除（软删；重新解析会重建全量卡）。 */
+    /** 卡人工删除（物理删除；重新解析会重建全量卡）。 */
     public void deleteCard(long cardId) {
         if (cardData.getById(cardId) == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "样本资产卡不存在: " + cardId);
         }
-        cardData.softDeleteById(cardId);
+        cardData.deleteCard(cardId);
     }
 
     /** 卡人工新建（AI 漏抽补录；别名逗号分隔）。 */

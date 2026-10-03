@@ -14,12 +14,12 @@
                 SELECT source_type AS "sourceType", source_id AS "sourceId", chapter_no AS "chapterNo", content,
                        embedding &lt;=&gt; #{vecStr}::vector AS distance
                 FROM embeddings
-                WHERE novel_id = #{novelId} AND is_deleted = FALSE
+                WHERE novel_id = #{novelId}
                   AND (
                     (source_type = 'digest' AND EXISTS (SELECT 1 FROM digests d
-                        WHERE d.id = embeddings.source_id AND d.is_deleted = FALSE))
+                        WHERE d.id = embeddings.source_id))
                     OR (source_type = 'card' AND EXISTS (SELECT 1 FROM material_cards m
-                        WHERE m.id = embeddings.source_id AND m.is_deleted = FALSE))
+                        WHERE m.id = embeddings.source_id))
                   )
                 ORDER BY embedding &lt;=&gt; #{vecStr}::vector
                 LIMIT #{limit}
@@ -30,24 +30,24 @@
                        NULL AS "kind", NULL AS "name"
                 FROM digests d
                 JOIN chapters c ON c.id = d.chapter_id
-                WHERE c.novel_id = #{novelId} AND d.is_deleted = FALSE AND c.is_deleted = FALSE
+                WHERE c.novel_id = #{novelId}
                   AND NOT EXISTS (SELECT 1 FROM embeddings e
-                                  WHERE e.source_type = 'digest' AND e.source_id = d.id AND e.is_deleted = FALSE)
+                                  WHERE e.source_type = 'digest' AND e.source_id = d.id)
                 ORDER BY c.chapter_no DESC
                 LIMIT #{limit}
     </select>
 
     <select id="findMissingCards" resultType="com.zzdzz.novelgen.service.data.EmbeddingDataService$MissingRow">
                 SELECT id AS "sourceId", NULL AS "chapterNo", summary AS content, kind, name FROM material_cards
-                WHERE novel_id = #{novelId} AND is_deleted = FALSE
+                WHERE novel_id = #{novelId}
                   AND NOT EXISTS (SELECT 1 FROM embeddings e
-                                  WHERE e.source_type = 'card' AND e.source_id = material_cards.id AND e.is_deleted = FALSE)
+                                  WHERE e.source_type = 'card' AND e.source_id = material_cards.id)
                 ORDER BY id
                 LIMIT #{limit}
     </select>
 
     <select id="countByNovel" resultType="int">
-                SELECT count(*) FROM embeddings WHERE novel_id = #{novelId} AND is_deleted = FALSE
+                SELECT count(*) FROM embeddings WHERE novel_id = #{novelId}
     </select>
 
     <!-- 硬删（含软删残留）：只给「覆盖重算」用——向量是纯派生索引，清掉即由源行重建。

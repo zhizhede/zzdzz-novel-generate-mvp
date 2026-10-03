@@ -57,6 +57,7 @@ public class NovelService {
     private final MaterialCardDataService cardData;
     private final CanonDocDataService canonData;
     private final com.zzdzz.novelgen.service.data.GenerationTaskDataService taskData;
+    private final com.zzdzz.novelgen.service.data.EmbeddingDataService embeddingData;
     private final LlmPort llm;
     private final LlmJson llmJson;
     private final PromptTemplateService promptTemplates;
@@ -204,11 +205,15 @@ public class NovelService {
     }
 
     /**
-     * 删除书籍（软删，可 psql 恢复）。守卫：有排队/运行中的生成任务拒绝（先停止再删）；
+     * 删除书籍（**硬删，不可恢复**）。守卫：有排队/运行中的生成任务拒绝（先停止再删）；
      * 无人续跑开着时先关闭（derive_config.autoContinue=false + 链置 OFF），防止删除后队列钩子继续排任务。
+     *
+     * <p>关联数据靠外键 ON DELETE CASCADE 带走（V37）：章节/场景/门禁报告/步骤/事实账/伏笔/世界状态/
+     * 素材卡/正典/生成任务/解析任务/大纲草稿/事件/复盘。两处没有级联外键、必须在此显式清：
+     * 向量（embeddings.novel_id 无外键）与专属风格包（style_packs 是父表，删包不该牵走别的书）。
      */
     public void deleteNovel(long novelId) {
-        requireNovel(novelId);
+        NovelDO novel = requireNovel(novelId);
         if (taskData.existsActiveForNovel(novelId)) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "这本书还有排队/运行中的生成任务——先到工作台停止任务，再删除");
@@ -220,19 +225,19 @@ public class NovelService {
                             cfg.chaptersPerVolume(), cfg.targetChapters(), false, cfg.priority(), cfg.tags()), novelId));
         }
         novelData.updateAutoState(novelId, "OFF", "书籍已删除，无人续跑已关闭");
-        novelData.softDelete(novelId);
-        // 专属风格包一并软删：否则「书名·风格」这个活名被残留包占着，同名书再开/再导必然撞
-        // uq_style_packs_name_alive（共享包与预设不动——SQL 里已判活书引用与 is_preset）。
-        int freedPacks = stylePackData.softDeleteOrphanOfNovel(novelId);
-        log.info("书籍软删 novelId={} 专属风格包一并软删={}", novelId, freedPacks > 0);
+        Long packId = novel.getStylePackId();   // 必须在删书前取：删完就查不到这本书的 style_pack_id
+        embeddingData.deleteByNovel(novelId);
+        novelData.delete(novelId);
+        // 专属风格包一并删：否则「书名·风格」这个活名被残留包占着，同名书再开/再导必然撞
+        // uq_style_packs_name_alive（共享包与预设不动——SQL 里已判 is_preset 与书引用）。
+        int freedPacks = packId == null ? 0 : stylePackData.deleteOrphanPack(packId);
+        log.info("书籍已删除 novelId={} 专属风格包一并删除={}", novelId, freedPacks > 0);
     }
 
     /**
-     * 取本书的私有风格包（开书/导入共用）。活名唯一约束 uq_style_packs_name_alive 不认历史残留，
-     * 所以顺序为：①同名可复用包（**活着但无活书引用的孤儿包**）原地改写复用 → ②活名空缺则新建 →
+     * 取本书的私有风格包（开书/导入共用）。活名唯一约束 uq_style_packs_name_alive 认全表，
+     * 所以顺序为：①同名可复用包（**没有任何书引用的孤儿包**）原地改写复用 → ②活名空缺则新建 →
      * ③活名被在用的包/预设占着才退让改名（书名·风格·2…）。任何一步都不该再抛数据库唯一键异常。
-     * 2026-10-03 起「软删行一律不可见」，故不再回收已软删的包：同名包被删后重导走 ② 新建一行
-     * （软删行不占活名，条件唯一索引放行），代价是留一行历史数据。
      */
     private long acquireStylePack(String title, String description, String rulesMd, String fingerprint,
                                  String gateConfig) {
@@ -731,10 +736,12 @@ public class NovelService {
         return deriveConfig(novelId);
     }
 
-    private void requireNovel(long novelId) {
-        if (novelData.getById(novelId) == null) {
+    private NovelDO requireNovel(long novelId) {
+        NovelDO novel = novelData.getById(novelId);
+        if (novel == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }
+        return novel;
     }
 
     /** 衍生配置全量（含 sourceSampleId 回显与类型标签）。 */

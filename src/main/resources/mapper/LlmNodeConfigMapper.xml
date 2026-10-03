@@ -4,25 +4,25 @@
 
     <select id="findEnabled" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
 
-                SELECT * FROM llm_node_config WHERE node=#{node} AND is_deleted=false AND enabled=true
+                SELECT * FROM llm_node_config WHERE node=#{node} AND enabled=true
                 
     </select>
 
     <select id="listAll" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
-SELECT * FROM llm_node_config WHERE is_deleted=false ORDER BY id
+SELECT * FROM llm_node_config  ORDER BY id
     </select>
 
     <select id="findById" resultType="com.zzdzz.novelgen.model.entity.LlmNodeConfigDO">
-SELECT * FROM llm_node_config WHERE id=#{id} AND is_deleted=false
+SELECT * FROM llm_node_config WHERE id=#{id}
     </select>
 
     <select id="exists" resultType="boolean">
-SELECT COUNT(*) FROM llm_node_config WHERE node=#{node} AND is_deleted=false
+SELECT COUNT(*) FROM llm_node_config WHERE node=#{node}
     </select>
 
-    <update id="softDelete">
-UPDATE llm_node_config SET is_deleted=true, delete_time=NOW() WHERE id=#{id} AND is_deleted=false
-    </update>
+    <delete id="delete">
+DELETE FROM llm_node_config WHERE id=#{id}
+    </delete>
     <select id="insert" resultType="long">
                 INSERT INTO llm_node_config (node, model, temperature, max_tokens, extra_json, enabled, remark)
                 VALUES (#{node}, #{model}, #{temperature}, #{maxTokens}, #{extraJson}::jsonb, #{enabled}, #{remark}) RETURNING id
@@ -31,6 +31,6 @@ UPDATE llm_node_config SET is_deleted=true, delete_time=NOW() WHERE id=#{id} AND
     <update id="update">
                 UPDATE llm_node_config SET model=#{model}, temperature=#{temperature}, max_tokens=#{maxTokens}, extra_json=#{extraJson}::jsonb,
                        enabled=#{enabled}, remark=#{remark}, update_time=NOW()
-                WHERE id=#{id} AND is_deleted=false
+                WHERE id=#{id}
     </update>
 </mapper>

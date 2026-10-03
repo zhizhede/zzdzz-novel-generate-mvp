@@ -37,9 +37,9 @@
     <!-- 章生成档案：全轮次全类型（场景级机械门禁/章级/读者评审/AI 审校）按时间序 -->
     <select id="listByChapter" resultType="com.zzdzz.novelgen.model.entity.GateReportDO">
                 SELECT id, chapter_id, scene_id, gate_type, round, passed, result::text AS result,
-                       is_deleted, create_time, update_time
+                       create_time, update_time
                 FROM gate_reports
-                WHERE chapter_id=#{chapterId} AND is_deleted=false
+                WHERE chapter_id=#{chapterId}
                 ORDER BY id ASC
     </select>
 
@@ -48,8 +48,8 @@
                 SELECT DISTINCT gr.chapter_id
                 FROM gate_reports gr
                 JOIN chapters c ON c.id = gr.chapter_id
-                WHERE gr.is_deleted = false AND gr.scene_id IS NULL
+                WHERE gr.scene_id IS NULL
                   AND gr.gate_type = 'mechanical' AND gr.passed = true
-                  AND c.is_deleted = false AND c.novel_id = #{novelId}
+ AND c.novel_id = #{novelId}
     </select>
 </mapper>

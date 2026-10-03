@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/** 复盘建议/提案数据服务实现。Wrapper 用字符串列名并显式 `.eq("is_deleted", false)`——实体不带软删字段，过滤必须自己带。 */
+/** 复盘建议/提案数据服务实现。 */
 @Service
 public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMapper, RetroProposalDO>
         implements RetroProposalDataService {
@@ -27,7 +27,6 @@ public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMappe
                 .eq("novel_id", novelId)
                 .eq("vol_no", volNo)
                 .eq("content", trimmed)
-                .eq("is_deleted", false)
                 .last("LIMIT 1"), o -> ((Number) o).longValue());
         if (dup != null) {
             return;
@@ -46,7 +45,6 @@ public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMappe
         return list(new QueryWrapper<RetroProposalDO>()
                 .eq("novel_id", novelId)
                 .eq("vol_no", volNo)
-                .eq("is_deleted", false)
                 .orderByAsc("status")
                 .orderByDesc("id"));
     }

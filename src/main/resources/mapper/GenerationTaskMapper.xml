@@ -14,7 +14,7 @@
                        to_char(t.create_time, 'YYYY-MM-DD HH24:MI:SS') AS "createTime", COALESCE(t.kind, 'CHAPTERS') AS "kind", t.payload::text AS "payload",
                        t.retry_count AS "retryCount", t.priority AS "priority"
                 FROM generation_tasks t JOIN novels n ON n.id = t.novel_id
-                WHERE t.is_deleted = FALSE
+                
                 ORDER BY CASE WHEN t.status IN ('QUEUED', 'RUNNING') THEN 0 ELSE 1 END, t.id DESC
                 LIMIT #{limit}
     </select>
@@ -47,7 +47,7 @@
 
     <select id="findQueuedForDispatch" resultType="long">
                 SELECT t.id FROM generation_tasks t
-                WHERE t.status = 'QUEUED' AND t.is_deleted = FALSE
+                WHERE t.status = 'QUEUED'
                   AND NOT EXISTS (SELECT 1 FROM generation_tasks r
                                   WHERE r.novel_id = t.novel_id AND r.status = 'RUNNING')
                 ORDER BY t.priority DESC, t.id LIMIT 1
@@ -55,12 +55,12 @@
 
     <select id="existsActiveForNovel" resultType="boolean">
                 SELECT EXISTS (SELECT 1 FROM generation_tasks
-                               WHERE novel_id = #{novelId} AND status IN ('QUEUED', 'RUNNING') AND is_deleted = FALSE)
+                               WHERE novel_id = #{novelId} AND status IN ('QUEUED', 'RUNNING'))
     </select>
 
     <select id="countRunningNovels" resultType="int">
                 SELECT COUNT(DISTINCT novel_id) FROM generation_tasks
-                WHERE status = 'RUNNING' AND is_deleted = FALSE
+                WHERE status = 'RUNNING'
     </select>
 
     <select id="findRunningById" resultType="com.zzdzz.novelgen.service.data.GenerationTaskDataService$TaskRow">
@@ -90,12 +90,12 @@
 
     <update id="resetInterrupted">
                 UPDATE generation_tasks SET status='QUEUED', last_message='重启重排', update_time=now()
-                WHERE status='RUNNING' AND is_deleted=false AND cancel_requested=FALSE
+                WHERE status='RUNNING' AND cancel_requested=FALSE
     </update>
 
     <update id="cancelFlaggedOnRestart">
                 UPDATE generation_tasks SET status='CANCELED', last_message='重启前已请求停止', update_time=now()
-                WHERE status='RUNNING' AND is_deleted=false AND cancel_requested=TRUE
+                WHERE status='RUNNING' AND cancel_requested=TRUE
     </update>
 
     <update id="requestCancel">

@@ -17,7 +17,7 @@ public interface MaterialCardDataService extends IService<MaterialCardDO> {
     /** 除自己以外是否还有同名活卡（改名撞键前置校验）。 */
     boolean existsOther(long novelId, String kind, String name, long excludeId);
 
-    int softDelete(long id);
+    int delete(long id);
 
     boolean hasCards(long novelId);
 

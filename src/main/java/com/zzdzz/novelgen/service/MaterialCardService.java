@@ -108,7 +108,7 @@ public class MaterialCardService {
 
     public void delete(long id) {
         get(id);
-        cardDAO.softDelete(id);
+        cardDAO.delete(id);
     }
 
     private void validate(String kind, String name, String status) {

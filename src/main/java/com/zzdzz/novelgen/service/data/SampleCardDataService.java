@@ -15,9 +15,9 @@ public interface SampleCardDataService extends IService<SampleCardDO> {
     long insertCard(long sampleId, String kind, String name, String aliases, String summary,
                     String contentMd, String relations, int importance, Integer firstSeq, int mentions);
 
-    /** 软删该样本全部卡（重合成前清理，人工编辑走单卡 PUT 不受影响直至重新解析）。 */
-    int softDeleteBySample(long sampleId);
+    /** 物理删除该样本全部卡（重合成前清理，人工编辑走单卡 PUT 不受影响直至重新解析）。 */
+    int deleteBySample(long sampleId);
 
-    /** 单卡软删（人工纠偏删除）。 */
-    void softDeleteById(long cardId);
+    /** 单卡删除（人工纠偏）。 */
+    void deleteCard(long cardId);
 }

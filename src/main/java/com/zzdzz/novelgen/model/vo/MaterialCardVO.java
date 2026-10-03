@@ -3,7 +3,7 @@ package com.zzdzz.novelgen.model.vo;
 import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 import java.util.List;
 
-/** 素材卡：软删除内部字段不出 API。 */
+/** 素材卡。 */
 public record MaterialCardVO(Long id, long novelId, String kind, String name, List<String> aliases,
                              String summary, String contentMd, boolean pinned, String status,
                              Integer sourceChapter) {

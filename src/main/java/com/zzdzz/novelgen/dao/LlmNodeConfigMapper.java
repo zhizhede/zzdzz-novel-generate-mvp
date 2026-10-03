@@ -17,7 +17,7 @@ public interface LlmNodeConfigMapper extends BaseMapper<LlmNodeConfigDO> {
 
     boolean exists(@Param("node") String node);
 
-    int softDelete(@Param("id") long id);
+    int delete(@Param("id") long id);
 
     Long insert(@Param("node") String node, @Param("model") String model, @Param("temperature") Double temperature,
                 @Param("maxTokens") Integer maxTokens, @Param("extraJson") String extraJson,

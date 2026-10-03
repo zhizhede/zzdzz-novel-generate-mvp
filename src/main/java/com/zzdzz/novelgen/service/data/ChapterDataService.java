@@ -90,8 +90,8 @@ public interface ChapterDataService extends IService<ChapterDO> {
     void updatePlan(long chapterId, Integer volumeNo, String arc, String title,
                     String goal, String hook, String timeNote, int budgetMin, int budgetMax);
 
-    /** 仅未动笔的规划行可删（软删）。 */
-    void softDeletePlan(long chapterId);
+    /** 仅未动笔的规划行可删（物理删除）。 */
+    void deletePlan(long chapterId);
 
     void updateStatus(long chapterId, String status);
 

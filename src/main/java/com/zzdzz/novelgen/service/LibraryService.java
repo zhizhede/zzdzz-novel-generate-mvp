@@ -77,7 +77,7 @@ public class LibraryService {
 
     public void deleteCanon(long id) {
         canonDoc(id);
-        canonData.softDelete(id);
+        canonData.delete(id);
     }
 
     // ===== 伏笔账本 =====

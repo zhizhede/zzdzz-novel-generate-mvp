@@ -66,7 +66,7 @@ public interface ChapterMapper extends BaseMapper<ChapterDO> {
                    @Param("title") String title, @Param("goal") String goal, @Param("hook") String hook,
                    @Param("timeNote") String timeNote, @Param("budgetMin") int budgetMin, @Param("budgetMax") int budgetMax);
 
-    int softDeletePlan(@Param("chapterId") long chapterId);
+    int deletePlan(@Param("chapterId") long chapterId);
 
     int updateStatus(@Param("chapterId") long chapterId, @Param("status") String status);
 

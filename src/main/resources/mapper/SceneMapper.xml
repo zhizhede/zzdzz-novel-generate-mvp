@@ -3,23 +3,23 @@
 <mapper namespace="com.zzdzz.novelgen.dao.SceneMapper">
 
     <select id="countByChapter" resultType="int">
-SELECT COUNT(*) FROM chapter_scenes WHERE chapter_id=#{chapterId} AND is_deleted=false
+SELECT COUNT(*) FROM chapter_scenes WHERE chapter_id=#{chapterId}
     </select>
 
     <select id="findByChapter" resultType="com.zzdzz.novelgen.model.entity.SceneDO">
 
-                SELECT * FROM chapter_scenes WHERE chapter_id=#{chapterId} AND is_deleted=false ORDER BY scene_no
+                SELECT * FROM chapter_scenes WHERE chapter_id=#{chapterId} ORDER BY scene_no
 
     </select>
 
     <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.SceneDO">
 SELECT s.* FROM chapter_scenes s JOIN chapters c ON c.id = s.chapter_id
-WHERE c.novel_id=#{novelId} AND s.is_deleted=false AND c.is_deleted=false
+WHERE c.novel_id=#{novelId}
 ORDER BY c.chapter_no, s.scene_no
     </select>
 
     <select id="findId" resultType="long">
-SELECT id FROM chapter_scenes WHERE chapter_id=#{chapterId} AND scene_no=#{sceneNo} AND is_deleted=false
+SELECT id FROM chapter_scenes WHERE chapter_id=#{chapterId} AND scene_no=#{sceneNo}
     </select>
 
     <update id="saveDraft">
@@ -43,7 +43,7 @@ UPDATE chapter_scenes SET gate_status=#{status} WHERE id=#{sceneId}
     <select id="findPassedDrafts" resultType="string">
 
                 SELECT draft_text FROM chapter_scenes
-                WHERE chapter_id=#{chapterId} AND gate_status='PASSED' AND is_deleted=false ORDER BY scene_no
+                WHERE chapter_id=#{chapterId} AND gate_status='PASSED' ORDER BY scene_no
                 
     </select>
     <delete id="deleteByChapter">

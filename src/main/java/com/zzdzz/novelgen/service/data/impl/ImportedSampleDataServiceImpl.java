@@ -18,7 +18,6 @@ public class ImportedSampleDataServiceImpl extends ServiceImpl<ImportedSampleMap
     @Override
     public List<ImportedSampleDO> listAlive() {
         return list(new QueryWrapper<ImportedSampleDO>()
-                .eq("is_deleted", false)
                 .orderByDesc("id"));
     }
 
@@ -31,7 +30,6 @@ public class ImportedSampleDataServiceImpl extends ServiceImpl<ImportedSampleMap
     public int linkPreset(String genre, long presetId) {
         return baseMapper.update(null, new UpdateWrapper<ImportedSampleDO>()
                 .eq("genre", genre)
-                .eq("is_deleted", false)
                 .set("preset_id", presetId)
                 .set("update_time", java.time.OffsetDateTime.now()));
     }

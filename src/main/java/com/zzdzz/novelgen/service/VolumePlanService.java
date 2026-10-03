@@ -416,7 +416,7 @@ public class VolumePlanService {
 
     // ===== 落库与伏笔采纳 =====
 
-    /** 落库：软删 fromNo 起旧规划行（前置校验保证无正文）→ 插入新行 → 伏笔采纳/建账 → 卷简报存 canon。 */
+    /** 落库：删除 fromNo 起旧规划行（前置校验保证无正文）→ 插入新行 → 伏笔采纳/建账 → 卷简报存 canon。 */
     private AdoptResult adopt(long novelId, int volNo, PlanDraft draft) {
         int fromNo = draft.rows().get(0).chapterNo();
         List<String> warnings = new ArrayList<>();
@@ -428,7 +428,7 @@ public class VolumePlanService {
                         throw new BizException(ErrorCode.PARAM_ERROR,
                                 "第 " + c.getChapterNo() + " 章已有正文，禁止覆盖其规划行");
                     }
-                    chapterData.softDeletePlan(c.getId());
+                    chapterData.deletePlan(c.getId());
                 }
             }
             // 先逐章解析伏笔引用（可能自动建账），再插规划行——refs 写最终编码，下游指令查询才有据

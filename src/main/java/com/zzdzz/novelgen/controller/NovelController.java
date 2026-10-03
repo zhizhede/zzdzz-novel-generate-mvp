@@ -125,7 +125,7 @@ public class NovelController {
         return Result.success();
     }
 
-    /** 删除书籍（软删）。有排队/运行中任务时拒绝；无人续跑自动关闭。 */
+    /** 删除书籍（物理删除，章节等关联数据随外键级联清走）。有排队/运行中任务时拒绝；无人续跑自动关闭。 */
     @DeleteMapping("/{id}")
     public Result<Void> deleteNovel(@PathVariable long id) {
         novelService.deleteNovel(id);

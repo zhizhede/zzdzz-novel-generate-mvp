@@ -94,7 +94,7 @@ public class GenerationQueueService {
         return submitById(novelId, requireNovelTitle(novelId), from, to, userId, priority);
     }
 
-    /** 取书名给任务行用。全局逻辑删除后软删行不可见，getById 会返回 null——换成可读的 404，别让它变成 NPE。 */
+    /** 取书名给任务行用。行已物理删除时 getById 返回 null——换成可读的 404，别让它变成 NPE。 */
     private String requireNovelTitle(long novelId) {
         var novel = novelData.getById(novelId);
         if (novel == null) {

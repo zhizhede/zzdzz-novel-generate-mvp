@@ -14,13 +14,13 @@
     <select id="findJson" resultType="string">
 
                 SELECT report::text FROM volume_reviews
-                WHERE novel_id = #{novelId} AND vol_no = #{volNo} AND is_deleted = FALSE
+                WHERE novel_id = #{novelId} AND vol_no = #{volNo}
                 
     </select>
 
     <!-- 规划资产页：全库卷复盘（书升序 + 卷号升序） -->
     <select id="listAll" resultType="com.zzdzz.novelgen.service.data.VolumeReviewDataService$VolumeReviewRow">
 SELECT novel_id AS "novelId", vol_no AS "volNo", report::text AS "reportJson", update_time AS "updateTime"
-FROM volume_reviews WHERE is_deleted = FALSE ORDER BY novel_id, vol_no
+FROM volume_reviews  ORDER BY novel_id, vol_no
     </select>
 </mapper>

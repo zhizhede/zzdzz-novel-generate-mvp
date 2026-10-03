@@ -17,7 +17,6 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
     public SampleParseTaskDO findAliveBySample(long sampleId) {
         return getOne(new QueryWrapper<SampleParseTaskDO>()
                 .eq("sample_id", sampleId)
-                .eq("is_deleted", false)
                 .orderByDesc("id")
                 .last("LIMIT 1"));
     }
@@ -65,7 +64,6 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
         return baseMapper.update(null, new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", taskId)
                 .eq("status", fromStatus)
-                .eq("is_deleted", false)
                 .set("status", toStatus));
     }
 
@@ -73,7 +71,6 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
     public void updateProgress(long taskId, int doneUnits, String stage) {
         baseMapper.update(null, new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", taskId)
-                .eq("is_deleted", false)
                 .set("done_units", doneUnits)
                 .set("stage", stage));
     }
@@ -82,7 +79,6 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
     public void updateTotal(long taskId, int totalUnits) {
         baseMapper.update(null, new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", taskId)
-                .eq("is_deleted", false)
                 .set("total_units", totalUnits));
     }
 
@@ -90,7 +86,6 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
     public void finish(long taskId, String status, String stage, String message) {
         baseMapper.update(null, new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", taskId)
-                .eq("is_deleted", false)
                 .set("status", status)
                 .set("stage", stage)
                 .set("message", message == null || message.isBlank() ? null

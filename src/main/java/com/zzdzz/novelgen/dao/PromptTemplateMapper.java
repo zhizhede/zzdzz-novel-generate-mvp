@@ -35,6 +35,6 @@ public interface PromptTemplateMapper extends BaseMapper<PromptTemplateDO> {
     long insertCustom(@Param("node") String node, @Param("phase") String phase,
                       @Param("title") String title, @Param("content") String content);
 
-    int softDeleteById(@Param("id") long id);
+    int deleteCustom(@Param("id") long id);
 
 }

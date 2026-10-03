@@ -117,7 +117,7 @@ public class PlanAssetService {
             ChapterDataService.ChapterPlanRow first = group.get(0);
             NovelDO novel = novels.get(first.novelId());
             if (novel == null) {
-                continue;   // 软删书的残留章行不进列表
+                continue;   // 已删书的残留行（历史兜底）不进列表
             }
             Integer volNo = first.volumeNo();
             String arc = group.stream().map(ChapterDataService.ChapterPlanRow::arc)
@@ -169,7 +169,7 @@ public class PlanAssetService {
         for (ChapterDataService.ChapterPlanRow r : rows) {
             NovelDO novel = novels.get(r.novelId());
             if (novel == null) {
-                continue;   // 软删书的残留章行不进列表
+                continue;   // 已删书的残留行（历史兜底）不进列表
             }
             out.add(new PlanAssetVO(LEVEL_CHAPTER, r.novelId(), novel.getTitle(),
                     NovelSourceType.normalize(novel.getSourceType()), r.volumeNo(), r.arc(),

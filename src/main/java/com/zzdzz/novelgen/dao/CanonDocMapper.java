@@ -28,5 +28,5 @@ public interface CanonDocMapper extends BaseMapper<CanonDocDO> {
 
     int updateContent(@Param("id") long id, @Param("content") String content);
 
-    int softDelete(@Param("id") long id);
+    int delete(@Param("id") long id);
 }

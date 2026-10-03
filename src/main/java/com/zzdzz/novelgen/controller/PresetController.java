@@ -128,7 +128,7 @@ public class PresetController {
         return Result.success();
     }
 
-    /** 资产卡人工删除（软删，重新解析会重建）。 */
+    /** 资产卡人工删除（物理删除，重新解析会重建）。 */
     @DeleteMapping("/cards/{id}")
     public Result<Void> deleteCard(@PathVariable long id) {
         sampleParseService.deleteCard(id);

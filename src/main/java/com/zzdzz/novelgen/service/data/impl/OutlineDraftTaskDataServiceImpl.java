@@ -21,7 +21,6 @@ public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTas
     public OutlineDraftTaskDO latestByNovel(long novelId) {
         return getOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<OutlineDraftTaskDO>()
                 .eq("novel_id", novelId)
-                .eq("is_deleted", false)
                 .orderByDesc("id")
                 .last("LIMIT 1"));
     }
@@ -31,7 +30,6 @@ public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTas
         return baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDO>()
                 .eq("id", taskId)
                 .eq("status", fromStatus)
-                .eq("is_deleted", false)
                 .set("status", toStatus));
     }
 
@@ -39,7 +37,6 @@ public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTas
     public void finishDone(long taskId, String result) {
         baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDO>()
                 .eq("id", taskId)
-                .eq("is_deleted", false)
                 .set("status", "DONE")
                 .set("result", result));
     }
@@ -48,7 +45,6 @@ public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTas
     public void finishFailed(long taskId, String message) {
         baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDO>()
                 .eq("id", taskId)
-                .eq("is_deleted", false)
                 .set("status", "FAILED")
                 .set("message", message == null ? null
                         : message.substring(0, Math.min(message.length(), 256))));

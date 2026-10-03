@@ -58,7 +58,7 @@ public class CanonDocDataServiceImpl extends ServiceImpl<CanonDocMapper, CanonDo
     }
 
     @Override
-    public int softDelete(long id) {
-        return baseMapper.softDelete(id);
+    public int delete(long id) {
+        return baseMapper.delete(id);
     }
 }

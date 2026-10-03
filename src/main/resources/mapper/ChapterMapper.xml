@@ -3,46 +3,46 @@
 <mapper namespace="com.zzdzz.novelgen.dao.ChapterMapper">
 
     <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
-                SELECT * FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
+                SELECT * FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
     </select>
 
     <select id="listSummaries" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
                 SELECT id, novel_id, chapter_no, volume_no, arc, title, pov, outline_yaml,
                        NULL AS full_text, goal, hook, time_note, rule_refs, foreshadow_refs,
-                       budget_min, budget_max, status, round, is_deleted
-                FROM chapters WHERE novel_id=#{novelId} AND is_deleted=false ORDER BY chapter_no
+                       budget_min, budget_max, status, round
+                FROM chapters WHERE novel_id=#{novelId} ORDER BY chapter_no
     </select>
 
     <select id="maxChapterWithText" resultType="int">
                 SELECT MAX(chapter_no) FROM chapters
-                WHERE novel_id=#{novelId} AND is_deleted=false AND full_text IS NOT NULL AND full_text != ''
+                WHERE novel_id=#{novelId} AND full_text IS NOT NULL AND full_text != ''
     </select>
 
     <select id="nextPlannedChapterNo" resultType="int">
                 SELECT MIN(chapter_no) FROM chapters
-                WHERE novel_id=#{novelId} AND is_deleted=false AND chapter_no > #{afterNo}
+                WHERE novel_id=#{novelId} AND chapter_no > #{afterNo}
     </select>
 
     <select id="maxPlannedChapterNo" resultType="int">
                 SELECT MAX(chapter_no) FROM chapters
-                WHERE novel_id=#{novelId} AND is_deleted=false
+                WHERE novel_id=#{novelId}
     </select>
 
     <select id="maxVolumeNo" resultType="int">
                 SELECT MAX(volume_no) FROM chapters
-                WHERE novel_id=#{novelId} AND is_deleted=false AND volume_no IS NOT NULL
+                WHERE novel_id=#{novelId} AND volume_no IS NOT NULL
     </select>
 
     <select id="findOpeningRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
                 SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
-                WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo} AND is_deleted=false
+                WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo}
                   AND full_text IS NOT NULL AND full_text!=''
                 ORDER BY chapter_no
     </select>
 
     <select id="listTextsByNovel" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
                 SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
-                WHERE novel_id=#{novelId} AND is_deleted=false
+                WHERE novel_id=#{novelId}
                   AND full_text IS NOT NULL AND full_text!=''
                 ORDER BY chapter_no
     </select>
@@ -58,21 +58,20 @@
                        COALESCE(rule_refs::text, '[]') AS "ruleRefs",
                        create_time AS "createTime", update_time AS "updateTime"
                 FROM chapters
-                WHERE is_deleted = false
-                  AND (#{novelId,jdbcType=BIGINT}::bigint IS NULL OR novel_id = #{novelId})
+                WHERE (#{novelId,jdbcType=BIGINT}::bigint IS NULL OR novel_id = #{novelId})
                 ORDER BY novel_id, chapter_no
     </select>
 
 
     <select id="findFullText" resultType="string">
                 SELECT full_text FROM chapters
-                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false AND full_text IS NOT NULL
+                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND full_text IS NOT NULL
     </select>
 
     <select id="findApprovedWithoutDigest" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ApprovedNoDigest">
                 SELECT c.id, c.novel_id AS "novelId", c.chapter_no AS "chapterNo" FROM chapters c
-                LEFT JOIN digests d ON d.chapter_id = c.id AND d.is_deleted = FALSE
-                WHERE c.status = 'DIGESTED' AND c.is_deleted = FALSE AND d.id IS NULL
+                LEFT JOIN digests d ON d.chapter_id = c.id
+                WHERE c.status = 'DIGESTED' AND d.id IS NULL
                 ORDER BY c.novel_id, c.chapter_no
     </select>
 
@@ -81,12 +80,12 @@
                        COALESCE(LENGTH(full_text), 0)::bigint AS "textLen",
                        COALESCE(foreshadow_refs::text, '[]') AS "refs"
                 FROM chapters
-                WHERE novel_id = #{novelId} AND volume_no = #{volNo} AND is_deleted = false
+                WHERE novel_id = #{novelId} AND volume_no = #{volNo}
                 ORDER BY chapter_no
     </select>
 
     <select id="existsCount" resultType="long">
-                SELECT COUNT(*) FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
+                SELECT COUNT(*) FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
     </select>
 
     <insert id="insertPlan">
@@ -110,7 +109,7 @@
 
     <update id="updateOutlineYaml">
                 UPDATE chapters SET outline_yaml=#{outlineYaml}, update_time=NOW()
-                WHERE id=#{chapterId} AND is_deleted=false
+                WHERE id=#{chapterId}
     </update>
 
     <update id="markOutlined">
@@ -120,7 +119,7 @@
     <update id="markRejected">
                 UPDATE chapters SET status='NEW', full_text=NULL, outline_yaml=NULL, round=0,
                        reject_reason=#{reason}, update_time=NOW()
-                WHERE id=#{chapterId} AND is_deleted=false
+                WHERE id=#{chapterId}
     </update>
 
     <update id="clearRejectReason">
@@ -130,12 +129,12 @@
     <update id="updatePlan">
                 UPDATE chapters SET volume_no=#{volumeNo}, arc=#{arc}, title=#{title}, goal=#{goal}, hook=#{hook}, time_note=#{timeNote},
                        budget_min=#{budgetMin}, budget_max=#{budgetMax}, update_time=NOW()
-                WHERE id=#{chapterId} AND is_deleted=false
+                WHERE id=#{chapterId}
     </update>
 
-    <update id="softDeletePlan">
-                UPDATE chapters SET is_deleted=true, delete_time=NOW() WHERE id=#{chapterId} AND is_deleted=false
-    </update>
+    <delete id="deletePlan">
+                DELETE FROM chapters WHERE id=#{chapterId}
+    </delete>
 
     <update id="updateStatus">
                 UPDATE chapters SET status=#{status}, update_time=NOW() WHERE id=#{chapterId}
@@ -147,7 +146,7 @@
 
     <update id="updateStatusByNo">
                 UPDATE chapters SET status=#{status}, update_time=NOW()
-                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
+                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
     </update>
 
     <update id="saveFullText">
@@ -155,12 +154,12 @@
     </update>
 
     <update id="updateReviewConfig">
-                UPDATE chapters SET review_config=#{reviewConfig}::jsonb, update_time=NOW() WHERE id=#{chapterId} AND is_deleted=false
+                UPDATE chapters SET review_config=#{reviewConfig}::jsonb, update_time=NOW() WHERE id=#{chapterId}
     </update>
 
     <select id="findDialogueRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
                 SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
-                WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo} AND is_deleted=false
+                WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo}
                   AND full_text IS NOT NULL AND full_text!=''
                 ORDER BY chapter_no
     </select>

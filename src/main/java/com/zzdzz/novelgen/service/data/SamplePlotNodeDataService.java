@@ -18,6 +18,6 @@ public interface SamplePlotNodeDataService extends IService<SamplePlotNodeDO> {
     long insertNode(long sampleId, String level, int seq, int parentSeq, String title,
                     String summary, String beats, String meta);
 
-    /** 软删某层全部节点（重合成前清理）。 */
-    int softDeleteByLevel(long sampleId, String level);
+    /** 物理删除某层全部节点（重合成前清理）。 */
+    int deleteByLevel(long sampleId, String level);
 }

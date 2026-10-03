@@ -17,7 +17,6 @@ public class ImportAnalyzeTaskDataServiceImpl extends ServiceImpl<ImportAnalyzeT
     public ImportAnalyzeTaskDO findAliveByNovel(long novelId) {
         return getOne(new QueryWrapper<ImportAnalyzeTaskDO>()
                 .eq("novel_id", novelId)
-                .eq("is_deleted", false)
                 .orderByDesc("id")
                 .last("LIMIT 1"));
     }

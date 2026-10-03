@@ -19,7 +19,7 @@ public interface MaterialCardMapper extends BaseMapper<MaterialCardDO> {
     boolean existsOther(@Param("novelId") long novelId, @Param("kind") String kind, @Param("name") String name,
                         @Param("excludeId") long excludeId);
 
-    int softDelete(@Param("id") long id);
+    int delete(@Param("id") long id);
 
     boolean hasCards(@Param("novelId") long novelId);
 

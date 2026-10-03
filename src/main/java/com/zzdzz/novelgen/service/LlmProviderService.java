@@ -129,8 +129,8 @@ public class LlmProviderService {
 
     public void delete(long id) {
         require(id);
-        providerData.softDelete(id);
-        log.info("LLM 接入已软删 id={}", id);
+        providerData.delete(id);
+        log.info("LLM 接入已删除 id={}", id);
     }
 
     /**
