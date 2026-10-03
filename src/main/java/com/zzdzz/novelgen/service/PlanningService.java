@@ -63,36 +63,42 @@ public class PlanningService {
     // ===== 卷纲 =====
 
     public List<Map<String, Object>> volumes(long novelId) {
-        List<ChapterDTO> chapters = chapterData.listSummariesByNovel(novelId);
-        Map<Integer, List<ChapterDTO>> byVolume = new LinkedHashMap<>();
-        for (ChapterDTO c : chapters) {
-            byVolume.computeIfAbsent(c.getVolumeNo() == null ? 0 : c.getVolumeNo(), k -> new ArrayList<>()).add(c);
+        // 走带 textChars 的规划读模型：listSummaries 的 full_text 是为省流量置空的（NULL AS full_text），
+        // 拿它算 hasText 会**恒为 false**——规划页曾把有正文的章全标成「规划就绪·待生成」（真库踩过：
+        // 书 2 的 68 行里 0 行显示「正文已成」，而它有 47 章已 DIGESTED）。
+        List<ChapterDataService.ChapterPlanRow> chapters = chapterData.listPlanRowsByNovel(novelId);
+        Map<Integer, List<ChapterDataService.ChapterPlanRow>> byVolume = new LinkedHashMap<>();
+        for (ChapterDataService.ChapterPlanRow c : chapters) {
+            byVolume.computeIfAbsent(c.volumeNo() == null ? 0 : c.volumeNo(), k -> new ArrayList<>()).add(c);
         }
         List<Map<String, Object>> volumes = new ArrayList<>();
         for (var e : byVolume.entrySet()) {
-            ChapterDTO first = e.getValue().get(0);
+            ChapterDataService.ChapterPlanRow first = e.getValue().get(0);
             Map<String, Object> v = new LinkedHashMap<>();
             v.put("volNo", e.getKey());
-            v.put("arc", e.getKey() == 0 ? "未分卷" : first.getArc());
+            v.put("arc", e.getKey() == 0 ? "未分卷" : first.arc());
             v.put("chapters", e.getValue().stream().map(this::toPlanVO).toList());
             volumes.add(v);
         }
         return volumes;
     }
 
-    private Map<String, Object> toPlanVO(ChapterDTO c) {
+    private Map<String, Object> toPlanVO(ChapterDataService.ChapterPlanRow c) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("id", c.getId());
-        m.put("chapterNo", c.getChapterNo());
-        m.put("title", c.getTitle());
-        m.put("goal", c.getGoal());
-        m.put("hook", c.getHook());
-        m.put("timeNote", c.getTimeNote());
-        m.put("status", c.getStatus());
-        m.put("hasText", c.getFullText() != null && !c.getFullText().isBlank());
-        m.put("budgetMin", c.getBudgetMin());
-        m.put("budgetMax", c.getBudgetMax());
-        m.put("sceneCount", sceneData.countByChapter(c.getId()));
+        m.put("id", c.id());
+        m.put("chapterNo", c.chapterNo());
+        m.put("title", c.title());
+        m.put("goal", c.goal());
+        m.put("hook", c.hook());
+        m.put("timeNote", c.timeNote());
+        m.put("status", c.status());
+        m.put("hasText", c.textChars() > 0);
+        m.put("textChars", c.textChars());
+        m.put("hasOutline", c.outlineChars() > 0);
+        m.put("outlineChars", c.outlineChars());
+        m.put("budgetMin", c.budgetMin());
+        m.put("budgetMax", c.budgetMax());
+        m.put("sceneCount", sceneData.countByChapter(c.id()));
         return m;
     }
 

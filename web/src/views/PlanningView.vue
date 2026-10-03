@@ -41,8 +41,13 @@
         </div>
         <div v-for="v in volumes" :key="v.volNo" style="margin-bottom: 16px">
           <div style="font-weight: bold; margin-bottom: 6px; display: flex; gap: 10px; align-items: center">
-            <span>第 {{ v.volNo }} 卷 · {{ v.arc }}（{{ v.chapters?.length || 0 }} 章）</span>
+            <span v-if="v.volNo === 0">未分卷（{{ v.chapters?.length || 0 }} 章）—— 导入正文之外的散章</span>
+            <span v-else>第 {{ v.volNo }} 卷 · {{ v.arc }}（{{ v.chapters?.length || 0 }} 章）</span>
             <el-button size="small" plain :loading="retroBusy === v.volNo" @click="runReview(v)">卷级复盘</el-button>
+          </div>
+          <div v-if="isImportVolume(v)" style="font-size: 12px; color: #909399; margin: -2px 0 6px 0; line-height: 1.7">
+            导入成稿卷：这 {{ v.chapters?.length || 0 }} 章是你导入的原文（正文已成），目标/钩子为空是正常的——
+            卷纲/章纲是「写之前」的规划，成稿章不需要再规划；生成管线从第 {{ firstGeneratedChapterNo }} 章接着写。
           </div>
           <el-table :data="v.chapters" border size="small" style="max-width: 980px">
             <el-table-column prop="chapterNo" label="章" width="60" />
@@ -79,12 +84,24 @@
           <span>至</span>
           <el-input-number v-model="outlineTo" :min="outlineFrom || 1" size="small" style="width: 92px" />
           <span>章</span>
+          <el-checkbox v-model="outlineIncludeText" size="small">
+            含已有正文的章（默认跳过——勾上就为它们补章纲，状态与正文不动）
+          </el-checkbox>
           <el-button size="small" type="primary" :disabled="!!outlineTask" @click="submitOutlineBatch">
             {{ outlineTask ? '章纲生成中…' : '生成章纲（入队）' }}
           </el-button>
         </div>
+        <div v-if="noOutlineChapters.length" style="font-size: 12px; color: #909399; margin-bottom: 10px; line-height: 1.7">
+          暂无章纲 {{ noOutlineChapters.length }} 章：{{ rangeLabel(noOutlineChapters) }}
+          <template v-if="importNoOutline.length">。其中 {{ rangeLabel(importNoOutline) }} 是<b>导入成稿章</b>——章纲是写之前拆场景用的，
+            正文已成就不再规划（这是正常的，不是漏跑）；确实要补纲就勾上方「含已有正文的章」</template>
+          <template v-else>。这些章没有规划行（先跑卷纲）或缺章纲，可点上方批量生成。</template>
+        </div>
         <div style="font-size: 12px; color: #999; margin-bottom: 10px; line-height: 1.7">
-          入队后在工作台生成队列看实时进度（约 1-2 分钟/章，可停止）；已有章纲覆盖重建，已有正文/无规划行的章自动跳过。
+          入队后在工作台生成队列看实时进度（约 1-2 分钟/章，可停止）；已有章纲覆盖重建，无规划行的章自动跳过。
+          <b>已有正文的章默认跳过</b>（老路径会把该章状态退回「待生成」并删掉它的场景与门禁报告，之后一续跑就会把这一章重写，
+          等于毁掉已写完的正文）——导入书自带的成稿章因此默认没有章纲。
+          勾上「含已有正文的章」则改为<b>保全状态</b>出纲：只补章纲与场景拆解，章状态、正文、门禁报告都不动（要花 1-2 分钟/章）。
           提前出的章纲缺「前情」（此前章节的摘要与结尾），量产建议交给管线逐章自动出；启动生成时已有章纲直接复用、不再重出。
         </div>
         <div v-if="outlineTask" style="margin-bottom: 10px; padding: 8px 12px; background: #fdf6ec; border-radius: 6px">
@@ -372,6 +389,43 @@ async function runReview(v) {
 
 const planChapters = computed(() => volumes.value.flatMap((v) => v.chapters))
 
+/** 导入成稿卷（导入书落章即写的 volume_no=1 / arc=导入正文）：其章有正文、无卷纲目标与章纲。 */
+const importVolume = computed(() => volumes.value.find((v) => v.arc === '导入正文'))
+const isImportVolume = (v) => v.arc === '导入正文'
+/** 生成管线的续写起点＝已有正文最末章+1。 */
+const firstGeneratedChapterNo = computed(() => {
+  const withText = planChapters.value.filter((c) => c.hasText).map((c) => c.chapterNo)
+  return withText.length ? Math.max(...withText) + 1 : 1
+})
+const noOutlineChapters = computed(() => planChapters.value.filter((c) => !c.hasOutline))
+const importNoOutline = computed(() => {
+  const vol = importVolume.value
+  if (!vol) return []
+  const nos = new Set((vol.chapters || []).map((c) => c.chapterNo))
+  return noOutlineChapters.value.filter((c) => nos.has(c.chapterNo))
+})
+
+/** 章号列表压成「第 1–17 章、第 20 章」这样的区间文案。 */
+function rangeLabel(chs) {
+  const nos = chs.map((c) => c.chapterNo).sort((a, b) => a - b)
+  if (!nos.length) return ''
+  const parts = []
+  let s = nos[0]
+  let p = nos[0]
+  for (let i = 1; i <= nos.length; i++) {
+    if (i < nos.length && nos[i] === p + 1) {
+      p = nos[i]
+      continue
+    }
+    parts.push(s === p ? `第 ${s} 章` : `第 ${s}–${p} 章`)
+    if (i < nos.length) {
+      s = nos[i]
+      p = nos[i]
+    }
+  }
+  return parts.join('、')
+}
+
 async function loadAll() {
   if (!novelId.value) return
   const s = await api.get(`/api/novels/${novelId.value}/planning/story`)
@@ -379,6 +433,10 @@ async function loadAll() {
   volumes.value = await api.get(`/api/novels/${novelId.value}/planning/volumes`)
   const m = await api.get(`/api/novels/${novelId.value}/planning/mode`)
   planMode.value = m.planMode
+  // 章纲批量的默认范围=全书（1..末章）：原先默认 1..1，点「生成章纲」只会去碰第 1 章，
+  // 而第 1 章若是导入的成稿章会被守卫跳过，看着就像「点了没反应」。
+  outlineFrom.value = 1
+  outlineTo.value = Math.max(1, ...planChapters.value.map((c) => c.chapterNo))
   await loadAllScenes()
 }
 
@@ -454,7 +512,7 @@ async function regen(row) {
 async function submitOutlineBatch() {
   try {
     const r = await api.post(`/api/novels/${novelId.value}/planning/outline/batch`,
-        { from: outlineFrom.value, to: outlineTo.value })
+        { from: outlineFrom.value, to: outlineTo.value, includeTextChapters: outlineIncludeText.value })
     ElMessage.success(`章纲生成已入队（任务 #${r.taskId}）——下方显示进度，工作台生成队列同步可见`)
     pollPlanTask()
   } catch (e) {
@@ -599,6 +657,8 @@ const planTask = ref(null)
 const outlineTask = ref(null)
 const outlineFrom = ref(1)
 const outlineTo = ref(1)
+/** 「含已有正文的章」：默认关（守卫口径）；勾上＝为成稿章补章纲（保全状态出纲）。 */
+const outlineIncludeText = ref(false)
 let planPollTimer = null
 
 const planTaskPercent = computed(() => (planTask.value?.status === 'RUNNING' ? 50 : 5))

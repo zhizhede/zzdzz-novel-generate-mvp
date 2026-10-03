@@ -269,14 +269,24 @@ public class ChapterPipelineService {
 
     /** 强制重出章纲：清掉旧场景与门禁报告，按当前卷纲目标/大纲/前情重新生成场景拆解（同步调用，约 1-2 分钟）。 */
     public List<OutlineService.SceneSpec> regenerateOutline(long novelId, int chapterNo) {
+        return regenerateOutline(novelId, chapterNo, false);
+    }
+
+    /**
+     * allowTextChapter=true（用户显式勾「含已有正文的章」）：跳过「已有正文禁止重出章纲」的硬闸，
+     * 走 {@link OutlineService#generate} 的保全状态分支——只补章纲与场景拆解，章状态/正文/门禁报告都不动。
+     * 默认 false 时保持原硬闸：老路径会把状态退回 OUTLINED 并删场景/门禁报告，之后一续跑就重写该章正文。
+     */
+    public List<OutlineService.SceneSpec> regenerateOutline(long novelId, int chapterNo, boolean allowTextChapter) {
         ChapterDTO ch = outlineService.loadChapter(novelId, chapterNo);
-        if (ch.getFullText() != null && !ch.getFullText().isBlank()) {
+        boolean hasText = ch.getFullText() != null && !ch.getFullText().isBlank();
+        if (hasText && !allowTextChapter) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "第 " + chapterNo + " 章已有正文，禁止重出章纲");
         }
         List<String> digests = packer.recentDigests(novelId, chapterNo, 3);
         outlineService.generate(novelId, ch, packer.world(novelId), packer.characters(novelId),
                 packer.foreshadowDirectives(novelId, chapterNo), digests,
-                packer.prevTail(novelId, chapterNo), packer.prevChapterBrief(novelId, chapterNo));
+                packer.prevTail(novelId, chapterNo), packer.prevChapterBrief(novelId, chapterNo), hasText);
         return outlineService.loadSpecs(ch.getId());
     }
 

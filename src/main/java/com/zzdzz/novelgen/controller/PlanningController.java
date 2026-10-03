@@ -38,6 +38,14 @@ public class PlanningController {
     private final NovelDataService novelData;
     private final RetroProposalDataService proposalData;
 
+    /** 取书名给入队用。全局逻辑删除后软删行不可见，getById 会返回 null——换成可读的 404，别让它变成 NPE。 */
+    private String requireTitle(long novelId) {
+        var novel = novelData.getById(novelId);
+        if (novel == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "作品不存在或已删除: " + novelId);
+        }
+        return String.valueOf(novel.getTitle());
+    }
 
     // ===== 大纲 =====
 
@@ -108,7 +116,7 @@ public class PlanningController {
         if (dto.volNo() == null || dto.from() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "参数不合法：volNo/from 必填");
         }
-        String title = String.valueOf(novelData.getById(novelId).getTitle());
+        String title = requireTitle(novelId);
         long taskId = queueService.submitPlan(novelId, title, dto.volNo(), dto.from(), dto.to(), dto.seedOutline(), null);
         return Result.success(Map.of("taskId", taskId));
     }
@@ -126,8 +134,9 @@ public class PlanningController {
         if (dto.from() == null || dto.to() == null || dto.from() > dto.to()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "参数不合法：from/to 必填且 from ≤ to");
         }
-        String title = String.valueOf(novelData.getById(novelId).getTitle());
-        long taskId = queueService.submitOutline(novelId, title, dto.from(), dto.to(), null);
+        String title = requireTitle(novelId);
+        long taskId = queueService.submitOutline(novelId, title, dto.from(), dto.to(), null,
+                Boolean.TRUE.equals(dto.includeTextChapters()));
         return Result.success(Map.of("taskId", taskId));
     }
 
@@ -215,7 +224,8 @@ public class PlanningController {
     /** AI 规划一卷（同步 auto-plan / 异步 auto-plan-async 共用）。 */
     public record VolumeAutoPlanVO(Integer volNo, Integer from, Integer to, String seedOutline) {}
 
-    public record OutlineBatchVO(Integer from, Integer to) {}
+    /** includeTextChapters=true 时放行「已有正文的章」（保全状态出纲：只补章纲与场景拆解，不动正文/状态/门禁报告）。 */
+    public record OutlineBatchVO(Integer from, Integer to, Boolean includeTextChapters) {}
 
     /** manual 草稿采纳；rows 为动态结构保持 Map。 */
     public record VolumeAdoptVO(Integer volNo, String arc, String brief, List<Map<String, Object>> rows) {}

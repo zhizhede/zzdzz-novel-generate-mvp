@@ -45,6 +45,17 @@ public class OutlineService {
     public void generate(long novelId, ChapterDTO ch, String world, String characters,
                          List<String> directives, List<String> digests, String prevTail,
                          String prevBrief) {
+        generate(novelId, ch, world, characters, directives, digests, prevTail, prevBrief, false);
+    }
+
+    /**
+     * preserveChapterState=true（用户显式勾了「含已有正文的章」）：只写章纲（outline_yaml）与场景拆解，
+     * **不把章状态退回 OUTLINED、不删门禁报告**——给成品章补规划不该让管线以为它要重写。
+     * 老路径 `resetForReoutline` 会 markOutlined（状态→OUTLINED）并删场景/门禁报告，之后一续跑就会把这一章重写掉。
+     */
+    public void generate(long novelId, ChapterDTO ch, String world, String characters,
+                         List<String> directives, List<String> digests, String prevTail,
+                         String prevBrief, boolean preserveChapterState) {
         // 流 A：未消费的打回意见拼进卷纲目标行（不动提示词模板目录），章纲落库成功后清零；
         // 长度护栏走调参键 reject_reason_max_len（默认 200），超长截断并标注
         String goal = ch.getGoal();
@@ -83,10 +94,15 @@ public class OutlineService {
             not.add(jsonText(s.path("must_not")));
             words.add(s.path("words").asInt(900));
         }
-        // 先清旧场景与门禁报告（外键顺序在 repository 内处理），再物化新场景
-        chapterData.resetForReoutline(ch.getId(), scenes.toString());
+        // 先清旧场景与门禁报告（外键顺序在 repository 内处理），再物化新场景；
+        // 已有正文的章走「保全状态」分支：只换章纲，章状态/正文/门禁报告都不动
+        if (preserveChapterState) {
+            chapterData.updateOutlineYaml(ch.getId(), scenes.toString());
+        } else {
+            chapterData.resetForReoutline(ch.getId(), scenes.toString());
+        }
         sceneData.replaceAll(ch.getId(), goals, present, reveal, not, words);
-        log.info("章纲落库: scenes={}", scenes.size());
+        log.info("章纲落库: scenes={} 保全状态={}", scenes.size(), preserveChapterState);
     }
 
     public List<SceneSpec> loadSpecs(long chapterId) {
