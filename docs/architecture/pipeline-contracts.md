@@ -280,7 +280,7 @@ flowchart LR
 | WORLD | 世界观文档 → `canon_docs(world/世界观)` | 复用 `LlmNode.SAMPLE_WORLD` 提示词（输入＝章节摘要块 + 已抽出的素材卡块，故排在 CARDS 之后） |
 | RULES | 文风规则 → 本书风格包 `rules_md` | `LlmNode.STYLE_RULES`；语料优先话题材语料，**没有则回落到本书正文**（导入书只有正文） |
 | EMBEDDINGS | 事实账/素材卡向量 → `embeddings`（RAG 召回前置）；默认**先硬删本书旧向量再全量重嵌**（旧向量对应旧文本，不刷会被一直召回），选跳过只补缺 | `EmbeddingService.backfillNovel`（走 embedding 模型，与会话 LLM 分开接入） |
-| VOLUME_PLAN | 新一卷规划行 → `chapters`（非首卷还会写前置卷复盘 `volume_reviews`） | `PlanningService.autoPlan`：起点＝已有正文最末章+1；**卷号分两种**——起点前有**空档**＝新增一卷（现有最大卷+1），已有规划行**盖到起点**＝**原地重规划同一卷号**（见下「幂等」）。auto 模式直接落库、manual 出草稿。**导入正文现在自成一卷**（落章即写 `volume_no=1 / arc=导入正文`），故对导入书跑本步落在**第 2 卷**（更早口径是落第 1 卷，已改） |
+| VOLUME_PLAN | 新一卷规划行 → `chapters` | `PlanningService.autoPlan`：起点＝已有正文最末章+1；**卷号分两种**——起点前有**空档**＝新增一卷（现有最大卷+1），已有规划行**盖到起点**＝**原地重规划同一卷号**（见下「幂等」）。auto 模式直接落库、manual 出草稿。**导入正文现在自成一卷**（落章即写 `volume_no=1 / arc=导入正文`），故对导入书跑本步落在**第 2 卷**（更早口径是落第 1 卷，已改）。**本步不写卷复盘**：`volume_reviews` 只由无人续跑链的 PLAN 钩子（`volNo>1` 时先 `VolumeReviewService.review(volNo-1)` 再规划，fail-open）或人工 `POST /planning/volumes/{volNo}/review` 写入；`ContextPackerService` 规划时读 `volNo-1` 的复盘喂上下文——所以对「卷 1 是导入正文」的导入书跑本步，`volume_reviews` 保持为空（无前置管线卷可复盘） |
 | CHAPTER_OUTLINES | **号最大的非导入成稿卷**的章纲 → 生成队列（`kind=OUTLINE` 任务） | `GenerationQueueService.submitOutline`；**本链只提交**，生成进度看工作台。导入成稿卷（`arc=导入正文`）**不**出纲（正文已成、出纲也会被守卫跳过）；只有导入正文、还没规划下一卷时本步直接 `SKIPPED` 并说明，不再入队「全跳过」的空任务（2026-10-03 修） |
 
 **运行形态与硬约束**：
