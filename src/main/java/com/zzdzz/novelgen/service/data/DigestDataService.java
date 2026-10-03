@@ -23,6 +23,9 @@ public interface DigestDataService extends IService<DigestDTO> {
 
     boolean existsByChapter(long chapterId);
 
+    /** 本章事实账行 id（无则 null）——「覆盖重做」时原地更新，而不是插出第二行。 */
+    Long findIdByChapter(long chapterId);
+
     /** 事后否决（流 A 扩展）：按章清除事实账/摘要行，重生成末尾 digest 步骤重建。 */
     int deleteByChapter(long chapterId);
 }

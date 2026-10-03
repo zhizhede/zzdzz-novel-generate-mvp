@@ -38,6 +38,11 @@ public class DigestDataServiceImpl extends ServiceImpl<DigestMapper, DigestDTO> 
     }
 
     @Override
+    public Long findIdByChapter(long chapterId) {
+        return baseMapper.findIdByChapter(chapterId);
+    }
+
+    @Override
     public int deleteByChapter(long chapterId) {
         return remove(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<DigestDTO>()
                 .eq("chapter_id", chapterId)) ? 1 : 0;

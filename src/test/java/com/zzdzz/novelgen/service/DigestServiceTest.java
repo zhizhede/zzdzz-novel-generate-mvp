@@ -120,9 +120,39 @@ class DigestServiceTest {
     void existingDigestSkipsWithoutCallingLlm() {
         when(digestData.existsByChapter(301L)).thenReturn(true);
 
-        service.digest(9L, 301L, 3, "本章正文");
+        boolean computed = service.digest(9L, 301L, 3, "本章正文");
 
+        assertThat(computed).isFalse();   // 返回 false＝本次没算（步消息据此区分「已补」与「跳过」）
         verify(llm, times(0)).chat(any());
         verify(chapterData).updateStatus(301L, ChapterStatus.DIGESTED.wire());
+    }
+
+    @Test
+    void forceRecomputesInPlaceWithoutSecondRow() throws Exception {
+        // 「覆盖已有」：重算并原地更新那一行事实账（不是插出第二行）
+        when(digestData.findIdByChapter(301L)).thenReturn(77L);
+        llmReturns("{\"summary_md\":\"新摘要\",\"facts\":[\"新事实\"],\"state\":{\"time\":\"夜\"},"
+                + "\"new_threads\":[{\"name\":\"新线\",\"content\":\"跨章长线\"}]}");
+
+        boolean computed = service.digest(9L, 301L, 3, "本章正文", true);
+
+        assertThat(computed).isTrue();   // 算了＝返回 true
+        ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
+        verify(digestData).updateContent(eq(77L), summary.capture(), anyString());
+        assertThat(summary.getValue()).isEqualTo("新摘要");
+        verify(digestData, times(0)).insert(anyLong(), anyString(), anyString());
+        verify(worldStateData).upsert(eq(9L), eq(3), any());
+        verify(foreshadowData).insertProposal(eq(9L), anyString(), anyString(), eq(3));
+    }
+
+    @Test
+    void forceWithoutExistingRowStillInserts() throws Exception {
+        when(digestData.findIdByChapter(301L)).thenReturn(null);
+        llmReturns("{\"summary_md\":\"摘要\",\"facts\":[],\"state\":{\"time\":\"夜\"}}");
+
+        service.digest(9L, 301L, 3, "本章正文", true);
+
+        verify(digestData).insert(eq(301L), anyString(), anyString());
+        verify(digestData, times(0)).updateContent(anyLong(), anyString(), anyString());
     }
 }

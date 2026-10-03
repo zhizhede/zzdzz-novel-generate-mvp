@@ -18,5 +18,7 @@ public interface DigestMapper extends BaseMapper<DigestDTO> {
 
     boolean existsByChapter(@Param("chapterId") long chapterId);
 
+    Long findIdByChapter(@Param("chapterId") long chapterId);
+
     List<DigestDataService.DigestItem> listByNovel(@Param("novelId") long novelId);
 }

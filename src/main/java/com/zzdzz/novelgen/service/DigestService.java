@@ -46,11 +46,22 @@ public class DigestService {
     private final TuningService tuning;
 
 
-    public void digest(long novelId, long chapterId, int chapterNo, String fullText) {
-        if (digestData.existsByChapter(chapterId)) {
+    /** 返回 true＝本次真的算了（新插入或覆盖更新），false＝已有事实账且本次选择跳过。 */
+    public boolean digest(long novelId, long chapterId, int chapterNo, String fullText) {
+        return digest(novelId, chapterId, chapterNo, fullText, false);
+    }
+
+    /**
+     * force=false（默认）：本章已有事实账即跳过（幂等，续跑不重复烧 LLM）。
+     * force=true（用户选「覆盖已有」）：重算并**原地更新**那一行事实账，同时按新结果重写世界状态快照；
+     * 伏笔提议按 content 去重，同义重提不会重复建账。
+     */
+    public boolean digest(long novelId, long chapterId, int chapterNo, String fullText, boolean force) {
+        Long existingId = force ? digestData.findIdByChapter(chapterId) : null;
+        if (existingId == null && digestData.existsByChapter(chapterId)) {
             log.info("第 {} 章事实账已存在，跳过", chapterNo);
             chapterData.updateStatus(chapterId, ChapterStatus.DIGESTED.wire());
-            return;
+            return false;
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.DIGEST, novelId, chapterId,
@@ -67,7 +78,12 @@ public class DigestService {
                 .replaceAll("(?m)^#{1,6}[^\\n]*\\n?", "").strip();
         JsonNode state = node.path("state");
         JsonNode threads = threadsOf(node, state); // 内含「误嵌 state」的抬升 + 快照剔除，必须在 upsert 之前
-        digestData.insert(chapterId, summary, node.path("facts").toString());
+        if (existingId == null) {
+            digestData.insert(chapterId, summary, node.path("facts").toString());
+        } else {
+            digestData.updateContent(existingId, summary, node.path("facts").toString());
+            log.info("第 {} 章事实账已重算覆盖（用户选了覆盖已有）", chapterNo);
+        }
         if (state.isObject() && state.size() > 0) {
             worldStateData.upsert(novelId, chapterNo, state);
             log.info("第 {} 章世界状态快照落库", chapterNo);
@@ -78,6 +94,7 @@ public class DigestService {
         sweepStaleProposals(novelId, chapterNo);
         chapterData.updateStatus(chapterId, ChapterStatus.DIGESTED.wire());
         log.info("第 {} 章事实账落库（{} tokens）", chapterNo, r.usage().totalTokens());
+        return true;
     }
 
     /**
