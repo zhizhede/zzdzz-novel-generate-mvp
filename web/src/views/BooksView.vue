@@ -1,6 +1,6 @@
 <template>
   <div>
-    <PageHeader title="书籍管理" hint="全部作品在此查询/编辑/删除；「打开」设为工作台当前书。删除为软删（数据库可恢复）。">
+    <PageHeader title="书籍管理" hint="全部作品在此查询/编辑/删除；「打开」设为工作台当前书。删除不可恢复：章节等关联数据一并删除。">
       <el-button type="primary" size="small" @click="importOpen = true">导入书籍</el-button>
       <el-button size="small" @click="router.push('/wizard')">＋ 开新书</el-button>
       <el-button size="small" :loading="loading" @click="reloadAll">刷新</el-button>
@@ -371,7 +371,7 @@ async function saveEdit() {
 async function delBook(row) {
   try {
     const { value } = await ElMessageBox.prompt(
-      `将删除《${row.title}》（${row.chapterCount} 章）。此操作软删该书（可 psql 恢复），正文保留但界面不再可见；本书的风格包若没被别书共用会一并回收（同名书之后再导入/开书会复用它）。请输入完整书名确认：`,
+      `将删除《${row.title}》（${row.chapterCount} 章）。此操作不可恢复：该书的章节/场景/事实账/素材卡/正典/伏笔等关联数据一并删除；本书专属风格包若没被别书共用也一并删除。请输入完整书名确认：`,
       '删除书籍', { confirmButtonText: '删除', cancelButtonText: '取消', inputPattern: new RegExp(`^${row.title}$`), inputErrorMessage: '书名不匹配' })
     if (value !== row.title) return
   } catch (e) {

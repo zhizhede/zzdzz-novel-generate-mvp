@@ -13,7 +13,7 @@
         <el-button size="small" type="primary" @click="resumeDraft">继续这份草稿</el-button>
         <el-button size="small" type="danger" plain @click="discardDraft(draftBook)">废弃草稿</el-button>
         <el-button size="small" @click="ignoreDraft">不管它，直接开新书</el-button>
-        <span class="hint" style="margin-left: 8px">废弃为软删，之后仍可在数据库恢复</span>
+        <span class="hint" style="margin-left: 8px">废弃即物理删除，不可恢复</span>
       </el-alert>
 
       <el-steps :active="wizardStep" finish-status="success" simple style="margin-bottom: 20px">
@@ -428,12 +428,12 @@ async function resumeDraft() {
   }
 }
 
-/** 废弃草稿书（软删）：向导内直接了断，不用绕书籍管理页。若废弃的正是当前接续的书，重置向导回到第一步。 */
+/** 废弃草稿书（物理删除）：向导内直接了断，不用绕书籍管理页。若废弃的正是当前接续的书，重置向导回到第一步。 */
 async function discardDraft(b) {
   if (!b) return
   try {
     await ElMessageBox.confirm(
-      `将废弃草稿书《${b.title}》（ID ${b.id}）：书籍管理页不再显示（软删，数据库可恢复）。确定废弃？`,
+      `将废弃草稿书《${b.title}》（ID ${b.id}）：该书及其关联数据将被删除，不可恢复。确定废弃？`,
       '废弃草稿', { type: 'warning', confirmButtonText: '废弃', cancelButtonText: '先留着' })
   } catch { return }
   try {
