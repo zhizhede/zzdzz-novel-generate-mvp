@@ -245,7 +245,7 @@ flowchart LR
 新写删除/插入/召回相关代码时按这四条判断，别只照抄某张表的具体做法。
 
 1. **条件唯一索引的语义**：本项目唯一约束基本都是 `UNIQUE (...) WHERE is_deleted = FALSE`（V1 起的口径），**软删行不进索引**。所以「先把旧行软删、再插同样 key 的新行」是安全的；会撞键的只有两类：①**该删没删、活着占 key 的残留行**（典型：删父行时没管子行——style_packs 的孤儿包就是删书不删包，同名重导必炸）②**编辑改名撞上在用的活行**（`material_cards` 的 update 曾漏查重，create 却有）。
-2. **删父行要么级联、要么让子行可复用**：删书→级联软删专属风格包（非预设且无其他活书引用才删）；同名重来→复用/复活同名可复用包而不是硬 INSERT（`NovelService.acquireStylePack` 四路径）。改名/编辑类更新要查重且**排除自己**（`existsOther`）。
+2. **删父行要么级联、要么让子行可复用**：删书→级联软删专属风格包（非预设且无其他活书引用才删）；同名重来→复用**活着的**同名孤儿包，而不是硬 INSERT（`NovelService.acquireStylePack`：查「无活书引用的活包」→原地改写复用，查不到再插新行）。**2026-10-03 口径收紧：软删包不再被复用/复活**——`StylePackMapper.findReusablePackId` 加了 `sp.is_deleted = FALSE`、`reusePack` 带 `AND is_deleted = FALSE`；同名重导会**新建一行**，被软删的那行留作历史（软删行不占活名，条件唯一索引放行）。改名/编辑类更新要查重且**排除自己**（`existsOther`）。
 3. **「删除要传播到读路径」**：任何召回/注入类读取都必须按**源行存活**过滤，不能只看自己的 is_deleted——RAG 曾只滤 `embeddings.is_deleted`，导致软删的素材卡/事实账的向量仍被召回注入生成（删了卡系统照它写，界面看不出原因）。已改为 `EXISTS (源行 is_deleted = FALSE)`，digest 连 `chapters.is_deleted` 一起看。选查询期过滤而非删向量，是为了把库里已存在的陈旧行一并挡掉。
 4. **「先查没有→再插入」要么原子、要么撞键后复用**：已用 `ON CONFLICT ... WHERE is_deleted = FALSE DO UPDATE` 的表（world_states / volume_reviews / embeddings）；解析任务走「撞键后复用」（捕 `DataIntegrityViolationException` 父类 + 以能否重查到该行判真假并发，不依赖 Spring 把 23505 翻成哪个子类）。**不要把唯一键冲突直接抛给用户**——数据库类异常（`DataAccessException` 及子类）一律在 `GlobalExceptionHandler` 换成人话，明细只进服务端日志（原文含 SQL、表结构与 JDBC 主机端口）。
 
@@ -264,6 +264,7 @@ flowchart LR
 2. **缺口清单是主线**：没有大纲的活书、没有章纲的卷/章**也出行**并标 `hasOutline=false`——导入书籍（`IMPORTED`）本来就没有这三样，正是这一页要暴露的东西：导入书只有正文（`status=FINAL`），要接着写必须先补大纲/卷纲/章纲。
 3. **与层级无关的条件在不适用的层上不生效**（大纲层不判章状态/正文，卷层用章号区间**相交**判定，「未分卷」用 `volumeNo=0` 表达）——语义由 `PlanAssetService.matches/comparator` 纯函数锁定，改动必须同步单测。
 4. **软删书的残留章行不进列表**（按活书过滤），与文风指纹页同一口径。
+5. **「有没有正文」按实况判，不看投影**（2026-10-03 修）：规划行读模型走 `ChapterDataService.listPlanRows(novelId)`（带 `LENGTH(full_text)`，返回 `ChapterPlanRow.textChars`），`PlanningService.toPlanVO` 由它算 `hasText/textChars`（章纲侧同法算 `hasOutline/outlineChars`）。**别用 `listSummaries` 的 `full_text` 判有无正文**——那个投影为省流量把正文置 `NULL`（`NULL AS full_text`），会让 `hasText` 恒为 false，把有正文的章全标成「规划就绪·待生成」（真库脚印：书 2 有 47 章 `DIGESTED`，规划页 0 行显示「正文已成」）。
 
 ## 八、导入书籍「解析链」契约（2026-09-30 增补）
 
@@ -273,22 +274,22 @@ flowchart LR
 
 | 步 | 产出与落库位置 | 复用哪套口径 |
 |---|---|---|
-| DIGESTS | 事实账 `digests` + 世界状态 `world_states` + 伏笔提议 `foreshadows(PROPOSED)`；取末尾 ≤20 章，已有事实账的章跳过 | `NovelService.backfillDigests` → `DigestService`（`LlmNode.DIGEST`） |
+| DIGESTS | 事实账 `digests` + 世界状态 `world_states` + 伏笔提议 `foreshadows(PROPOSED)`；取末尾 ≤20 章，默认**覆盖重做**已有事实账的章（原地更新同一行），选跳过则只补缺 | `NovelService.backfillDigests` → `DigestService`（`LlmNode.DIGEST`） |
 | OUTLINE | 全书大纲 → `canon_docs(misc/大纲)` | 复用 `LlmNode.SAMPLE_OUTLINE` 提示词（**不新造第二份提示词**） |
-| CARDS | 设定层素材卡 → `material_cards`（已有同名同类卡跳过） | 新节点 `LlmNode.BOOK_CARDS`（从「章节结构+事实账」抽卡，不是逐章 SAMPLE_CHAPTER） |
+| CARDS | 设定层素材卡 → `material_cards`（默认**覆盖更新同类同名卡**并保留人工 `pinned/status`，选跳过则保留已有） | 新节点 `LlmNode.BOOK_CARDS`（从「章节结构+事实账」抽卡，不是逐章 SAMPLE_CHAPTER） |
 | WORLD | 世界观文档 → `canon_docs(world/世界观)` | 复用 `LlmNode.SAMPLE_WORLD` 提示词（输入＝章节摘要块 + 已抽出的素材卡块，故排在 CARDS 之后） |
 | RULES | 文风规则 → 本书风格包 `rules_md` | `LlmNode.STYLE_RULES`；语料优先话题材语料，**没有则回落到本书正文**（导入书只有正文） |
-| EMBEDDINGS | 事实账/素材卡向量 → `embeddings`（RAG 召回前置） | `EmbeddingService.backfillNovel`（走 embedding 模型，与会话 LLM 分开接入） |
-| VOLUME_PLAN | 新一卷规划行 → `chapters`（规划第 2 卷起还会写前置卷复盘 `volume_reviews`） | `PlanningService.autoPlan`：卷号＝现有最大卷+1，起点＝已有正文最末章+1；auto 模式直接落库、manual 出草稿。**导入书首次跑会把这卷编为「第 1 卷」**（导入章是未分卷的，卷 1 从正文之后接续） |
-| CHAPTER_OUTLINES | 新规划那卷的章纲 → 生成队列（`kind=OUTLINE` 任务） | `GenerationQueueService.submitOutline`；**本链只提交**，生成进度看工作台 |
+| EMBEDDINGS | 事实账/素材卡向量 → `embeddings`（RAG 召回前置）；默认**先硬删本书旧向量再全量重嵌**（旧向量对应旧文本，不刷会被一直召回），选跳过只补缺 | `EmbeddingService.backfillNovel`（走 embedding 模型，与会话 LLM 分开接入） |
+| VOLUME_PLAN | 新一卷规划行 → `chapters`（非首卷还会写前置卷复盘 `volume_reviews`） | `PlanningService.autoPlan`：起点＝已有正文最末章+1；**卷号分两种**——起点前有**空档**＝新增一卷（现有最大卷+1），已有规划行**盖到起点**＝**原地重规划同一卷号**（见下「幂等」）。auto 模式直接落库、manual 出草稿。**导入正文现在自成一卷**（落章即写 `volume_no=1 / arc=导入正文`），故对导入书跑本步落在**第 2 卷**（更早口径是落第 1 卷，已改） |
+| CHAPTER_OUTLINES | **号最大的非导入成稿卷**的章纲 → 生成队列（`kind=OUTLINE` 任务） | `GenerationQueueService.submitOutline`；**本链只提交**，生成进度看工作台。导入成稿卷（`arc=导入正文`）**不**出纲（正文已成、出纲也会被守卫跳过）；只有导入正文、还没规划下一卷时本步直接 `SKIPPED` 并说明，不再入队「全跳过」的空任务（2026-10-03 修） |
 
 **运行形态与硬约束**：
 1. **任务行 `import_analyze_tasks`（V36）**：一本活书一行活跃任务（`uq_import_analyze_task_alive`），重复提交＝重置同一行；两个 JSONB 列（`steps`/`done_steps`）走 XML 显式 `::jsonb`，`INSERT ... RETURNING id` 走 `<select resultType="long">`。
 2. **全局单线程 runner**（与样本深度解析同构）：一本一本地跑，瓶颈在 LLM；**每步跑完立即落 `done_steps`**（断点事实，前端进度与刷新后状态都靠它），关页面/重启进程都不会「看起来没跑」。
-3. **逐步 fail-open**：某步失败只记该步 `FAILED` 并继续下一步，链终态＝「有失败步则 FAILED，否则 DONE」；`SKIPPED` 用于前置不满足（如没有规划章行就跳过章纲入队）。
+3. **逐步 fail-open**：某步失败只记该步 `FAILED` 并继续下一步，链终态＝「有失败步则 FAILED，否则 DONE」；`SKIPPED` 用于前置不满足——没有规划章行、或只有导入成稿正文而无规划卷时跳过章纲入队；已有卷纲但本次选了「跳过」时卷纲步也记 `SKIPPED`。
 4. **提交在事务外**：导入是短事务，解析链入队在 `NovelController` 里于 `importBook` 返回后提交——否则 runner 线程读不到未提交的章行。
-5. **API 语义**：`analyzeSteps` 不传/空＝**不解析**（纯接口建书不会默默烧一轮 LLM）；界面默认全勾。`GET /api/novels/{id}/import-analyze` 无任务时返回 null。
-6. **幂等口径各不相同，必须按步记清**：事实账与素材卡**跳过已有**、大纲/世界观/规则**覆盖**、向量 **upsert**、卷规划**新增一卷**（所以对同一本书重复跑 VOLUME_PLAN 会一卷接一卷地往后规划，不会覆盖旧卷）。
+5. **API 语义**：`analyzeSteps` 不传/空＝**不解析**（纯接口建书不会默默烧一轮 LLM）；界面默认全勾。`analyzeSkipExistingSteps`＝这些步对「已有内容」选**跳过**（不传/空＝不跳过＝覆盖重做）；只有同时被勾选的步才谈得上跳过。`GET /api/novels/{id}/import-analyze` 无任务时返回 null。
+6. **幂等口径各不相同，必须按步记清**（「跳过已有」开关只对前三步有效，2026-10-03 起）：①DIGESTS 默认**原地重算**已有事实账的章，跳过则只补缺；②CARDS 默认**更新同类同名卡**（保留人工 `pinned/status`），跳过则保留已有；③EMBEDDINGS 默认**硬删本书旧向量后全量重嵌**，跳过只补缺；④OUTLINE/WORLD/RULES **覆盖**同名文档（口径固定、开关无效）；⑤VOLUME_PLAN 起点前有**空档**＝新增一卷，已有规划行**盖到起点**＝**原地重规划同一卷号**（`adopt` 软删该起点起的旧行再插新行）——**不能写成「最大卷号+1」**，否则每重跑一次就把上一卷的规划行整体顶掉（真库踩过：第 1 卷「沉船不该再浮」10 行被第 2 卷顶掉）。（历史注：早期文档写「重复跑会一卷接一卷」，那只在起点不断后移时成立；现在导入正文自成一卷、起点固定，必须原地重规划。）
 
 ## 九、digest 输出契约：字段归位 + 容错解析边界（2026-09-30 增补）
 
