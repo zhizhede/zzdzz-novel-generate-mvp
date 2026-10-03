@@ -13,7 +13,7 @@ import java.util.List;
 
 /**
  * llm_providers 数据服务实现（软删三件套口径与全库一致）。
- * Wrapper 用字符串列名——lambda cache 解析不了 isDeleted 布尔字段（与 OutlineDraftService 同款做法）。
+ * Wrapper 用字符串列名并显式 `.eq("is_deleted", false)`——实体不带软删字段，过滤必须自己带（与 OutlineDraftService 同款做法）。
  */
 @Service
 public class LlmProviderDataServiceImpl extends ServiceImpl<LlmProviderMapper, LlmProviderDTO> implements LlmProviderDataService {

@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/** 章节步骤状态数据服务实现。查询用列名 Wrapper（boolean isDeleted 属性不入 MP lambda 缓存）。 */
+/** 章节步骤状态数据服务实现。Wrapper 用字符串列名并显式 `.eq("is_deleted", false)`——实体不带软删字段，过滤必须自己带。 */
 @Service
 public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, ChapterStepDTO>
         implements ChapterStepDataService {

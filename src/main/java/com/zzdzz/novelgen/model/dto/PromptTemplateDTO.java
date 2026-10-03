@@ -1,7 +1,5 @@
 package com.zzdzz.novelgen.model.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.OffsetDateTime;
 import lombok.Data;
@@ -9,9 +7,7 @@ import lombok.Data;
 /** PromptTemplateDTO。 */
 @Data
 @TableName(value = "prompt_templates")
-public class PromptTemplateDTO {
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class PromptTemplateDTO extends BaseDTO {
     private String node;
     private String phase;
     private String title;
@@ -20,7 +16,6 @@ public class PromptTemplateDTO {
     private int version;
     private boolean custom;
     private boolean enabled;
-    private boolean isDeleted;
     private OffsetDateTime updateTime;
 
 

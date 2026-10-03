@@ -1,16 +1,12 @@
 package com.zzdzz.novelgen.model.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 /** LlmCallLogDTO。 */
 @Data
 @TableName(value = "llm_call_log")
-public class LlmCallLogDTO {
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class LlmCallLogDTO extends BaseDTO {
     private String node;
     private Long novelId;
     private Long chapterId;
@@ -25,7 +21,6 @@ public class LlmCallLogDTO {
     private String reasoningText;
     private String requestJson;
     private String responseJson;
-    private boolean isDeleted;
     private java.time.OffsetDateTime createTime;
 
 

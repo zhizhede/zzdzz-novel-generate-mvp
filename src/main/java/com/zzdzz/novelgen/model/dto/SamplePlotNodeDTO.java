@@ -1,7 +1,5 @@
 package com.zzdzz.novelgen.model.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -10,10 +8,7 @@ import java.time.OffsetDateTime;
 /** sample_plot_nodes：导入样本剧情结构树（书→卷→章；章行 = 逐章解析结果与断点 checkpoint）。 */
 @Data
 @TableName("sample_plot_nodes")
-public class SamplePlotNodeDTO {
-
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class SamplePlotNodeDTO extends BaseDTO {
 
     private Long sampleId;
 
@@ -35,8 +30,6 @@ public class SamplePlotNodeDTO {
 
     /** 扩展元（字数/抽样标记/arc 节奏/主题等）；jsonb 写入走 XML ::jsonb 转型。 */
     private String meta;
-
-    private Boolean isDeleted;
 
     private OffsetDateTime createTime;
 

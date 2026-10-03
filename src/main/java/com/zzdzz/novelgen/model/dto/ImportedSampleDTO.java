@@ -1,7 +1,5 @@
 package com.zzdzz.novelgen.model.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -10,10 +8,7 @@ import java.time.OffsetDateTime;
 /** imported_samples：用户导入的小说样本台账（切块在 preset_corpus，分析结论全文在 analysis）。 */
 @Data
 @TableName("imported_samples")
-public class ImportedSampleDTO {
-
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class ImportedSampleDTO extends BaseDTO {
 
     private String title;
 
@@ -33,8 +28,6 @@ public class ImportedSampleDTO {
 
     /** 类型/特征标签（AI 深度解析提取，衍生开书沿用起点）；JSON 数组文本，XML 内 ::jsonb 转型。 */
     private String tags;
-
-    private Boolean isDeleted;
 
     private OffsetDateTime createTime;
 

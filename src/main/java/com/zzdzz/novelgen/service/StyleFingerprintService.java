@@ -148,7 +148,7 @@ public class StyleFingerprintService {
                 continue;
             }
             StylePackDTO pack = stylePackData.getById(novel.getStylePackId());
-            if (pack == null || pack.isDeleted()) {
+            if (pack == null) {
                 continue;
             }
             Long sourceSampleId = sourceSampleId(novel.getId());

@@ -133,7 +133,11 @@ public class BookFingerprintService {
         if (!root.isObject() || !root.path("baseline").isObject() || root.path("baseline").isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "指纹必须是含 baseline 指标对象的 JSON");
         }
-        Long packId = novelData.getById(novelId).getStylePackId();
+        NovelDTO novel = novelData.getById(novelId);
+        if (novel == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "作品不存在或已删除: " + novelId);
+        }
+        Long packId = novel.getStylePackId();
         if (packId == null) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "这本书没有风格包（无指纹载体）——先在素材库给它挂一个品类预设");
         }

@@ -1,7 +1,5 @@
 package com.zzdzz.novelgen.model.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -10,9 +8,7 @@ import java.time.OffsetDateTime;
 /** LLM 接入配置（平台级）：baseUrl/apiKey 密文/默认模型/超时。明文 key 不落库不出库。 */
 @Data
 @TableName(value = "llm_providers")
-public class LlmProviderDTO {
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class LlmProviderDTO extends BaseDTO {
     private String name;
     private String baseUrl;
     /** AES-GCM 密文（SecretCipher），格式 base64(iv||ct+tag)。 */
@@ -25,7 +21,6 @@ public class LlmProviderDTO {
     private Integer readTimeoutMs;
     private boolean enabled;
     private String remark;
-    private boolean isDeleted;
     private OffsetDateTime createTime;
     private OffsetDateTime updateTime;
     private OffsetDateTime deleteTime;

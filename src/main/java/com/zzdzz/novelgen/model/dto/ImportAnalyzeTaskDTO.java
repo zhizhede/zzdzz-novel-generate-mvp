@@ -1,16 +1,12 @@
 package com.zzdzz.novelgen.model.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 /** ImportAnalyzeTaskDTO（导入书籍解析链任务，一本活书一行活跃任务）。 */
 @Data
 @TableName(value = "import_analyze_tasks")
-public class ImportAnalyzeTaskDTO {
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class ImportAnalyzeTaskDTO extends BaseDTO {
     private long novelId;
     /** 勾选并已排序的步骤键 JSON 数组文本。 */
     private String steps;
@@ -20,7 +16,6 @@ public class ImportAnalyzeTaskDTO {
     /** 逐步结果 JSON 数组文本：[{step,status,message,elapsedMs,counts}]。 */
     private String doneSteps;
     private String message;
-    private boolean isDeleted;
     private java.time.OffsetDateTime createTime;
     private java.time.OffsetDateTime updateTime;
     private java.time.OffsetDateTime deleteTime;

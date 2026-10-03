@@ -11,7 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/** 复盘建议/提案数据服务实现。查询用列名 Wrapper（boolean isDeleted 不入 MP lambda 缓存）。 */
+/** 复盘建议/提案数据服务实现。Wrapper 用字符串列名并显式 `.eq("is_deleted", false)`——实体不带软删字段，过滤必须自己带。 */
 @Service
 public class RetroProposalDataServiceImpl extends ServiceImpl<RetroProposalMapper, RetroProposalDTO>
         implements RetroProposalDataService {

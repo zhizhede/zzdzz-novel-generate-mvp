@@ -2,16 +2,12 @@ package com.zzdzz.novelgen.model.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.baomidou.mybatisplus.annotation.TableField;
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 @Data
 @TableName("generation_tasks")
-public class GenerationTaskDTO {
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class GenerationTaskDTO extends BaseDTO {
     private Long novelId;
     private Integer fromChapter;
     private Integer toChapter;
@@ -27,7 +23,6 @@ public class GenerationTaskDTO {
     private boolean cancelRequested;
     /** 插队暂停请求（④ 批启用） */
     private boolean pauseRequested;
-    private boolean isDeleted;
     private java.time.OffsetDateTime createTime;
     private java.time.OffsetDateTime updateTime;
     private java.time.OffsetDateTime deleteTime;

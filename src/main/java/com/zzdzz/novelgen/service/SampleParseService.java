@@ -871,7 +871,7 @@ public class SampleParseService {
     /** 卡人工纠偏（摘要/正文/重要度；重要度 1-3）。 */
     public void updateCard(long cardId, String summary, String contentMd, Integer importance) {
         SampleCardDTO card = cardData.getById(cardId);
-        if (card == null || Boolean.TRUE.equals(card.getIsDeleted())) {
+        if (card == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "样本资产卡不存在: " + cardId);
         }
         if (importance != null && (importance < 1 || importance > 3)) {

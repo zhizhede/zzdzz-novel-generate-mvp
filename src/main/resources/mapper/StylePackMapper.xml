@@ -67,23 +67,25 @@ VALUES (#{name}, #{description}, #{rulesMd}, #{fingerprint}::jsonb, #{gateConfig
 RETURNING id
     </select>
 
-    <!-- 同名可复用包：非预设，且已软删 或 活着但无活书引用（删书残留孤儿包）。活着优先于已删，同档取新。 -->
+    <!-- 同名可复用包：非预设，且活着但没有活书引用（删书残留的孤儿包）。
+         2026-10-03 起口径收紧为「软删行一律不可见」，此处不再回收已软删的包——同名包被删后重导会新建一行；
+         uq_style_packs_name_alive 是条件唯一索引（WHERE is_deleted=false），软删行不占名，新建不会撞键。 -->
     <select id="findReusablePackId" resultType="long">
 SELECT sp.id FROM style_packs sp
-WHERE sp.name = #{name} AND sp.is_preset = FALSE
-  AND (sp.is_deleted = TRUE
-       OR NOT EXISTS (SELECT 1 FROM novels n WHERE n.style_pack_id = sp.id AND n.is_deleted = FALSE))
-ORDER BY sp.is_deleted ASC, sp.id DESC
+WHERE sp.name = #{name} AND sp.is_preset = FALSE AND sp.is_deleted = FALSE
+  AND NOT EXISTS (SELECT 1 FROM novels n WHERE n.style_pack_id = sp.id AND n.is_deleted = FALSE)
+ORDER BY sp.id DESC
 LIMIT 1
     </select>
 
-    <!-- 复用：整包字段原地改写并复活（清软删标记）。与 insertPack 字段口径一致，只是打在既有行上。 -->
+    <!-- 复用：整包字段原地改写（孤儿包复活成在用的包）。与 insertPack 字段口径一致，只是打在既有行上。
+         软删行已不可见，故这里不会被指向已删包；恒等写 is_deleted=FALSE 只为兜住调用方传入的残留状态。 -->
     <update id="reusePack">
 UPDATE style_packs
 SET name=#{name}, description=#{description}, rules_md=#{rulesMd},
     fingerprint=#{fingerprint}::jsonb, gate_config=#{gateConfig}::jsonb,
     is_preset=FALSE, is_deleted=FALSE, delete_time=NULL, update_time=NOW()
-WHERE id=#{id}
+WHERE id=#{id} AND is_deleted = FALSE
     </update>
 
     <!-- 删书级联：本书的专属风格包若非预设且已无活书引用，一并软删（否则活名唯一约束会挡住同名重导）。 -->

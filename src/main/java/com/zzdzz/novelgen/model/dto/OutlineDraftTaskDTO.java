@@ -1,7 +1,5 @@
 package com.zzdzz.novelgen.model.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -10,10 +8,7 @@ import java.time.OffsetDateTime;
 /** outline_draft_tasks：AI 大纲草稿异步任务（向导点击秒回，后台并发生成，结果可轮询拉取）。 */
 @Data
 @TableName("outline_draft_tasks")
-public class OutlineDraftTaskDTO {
-
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class OutlineDraftTaskDTO extends BaseDTO {
 
     private String title;
 
@@ -27,8 +22,6 @@ public class OutlineDraftTaskDTO {
     private String result;
 
     private String message;
-
-    private Boolean isDeleted;
 
     private OffsetDateTime createTime;
 

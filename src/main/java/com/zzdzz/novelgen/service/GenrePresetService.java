@@ -281,7 +281,11 @@ public class GenrePresetService {
         long presetId = adopt(g,
                 requireText(presetName, "预设名必填"),
                 description == null || description.isBlank() ? "开书向导由导入小说创建，" + chunks + " 块语料" : description);
-        return new SamplePresetVO(presetId, stylePackData.getById(presetId).getName(), g, chunks);
+        StylePackDTO justAdopted = stylePackData.getById(presetId);
+        if (justAdopted == null) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "预设刚写入却查不到（可能已被并发删除）: " + presetId);
+        }
+        return new SamplePresetVO(presetId, justAdopted.getName(), g, chunks);
     }
 
     /** 品类名唯一化：入口先限长到 60（给 ·N 后缀留位，总长恒 ≤64），占用则追加 ·2、·3……（反复分析每次都是新资产，不覆盖旧语料）。 */

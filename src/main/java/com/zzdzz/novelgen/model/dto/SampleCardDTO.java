@@ -1,7 +1,5 @@
 package com.zzdzz.novelgen.model.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -10,10 +8,7 @@ import java.time.OffsetDateTime;
 /** sample_cards：导入样本的结构化资产卡（平台级全员可复用；kind 对齐 material_cards 全类 + world）。 */
 @Data
 @TableName("sample_cards")
-public class SampleCardDTO {
-
-    @TableId(type = IdType.AUTO)
-    private Long id;
+public class SampleCardDTO extends BaseDTO {
 
     private Long sampleId;
 
@@ -40,8 +35,6 @@ public class SampleCardDTO {
 
     /** 出现章数（重要度依据）。 */
     private Integer mentions;
-
-    private Boolean isDeleted;
 
     private OffsetDateTime createTime;
 
