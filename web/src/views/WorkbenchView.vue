@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h3>工作台</h3>
+    <PageHeader title="工作台" hint="选定作品后提交生成、盯实时进度；本页顶部是运行决策，生成参数统一走「本书生成参数」" />
 
     <el-card shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap">
@@ -40,13 +40,13 @@
 
     <!-- 待审批明细（此前只有计数，章列表接口一直有数据没展示） -->
     <el-dialog v-model="pendingOpen" title="待审批章节" width="480px">
-      <el-table v-if="pendingList.length" :data="pendingList" border size="small" @row-click="goPending">
+      <DataTable v-if="pendingList.length" :data="pendingList" border size="small" @row-click="goPending">
         <el-table-column prop="chapterNo" label="章号" width="70" />
         <el-table-column prop="title" label="标题" min-width="160" />
         <el-table-column label="预算" width="120">
           <template #default="{ row }">{{ row.budgetMin }}-{{ row.budgetMax }} 字</template>
         </el-table-column>
-      </el-table>
+      </DataTable>
       <el-empty v-else description="当前无待审批章节" :image-size="50" />
       <div style="font-size: 12px; color: #999; margin-top: 8px">点行跳转章节页审批</div>
     </el-dialog>
@@ -180,7 +180,7 @@
     </el-dialog>
 
     <el-card shadow="never" style="margin-bottom: 12px" header="生成队列（异步执行，逐章回写进度）">
-      <el-table v-if="queue.length" :data="queue" border size="small">
+      <DataTable v-if="queue.length" :data="queue" border size="small">
         <el-table-column prop="id" label="#" width="50" />
         <el-table-column prop="novelTitle" label="作品" width="150" show-overflow-tooltip />
         <el-table-column label="范围" width="80">
@@ -227,7 +227,7 @@
             <el-button v-else-if="row.status === 'PAUSED'" size="small" type="success" @click="resumeTask(row)">继续</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </DataTable>
       <el-empty v-else description="队列为空：点「启动生成」加入队列" :image-size="50" />
     </el-card>
 
@@ -354,6 +354,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import { NODE_LABEL, GATE_LABEL, STEP_LABEL, TASK_TEXT, TASK_COLOR } from '../labels'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const router = useRouter()
 

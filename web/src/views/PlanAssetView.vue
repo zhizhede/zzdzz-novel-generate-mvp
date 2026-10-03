@@ -1,13 +1,10 @@
 <template>
   <div>
-    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 6px">
-      <h3 style="margin: 0">规划资产</h3>
+    <PageHeader
+      title="规划资产"
+      hint="大纲 / 卷纲 / 章纲的统一下游台账（跨书只读）。产出入口：大纲＝「开新书 → AI 生成大纲」或书籍行内续写链；卷纲＝「规划」页 AI 规划一卷；章纲＝生成管线逐章产出或「规划」页章纲批量任务。">
       <el-button size="small" :loading="loading" @click="reloadAll">刷新</el-button>
-      <span style="color: #999; font-size: 12px">
-        大纲 / 卷纲 / 章纲的统一下游台账（跨书只读）。产出入口：大纲＝「开新书 → AI 生成大纲」或书籍行内续写链；
-        卷纲＝「规划」页 AI 规划一卷；章纲＝生成管线逐章产出或「规划」页章纲批量任务。
-      </span>
-    </div>
+    </PageHeader>
 
     <el-radio-group v-model="filters.level" size="small" style="margin-bottom: 10px" @change="onLevelChange">
       <el-radio-button label="OUTLINE">大纲（{{ countByLevel.OUTLINE }}）</el-radio-button>
@@ -16,8 +13,7 @@
     </el-radio-group>
 
     <!-- 筛选查询条件：条件全空 = 该层全量，默认按「书 + 卷号 + 章号」通读序 -->
-    <el-card shadow="never" style="margin-bottom: 10px">
-      <el-form :inline="true" size="small" @submit.prevent>
+    <FilterBar :loading="loading" @search="load" @reset="resetFilters">
         <el-form-item label="作品">
           <el-select v-model="filters.novelId" placeholder="全部作品" clearable filterable style="width: 190px" @change="load">
             <el-option v-for="n in novels" :key="n.id" :label="n.title" :value="n.id" />
@@ -96,19 +92,13 @@
             <el-option label="书名" value="TITLE_ASC" />
           </el-select>
         </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="load">查询</el-button>
-          <el-button @click="resetFilters">重置</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <div style="font-size: 12px; color: #999; margin-bottom: 8px">
-      命中 <b>{{ rows.length }}</b> 条 · {{ hitReadout }}
-    </div>
+        <template #hit>
+          命中 <b>{{ rows.length }}</b> 条 · {{ hitReadout }}
+        </template>
+    </FilterBar>
 
     <!-- 大纲层：一书一行；缺大纲的书也列出来（缺口清单） -->
-    <el-table v-if="filters.level === 'OUTLINE'" :data="rows" v-loading="loading" border size="small"
+    <DataTable v-if="filters.level === 'OUTLINE'" :data="rows" :loading="loading" border size="small"
               :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">
@@ -149,10 +139,10 @@
           <el-button size="small" link :disabled="!row.hasOutline" @click="openText('大纲全文', row.novelTitle, row.outline)">看全文</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </DataTable>
 
     <!-- 卷纲层：一书一卷一行（章行聚合 + 卷复盘） -->
-    <el-table v-else-if="filters.level === 'VOLUME'" :data="rows" v-loading="loading" border size="small"
+    <DataTable v-else-if="filters.level === 'VOLUME'" :data="rows" :loading="loading" border size="small"
               :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">
@@ -221,10 +211,10 @@
           <el-button size="small" link :disabled="!row.hasReview" @click="openText('卷复盘 JSON', `${row.novelTitle} 第${row.volumeNo}卷`, prettyJson(row.review))">看复盘</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </DataTable>
 
     <!-- 章纲层：一章一行 -->
-    <el-table v-else :data="rows" v-loading="loading" border size="small"
+    <DataTable v-else :data="rows" :loading="loading" border size="small"
               :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">
@@ -296,7 +286,7 @@
           <el-button size="small" link :disabled="!row.hasOutline" @click="openText('章纲 YAML', `${row.novelTitle} 第${row.chapterNo}章`, row.outline)">看章纲</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </DataTable>
 
     <el-dialog v-model="textVisible" :title="textTitle" width="820px">
       <div style="display: flex; justify-content: flex-end; margin-bottom: 6px">
@@ -314,6 +304,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
+import FilterBar from '../components/FilterBar.vue'
 
 const SOURCE_LABEL = { IMPORTED: '手动导入', DERIVED: '系统衍生', ORIGINAL: '系统纯原创' }
 const SOURCE_TYPE = { IMPORTED: 'primary', DERIVED: 'success', ORIGINAL: 'warning' }
@@ -490,9 +483,9 @@ function reviewRange(row) {
 
 /** 缺口行给个淡色底：这一页的主要用途就是找缺口。 */
 function gapRowClass({ row }) {
-  if (filters.level === 'OUTLINE') return row.hasOutline ? '' : 'plan-gap'
-  if (filters.level === 'VOLUME') return row.outlineChapters ? '' : 'plan-gap'
-  return row.hasOutline ? '' : 'plan-gap'
+  if (filters.level === 'OUTLINE') return row.hasOutline ? '' : 'row-notice'
+  if (filters.level === 'VOLUME') return row.outlineChapters ? '' : 'row-notice'
+  return row.hasOutline ? '' : 'row-notice'
 }
 
 function prettyJson(text) {
@@ -510,9 +503,3 @@ function fmtTime(t) {
 
 onMounted(() => reloadAll())
 </script>
-
-<style scoped>
-:deep(.plan-gap td) {
-  background: #fef7ec;
-}
-</style>

@@ -1,19 +1,13 @@
 <template>
   <div>
-    <el-card shadow="never" style="margin-bottom: 12px">
-      <div style="display: flex; align-items: center; gap: 10px">
-        <b style="font-size: 15px">书籍管理</b>
-        <span style="font-size: 12px; color: #999">全部作品在此查询/编辑/删除；「打开」设为工作台当前书。删除为软删（数据库可恢复）。</span>
-        <div style="flex: 1" />
-        <el-button type="primary" size="small" @click="importOpen = true">导入书籍</el-button>
-        <el-button size="small" @click="router.push('/wizard')">＋ 开新书</el-button>
-        <el-button size="small" :loading="loading" @click="reloadAll">刷新</el-button>
-      </div>
-    </el-card>
+    <PageHeader title="书籍管理" hint="全部作品在此查询/编辑/删除；「打开」设为工作台当前书。删除为软删（数据库可恢复）。">
+      <el-button type="primary" size="small" @click="importOpen = true">导入书籍</el-button>
+      <el-button size="small" @click="router.push('/wizard')">＋ 开新书</el-button>
+      <el-button size="small" :loading="loading" @click="reloadAll">刷新</el-button>
+    </PageHeader>
 
     <!-- 查询条件：条件全空 = 全量（默认按创建时间倒序，见 filters.sort） -->
-    <el-card shadow="never" style="margin-bottom: 10px">
-      <el-form :inline="true" size="small" @submit.prevent>
+    <FilterBar :loading="loading" @search="load" @reset="resetFilters">
         <el-form-item label="关键字">
           <el-input v-model="filters.keyword" placeholder="书名/简介" clearable style="width: 180px"
                     @keyup.enter="load" @clear="load" @blur="load" />
@@ -65,20 +59,15 @@
             <el-option label="书名" value="TITLE_ASC" />
           </el-select>
         </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="load">查询</el-button>
-          <el-button @click="resetFilters">重置</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+        <template #hit>
+          命中 <b>{{ books.length }}</b> 本（全库 {{ allBooks.length }} 本）：
+          手动导入 {{ sourceCount.IMPORTED }} / 系统衍生 {{ sourceCount.DERIVED }} / 系统纯原创 {{ sourceCount.ORIGINAL }}
+        </template>
+    </FilterBar>
 
     <el-card shadow="never">
-      <div style="font-size: 12px; color: #999; margin-bottom: 8px">
-        命中 <b>{{ books.length }}</b> 本（全库 {{ allBooks.length }} 本）：
-        手动导入 {{ sourceCount.IMPORTED }} / 系统衍生 {{ sourceCount.DERIVED }} / 系统纯原创 {{ sourceCount.ORIGINAL }}
-      </div>
-      <el-table :data="books" border size="small" v-loading="loading" @row-dblclick="(row) => openBook(row)"
-                :row-class-name="({ row }) => (row.id === highlightNovelId ? 'book-highlight' : '')">
+      <DataTable :data="books" border size="small" :loading="loading" @row-dblclick="(row) => openBook(row)"
+                :row-class-name="({ row }) => (row.id === highlightNovelId ? 'row-notice' : '')">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="title" label="书名" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
@@ -136,7 +125,7 @@
         <template #empty>
           <el-empty description="没有命中的书籍——放宽查询条件再查" />
         </template>
-      </el-table>
+      </DataTable>
     </el-card>
 
     <el-dialog v-model="editOpen" title="编辑书籍信息" width="560px">
@@ -264,6 +253,9 @@ import TextFileDropZone from '../components/TextFileDropZone.vue'
 import FingerprintDraftDialog from '../components/FingerprintDraftDialog.vue'
 import ImportAnalyzeDialog from '../components/ImportAnalyzeDialog.vue'
 import { ANALYZE_STEPS, allStepKeys, existingPolicy, isToggleable } from '../importAnalyze'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
+import FilterBar from '../components/FilterBar.vue'
 
 const SOURCE_LABEL = { IMPORTED: '手动导入', DERIVED: '系统衍生', ORIGINAL: '系统纯原创' }
 const SOURCE_TYPE = { IMPORTED: 'warning', DERIVED: 'success', ORIGINAL: 'info' }
@@ -554,10 +546,3 @@ onMounted(() => {
   reloadAll()
 })
 </script>
-
-<style scoped>
-/* 刚导入的那本：默认按创建时间倒序落在首行 */
-:deep(.book-highlight td) {
-  background: #ecf5ff !important;
-}
-</style>

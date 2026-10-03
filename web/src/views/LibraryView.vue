@@ -1,12 +1,10 @@
 <template>
   <div>
-    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 6px">
-      <h3 style="margin: 0">素材库</h3>
+    <PageHeader title="素材库" hint="所有素材按作品隔离">
       <el-select v-model="novelId" style="width: 260px" @change="() => { setSelectedNovelId(novelId); loadAll() }">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
-      <span style="color: #999; font-size: 12px">所有素材按作品隔离</span>
-    </div>
+    </PageHeader>
 
     <el-tabs>
       <!-- 分组一：素材设定（写书前准备的世界观与人物素材） -->
@@ -26,7 +24,7 @@
             设定层实体（角色/物品/地点/现象/地标/灾害/组织）；生成时按「常驻 + 本场景别名命中」自动取值注入
           </span>
         </div>
-        <el-table :data="cards" border size="small">
+        <DataTable :data="cards" border size="small">
           <el-table-column label="类型" width="80">
             <template #default="{ row }">{{ kindLabel[row.kind] || row.kind }}</template>
           </el-table-column>
@@ -54,7 +52,7 @@
               <el-button size="small" type="danger" plain @click="removeCard(row)">删</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
 
       <!-- 正典 -->
@@ -68,7 +66,7 @@
           <el-input v-model="newCanon.name" placeholder="文档名称" style="width: 200px" size="small" />
           <el-button type="primary" size="small" @click="createCanon">新增文档</el-button>
         </div>
-        <el-table :data="canon" border size="small">
+        <DataTable :data="canon" border size="small">
           <el-table-column prop="kind" label="类型" width="110" />
           <el-table-column prop="name" label="名称" min-width="180" />
           <el-table-column label="操作" width="150">
@@ -77,7 +75,7 @@
               <el-button size="small" type="danger" plain @click="removeCanon(row)">删除</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
 
         </el-tabs>
@@ -98,7 +96,7 @@
         <div v-if="foreshadows.some((f) => f.status === 'proposed')" style="margin-bottom: 8px; font-size: 12px; color: #e6a23c">
           有 AI 自动提议的新伏笔待处理——采纳后进入埋设编排，忽略则弃用
         </div>
-        <el-table :data="foreshadows" border size="small">
+        <DataTable :data="foreshadows" border size="small">
           <el-table-column prop="code" label="编号" width="70" />
           <el-table-column prop="content" label="内容" min-width="280" show-overflow-tooltip />
           <el-table-column prop="plantedIn" label="埋设章" width="80" />
@@ -122,13 +120,13 @@
               <el-button v-else size="small" @click="openForeshadow(row)">修正</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
 
       <!-- 事实账 -->
       <el-tab-pane :label="`事实账（${digests.length}）`">
         <div style="color: #999; font-size: 12px; margin-bottom: 8px">续写前情链的唯一来源——发现摘要与正文不符时在此人工修正</div>
-        <el-table :data="digests" border size="small">
+        <DataTable :data="digests" border size="small">
           <el-table-column prop="chapterNo" label="章" width="70" />
           <el-table-column prop="contentMd" label="摘要" min-width="480" show-overflow-tooltip />
           <el-table-column label="操作" width="80">
@@ -136,7 +134,7 @@
               <el-button size="small" @click="openDigest(row)">修正</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
 
       <!-- 世界状态账 -->
@@ -177,7 +175,7 @@
           </span>
         </div>
 
-        <el-table :data="llmPrices" border size="small" style="margin-bottom: 6px">
+        <DataTable :data="llmPrices" border size="small" style="margin-bottom: 6px">
           <el-table-column prop="model" label="模型" width="130" />
           <el-table-column label="空闲价（命中/未命中/输出）" min-width="200">
             <template #default="{ row }">{{ row.idleInputHit }} / {{ row.idleInputMiss }} / {{ row.idleOutput }} {{ row.currency }}/百万</template>
@@ -193,9 +191,9 @@
               <el-button size="small" @click="openPrice(row)">改价</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
 
-        <el-table :data="llmNodes" border size="small">
+        <DataTable :data="llmNodes" border size="small">
           <el-table-column prop="node" label="节点" width="160" />
           <el-table-column prop="remark" label="说明" min-width="200" show-overflow-tooltip />
           <el-table-column label="模型（留空=默认）" width="140">
@@ -232,7 +230,7 @@
               <el-button v-else size="small" type="primary" plain @click="openNode(row)">建行</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
 
       <!-- 模型接入（baseUrl/apiKey 落库，密文存储） -->
@@ -245,7 +243,7 @@
             某用途无启用行时回退服务端本地配置。
           </span>
         </div>
-        <el-table :data="llmProviders" border size="small">
+        <DataTable :data="llmProviders" border size="small">
           <el-table-column prop="name" label="名称" width="130" />
           <el-table-column label="用途" width="90">
             <template #default="{ row }">
@@ -277,7 +275,7 @@
               <el-button size="small" type="danger" plain @click="delProvider(row)">删除</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
 
       <!-- 调参（平台级行为参数） -->
@@ -285,7 +283,7 @@
         <div style="color: #999; font-size: 12px; margin-bottom: 8px">
           管线/门禁/提示词的行为参数，平台级生效（30 秒内）；删掉库内行即回退代码默认。改错会让门禁或自愈行为变形，改前看清说明。
         </div>
-        <el-table :data="tunings" border size="small">
+        <DataTable :data="tunings" border size="small">
           <el-table-column prop="key" label="键" width="220" />
           <el-table-column prop="description" label="说明" min-width="300" show-overflow-tooltip />
           <el-table-column label="值" width="160">
@@ -299,7 +297,7 @@
                 @click="saveTuning(row)">保存</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
 
       <!-- 提示词注册表 -->
@@ -311,7 +309,7 @@
           <el-input v-model="promptFilter" placeholder="按节点/标题筛选" size="small" clearable style="width: 220px" />
           <el-button type="primary" size="small" @click="openPromptCreate">新建提示词</el-button>
         </div>
-        <el-table :data="filteredPrompts" border size="small" @row-click="(r) => viewPrompt(r.id)">
+        <DataTable :data="filteredPrompts" border size="small" @row-click="(r) => viewPrompt(r.id)">
           <el-table-column prop="node" label="节点" width="150" />
           <el-table-column prop="phase" label="阶段" width="110" />
           <el-table-column prop="title" label="用途" min-width="240" show-overflow-tooltip />
@@ -346,7 +344,7 @@
                          @click.stop="deletePrompt(row)">删</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
 
         <el-drawer v-model="promptOpen" :title="promptDetail ? promptDetail.node + ' · ' + promptDetail.phase : '提示词'" size="55%">
           <template v-if="promptDetail">
@@ -408,12 +406,12 @@
             </div>
           </el-tab-pane>
           <el-tab-pane label="指纹基线（只读）" name="fingerprint">
-            <el-table :data="fingerprintRows" border size="small">
+            <DataTable :data="fingerprintRows" border size="small">
               <el-table-column prop="metric" label="指标" min-width="220" />
               <el-table-column prop="value" label="基线值" width="100" />
               <el-table-column prop="tolerance" label="容差" width="100" />
               <el-table-column prop="abs_max" label="天花板" width="100" />
-            </el-table>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane label="门禁配置（可编辑）" name="gate">
             <div>
@@ -464,7 +462,7 @@
         </div>
         <el-input v-model="corpusText" type="textarea" :rows="5" placeholder="粘贴一章原稿正文后点导入（可反复导入，量级不限）"
                   style="margin-bottom: 10px" />
-        <el-table v-if="corpusRows.length" :data="corpusRows" border size="small" style="margin-bottom: 12px">
+        <DataTable v-if="corpusRows.length" :data="corpusRows" border size="small" style="margin-bottom: 12px">
           <el-table-column prop="title" label="章标题" min-width="200" />
           <el-table-column prop="wordCount" label="字数" width="90" />
           <el-table-column label="操作" width="80">
@@ -472,7 +470,7 @@
               <el-button size="small" type="danger" link @click="delCorpus(row.id)">删除</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
 
         <el-card v-if="draft" shadow="never" style="margin-bottom: 12px">
           <template #header>
@@ -491,7 +489,7 @@
           </div>
         </el-card>
 
-        <el-table :data="presets" border size="small">
+        <DataTable :data="presets" border size="small">
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column prop="name" label="预设" min-width="160" />
           <el-table-column prop="description" label="说明" min-width="240" show-overflow-tooltip />
@@ -500,7 +498,7 @@
               <el-button size="small" type="primary" link @click="applyPreset(row.id)">应用到本书</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
 
       <!-- 导入小说（用户定调：输入的小说与全部分析落库可复用，专门分类展示；深度解析出剧情/角色/世界观资产） -->
@@ -512,8 +510,8 @@
             快速档抽样前 40 章出骨架（约几分钟）；完整档全书逐章（长篇 1-3 小时，可断点续跑）。
           </span>
         </div>
-        <el-table :data="samples" border size="small"
-                  :row-class-name="({ row }) => (row.id === highlightSampleId ? 'sample-highlight' : '')">
+        <DataTable :data="samples" border size="small"
+                  :row-class-name="({ row }) => (row.id === highlightSampleId ? 'row-notice' : '')">
           <el-table-column type="expand">
             <template #default="{ row }">
               <div v-if="sampleAnalysis(row)" style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
@@ -593,7 +591,7 @@
           <el-table-column label="导入时间" width="140">
             <template #default="{ row }">{{ (row.createTime || '').replace('T', ' ').slice(0, 16) }}</template>
           </el-table-column>
-        </el-table>
+        </DataTable>
       </el-tab-pane>
         </el-tabs>
       </el-tab-pane>
@@ -768,11 +766,11 @@
                 <template v-if="plotDetail">
                   <div style="font-weight: 600; margin-bottom: 6px">{{ plotDetail.title }}</div>
                   <div style="font-size: 13px; line-height: 1.8; margin-bottom: 10px">{{ plotDetail.summary }}</div>
-                  <el-table v-if="(plotDetail.beats || []).length" :data="plotDetail.beats" border size="small">
+                  <DataTable v-if="(plotDetail.beats || []).length" :data="plotDetail.beats" border size="small">
                     <el-table-column prop="goal" label="场景目标" min-width="160" show-overflow-tooltip />
                     <el-table-column prop="conflict" label="冲突" min-width="160" show-overflow-tooltip />
                     <el-table-column prop="outcome" label="收束" min-width="160" show-overflow-tooltip />
-                  </el-table>
+                  </DataTable>
                   <div v-if="plotDetail.meta && plotDetail.meta.pseudo" style="color: #999; font-size: 12px; margin-top: 6px">
                     原文无标准章标题，此段为自动伪章切分
                   </div>
@@ -786,7 +784,7 @@
               <el-button size="small" type="primary" plain @click="openSampleCardCreate">新建卡</el-button>
               <span style="font-size: 12px; color: #999; margin-left: 6px">AI 漏抽的实体在这里手工补录（重新解析会重建全部卡）</span>
             </div>
-            <el-table :data="sampleCards" border size="small">
+            <DataTable :data="sampleCards" border size="small">
               <el-table-column type="expand">
                 <template #default="{ row }">
                   <div style="padding: 4px 12px; font-size: 13px">
@@ -816,15 +814,15 @@
                   <el-button size="small" type="danger" link @click="delSampleCard(row)">删除</el-button>
                 </template>
               </el-table-column>
-            </el-table>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane name="relations" :label="`关系（${sampleRelations.length}）`">
-            <el-table :data="sampleRelations" border size="small">
+            <DataTable :data="sampleRelations" border size="small">
               <el-table-column prop="from" label="主体" min-width="120" />
               <el-table-column prop="kind" label="关系" min-width="110" />
               <el-table-column prop="target" label="对象" min-width="120" />
               <el-table-column prop="note" label="说明" min-width="220" show-overflow-tooltip />
-            </el-table>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane name="world" label="世界观">
             <div v-if="worldCard" style="white-space: pre-wrap; font-size: 13px; line-height: 1.9">{{ worldCard.contentMd }}</div>
@@ -874,6 +872,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import SampleImportDialog from '../components/SampleImportDialog.vue'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const novels = ref([])
 const novelId = ref(null)
@@ -1762,9 +1762,3 @@ onUnmounted(() => clearTimeout(parsePollTimer))
 
 watch(novelId, loadAll)
 </script>
-
-<style scoped>
-:deep(.sample-highlight td) {
-  background: #ecf5ff !important;
-}
-</style>

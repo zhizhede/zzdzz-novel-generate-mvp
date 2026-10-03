@@ -41,3 +41,13 @@ body {
 .el-table .num > .cell {
   font-variant-numeric: tabular-nums;
 }
+
+/* ── 表格：提示行（统一行高亮）────────────────────────────────────────
+ * 原先四页各写一份 scoped `:deep(.xxx-highlight td){ background:#ecf5ff !important }`
+ * （fp-highlight / book-highlight / sample-highlight / plan-gap），颜色还是
+ * Element Plus 的旧浅蓝。现统一为一个 .row-notice，用设计令牌着色：
+ * 「刚导入的那条」与「缺口行」在语义上都是「看这里」，统一走琥珀族的浅色调。
+ * 由 DataTable 的 notice-field / notice-value 或 rowClass 函数返回该 class。 */
+.el-table .row-notice > td.el-table__cell {
+  background-color: color-mix(in oklab, var(--warn), var(--bg) 90%) !important;
+}

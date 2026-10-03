@@ -1,12 +1,11 @@
 <template>
   <div>
-    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 6px">
-      <h3 style="margin: 0">章节</h3>
+    <PageHeader title="章节">
       <el-select v-model="novelId" style="width: 260px" @change="() => { setSelectedNovelId(novelId); loadChapters() }">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
-    </div>
-    <el-table :data="chapters" border size="small" @row-click="open" style="cursor: pointer">
+    </PageHeader>
+    <DataTable :data="chapters" border size="small" @row-click="open" style="cursor: pointer">
       <el-table-column prop="chapterNo" label="章" width="60" />
       <el-table-column prop="title" label="标题" min-width="160" />
       <el-table-column prop="status" label="状态" width="150">
@@ -19,7 +18,7 @@
           <span v-else style="color: #bbb">—</span>
         </template>
       </el-table-column>
-    </el-table>
+    </DataTable>
 
     <el-drawer v-model="drawer" :title="detail ? `第${detail.chapterNo}章 ${detail.title}` : ''" size="65%">
       <template v-if="detail">
@@ -66,7 +65,7 @@
             </div>
           </el-tab-pane>
           <el-tab-pane :label="`门禁（${detail.gateReport ? (detail.gateReport.passed ? '通过' : '未过') : '无'}）`" name="gates">
-            <el-table v-if="detail.gateReport" :data="detail.gateReport.checks || []" border size="small">
+            <DataTable v-if="detail.gateReport" :data="detail.gateReport.checks || []" border size="small">
               <el-table-column prop="check" label="指标" min-width="200" />
               <el-table-column prop="value" label="实测" width="100" />
               <el-table-column prop="baseline" label="基线" width="100" />
@@ -76,7 +75,7 @@
                   <el-tag size="small" :type="row.ok ? 'success' : 'danger'">{{ row.ok ? '通过' : '未过' }}</el-tag>
                 </template>
               </el-table-column>
-            </el-table>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane :label="`审校（${reviewLabel}）`" name="review">
             <div v-if="readerReviews.length" style="margin-bottom: 18px">
@@ -105,7 +104,7 @@
                 <span style="font-size: 12px; color: #999">{{ detail.review.createTime }}</span>
               </div>
               <div style="font-size: 13px; margin-bottom: 12px">{{ detail.review.summary }}</div>
-              <el-table v-if="detail.review.issues?.length" :data="detail.review.issues" border size="small">
+              <DataTable v-if="detail.review.issues?.length" :data="detail.review.issues" border size="small">
                 <el-table-column prop="type" label="类型" width="110" />
                 <el-table-column label="严重度" width="90">
                   <template #default="{ row }">
@@ -117,12 +116,12 @@
                 <el-table-column prop="quote" label="原句" min-width="180" />
                 <el-table-column prop="explanation" label="问题" min-width="160" />
                 <el-table-column prop="suggestion" label="建议" min-width="160" />
-              </el-table>
+              </DataTable>
               <div v-else style="color: #999; font-size: 13px">无问题条目。</div>
             </template>
           </el-tab-pane>
           <el-tab-pane :label="`步骤（${(detail.steps || []).length}）`" name="steps">
-            <el-table :data="detail.steps || []" border size="small">
+            <DataTable :data="detail.steps || []" border size="small">
               <el-table-column prop="step" label="步骤" width="120" />
               <el-table-column prop="subKey" label="子项" width="70" />
               <el-table-column prop="attempt" label="尝试" width="60" />
@@ -133,10 +132,10 @@
               </el-table-column>
               <el-table-column prop="detail" label="明细" min-width="240" show-overflow-tooltip />
               <el-table-column prop="updateTime" label="时间" width="180" />
-            </el-table>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane label="流水" name="events">
-            <el-table v-if="events.length" :data="events" border size="small">
+            <DataTable v-if="events.length" :data="events" border size="small">
               <el-table-column type="expand">
                 <template #default="{ row }">
                   <pre class="call-pre">{{ prettyJson(parsedJson(row.payloadJson)) }}</pre>
@@ -146,7 +145,7 @@
               <el-table-column prop="phase" label="相位" width="100" />
               <el-table-column prop="payloadJson" label="内容" min-width="320" show-overflow-tooltip />
               <el-table-column prop="createTime" label="时间" width="180" />
-            </el-table>
+            </DataTable>
             <el-empty v-else description="暂无事件" :image-size="50" />
           </el-tab-pane>
           <el-tab-pane :label="`档案（${(trace?.calls || []).length} 次调用）`" name="trace">
@@ -257,6 +256,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import { NODE_LABEL, GATE_LABEL, STEP_LABEL } from '../labels'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FINAL: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', OUTLINE_APPROVED: 'success', GATE_MECHANICAL: '', GATE_AI_REVIEW: 'warning', INTERRUPTED: 'info' }
 const STATUS_TEXT = { NEW: '待生成', OUTLINED: '章纲就绪', OUTLINE_APPROVED: '章纲已批', GATE_MECHANICAL: '门禁修订中', GATE_AI_REVIEW: '审校中', REVISING: '修订中', DIGESTED: '已完成', FINAL: '导入正文', PENDING_APPROVAL: '待审批', FAILED: '失败', INTERRUPTED: '已中断' }

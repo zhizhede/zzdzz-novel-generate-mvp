@@ -1,17 +1,14 @@
 <template>
   <div>
-    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 6px">
-      <h3 style="margin: 0">文风指纹</h3>
+    <PageHeader
+      title="文风指纹"
+      hint="系统里所有文风指纹提取结果的统一台账：导入样本（导入即提取的分析快照）、品类预设（语料机械提取采纳）、书籍风格包（开书克隆/导入）。指标口径与机械门禁同源。">
       <el-button type="primary" size="small" @click="importOpen = true">导入文章提取指纹</el-button>
       <el-button size="small" :loading="loading" @click="reloadAll">刷新</el-button>
-      <span style="color: #999; font-size: 12px">
-        系统里所有文风指纹提取结果的统一台账：导入样本（导入即提取的分析快照）、品类预设（语料机械提取采纳）、书籍风格包（开书克隆/导入）。指标口径与机械门禁同源。
-      </span>
-    </div>
+    </PageHeader>
 
     <!-- 筛选查询条件：条件全空 = 全量按提取时间倒序 -->
-    <el-card shadow="never" style="margin-bottom: 10px">
-      <el-form :inline="true" size="small" @submit.prevent>
+    <FilterBar :loading="loading" @search="load" @reset="resetFilters">
         <el-form-item label="来源">
           <el-select v-model="filters.source" style="width: 130px" @change="load">
             <el-option label="全部来源" value="ALL" />
@@ -59,21 +56,15 @@
             <el-option label="名称" value="NAME_ASC" />
           </el-select>
         </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="loading" @click="load">查询</el-button>
-          <el-button @click="resetFilters">重置</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+        <template #hit>
+          命中 <b>{{ rows.length }}</b> 条（全库 {{ allRows.length }} 条）：样本 {{ sourceCount.SAMPLE }} / 预设 {{ sourceCount.PRESET }} / 书籍 {{ sourceCount.BOOK }} ·
+          覆盖品类 {{ matchedGenreCount }} 个
+        </template>
+    </FilterBar>
 
-    <div style="font-size: 12px; color: #999; margin-bottom: 8px">
-      命中 <b>{{ rows.length }}</b> 条（全库 {{ allRows.length }} 条）：样本 {{ sourceCount.SAMPLE }} / 预设 {{ sourceCount.PRESET }} / 书籍 {{ sourceCount.BOOK }} ·
-      覆盖品类 {{ matchedGenreCount }} 个
-    </div>
-
-    <el-table :data="rows" v-loading="loading" border size="small"
+    <DataTable :data="rows" :loading="loading" border size="small"
               :row-key="(row) => `${row.source}-${row.refId}`"
-              :row-class-name="({ row }) => (row.source === 'SAMPLE' && row.refId === highlightSampleId ? 'fp-highlight' : '')">
+              :row-class-name="({ row }) => (row.source === 'SAMPLE' && row.refId === highlightSampleId ? 'row-notice' : '')">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
@@ -150,7 +141,7 @@
       <template #empty>
         <el-empty description="没有命中的指纹记录——放宽筛选条件再查" />
       </template>
-    </el-table>
+    </DataTable>
 
     <!-- 指标明细：基线/容差/硬边界 + 原始 JSON（只读，改指纹请去风格包页） -->
     <el-dialog v-model="detailVisible" :title="`指纹明细 · ${detailRow ? detailRow.name : ''}`" width="900px">
@@ -197,6 +188,9 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import SampleImportDialog from '../components/SampleImportDialog.vue'
 import FingerprintMetricTable from '../components/FingerprintMetricTable.vue'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
+import FilterBar from '../components/FilterBar.vue'
 
 const SOURCE_LABEL = { SAMPLE: '导入样本', PRESET: '品类预设', BOOK: '书籍风格包' }
 const SOURCE_TYPE = { SAMPLE: 'primary', PRESET: 'success', BOOK: 'warning' }
@@ -332,10 +326,3 @@ function fmtTime(t) {
 
 onMounted(() => reloadAll())
 </script>
-
-<style scoped>
-/* 刚导入的那一条：默认按提取时间倒序排，落在首行，高亮一下免得在 25 行里找 */
-:deep(.fp-highlight td) {
-  background: #ecf5ff !important;
-}
-</style>

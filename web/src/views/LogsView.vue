@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h3>日志</h3>
+    <PageHeader title="日志" hint="LLM 调用台账与生成事件流水；点行看完整 prompt/输出与思考过程" />
     <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
       <span style="font-size: 13px; color: #666">筛选：</span>
       <el-select v-model="novelId" placeholder="全部作品" clearable size="small" style="width: 220px" @change="loadAll">
@@ -27,7 +27,7 @@
           </div>
         </el-card>
 
-        <el-table :data="items" border size="small" @row-click="open">
+        <DataTable :data="items" border size="small" @row-click="open">
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column prop="node" label="节点" min-width="140" />
           <el-table-column prop="chapterId" label="章ID" width="70" />
@@ -45,7 +45,7 @@
           <el-table-column label="时间" width="150">
             <template #default="{ row }">{{ fmtTime(row.createTime) }}</template>
           </el-table-column>
-        </el-table>
+        </DataTable>
         <el-pagination style="margin-top: 10px" layout="prev, pager, next" :total="total"
           :page-size="size" v-model:current-page="page" @current-change="load" />
       </el-tab-pane>
@@ -97,6 +97,8 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { api } from '../api'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const tab = ref('calls')
 const items = ref([])

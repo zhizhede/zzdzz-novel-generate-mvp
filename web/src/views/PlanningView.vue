@@ -1,12 +1,12 @@
 <template>
   <div>
-    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 6px">
-      <h3 style="margin: 0">规划</h3>
+    <PageHeader
+      title="规划"
+      hint="大纲 / 卷纲 / 章纲 三级管理：大纲进生成上下文，卷纲驱动逐章生成，章纲为 AI 场景拆解">
       <el-select v-model="novelId" style="width: 260px" @change="() => { setSelectedNovelId(novelId); loadAll() }">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
-      <span style="color: #999; font-size: 12px">大纲 / 卷纲 / 章纲 三级管理：大纲进生成上下文，卷纲驱动逐章生成，章纲为 AI 场景拆解</span>
-    </div>
+    </PageHeader>
 
     <el-tabs>
       <!-- 大纲 -->
@@ -49,7 +49,7 @@
             导入成稿卷：这 {{ v.chapters?.length || 0 }} 章是你导入的原文（正文已成），目标/钩子为空是正常的——
             卷纲/章纲是「写之前」的规划，成稿章不需要再规划；生成管线从第 {{ firstGeneratedChapterNo }} 章接着写。
           </div>
-          <el-table :data="v.chapters" border size="small">
+          <DataTable :data="v.chapters" border size="small">
             <el-table-column prop="chapterNo" label="章" width="60" />
             <el-table-column prop="title" label="标题" width="160" />
             <el-table-column prop="goal" label="目标" min-width="220" show-overflow-tooltip />
@@ -72,7 +72,7 @@
                 <el-button size="small" type="danger" plain @click="removePlan(row)">删</el-button>
               </template>
             </el-table-column>
-          </el-table>
+          </DataTable>
         </div>
       </el-tab-pane>
 
@@ -140,7 +140,7 @@
           </span>
         </div>
         <el-empty v-if="!allScenes.length" description="还没有任何章纲——用上方批量生成（区间可只填本章），或启动生成时自动出" :image-size="60" />
-        <el-table v-else :data="filteredScenes" border size="small" max-height="560">
+        <DataTable v-else :data="filteredScenes" border size="small" max-height="560">
           <el-table-column label="所属章纲" width="180" show-overflow-tooltip>
             <template #default="{ row }">
               <el-link type="primary" :underline="false" style="font-size: 12px"
@@ -157,7 +157,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="wordsBudget" label="预算" width="70" />
-        </el-table>
+        </DataTable>
         <el-empty v-if="allScenes.length && !filteredScenes.length" description="没有符合筛选条件的场景——调整或清空筛选" :image-size="60" />
       </el-tab-pane>
     </el-tabs>
@@ -191,7 +191,7 @@
         <span style="color: #999; font-size: 12px">可直接编辑；采纳后不再过 AI 审校</span>
       </div>
       <el-input v-model="draft.brief" type="textarea" :rows="4" style="margin-bottom: 10px" placeholder="卷简报" />
-      <el-table :data="draft.rows" border size="small" max-height="420">
+      <DataTable :data="draft.rows" border size="small" max-height="420">
         <el-table-column prop="no" label="章" width="52" />
         <el-table-column label="标题" width="150">
           <template #default="{ row }"><el-input v-model="row.title" size="small" /></template>
@@ -215,7 +215,7 @@
             <el-input-number v-model="row.budgetMax" size="small" :min="600" :max="10000" controls-position="right" style="width: 62px" />
           </template>
         </el-table-column>
-      </el-table>
+      </DataTable>
       <div v-if="(autoPlanResult?.warnings || []).length" style="color: #e6a23c; font-size: 12px; margin-top: 6px">
         {{ autoPlanResult.warnings.join('；') }}
       </div>
@@ -266,20 +266,20 @@
           章节数 {{ retro.mechanical?.chapters }} · 总字数 {{ retro.mechanical?.text_len_total }} ·
           状态分布 {{ JSON.stringify(retro.mechanical?.status_count || {}) }}
         </div>
-        <el-table v-if="(retro.mechanical?.budget_outliers || []).length" :data="retro.mechanical.budget_outliers" border size="small" style="margin-bottom: 8px">
+        <DataTable v-if="(retro.mechanical?.budget_outliers || []).length" :data="retro.mechanical.budget_outliers" border size="small" style="margin-bottom: 8px">
           <el-table-column prop="chapter_no" label="章" width="70" />
           <el-table-column prop="budget" label="预算" width="140" />
           <el-table-column prop="actual" label="实际字数" width="100" />
           <el-table-column prop="verdict" label="判定" />
-        </el-table>
-        <el-table v-if="(retro.mechanical?.foreshadow_audit || []).length" :data="retro.mechanical.foreshadow_audit" border size="small" style="margin-bottom: 12px">
+        </DataTable>
+        <DataTable v-if="(retro.mechanical?.foreshadow_audit || []).length" :data="retro.mechanical.foreshadow_audit" border size="small" style="margin-bottom: 12px">
           <el-table-column prop="chapter_no" label="章" width="70" />
           <el-table-column prop="code" label="伏笔" width="90" />
           <el-table-column prop="verdict" label="对账结果" />
-        </el-table>
+        </DataTable>
 
         <div style="font-weight: bold; margin: 10px 0 6px">漂移分析</div>
-        <el-table v-if="(retro.review?.drifts || []).length" :data="retro.review.drifts" border size="small">
+        <DataTable v-if="(retro.review?.drifts || []).length" :data="retro.review.drifts" border size="small">
           <el-table-column prop="type" label="类型" width="100" />
           <el-table-column label="严重度" width="90">
             <template #default="{ row }">
@@ -289,11 +289,11 @@
           <el-table-column prop="where" label="位置" width="110" />
           <el-table-column prop="issue" label="漂移" min-width="220" />
           <el-table-column prop="suggestion" label="建议" min-width="200" />
-        </el-table>
+        </DataTable>
         <div v-else style="color: #999; font-size: 13px">无漂移项。</div>
 
         <div style="font-weight: bold; margin: 12px 0 6px">建议采纳（流 D）</div>
-        <el-table v-if="proposals.length" :data="proposals" border size="small">
+        <DataTable v-if="proposals.length" :data="proposals" border size="small">
           <el-table-column prop="content" label="建议" min-width="320" />
           <el-table-column label="状态" width="100">
             <template #default="{ row }">
@@ -311,7 +311,7 @@
               <span v-else style="color:#999;font-size:12px">{{ row.decisionNote || '已决策' }}</span>
             </template>
           </el-table-column>
-        </el-table>
+        </DataTable>
         <div v-else style="color: #999; font-size: 13px">本卷暂无提案（复盘生成后自动落入）。</div>
 
         <div v-if="(retro.review?.highlights || []).length" style="font-weight: bold; margin: 12px 0 6px">亮点</div>
@@ -331,6 +331,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const novels = ref([])
 const novelId = ref(null)

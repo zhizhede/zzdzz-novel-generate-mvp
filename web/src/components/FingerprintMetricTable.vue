@@ -1,6 +1,6 @@
 <template>
   <!-- 指纹指标表（口径唯一）：文风指纹页的指标明细与「按本书正文提指纹」草稿弹窗共用 -->
-  <el-table :data="metrics" border size="small" :max-height="maxHeight">
+  <DataTable :data="metrics" border size="small" :max-height="maxHeight">
     <el-table-column prop="label" label="指标" min-width="170" />
     <el-table-column prop="key" label="键名" min-width="190" />
     <el-table-column label="基线值" width="90">
@@ -18,10 +18,11 @@
     <template #empty>
       <span style="color: #bbb">没有指标</span>
     </template>
-  </el-table>
+  </DataTable>
 </template>
 
 <script setup>
+import DataTable from './DataTable.vue'
 defineProps({
   /** 后端统一形状：[{ key, label, value, tolerance, absMin, absMax }] */
   metrics: { type: Array, default: () => [] },
