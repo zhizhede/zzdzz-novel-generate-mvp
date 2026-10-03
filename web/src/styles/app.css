@@ -42,6 +42,34 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── 工具类：收敛反复手写的内联样式 ──────────────────────────────────
+ * 这三组是实测出来重复度最高的（见 var/scan-dup-style.py 的扫描结果）：
+ * 说明文字 51 处、空值单元格 16 处、工具栏行 14 处。它们都是纯样式、
+ * 无行为，所以用工具类而不是组件——做成组件是过度抽象。 */
+
+/* 说明文字：表格/区块上方的解释句。原先各写一遍
+ * `font-size: var(--text-xs); color: var(--muted)`（还有反序与无空格两种变体）。 */
+.hint {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+/* 空值单元格占位（「-」「—」）。 */
+.cell-empty {
+  color: var(--meta);
+}
+
+/* 工具栏行：一排按钮/下拉/输入等距排列。
+ * 原先是 `display:flex; gap:10px; align-items:center; margin-bottom:10px`，
+ * 另有 gap:14px 的变体；统一收到 --space-3(12px)——10 与 14 都不在 4px 栅格上。 */
+.toolbar {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
 /* ── 表格：提示行（统一行高亮）────────────────────────────────────────
  * 原先四页各写一份 scoped `:deep(.xxx-highlight td){ background:#ecf5ff !important }`
  * （fp-highlight / book-highlight / sample-highlight / plan-gap），颜色还是

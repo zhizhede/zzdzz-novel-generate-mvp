@@ -107,14 +107,14 @@
       <el-table-column label="章长带" width="130">
         <template #default="{ row }">
           <span v-if="row.budgetMin">{{ row.budgetMin }}–{{ row.budgetMax }} 字</span>
-          <span v-else style="color: var(--meta)">-</span>
+          <span class="cell-empty" v-else>-</span>
         </template>
       </el-table-column>
       <el-table-column label="置信度" width="90">
         <template #default="{ row }">
           <el-tag v-if="row.lowConfidence" size="small" type="warning">低置信</el-tag>
           <span v-else-if="row.lowConfidence === false" style="color: var(--success); font-size: var(--text-xs)">正常</span>
-          <span v-else style="color: var(--meta)">-</span>
+          <span class="cell-empty" v-else>-</span>
         </template>
       </el-table-column>
       <el-table-column label="关联" min-width="170" show-overflow-tooltip>
@@ -125,9 +125,9 @@
           </template>
           <template v-else-if="row.source === 'BOOK'">
             <span v-if="row.sampleId" style="font-size: var(--text-xs)">源样本 #{{ row.sampleId }}</span>
-            <span v-else style="color: var(--meta)">-</span>
+            <span class="cell-empty" v-else>-</span>
           </template>
-          <span v-else style="color: var(--meta)">-</span>
+          <span class="cell-empty" v-else>-</span>
         </template>
       </el-table-column>
       <el-table-column label="提取时间" width="160">
@@ -171,7 +171,7 @@
           <el-button size="small" @click="copyJson">复制</el-button>
         </div>
         <pre style="max-height: 240px; overflow: auto; background: var(--surface-warm); padding: 10px; border-radius: 6px; font-size: var(--text-xs); line-height: 1.6">{{ prettyJson(detailRow.fingerprintJson) }}</pre>
-        <div style="color: var(--muted); font-size: var(--text-xs); margin-top: 6px">
+        <div class="hint" style="margin-top: 6px">
           改指纹阈值/门禁请去「素材库 → 质量与风格」（本书）或品类预设页；此处只读。
         </div>
       </div>

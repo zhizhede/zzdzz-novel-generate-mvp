@@ -41,7 +41,7 @@
             </el-radio-group>
           </template>
           <el-tag v-else size="small" type="info" effect="plain" style="margin-left: 8px">{{ existingPolicy(s.key) }}</el-tag>
-          <span style="font-size: var(--text-xs); color: var(--muted); margin-left: 6px">{{ s.hint }}</span>
+          <span class="hint" style="margin-left: 6px">{{ s.hint }}</span>
         </div>
       </el-checkbox-group>
       <div style="margin-top: 8px">
@@ -50,7 +50,7 @@
         <el-button type="primary" size="small" :disabled="!picked.length" @click="start">开始解析</el-button>
       </div>
     </el-card>
-    <div v-else style="font-size: var(--text-xs); color: var(--muted)">
+    <div class="hint" v-else>
       解析在后台跑（关掉这个窗口也会继续），随时回到这里或刷新页面都能看到进度；完成情况也会写进本书的解析任务行。
     </div>
 

@@ -30,7 +30,7 @@
         <el-button type="primary" size="small" :loading="running" @click="run">启动生成</el-button>
         <el-button size="small" type="danger" plain @click="stopAllTasks">全部停止</el-button>
         <el-tag :type="running ? 'warning' : 'info'" size="small">{{ running ? '运行中' : '空闲' }}</el-tag>
-        <span style="color:var(--muted);font-size: var(--text-xs)">{{ lastMessage }}</span>
+        <span class="hint">{{ lastMessage }}</span>
         <el-badge :value="pendingCount" :hidden="!pendingCount" style="margin-left: auto">
           <el-button size="small" plain @click="openPending">待审批{{ pendingCount ? ` ${pendingCount} 章` : '' }}</el-button>
         </el-badge>
@@ -48,7 +48,7 @@
         </el-table-column>
       </DataTable>
       <el-empty v-else description="当前无待审批章节" :image-size="50" />
-      <div style="font-size: var(--text-xs); color: var(--muted); margin-top: 8px">点行跳转章节页审批</div>
+      <div class="hint" style="margin-top: 8px">点行跳转章节页审批</div>
     </el-dialog>
 
     <!-- 无人续跑链状态（开了无人续跑的书才有；目标进度/暂停原因/恢复入口） -->
@@ -57,7 +57,7 @@
         <div style="display: flex; align-items: center; gap: 10px">
           <b style="font-size: var(--text-sm)">无人续跑</b>
           <el-tag size="small" :type="autoChainTagType">{{ autoChainText }}</el-tag>
-          <span style="font-size: var(--text-xs); color: var(--muted)">
+          <span class="hint">
             {{ autoChain.currentChapters }}/{{ autoChain.targetChapters ?? '∞' }} 章 · 已规划 {{ autoChain.volumes }} 卷
           </span>
           <el-button v-if="autoChain.state !== 'REACHED' && autoChain.state !== 'RUNNING'"
@@ -72,7 +72,7 @@
       </template>
       <el-progress v-if="autoChain.targetChapters"
                    :percentage="Math.min(100, Math.round(autoChain.currentChapters / autoChain.targetChapters * 100))" />
-      <div v-else style="font-size: var(--text-xs); color: var(--muted)">未设目标章数：续跑按卷推进，达到保险丝或人工停止为止</div>
+      <div class="hint" v-else>未设目标章数：续跑按卷推进，达到保险丝或人工停止为止</div>
     </el-card>
 
     <!-- 本书生成参数（唯一修改入口：开书向导的设定落库后在此查看/修改） -->
@@ -80,14 +80,14 @@
       <el-form label-width="92px" v-if="deriveEdit">
         <el-form-item label="掺水量">
           <div style="display: flex; align-items: center; gap: 12px; width: 100%">
-            <span style="font-size: var(--text-xs); color: var(--muted)">干货</span>
+            <span class="hint">干货</span>
             <el-slider v-model="deriveEdit.water" :min="0" :max="100" :step="5" style="flex: 1" />
-            <span style="font-size: var(--text-xs); color: var(--muted)">舒缓</span>
+            <span class="hint">舒缓</span>
             <el-tag size="small" :type="deriveEdit.water >= 70 ? 'warning' : deriveEdit.water <= 30 ? 'success' : 'info'">
               {{ deriveEdit.water >= 70 ? '可注水' : deriveEdit.water <= 30 ? '零注水' : '均衡' }}
             </el-tag>
           </div>
-          <div style="font-size: var(--text-xs); color: var(--muted); line-height: 1.7; width: 100%">
+          <div class="hint" style="line-height: 1.7; width: 100%">
             保存时自动换算质量口径：注水软阈值 <b>{{ waterGates.reader_fat_ratio_block }}</b> ·
             硬上限 <b>{{ waterGates.reader_fat_ratio_hard }}</b> ·
             审校下限 <b>{{ waterGates.ai_review_fix_floor }}</b>（越干越严；高级区可手动覆盖）
@@ -124,14 +124,14 @@
         </el-form-item>
         <el-form-item label="无人续跑">
           <el-switch v-model="deriveEdit.autoContinue" />
-          <span style="margin-left: 8px; font-size: var(--text-xs); color: var(--muted)">开=写到总目标为止全自动（规划/审批强制自动）</span>
+          <span class="hint" style="margin-left: 8px">开=写到总目标为止全自动（规划/审批强制自动）</span>
         </el-form-item>
         <el-form-item label="审批模式">
           <el-radio-group v-model="deriveEdit.approvalMode" size="small">
             <el-radio-button value="auto">自动放行</el-radio-button>
             <el-radio-button value="manual">人工审批</el-radio-button>
           </el-radio-group>
-          <span style="margin-left: 8px; font-size: var(--text-xs); color: var(--muted)">每章写完后的放行方式</span>
+          <span class="hint" style="margin-left: 8px">每章写完后的放行方式</span>
         </el-form-item>
         <el-form-item label="队列优先级">
           <el-radio-group v-model="deriveEdit.priority" size="small">
@@ -142,7 +142,7 @@
         </el-form-item>
         <el-form-item label="规划模式">
           <el-switch v-model="planManual" active-value="manual" inactive-value="auto" />
-          <span style="margin-left: 8px; font-size: var(--text-xs); color: var(--muted)">
+          <span class="hint" style="margin-left: 8px">
             {{ planManual === 'manual' ? '人工：卷纲出草稿，去「规划」页采纳后才生效' : '自动：AI 审校通过直接落库，立即可开跑' }}
           </span>
         </el-form-item>
@@ -150,7 +150,7 @@
       <el-collapse style="margin-top: 4px">
         <el-collapse-item name="quality">
           <template #title><span style="font-size: var(--text-sm); color: var(--fg-2)">质量口径（高级，一般不用动）</span></template>
-          <div style="font-size: var(--text-xs); color: var(--muted); line-height: 1.8; margin-bottom: 8px">
+          <div class="hint" style="line-height: 1.8; margin-bottom: 8px">
             每章写完由读者评审/审校把关，以下数值决定拦多狠：改掺水量保存后前三项会按新掺水量重新换算；
             不动掺水量时此处手调优先。判定明细见各章门禁报告。
           </div>
@@ -199,7 +199,7 @@
           <template #default="{ row }">
             <el-progress :percentage="Math.round(row.doneChapters / row.totalChapters * 100)"
               :stroke-width="10" :format="() => `${row.doneChapters}/${row.totalChapters}`" />
-            <div v-if="taskPace(row)" style="font-size: var(--text-xs); color: var(--muted); margin-top: 2px; line-height: 1.4">{{ taskPace(row) }}</div>
+            <div class="hint" v-if="taskPace(row)" style="margin-top: 2px; line-height: 1.4">{{ taskPace(row) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="当前章" width="70">
@@ -208,13 +208,13 @@
         <el-table-column label="当前阶段" min-width="140">
           <template #default="{ row }">
             <el-link v-if="row.status === 'RUNNING'" type="primary" :underline="false" style="font-size: var(--text-xs);color:var(--warn)" @click="openSession(row)">{{ row.currentStep || '准备中' }} ⤢</el-link>
-            <span v-else style="color:var(--meta)">-</span>
+            <span class="cell-empty" v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="本章tokens" width="95">
           <template #default="{ row }">
             <span v-if="row.status === 'RUNNING' && row.chapterTokens != null" style="font-size: var(--text-xs);color:var(--fg-2)">{{ row.chapterTokens.toLocaleString() }}</span>
-            <span v-else style="color:var(--meta)">-</span>
+            <span class="cell-empty" v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="lastMessage" label="消息" min-width="150" show-overflow-tooltip />
@@ -243,22 +243,7 @@
         <el-card shadow="never" header="生成输出（实时流式）">
           <div ref="outBox" style="height: 560px; overflow-y: auto">
             <div v-for="s in scenes" :key="s.key" style="margin-bottom: 16px">
-              <div style="color:var(--muted);font-size: var(--text-xs);margin-bottom:4px;display:flex;align-items:center;gap:8px">
-                <span>{{ s.title }}</span>
-                <el-tag v-if="s.streaming" type="warning" size="small" effect="plain">
-                  {{ s.text ? '正文流式生成中' : (s.think ? '思考中…' : '检索上下文中…') }}
-                </el-tag>
-                <el-tag v-else size="small" effect="plain" type="info">{{ s.phase === 'reused' ? '复用缓存' : '已完成' }}</el-tag>
-                <el-link v-if="s.think" type="info" :underline="false" style="font-size: var(--text-xs)" @click="s.thinkOpen = !s.thinkOpen">
-                  {{ s.thinkOpen ? '收起思考' : `思考过程（${s.think.length}字）` }}
-                </el-link>
-              </div>
-              <div v-if="s.streaming && !s.think && !s.text" style="color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px">
-                ⏳ 检索与打包上下文（世界状态/事实账/RAG 召回，约 10-20 秒后开始逐字输出）…
-              </div>
-              <div v-if="s.think && (s.thinkOpen || (s.streaming && !s.text))"
-                   style="white-space:pre-wrap;color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px;margin-bottom:6px;max-height:220px;overflow-y:auto">{{ s.think }}</div>
-              <div style="white-space: pre-wrap; border-left: 3px solid var(--accent); padding-left: 10px">{{ s.text }}<span v-if="s.streaming && s.text" style="color:var(--accent)">▍</span></div>
+              <SceneStream :item="s" :heading="s.title" />
             </div>
             <el-empty v-if="!scenes.length" description="启动生成后在此实时看到 AI 的思考与正文逐字流出" :image-size="60" />
           </div>
@@ -274,7 +259,7 @@
           <b>{{ sessionTask ? `任务 #${sessionTask.id} · ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : sessionTask.kind === 'OUTLINE' ? ` · 章纲 ${sessionTask.fromChapter}-${sessionTask.toChapter}` : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '' }}</b>
           <el-tag v-if="sessionTask" size="small" :type="TASK_COLOR[sessionTask.status] || 'info'">{{ TASK_TEXT[sessionTask.status] || sessionTask.status }}</el-tag>
           <span v-if="sessionTask?.status === 'RUNNING'" style="color:var(--warn);font-size: var(--text-sm)">{{ sessionTask.currentStep || '准备中' }}</span>
-          <span v-if="sessionTask?.status === 'RUNNING' && taskPace(sessionTask)" style="color:var(--muted);font-size: var(--text-xs)">{{ taskPace(sessionTask) }}</span>
+          <span class="hint" v-if="sessionTask?.status === 'RUNNING' && taskPace(sessionTask)" >{{ taskPace(sessionTask) }}</span>
           <span v-if="sessionTask?.status === 'RUNNING' && sessionTask.chapterTokens != null" style="font-size: var(--text-sm);color:var(--fg-2)">本章 {{ sessionTask.chapterTokens.toLocaleString() }} tokens</span>
           <span style="flex:1"></span>
           <el-button v-if="sessionTask?.status === 'RUNNING'" size="small" type="danger" @click="stopTask(sessionTask)">停止</el-button>
@@ -290,38 +275,16 @@
           </div>
           <!-- 场景：流式思考/正文块 -->
           <div v-else-if="t.type === 'scene'">
-            <div style="color:var(--success);font-size: var(--text-sm);margin-bottom:4px;display:flex;align-items:center;gap:8px">
-              <b>场景 {{ t.sceneNo }}</b>
-              <span style="color:var(--muted);font-size: var(--text-xs)">{{ t.goal }}</span>
-              <el-tag v-if="t.streaming" type="warning" size="small" effect="plain">{{ t.text ? '正文流式生成中' : (t.think ? '思考中…' : '检索上下文中…') }}</el-tag>
-              <el-tag v-else size="small" effect="plain" type="info">{{ t.phase === 'reused' ? '复用缓存' : '完成' }}</el-tag>
-              <el-link v-if="t.think" type="info" :underline="false" style="font-size: var(--text-xs)" @click="t.thinkOpen = !t.thinkOpen">
-                {{ t.thinkOpen ? '收起思考' : `思考（${t.think.length}字）` }}
-              </el-link>
-            </div>
-            <div v-if="t.streaming && !t.think && !t.text" style="color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px">
-              ⏳ 检索与打包上下文（约 10-20 秒后开始逐字输出）…
-            </div>
-            <div v-if="t.think && (t.thinkOpen || (t.streaming && !t.text))"
-                 style="white-space:pre-wrap;color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
-            <div style="white-space:pre-wrap; border-left: 3px solid var(--accent); padding-left: 10px; font-size: var(--text-base); line-height: 1.9">{{ t.text }}<span v-if="t.streaming && t.text" style="color:var(--accent)">▍</span></div>
+            <SceneStream :item="t" :heading="`场景 ${t.sceneNo}`" :subheading="t.goal" heading-color="var(--success)" />
           </div>
           <!-- 卷规划/审校：流式思考块（JSON 正文不逐字展示，思考流才是透明化主体） -->
           <div v-else-if="t.type === 'pstream'">
-            <div style="color:var(--warn);font-size: var(--text-sm);margin-bottom:4px;display:flex;align-items:center;gap:8px">
-              <b>{{ t.title }}</b>
-              <el-tag v-if="t.streaming" type="warning" size="small" effect="plain">{{ t.think ? '思考中…' : '打包上下文中…' }}</el-tag>
-              <el-link v-if="t.think" type="info" :underline="false" style="font-size: var(--text-xs)" @click="t.thinkOpen = !t.thinkOpen">
-                {{ t.thinkOpen ? '收起思考' : `思考（${t.think.length}字）` }}
-              </el-link>
-            </div>
-            <div v-if="t.think && (t.thinkOpen || t.streaming)"
-                 style="white-space:pre-wrap;color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
+            <SceneStream :item="t" variant="plan" :heading="t.title" heading-color="var(--warn)" />
           </div>
           <!-- 通用步骤/判定行 -->
           <div v-else style="font-size: var(--text-sm); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap">
             <span :style="{ color: t.color || 'var(--fg-2)' }">▸ {{ t.title }}</span>
-            <span v-if="t.note" style="color:var(--muted);font-size: var(--text-xs)">{{ t.note }}</span>
+            <span class="hint" v-if="t.note" >{{ t.note }}</span>
             <el-link v-if="t.reason" type="danger" :underline="false" style="font-size: var(--text-xs)" @click="t.open = !t.open">{{ t.open ? '收起原因' : '原因' }}</el-link>
             <div v-if="t.reason && t.open" style="width:100%; white-space:pre-wrap; color:var(--danger); font-size: var(--text-xs); background:var(--tag-danger-bg); padding:6px 10px; border-radius:4px; margin-top:4px">{{ t.reason }}</div>
             <template v-if="t.logId">
@@ -356,6 +319,7 @@ import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import { NODE_LABEL, GATE_LABEL, STEP_LABEL, TASK_TEXT, TASK_COLOR } from '../labels'
 import DataTable from '../components/DataTable.vue'
 import PageHeader from '../components/PageHeader.vue'
+import SceneStream from '../components/SceneStream.vue'
 
 const router = useRouter()
 

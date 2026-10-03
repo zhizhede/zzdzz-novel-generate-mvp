@@ -103,9 +103,9 @@
           <template #default="{ row }">
             <template v-if="row.autoContinue">
               <el-tag size="small" type="success">开</el-tag>
-              <span style="font-size: var(--text-xs); color: var(--muted); margin-left: 4px">目标 {{ row.targetChapters ?? '∞' }} 章</span>
+              <span class="hint" style="margin-left: 4px">目标 {{ row.targetChapters ?? '∞' }} 章</span>
             </template>
-            <span v-else style="color: var(--muted); font-size: var(--text-xs)">关</span>
+            <span class="hint" v-else>关</span>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="150">
@@ -137,7 +137,7 @@
           <el-input v-model="editForm.description" type="textarea" :rows="3" placeholder="一句话简介（可选）" />
         </el-form-item>
       </el-form>
-      <div style="font-size: var(--text-xs); color: var(--muted)">
+      <div class="hint">
         改文风/门禁/衍生参数/无人续跑不在本页——分别在工作台「本书生成参数」与素材库对应页签。
       </div>
       <template #footer>
@@ -160,7 +160,7 @@
                      filterable clearable style="width: 100%">
             <el-option v-for="p in presets" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
-          <div style="font-size: var(--text-xs); color: var(--muted); line-height: 1.6">
+          <div class="hint" style="line-height: 1.6">
             预设决定文风指纹与门禁阈值。<b>不选</b>：导入后按本书正文自动提指纹（草稿需你确认，比任何预设都贴这本书）；
             <b>选了</b>：克隆该预设口径，之后也可随时「提指纹」重校准。
           </div>
@@ -169,16 +169,16 @@
           <TextFileDropZone style="margin-bottom: 6px"
                             sub-hint="支持 txt / docx（.doc 请先另存为 .docx）与无 DRM 的 mobi、azw；也可直接粘贴到下方"
                             @loaded="onImportFileLoaded" />
-          <span v-if="importForm.text" style="font-size: var(--text-xs); color: var(--muted)">
+          <span class="hint" v-if="importForm.text" >
             已载入 {{ (importForm.text.length / 10000).toFixed(1) }} 万字
           </span>
-          <span v-else-if="importForm.fileBase64" style="font-size: var(--text-xs); color: var(--muted)">已载入文档/电子书</span>
+          <span class="hint" v-else-if="importForm.fileBase64" >已载入文档/电子书</span>
           <el-input v-model="importForm.text" type="textarea" :rows="8" style="margin-top: 6px"
                     placeholder="或直接粘贴正文（整本或已有部分）。按行首标题切章：第N章 / 第一章 / 一、标题；识别不到标题则整篇作为第 1 章。" />
         </el-form-item>
         <el-form-item label="导入后解析">
           <div style="width: 100%">
-            <div style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 4px">
+            <div class="hint" style="margin-bottom: 4px">
               落库后自动跑一轮 LLM 解析把这本书的资产补齐（<b>默认全勾</b>，可逐项取消；不勾＝只落库不解析）。
               「已有内容」默认<b>不跳过</b>（覆盖重做）；只想补缺的，把该步切到「跳过已有」。
               解析在后台跑，关掉页面也继续；进度随时在「解析」入口或本书解析任务里查看。
@@ -194,7 +194,7 @@
                   </el-radio-group>
                 </template>
                 <el-tag v-else size="small" type="info" effect="plain" style="margin-left: 6px">{{ existingPolicy(s.key) }}</el-tag>
-                <span style="font-size: var(--text-xs); color: var(--muted); margin-left: 6px">{{ s.hint }}</span>
+                <span class="hint" style="margin-left: 6px">{{ s.hint }}</span>
               </div>
             </el-checkbox-group>
             <div style="margin-top: 4px">
@@ -209,7 +209,7 @@
             <el-checkbox v-model="importForm.fingerprintOn" :disabled="!importForm.presetId">
               导入后按本书正文试提文风指纹
             </el-checkbox>
-            <div style="font-size: var(--text-xs); color: var(--muted); line-height: 1.6">
+            <div class="hint" style="line-height: 1.6">
               <template v-if="!importForm.presetId">
                 未选预设——导入后<b>必定</b>按本书正文提指纹（这是本书门禁阈值的唯一来源，必须走这里）。
               </template>
@@ -220,7 +220,7 @@
           </div>
         </el-form-item>
       </el-form>
-      <div style="font-size: var(--text-xs); color: var(--muted)">
+      <div class="hint">
         导入的章节按「导入正文」终态保存、不进生成管线；之后可在「规划」页按卷规划往后接续。
         支持 txt / docx（旧版 .doc 请先另存为 .docx）与无 DRM 的 mobi/azw；DRM 加密与 KF8 新格式会报错，请先转 txt。
       </div>

@@ -1,7 +1,7 @@
 <template>
   <div>
     <PageHeader title="日志" hint="LLM 调用台账与生成事件流水；点行看完整 prompt/输出与思考过程" />
-    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
+    <div class="toolbar">
       <span style="font-size: var(--text-sm); color: var(--fg-2)">筛选：</span>
       <el-select v-model="novelId" placeholder="全部作品" clearable size="small" style="width: 220px" @change="loadAll">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
@@ -51,7 +51,7 @@
       </el-tab-pane>
 
       <el-tab-pane label="事件流水" name="events">
-        <div style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 10px">
+        <div class="hint" style="margin-bottom: 10px">
           生成履历回放：每次门禁失败原因、重写/修订轮次、场景中途草稿都在此可追溯；点开单条可看原始负载。
         </div>
         <el-empty v-if="!events.length" description="暂无事件（新跑的章节会自动记录）" />
@@ -75,7 +75,7 @@
 
     <el-drawer v-model="drawer" :title="detail ? `#${detail.id} ${detail.node}` : ''" size="55%">
       <template v-if="detail">
-        <div style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 8px">
+        <div class="hint" style="margin-bottom: 8px">
           {{ detail.model }}｜prompt {{ detail.promptTokens }}（缓存 {{ detail.cachedTokens || 0 }}）+ completion {{ detail.completionTokens }} = {{ detail.totalTokens }} tokens｜{{ detail.latencyMs }}ms<template v-if="detail.cost != null">｜¥{{ detail.cost.toFixed(4) }}</template>｜{{ detail.status }}｜{{ fmtTime(detail.createTime) }}
         </div>
         <el-collapse>

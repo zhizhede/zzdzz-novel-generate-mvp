@@ -15,7 +15,7 @@
         <!-- 导入正文的章没有预算（不进生成管线）——显示 — 而不是 0-0 -->
         <template #default="{ row }">
           <span v-if="row.budgetMin">{{ row.budgetMin }}-{{ row.budgetMax }}</span>
-          <span v-else style="color: var(--meta)">—</span>
+          <span class="cell-empty" v-else>—</span>
         </template>
       </el-table-column>
     </DataTable>
@@ -24,12 +24,12 @@
       <template v-if="detail">
         <div style="margin-bottom: 8px; display: flex; gap: 12px; align-items: center">
           <el-tag size="small">{{ detail.status }}</el-tag>
-          <span v-if="genStd" style="font-size: var(--text-xs); color: var(--muted)">
+          <span class="hint" v-if="genStd" >
             生成时评审：注水软 {{ genStd.reader_fat_ratio_block }} / 硬上限 {{ genStd.reader_fat_ratio_hard }} /
             恢复线 {{ genStd.reader_fix_len_min }} / 扩写护栏 {{ genStd.reader_fix_len_max }} / 审校下限 {{ genStd.ai_review_fix_floor }}
           </span>
           <span v-else style="font-size: var(--text-xs); color: var(--meta)">生成时评审标准未记录（历史章节）</span>
-          <span style="font-size: var(--text-xs); color: var(--muted)">
+          <span class="hint">
             LLM：{{ detail.llmTotals?.calls ?? 0 }} 次调用 / {{ detail.llmTotals?.totalTokens ?? 0 }} tokens / 平均 {{ detail.llmTotals?.avgLatencyMs ?? 0 }}ms
           </span>
           <el-button v-if="detail.status === 'PENDING_APPROVAL'" type="success" size="small" :loading="approving" @click="approve">通过审批</el-button>
@@ -57,7 +57,7 @@
           </el-tab-pane>
           <el-tab-pane :label="`场景（${detail.scenes?.length ?? 0}）`" name="scenes">
             <div v-for="s in (detail.scenes || [])" :key="s.id" style="margin-bottom: 14px">
-              <div style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 4px; display: flex; align-items: center; gap: 8px">
+              <div class="hint" style="margin-bottom: 4px; display: flex; align-items: center; gap: 8px">
                 <span style="flex: 1">场景 {{ s.sceneNo }}｜{{ s.gateStatus }}｜改写 {{ s.revisionRound ?? 0 }} 次｜目标：{{ s.goal }}</span>
                 <el-button v-if="canEditScene" size="small" text type="primary" @click="openSceneEdit(s)">编辑</el-button>
               </div>
@@ -83,12 +83,12 @@
               <div v-for="(r, i) in readerReviews" :key="i"
                 style="border: 1px solid var(--border); border-radius: 4px; padding: 10px; margin-bottom: 8px">
                 <el-tag size="small" :type="r.passed ? 'success' : 'danger'">第 {{ r.round || 1 }} 轮 · {{ r.passed ? '通过' : '未过' }}</el-tag>
-                <span style="color: var(--muted); font-size: var(--text-xs); margin-left: 6px">{{ fmtTime(r.createTime) }}</span>
+                <span class="hint" style="margin-left: 6px">{{ fmtTime(r.createTime) }}</span>
                 <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px">
                   <el-tag v-for="q in fiveQuestions(r)" :key="q.label" size="small" effect="plain"
                     :type="q.value === 'pass' ? 'success' : 'danger'">{{ q.label }}：{{ q.value === 'pass' ? '过' : q.value }}</el-tag>
                 </div>
-                <div v-if="fatRatio(r) != null" style="font-size: var(--text-xs); color: var(--muted); margin-top: 6px">注水比 {{ fatRatio(r) }}</div>
+                <div class="hint" v-if="fatRatio(r) != null" style="margin-top: 6px">注水比 {{ fatRatio(r) }}</div>
                 <el-button link size="small" @click="r.open = !r.open">{{ r.open ? '收起' : '展开原文' }}</el-button>
                 <pre v-if="r.open" class="call-pre">{{ prettyJson(r.result) }}</pre>
               </div>
@@ -97,11 +97,11 @@
               尚未审校。点击上方「AI 审校」对当前正文跑一次语义审校（连续性/逻辑/错字/格式）。
             </div>
             <template v-else>
-              <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center">
+              <div class="toolbar">
                 <el-tag size="small" :type="VERDICT_COLOR[detail.review.verdict] || 'info'">
                   {{ VERDICT_TEXT[detail.review.verdict] || detail.review.verdict }}
                 </el-tag>
-                <span style="font-size: var(--text-xs); color: var(--muted)">{{ detail.review.createTime }}</span>
+                <span class="hint">{{ detail.review.createTime }}</span>
               </div>
               <div style="font-size: var(--text-sm); margin-bottom: 12px">{{ detail.review.summary }}</div>
               <DataTable v-if="detail.review.issues?.length" :data="detail.review.issues" border size="small">
@@ -161,12 +161,12 @@
                   <div v-if="it.kind === 'step'">
                     <b>{{ STEP_LABEL[it.step] || it.step }}</b><span v-if="it.subKey"> · 场景 {{ it.subKey }}</span>
                     <el-tag size="small" style="margin-left: 6px" :type="it.status === 'DONE' ? 'success' : it.status === 'RUNNING' ? 'warning' : 'danger'">{{ it.status }}</el-tag>
-                    <span v-if="it.attempt > 1" style="color: var(--muted); font-size: var(--text-xs); margin-left: 4px">第 {{ it.attempt }} 次尝试</span>
-                    <div v-if="it.detail" style="font-size: var(--text-xs); color: var(--muted); margin-top: 2px">{{ it.detail }}</div>
+                    <span class="hint" v-if="it.attempt > 1" style="margin-left: 4px">第 {{ it.attempt }} 次尝试</span>
+                    <div class="hint" v-if="it.detail" style="margin-top: 2px">{{ it.detail }}</div>
                   </div>
                   <div v-else-if="it.kind === 'call'">
                     <b>{{ NODE_LABEL[it.node] || it.node }}</b>
-                    <span style="color: var(--muted); font-size: var(--text-xs)">
+                    <span class="hint">
                       {{ (it.totalTokens || 0).toLocaleString() }} tok · {{ (it.latencyMs / 1000).toFixed(1) }}s<span v-if="it.cost != null"> · ¥{{ it.cost.toFixed(4) }}</span><span v-if="it.status === 'error'"> · 失败</span>
                     </span>
                     <el-button link type="primary" size="small" @click="openCall(it.id)">查看 prompt / 输出</el-button>
@@ -199,7 +199,7 @@
 
     <!-- Q5a：场景草稿人工编辑（生成前状态），保存即重过该场景机械门禁 -->
     <el-dialog v-model="sceneDialog" :title="editingScene ? `编辑场景 ${editingScene.sceneNo} 草稿` : ''" width="720px" top="6vh">
-      <div style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 8px">
+      <div class="hint" style="margin-bottom: 8px">
         保存后立即重过该场景机械门禁（通过/未过会回写场景门禁状态）；续跑时已通过场景复用此稿
       </div>
       <el-input v-model="sceneDraft" type="textarea" :rows="16" maxlength="20000" show-word-limit />
@@ -214,7 +214,7 @@
       <div v-if="detail?.status === 'DIGESTED'" style="font-size: var(--text-xs); color: var(--warn); margin-bottom: 8px">
         本章已有事实账：保存后旧 digest 作废、章节回到待审批，重新审批时重算事实账
       </div>
-      <div v-else style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 8px">人工修正正文，保存后停留在待审批</div>
+      <div class="hint" v-else  style="margin-bottom: 8px">人工修正正文，保存后停留在待审批</div>
       <el-input v-model="fullDraft" type="textarea" :rows="24" maxlength="60000" show-word-limit />
       <template #footer>
         <el-button @click="fullDialog = false">取消</el-button>
@@ -226,7 +226,7 @@
     <el-dialog v-model="callDialog" top="4vh" width="860px"
       :title="callDetail ? `${NODE_LABEL[callDetail.node] || callDetail.node} · 调用 #${callDetail.id}` : ''">
       <div v-if="callDetail" style="max-height: 72vh; overflow-y: auto">
-        <div style="color: var(--muted); font-size: var(--text-xs); margin-bottom: 8px">
+        <div class="hint" style="margin-bottom: 8px">
           {{ callDetail.model }} · {{ (callDetail.totalTokens || 0).toLocaleString() }} tok（缓存命中 {{ callDetail.cachedTokens || 0 }}）·
           {{ (callDetail.latencyMs / 1000).toFixed(1) }}s<span v-if="callDetail.cost != null"> · ¥{{ callDetail.cost.toFixed(4) }}</span> · {{ fmtTime(callDetail.createTime) }}
         </div>
@@ -236,7 +236,7 @@
             <pre class="call-pre">{{ m.content }}</pre>
           </el-collapse-item>
           <el-collapse-item v-if="callDetail.reasoningText" :title="`思考过程（${callDetail.reasoningText.length} 字）`">
-            <pre class="call-pre" style="color: var(--meta)">{{ callDetail.reasoningText }}</pre>
+            <pre class="call-pre cell-empty">{{ callDetail.reasoningText }}</pre>
           </el-collapse-item>
           <el-collapse-item v-if="callDetail.content" :title="`输出正文（${callDetail.content.length} 字）`">
             <pre class="call-pre">{{ callDetail.content }}</pre>

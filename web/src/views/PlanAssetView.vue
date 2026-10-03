@@ -195,7 +195,7 @@
       <el-table-column label="章预算带" width="120">
         <template #default="{ row }">
           <span v-if="row.budgetMin">{{ row.budgetMin }}–{{ row.budgetMax }} 字</span>
-          <span v-else style="color: var(--meta)">—</span>
+          <span class="cell-empty" v-else>—</span>
         </template>
       </el-table-column>
       <el-table-column label="卷复盘" width="100">
@@ -203,7 +203,7 @@
           <el-tag v-if="row.hasReview" size="small" :type="row.reviewMajor ? 'danger' : 'success'">
             {{ row.reviewMajor ? row.reviewMajor + ' 处 major' : '已复盘' }}
           </el-tag>
-          <span v-else style="color: var(--meta)">未复盘</span>
+          <span class="cell-empty" v-else>未复盘</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="110">
@@ -240,7 +240,7 @@
       <el-table-column label="卷" width="80">
         <template #default="{ row }">
           <span v-if="row.volumeNo">{{ row.volumeNo }}</span>
-          <span v-else style="color: var(--meta)">—</span>
+          <span class="cell-empty" v-else>—</span>
         </template>
       </el-table-column>
       <el-table-column label="章" width="70">
@@ -264,7 +264,7 @@
       <el-table-column label="预算" width="100">
         <template #default="{ row }">
           <span v-if="row.budgetMin">{{ row.budgetMin }}-{{ row.budgetMax }}</span>
-          <span v-else style="color: var(--meta)">—</span>
+          <span class="cell-empty" v-else>—</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="100">
@@ -275,7 +275,7 @@
       <el-table-column label="正文" width="90">
         <template #default="{ row }">
           <span v-if="row.hasText">{{ row.textChars }} 字</span>
-          <span v-else style="color: var(--meta)">—</span>
+          <span class="cell-empty" v-else>—</span>
         </template>
       </el-table-column>
       <el-table-column label="伏笔" width="70">
@@ -293,7 +293,7 @@
         <el-button size="small" @click="copyText">复制</el-button>
       </div>
       <pre style="max-height: 60vh; overflow: auto; white-space: pre-wrap; background: var(--surface-warm); padding: 10px; border-radius: 6px; font-size: var(--text-xs); line-height: 1.7">{{ textBody }}</pre>
-      <div style="color: var(--muted); font-size: var(--text-xs); margin-top: 6px">
+      <div class="hint" style="margin-top: 6px">
         此处只读。改大纲去「规划」页（或书籍管理 → 继续向导），改卷纲/章纲去「规划」页对应行；改完这里刷新即可看到。
       </div>
     </el-dialog>
