@@ -1,0 +1,197 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * web/design-system/tokens.css
+ *
+ * 小说生成平台设计令牌 —— 符合 OpenDesign `_schema/AGENTS.md` 的 v1 包契约。
+ *
+ * 基座：OpenDesign `design-systems/kami`（紙 / 纸，Editorial & Print）。
+ * 选它的理由：它是该目录里唯一**从设计之初就为 zh-CN 排版**做的系统
+ * （带中文衬线字体栈），且其印刷节奏与数据表密度天然接近。
+ *
+ * 相对基座的三处品牌化改造（详见 DESIGN.md §1）：
+ *   A. 密度   —— kami 面向印刷单页（section 72px、container 1120px）；
+ *                本系统面向数据密集的运维台，压缩纵向节奏，且
+ *                **数据面不受宽度上限约束**（--container-max 置为 100%，
+ *                正文版心改用 --reading-measure，按比例而非 px）。
+ *   B. 状态色 —— kami 自述「几乎不需要状态色」，其暖色语义饱和度不足；
+ *                本系统是状态标签密集型产品，故重设五族状态色，
+ *                全部经 WCAG AA(4.5:1) 实算（数值见各条注释）。
+ *   C. 阅读面 —— 中文长文需要比印刷文档更大的行高与段首缩进，
+ *                新增 C-extension 令牌组 --reading-*。
+ *
+ * 层级遵循 schema：A1-identity / A1-structure（品牌自定，无兜底）
+ *                  A2（schema 有兜底，但契约要求每个品牌都显式声明）
+ *                  B-slot（须声明，可 alias 或独立绑定）
+ *                  C-extension（品牌专有）
+ *
+ * 注意：A2 与 B-slot 在本系统里**全部显式绑定**——因为产物是「把一份
+ * :root 粘进单个 <style>」，没有全局样式表兜底，缺一个就会静默失效。
+ * ─────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ─── Surface（3 级，B-slot #Gap 2）───────────────────────────────
+   * 羊皮纸 → 象牙 → 暖沙。任何页面背景都不用纯白：这层暖色就是性格。 */
+  --bg: #f5f4ed;            /* 羊皮纸 —— 页面底色 */
+  --surface: #faf9f5;       /* 象牙 —— 卡片、抬升容器 */
+  --surface-warm: #e8e6dc;  /* 暖沙 —— 次级交互面、按钮底 */
+
+  /* ─── Foreground（4 级，B-slot #Gap 1）───────────────────────────
+   * 每一级都带黄褐底调（R ≈ G > B），无冷灰蓝。
+   * 括号内为在 --bg 上的实测对比度，全部过 AA：
+   * 换掉现状 #999(2.58) / #bbb(1.74) / #909399(2.79) 那一族。 */
+  --fg: #141413;            /* 主文字、标题            16.7:1 */
+  --fg-2: #3d3d3a;          /* 次级文字、表头          9.9:1 */
+  --muted: #504e49;         /* 说明、caption            7.5:1 */
+  --meta: #6b6a64;          /* 三级：时间、元信息       4.9:1 */
+
+  /* ─── Border（2 级，B-slot #Gap 3）────────────────────────────── */
+  --border: #e8e6dc;        /* 卡片边、分区线 */
+  --border-soft: #e5e3d8;   /* 行内分隔，应弱于 --border */
+
+  /* ─── Accent（A1-identity）───────────────────────────────────────
+   * 全系统唯一的彩色动作。占比 ≤5% 版面：主按钮、链接、激活态。 */
+  --accent: #1b365d;        /* 墨蓝                       11.0:1 */
+  --accent-on: #faf9f5;     /* 墨蓝底上的文字（象牙，非纯白）11.5:1 */
+  --accent-light: #2d5a8a;  /* 深色面上的链接 */
+  /* Accent 状态（A2 #Gap 4）：墨蓝已足够深，再混黑 hover 会看不见，
+   * 故按 kami 的做法——hover 用「色值不变 + 抬升」，active 手挑更深值。 */
+  --accent-hover: var(--accent);
+  --accent-active: #142a48;
+
+  /* ─── Semantic（A2）──────────────────────────────────────────────
+   * 基座 kami 的三个语义色是为印刷调暗的暖色，在状态标签密集的界面里
+   * 分不开也压不住对比度。此处按运维台场景重设，全部实测过 AA。
+   * 用法纪律：状态**不得只用颜色表达**，标签一律带文字。 */
+  --success: #2c6639;       /* 已完成 / 通过               6.2:1 */
+  --warn: #7a4606;          /* 待办 / 生成中 / 提醒         7.0:1 */
+  --danger: #8a3a30;        /* 停止 / 失败 / 打回           7.0:1 */
+
+  /* ─── Typography（A1-identity + A1-structure）────────────────────
+   * 本平台中文优先，故 :root 直接落中文衬线栈；下方 :root[lang] 块
+   * 才是「英语优先」的反向覆盖（与基座 kami 的默认方向相反）。 */
+  --font-display:
+    "TsangerJinKai02", "Source Han Serif SC", "Noto Serif CJK SC",
+    "Songti SC", "STSong", "SimSun", Georgia, serif;
+  --font-body:
+    "PingFang SC", "Microsoft YaHei", "Source Han Sans SC",
+    "Noto Sans CJK SC", "Hiragino Sans GB", system-ui, -apple-system, sans-serif;
+  --font-mono:
+    "JetBrains Mono", "SF Mono", "Fira Code", Consolas, Monaco,
+    "Source Han Serif SC", monospace;
+
+  /* 字号阶（px）。运维台密度：12 是元信息下限，14 是正文基准。
+   * 现状 12px(142处) → --text-xs，13px(71处) → --text-sm。 */
+  --text-xs: 12px;          /* 表格元信息、标签文字 */
+  --text-sm: 13px;          /* 密集 UI 默认 */
+  --text-base: 14px;        /* 标准正文 */
+  --text-md: 15px;          /* C-ext：强调正文（承 kami --text-md 先例） */
+  --text-lg: 17px;          /* 卡片标题 */
+  --text-xl: 20px;          /* 页面标题 */
+  --text-2xl: 24px;         /* 对话框标题 */
+  --text-3xl: 32px;         /* 少用 */
+
+  /* 行高。--leading-dense 给表格行，--leading-body 给界面正文。 */
+  --leading-display: 1.15;
+  --leading-tight: 1.3;
+  --leading-dense: 1.45;
+  --leading-body: 1.6;
+  --tracking-display: 0em;
+  --tracking-eyebrow: 1.2px;
+  --tracking-label: 0.4px;
+
+  /* ─── Spacing（A2）—— 4px 栅格 ───────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* A1-structure 要求声明；本系统是应用台而非营销页，取小值。 */
+  --section-y-desktop: 24px;
+  --section-y-tablet: 16px;
+  --section-y-phone: 12px;
+
+  /* ─── Radius（A2）─────────────────────────────────────────────
+   * 印刷式的克制圆角：标签 2–4px，按钮卡片 8px，特性容器 12px。 */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 9999px;
+
+  /* ─── Elevation（A2 #Gap 5）───────────────────────────────────
+   * 禁硬投影。三级：无 / 1px 环 / 低语。 */
+  --elev-flat: none;
+  --elev-ring: 0 0 0 1px var(--border);
+  --elev-ring-accent: 0 0 0 1px var(--accent);
+  --elev-raised: 0 4px 24px rgba(0, 0, 0, 0.05);
+
+  /* ─── Focus（A2）—— 用 accent 的深变体，不用冷蓝辉光 ──────────── */
+  --focus-ring: 0 0 0 2px var(--accent-active);
+
+  /* ─── Motion（A2）────────────────────────────────────────────── */
+  --motion-fast: 150ms;
+  --motion-base: 200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ─── Layout（A1-structure）────────────────────────────────────
+   * **数据面不受宽度上限约束**（产品口径，见 DESIGN.md §5）：
+   * 表格一律吃满内容区，窗口多宽表格多宽，多余宽度按比例分给弹性列。
+   * 故这里声明 100%（= 不设上限），而不是基座的 1120px。
+   * 真正需要限宽的长文，走下面的 --reading-measure（按字号缩放的 em）。 */
+  --container-max: 100%;
+  --container-gutter-desktop: 24px;
+  --container-gutter-tablet: 16px;
+  --container-gutter-phone: 12px;
+
+  /* ═══ C-extension：状态标签 tint ═══════════════════════════════
+   * 五族状态标签的实色三元组。用实色 hex 而非 rgba/color-mix：
+   * 一来承 kami 的印刷保真做法，二来 el-tag 会叠层渲染，半透明底会双绘。
+   * 生成方式（可复现）：把语义色按给定 alpha 合成到 --bg 上。
+   *   底 = mix(色, #f5f4ed, 0.14)   边 = mix(色, #f5f4ed, 0.30)
+   * 括号内为「标签文字色在自身底色上」的实测对比度，全部 ≥4.5。 */
+  --tag-success-fg: #2c6639;  --tag-success-bg: #d9e0d4;  --tag-success-bd: #b9c9b7;  /* 5.07 */
+  --tag-attn-fg:    #7a4606;  --tag-attn-bg:    #e4dccd;  --tag-attn-bd:    #d0c0a8;  /* 5.70 */
+  --tag-danger-fg:  #8a3a30;  --tag-danger-bg:  #e6dad3;  --tag-danger-bd:  #d5bcb4;  /* 5.62 */
+  --tag-accent-fg:  #1b365d;  --tag-accent-bg:  #d6d9d9;  --tag-accent-bd:  #b4bbc2;  /* 8.54 */
+  --tag-neutral-fg: #5f5e58;  --tag-neutral-bg: #e0dfd8;  --tag-neutral-bd: #c8c7c0;  /* 4.87 */
+
+  /* ═══ C-extension：阅读面 ══════════════════════════════════════
+   * 中文长文的排版参数。--reading-measure 用 em 而非 px：
+   * 1em ≈ 1 个全角字，46em ≈ 每行 46 字；用户调大字号时版心同步变宽，
+   * 每行字数不变（这是「按比例」而非「设上限」的做法）。 */
+  --reading-fs-1: 16px;
+  --reading-fs-2: 17px;
+  --reading-fs-3: 18px;
+  --reading-fs-4: 20px;
+  --reading-leading: 1.9;     /* 比界面正文松：中文长文需要 */
+  --reading-indent: 2em;      /* 段首缩进两字符（中文排版惯例） */
+  --reading-measure: 46em;    /* 版心 ≈ 46 全角字/行 */
+}
+
+/* ─── i18n 字体覆盖 ────────────────────────────────────────────────
+ * 与基座 kami 方向相反：本平台 :root 即中文栈，英语产物才覆盖。
+ * 只应用与 <html lang> 匹配的那一块，不要三个栈串在一个声明里。 */
+:root[lang="en"] {
+  --font-display: Charter, Georgia, Palatino, "Times New Roman", serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ─── 深色脚手架（本批不启用，仅留结构）───────────────────────────
+ * 启用时需要：Element Plus 的 dark css 变量 + 逐页 QA。取值取自 kami
+ * 的暗面（暖炭而非板岩）。 */
+.dark {
+  --bg: #141413;
+  --surface: #30302e;
+  --surface-warm: #26261f;
+  --fg: #f5f4ed;
+  --fg-2: #dedcd4;
+  --muted: #b8b6ae;
+  --meta: #94928b;
+  --border: #3d3d3a;
+  --border-soft: #333330;
+}
