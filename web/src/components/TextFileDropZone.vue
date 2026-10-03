@@ -96,27 +96,27 @@ function take(file) {
 
 <style scoped>
 .text-drop {
-  border: 1px dashed #d9dce0;
+  border: 1px dashed var(--border);
   border-radius: 6px;
-  background: #fafbfc;
+  background: var(--surface-warm);
   padding: 14px 16px;
   text-align: center;
   transition: border-color .2s, background .2s;
 }
 .text-drop.is-over {
-  border-color: #409eff;
-  background: #ecf5ff;
+  border-color: var(--accent);
+  background: var(--tag-accent-bg);
 }
 .text-drop-title {
-  font-size: 13px;
-  color: #606266;
+  font-size: var(--text-sm);
+  color: var(--fg-2);
 }
 .text-drop-pick {
   border: none;
   background: none;
   padding: 0;
-  font-size: 13px;
-  color: #409eff;
+  font-size: var(--text-sm);
+  color: var(--accent);
   cursor: pointer;
 }
 .text-drop-pick:hover {
@@ -124,7 +124,7 @@ function take(file) {
 }
 .text-drop-sub {
   margin-top: 4px;
-  font-size: 12px;
-  color: #999;
+  font-size: var(--text-xs);
+  color: var(--muted);
 }
 </style>

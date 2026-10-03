@@ -3,8 +3,8 @@
     <el-card shadow="never">
       <template #header>
         <div style="display: flex; align-items: baseline; gap: 12px">
-          <b style="font-size: 15px">开新书</b>
-          <span style="font-size: 12px; color: #999">从品类预设或导入的爆款样本衍生新书：设定衍生参数 → AI 生成大纲 → 创建即入量产链</span>
+          <b style="font-size: var(--text-md)">开新书</b>
+          <span style="font-size: var(--text-xs); color: var(--muted)">从品类预设或导入的爆款样本衍生新书：设定衍生参数 → AI 生成大纲 → 创建即入量产链</span>
         </div>
       </template>
 
@@ -13,7 +13,7 @@
         <el-button size="small" type="primary" @click="resumeDraft">继续这份草稿</el-button>
         <el-button size="small" type="danger" plain @click="discardDraft(draftBook)">废弃草稿</el-button>
         <el-button size="small" @click="ignoreDraft">不管它，直接开新书</el-button>
-        <span style="font-size: 12px; color: #999; margin-left: 8px">废弃为软删，之后仍可在数据库恢复</span>
+        <span style="font-size: var(--text-xs); color: var(--muted); margin-left: 8px">废弃为软删，之后仍可在数据库恢复</span>
       </el-alert>
 
       <el-steps :active="wizardStep" finish-status="success" simple style="margin-bottom: 20px">
@@ -28,7 +28,7 @@
           <el-form-item label="书名" required>
             <el-input v-model="wizardForm.title" maxlength="256" placeholder="作品名，全站唯一"
                       :disabled="!!createdNovelId" />
-            <div v-if="createdNovelId" style="font-size: 12px; color: #67c23a">已落库为草稿（ID {{ createdNovelId }}），改名请到书籍管理页编辑</div>
+            <div v-if="createdNovelId" style="font-size: var(--text-xs); color: var(--success)">已落库为草稿（ID {{ createdNovelId }}），改名请到书籍管理页编辑</div>
           </el-form-item>
           <el-form-item label="简介">
             <el-input v-model="wizardForm.description" type="textarea" :rows="2" placeholder="一句话简介（可选）" />
@@ -44,10 +44,10 @@
                 <el-select v-model="wizardForm.presetId" placeholder="选择品类预设" style="width: 100%">
                   <el-option v-for="p in presets" :key="p.id" :value="p.id" :label="p.name">
                     <span>{{ p.name }}</span>
-                    <span style="float: right; color: #999; font-size: 12px">{{ p.description }}</span>
+                    <span style="float: right; color: var(--muted); font-size: var(--text-xs)">{{ p.description }}</span>
                   </el-option>
                 </el-select>
-                <div style="font-size: 12px; color: #999; line-height: 1.7">
+                <div style="font-size: var(--text-xs); color: var(--muted); line-height: 1.7">
                   预设决定文风指纹、门禁阈值与写作规则，创建时克隆为本书私有配置（之后在素材库可单独调整，互不影响）。
                 </div>
               </template>
@@ -58,10 +58,10 @@
             <template v-else>
               <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px; flex-wrap: wrap">
                 <el-input v-model="sampleForm.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 200px" />
-                <span v-if="sampleForm.text" style="font-size: 12px; color: #999">
+                <span v-if="sampleForm.text" style="font-size: var(--text-xs); color: var(--muted)">
                   已载入 {{ (sampleForm.text.length / 10000).toFixed(1) }} 万字
                 </span>
-                <span v-else-if="sampleForm.fileBase64" style="font-size: 12px; color: #999">已载入文档/电子书</span>
+                <span v-else-if="sampleForm.fileBase64" style="font-size: var(--text-xs); color: var(--muted)">已载入文档/电子书</span>
                 <el-button type="primary" size="small" :loading="analyzing"
                            :disabled="!sampleForm.text && !sampleForm.fileBase64" @click="analyzeSample">
                   分析文风
@@ -73,7 +73,7 @@
               <el-input v-model="sampleForm.text" type="textarea" :rows="6"
                 placeholder="或直接粘贴小说正文（整本或长片段）。系统自动切块存入语料库（之后随时可补料/重提/采纳），只分析文风分布（用词/句式/节奏），不看情节。支持 txt 与无 DRM 的 mobi/azw3。" />
 
-              <div v-if="analyzeResult" style="margin-top: 10px; font-size: 13px">
+              <div v-if="analyzeResult" style="margin-top: 10px; font-size: var(--text-sm)">
                 <div style="margin-bottom: 6px">
                   {{ (analyzeResult.totalChars / 10000).toFixed(1) }} 万字 · {{ analyzeResult.chunks }} 块 ·
                   章长预算 {{ analyzeResult.budgetMin }}-{{ analyzeResult.budgetMax }} 字 ·
@@ -83,10 +83,10 @@
                 <div v-for="s in analyzeResult.similarities" :key="s.presetId"
                      style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px">
                   <span style="width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ s.name }}</span>
-                  <div style="flex: 1; height: 8px; background: #f0f2f5; border-radius: 4px; overflow: hidden">
-                    <div :style="{ width: Math.max(0, s.score) * 100 + '%', height: '100%', background: s.score >= 0.65 ? '#67c23a' : s.score >= 0.45 ? '#e6a23c' : '#c0c4cc' }" />
+                  <div style="flex: 1; height: 8px; background: var(--surface-warm); border-radius: 4px; overflow: hidden">
+                    <div :style="{ width: Math.max(0, s.score) * 100 + '%', height: '100%', background: s.score >= 0.65 ? 'var(--success)' : s.score >= 0.45 ? 'var(--warn)' : 'var(--meta)' }" />
                   </div>
-                  <span style="width: 48px; text-align: right; color: #606266">{{ s.comparable ? Math.round(s.score * 100) + '%' : '不可比' }}</span>
+                  <span style="width: 48px; text-align: right; color: var(--fg-2)">{{ s.comparable ? Math.round(s.score * 100) + '%' : '不可比' }}</span>
                 </div>
 
                 <el-alert v-if="analyzeResult.recommendation === 'match' && bestSim" type="success" :closable="false"
@@ -116,7 +116,7 @@
                              style="margin-left: 10px" @click="goDeepParse(analyzeResult.sampleId)">
                     去深度解析剧情与资产 →
                   </el-button>
-                  <div style="font-size: 12px; color: #999; margin-top: 4px">
+                  <div style="font-size: var(--text-xs); color: var(--muted); margin-top: 4px">
                     深度解析由 AI 拆出大纲/章纲/角色/世界观资产（素材库可看），衍生开书时即可克隆复用；不解析也可直接继续开书。
                   </div>
                 </div>
@@ -128,7 +128,7 @@
 
       <template v-else-if="wizardStep === 1">
         <el-form label-width="92px">
-          <div v-if="presetBand" style="font-size: 12px; color: #999; margin: 0 0 10px 92px">
+          <div v-if="presetBand" style="font-size: var(--text-xs); color: var(--muted); margin: 0 0 10px 92px">
             本书每章字数带（期望字数，来自预设「{{ chosenPresetName || '所选预设' }}」）：约 <b>{{ presetBand[0] }}–{{ presetBand[1] }}</b> 字/章，
             之后可在素材库·风格包调整
           </div>
@@ -136,15 +136,15 @@
             <el-select v-model="wizardForm.sampleId" clearable placeholder="选择导入小说（可不选）" style="width: 100%">
               <el-option v-for="s in wizardSamples" :key="s.id" :value="s.id" :label="s.title">
                 <span>{{ s.title }}</span>
-                <span style="float: right; color: #999; font-size: 12px">{{ (s.totalChars / 10000).toFixed(0) }} 万字</span>
+                <span style="float: right; color: var(--muted); font-size: var(--text-xs)">{{ (s.totalChars / 10000).toFixed(0) }} 万字</span>
               </el-option>
             </el-select>
-            <div v-if="wizardForm.sampleId" style="display: flex; gap: 12px; font-size: 13px; margin-top: 4px">
+            <div v-if="wizardForm.sampleId" style="display: flex; gap: 12px; font-size: var(--text-sm); margin-top: 4px">
               <el-checkbox v-model="wizardForm.cloneAssets.cards">设定卡（地点/物品/组织/现象；不含原书人物——新书写新人物）</el-checkbox>
               <el-checkbox v-model="wizardForm.cloneAssets.world">世界观</el-checkbox>
               <el-checkbox v-model="wizardForm.cloneAssets.plotOutline">剧情骨架预填大纲（慎用：大纲会贴近原书剧情，规划出的卷纲也会像原书；衍生新书建议改用「AI 生成大纲」）</el-checkbox>
             </div>
-            <div style="font-size: 12px; color: #999; line-height: 1.7">
+            <div style="font-size: var(--text-xs); color: var(--muted); line-height: 1.7">
               克隆的是样本深度解析出的资产（素材库 → 导入小说 → 深度解析）；未解析的样本克隆不到东西，先去解析。
             </div>
             <el-alert v-if="selectedSample && !selectedSample.presetId" type="warning" :closable="false"
@@ -164,7 +164,7 @@
               <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px">
                 <el-button v-if="sampleTagOptions.length" size="small" link type="primary"
                            @click="wizardForm.derive.tags = [...sampleTagOptions]">沿用样本标签</el-button>
-                <span style="font-size: 12px; color: #999">
+                <span style="font-size: var(--text-xs); color: var(--muted)">
                   控制衍生书的类型基调与标志性元素（题材/体量节奏/特征元素），进卷规划与正文提示词
                 </span>
               </div>
@@ -172,14 +172,14 @@
           </el-form-item>
           <el-form-item label="掺水量">
             <div style="display: flex; align-items: center; gap: 12px; width: 100%">
-              <span style="font-size: 12px; color: #999">干货</span>
+              <span style="font-size: var(--text-xs); color: var(--muted)">干货</span>
               <el-slider v-model="wizardForm.derive.water" :min="0" :max="100" :step="5" style="flex: 1" />
-              <span style="font-size: 12px; color: #999">舒缓</span>
+              <span style="font-size: var(--text-xs); color: var(--muted)">舒缓</span>
               <el-tag size="small" :type="wizardForm.derive.water >= 70 ? 'warning' : wizardForm.derive.water <= 30 ? 'success' : 'info'">
                 {{ wizardForm.derive.water >= 70 ? '可注水' : wizardForm.derive.water <= 30 ? '零注水' : '均衡' }}
               </el-tag>
             </div>
-            <div style="font-size: 12px; color: #999">决定读者评审的注水拦截线：越干修剪越狠，越水容忍度越高（写入本书门禁）</div>
+            <div style="font-size: var(--text-xs); color: var(--muted)">决定读者评审的注水拦截线：越干修剪越狠，越水容忍度越高（写入本书门禁）</div>
           </el-form-item>
           <el-form-item label="叙事视角">
             <el-select v-model="wizardForm.derive.pov" style="width: 200px">
@@ -193,9 +193,9 @@
           </el-form-item>
           <el-form-item label="节奏">
             <el-input-number v-model="wizardForm.derive.chaptersPerVolume" :min="3" :max="30" size="small" />
-            <span style="margin-left: 6px; font-size: 13px">章/卷</span>
+            <span style="margin-left: 6px; font-size: var(--text-sm)">章/卷</span>
             <el-input-number v-model="wizardForm.derive.targetChapters" :min="10" :max="2000" :step="50" size="small" style="margin-left: 16px" />
-            <span style="margin-left: 6px; font-size: 13px">章目标（总）</span>
+            <span style="margin-left: 6px; font-size: var(--text-sm)">章目标（总）</span>
           </el-form-item>
           <el-form-item label="节奏说明">
             <el-input v-model="wizardForm.derive.pacingNote" type="textarea" :rows="2"
@@ -203,7 +203,7 @@
           </el-form-item>
           <el-form-item label="无人续跑">
             <el-switch v-model="wizardForm.derive.autoContinue" />
-            <span style="margin-left: 8px; font-size: 12px; color: #999">
+            <span style="margin-left: 8px; font-size: var(--text-xs); color: var(--muted)">
               开=写到总目标为止全自动（卷尽自动规划下卷续批；规划/审批强制 auto，审校硬伤自动重写一轮，仍不过暂停等人）
             </span>
           </el-form-item>
@@ -215,7 +215,7 @@
             </el-radio-group>
             <el-button size="small" type="primary" plain :loading="paramsDeciding" :disabled="!wizardForm.sampleId"
                        style="margin-left: 16px" @click="aiDecideParams">AI 帮我定</el-button>
-            <span v-if="!wizardForm.sampleId" style="font-size: 12px; color: #999; margin-left: 6px">（选了参考样本才可用）</span>
+            <span v-if="!wizardForm.sampleId" style="font-size: var(--text-xs); color: var(--muted); margin-left: 6px">（选了参考样本才可用）</span>
           </el-form-item>
         </el-form>
       </template>
@@ -230,7 +230,7 @@
           <el-button size="small" type="primary" plain :loading="outlineDrafting"
                      :disabled="(!wizardForm.title.trim() || !wizardForm.presetId) && !outlineDrafting"
                      @click="aiDraftOutline">{{ outlineDrafting ? '大纲生成中…' : 'AI 生成大纲草稿' }}</el-button>
-          <span style="font-size: 12px; color: #999">
+          <span style="font-size: var(--text-xs); color: var(--muted)">
             后台并发生成（约半分钟/本，可连续批量提交），完成后自动填入本框；按书名/简介/文风预设 + 衍生设定（类型标签、克隆世界观、POV、节奏与目标章数）生成。
             选了样本时自动做「原书复刻」审校：判复刻会自动重写，重写仍复刻则任务失败并给出建议
           </span>
@@ -239,7 +239,7 @@
                   :placeholder="wizardForm.sampleId && wizardForm.cloneAssets.plotOutline
                     ? '可留空——创建时会自动预填样本剧情骨架（标注待改写，之后在「规划」页改写）。也可点上方 AI 生成或直接写全书大纲。'
                     : '全书大纲：主题、主线、分卷走向、主要人物。生成每一章都会携带它作为方向约束。可点上方 AI 生成草稿后修改。'" />
-        <div style="font-size: 12px; color: #999; margin-top: 6px">
+        <div style="font-size: var(--text-xs); color: var(--muted); margin-top: 6px">
           可先跳过、之后在「规划」页补写保存；但开跑生成前必须有——没有大纲的章会失去方向约束。
         </div>
       </template>
@@ -248,7 +248,7 @@
         <el-result v-if="wizardCreated" icon="success" :title="`《${wizardCreated.title}》已创建`"
           :sub-title="`风格包已从预设克隆，当前 ${wizardCreated.chapterCount} 章。接下来三步：`">
           <template #extra>
-            <div style="text-align: left; font-size: 13px; line-height: 2">
+            <div style="text-align: left; font-size: var(--text-sm); line-height: 2">
               <div v-if="wizardForm.derive.autoContinue">
                 本书已开「无人续跑」：回工作台点「启动续跑」即可写到总目标章数为止——卷尽自动规划下卷、自动续批；中途出硬伤会暂停等你处理。
               </div>
@@ -257,7 +257,7 @@
                 <div>② 回工作台设好连跑范围（默认从第 1 章起），点「启动生成」</div>
               </template>
               <div>③ 生成中在工作台看实时逐字流；写完的章去「章节」页阅读/审批</div>
-              <div style="color: #999">所有生成参数已按本向导的设定落库；之后想改，到工作台点「本书生成参数」随时可改。</div>
+              <div style="color: var(--muted)">所有生成参数已按本向导的设定落库；之后想改，到工作台点「本书生成参数」随时可改。</div>
             </div>
             <div style="display: flex; gap: 10px; justify-content: center">
               <el-button type="primary" @click="wizardDone">开始规划 →</el-button>
@@ -265,7 +265,7 @@
             </div>
           </template>
         </el-result>
-        <div v-else style="text-align: center; padding: 30px; color: #999">
+        <div v-else style="text-align: center; padding: 30px; color: var(--muted)">
           创建中……（克隆预设、建风格包、落书、存大纲）
         </div>
       </template>

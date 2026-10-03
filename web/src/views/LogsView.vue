@@ -2,7 +2,7 @@
   <div>
     <PageHeader title="日志" hint="LLM 调用台账与生成事件流水；点行看完整 prompt/输出与思考过程" />
     <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px">
-      <span style="font-size: 13px; color: #666">筛选：</span>
+      <span style="font-size: var(--text-sm); color: var(--fg-2)">筛选：</span>
       <el-select v-model="novelId" placeholder="全部作品" clearable size="small" style="width: 220px" @change="loadAll">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
@@ -18,7 +18,7 @@
     <el-tabs v-model="tab">
       <el-tab-pane label="调用台账" name="calls">
         <el-card shadow="never" style="margin-bottom: 12px">
-          <div style="display: flex; gap: 24px; font-size: 14px">
+          <div style="display: flex; gap: 24px; font-size: var(--text-base)">
             <span>调用：<b>{{ totals.calls }}</b> 次</span>
             <span>Prompt：<b>{{ totals.promptTokens }}</b></span>
             <span>Completion：<b>{{ totals.completionTokens }}</b></span>
@@ -51,21 +51,21 @@
       </el-tab-pane>
 
       <el-tab-pane label="事件流水" name="events">
-        <div style="font-size: 12px; color: #999; margin-bottom: 10px">
+        <div style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 10px">
           生成履历回放：每次门禁失败原因、重写/修订轮次、场景中途草稿都在此可追溯；点开单条可看原始负载。
         </div>
         <el-empty v-if="!events.length" description="暂无事件（新跑的章节会自动记录）" />
         <el-timeline v-else>
           <el-timeline-item v-for="e in events" :key="e.id" :timestamp="e.createTime" placement="top"
             :type="EVENT_COLOR[e.stage] || 'primary'">
-            <div style="font-size: 13px; line-height: 1.7">
+            <div style="font-size: var(--text-sm); line-height: 1.7">
               <el-tag size="small" style="margin-right: 6px">{{ STAGE_LABEL[e.stage] || e.stage }}</el-tag>
-              <span v-if="e.chapterNo" style="color: #409eff">第{{ e.chapterNo }}章 </span>
+              <span v-if="e.chapterNo" style="color: var(--accent)">第{{ e.chapterNo }}章 </span>
               <span>{{ eventText(e) }}</span>
             </div>
             <el-collapse style="margin-top: 2px">
               <el-collapse-item title="原始负载">
-                <pre style="font-size: 11px; white-space: pre-wrap; margin: 0; max-height: 320px; overflow-y: auto">{{ pretty(e.payloadJson) }}</pre>
+                <pre style="font-size: var(--text-xs); white-space: pre-wrap; margin: 0; max-height: 320px; overflow-y: auto">{{ pretty(e.payloadJson) }}</pre>
               </el-collapse-item>
             </el-collapse>
           </el-timeline-item>
@@ -75,20 +75,20 @@
 
     <el-drawer v-model="drawer" :title="detail ? `#${detail.id} ${detail.node}` : ''" size="55%">
       <template v-if="detail">
-        <div style="font-size: 12px; color: #999; margin-bottom: 8px">
+        <div style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 8px">
           {{ detail.model }}｜prompt {{ detail.promptTokens }}（缓存 {{ detail.cachedTokens || 0 }}）+ completion {{ detail.completionTokens }} = {{ detail.totalTokens }} tokens｜{{ detail.latencyMs }}ms<template v-if="detail.cost != null">｜¥{{ detail.cost.toFixed(4) }}</template>｜{{ detail.status }}｜{{ fmtTime(detail.createTime) }}
         </div>
         <el-collapse>
           <el-collapse-item v-for="(m, i) in detail.promptMessages || []" :key="'p' + i"
             :title="`Prompt · ${m.role}（${(m.content || '').length} 字）——AI 当时看到的完整输入`">
-            <div style="white-space: pre-wrap; font-size: 12px; color: #849aa9; max-height: 420px; overflow-y: auto; background: #fafcfe; padding: 8px">{{ m.content }}</div>
+            <div style="white-space: pre-wrap; font-size: var(--text-xs); color: var(--meta); max-height: 420px; overflow-y: auto; background: var(--surface); padding: 8px">{{ m.content }}</div>
           </el-collapse-item>
           <el-collapse-item title="AI 思考过程（think）">
-            <div style="white-space: pre-wrap; font-size: 12px; color: #666; max-height: 400px; overflow-y: auto">{{ detail.reasoningText || '（无）' }}</div>
+            <div style="white-space: pre-wrap; font-size: var(--text-xs); color: var(--fg-2); max-height: 400px; overflow-y: auto">{{ detail.reasoningText || '（无）' }}</div>
           </el-collapse-item>
         </el-collapse>
         <div style="margin-top: 10px; font-weight: bold">输出正文</div>
-        <div style="white-space: pre-wrap; line-height: 1.8; max-height: 480px; overflow-y: auto; border: 1px solid #eee; padding: 10px">{{ detail.content || detail.errorMsg || '（无）' }}</div>
+        <div style="white-space: pre-wrap; line-height: 1.8; max-height: 480px; overflow-y: auto; border: 1px solid var(--border); padding: 10px">{{ detail.content || detail.errorMsg || '（无）' }}</div>
       </template>
     </el-drawer>
   </div>

@@ -67,16 +67,16 @@
               :row-class-name="({ row }) => (row.source === 'SAMPLE' && row.refId === highlightSampleId ? 'row-notice' : '')">
       <el-table-column type="expand">
         <template #default="{ row }">
-          <div style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
-            <div v-if="!row.hasFingerprint" style="color: #e6a23c">
+          <div style="padding: 4px 12px; font-size: var(--text-sm); line-height: 1.9">
+            <div v-if="!row.hasFingerprint" style="color: var(--warn)">
               无指纹基线：这条记录还没有可用的指纹（历史导入的样本未留分析快照，且未采纳预设）
             </div>
             <div v-if="row.notes && row.notes.length">
-              <div v-for="(n, i) in row.notes" :key="i" style="color: #909399">{{ n }}</div>
+              <div v-for="(n, i) in row.notes" :key="i" style="color: var(--muted)">{{ n }}</div>
             </div>
             <div v-if="row.similarities && row.similarities.length">
               <div>与现有预设的相似度：</div>
-              <div v-for="s in row.similarities" :key="s.presetId" style="color: #606266">
+              <div v-for="s in row.similarities" :key="s.presetId" style="color: var(--fg-2)">
                 {{ s.name }}：{{ s.comparable ? Math.round(s.score * 100) + '%' : '不可比' }}
               </div>
             </div>
@@ -107,27 +107,27 @@
       <el-table-column label="章长带" width="130">
         <template #default="{ row }">
           <span v-if="row.budgetMin">{{ row.budgetMin }}–{{ row.budgetMax }} 字</span>
-          <span v-else style="color: #bbb">-</span>
+          <span v-else style="color: var(--meta)">-</span>
         </template>
       </el-table-column>
       <el-table-column label="置信度" width="90">
         <template #default="{ row }">
           <el-tag v-if="row.lowConfidence" size="small" type="warning">低置信</el-tag>
-          <span v-else-if="row.lowConfidence === false" style="color: #67c23a; font-size: 12px">正常</span>
-          <span v-else style="color: #bbb">-</span>
+          <span v-else-if="row.lowConfidence === false" style="color: var(--success); font-size: var(--text-xs)">正常</span>
+          <span v-else style="color: var(--meta)">-</span>
         </template>
       </el-table-column>
       <el-table-column label="关联" min-width="170" show-overflow-tooltip>
         <template #default="{ row }">
           <template v-if="row.source === 'SAMPLE'">
             <el-tag v-if="row.presetId" size="small" type="success">已采纳 #{{ row.presetId }} {{ row.presetName }}</el-tag>
-            <span v-else style="color: #e6a23c; font-size: 12px">未采纳预设</span>
+            <span v-else style="color: var(--warn); font-size: var(--text-xs)">未采纳预设</span>
           </template>
           <template v-else-if="row.source === 'BOOK'">
-            <span v-if="row.sampleId" style="font-size: 12px">源样本 #{{ row.sampleId }}</span>
-            <span v-else style="color: #bbb">-</span>
+            <span v-if="row.sampleId" style="font-size: var(--text-xs)">源样本 #{{ row.sampleId }}</span>
+            <span v-else style="color: var(--meta)">-</span>
           </template>
-          <span v-else style="color: #bbb">-</span>
+          <span v-else style="color: var(--meta)">-</span>
         </template>
       </el-table-column>
       <el-table-column label="提取时间" width="160">
@@ -146,7 +146,7 @@
     <!-- 指标明细：基线/容差/硬边界 + 原始 JSON（只读，改指纹请去风格包页） -->
     <el-dialog v-model="detailVisible" :title="`指纹明细 · ${detailRow ? detailRow.name : ''}`" width="900px">
       <div v-if="detailRow">
-        <div style="font-size: 13px; color: #606266; line-height: 1.9; margin-bottom: 8px">
+        <div style="font-size: var(--text-sm); color: var(--fg-2); line-height: 1.9; margin-bottom: 8px">
           <div>来源：{{ SOURCE_LABEL[detailRow.source] }}（#{{ detailRow.refId }}{{ detailRow.source === 'BOOK' ? ' · 风格包' : '' }}）
             <span v-if="detailRow.novelId"> · 书籍 #{{ detailRow.novelId }}</span>
           </div>
@@ -167,11 +167,11 @@
         <FingerprintMetricTable :metrics="detailRow.metrics" :max-height="360" style="margin-bottom: 10px" />
 
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px">
-          <b style="font-size: 13px">原始指纹 JSON</b>
+          <b style="font-size: var(--text-sm)">原始指纹 JSON</b>
           <el-button size="small" @click="copyJson">复制</el-button>
         </div>
-        <pre style="max-height: 240px; overflow: auto; background: #f7f8fa; padding: 10px; border-radius: 6px; font-size: 12px; line-height: 1.6">{{ prettyJson(detailRow.fingerprintJson) }}</pre>
-        <div style="color: #999; font-size: 12px; margin-top: 6px">
+        <pre style="max-height: 240px; overflow: auto; background: var(--surface-warm); padding: 10px; border-radius: 6px; font-size: var(--text-xs); line-height: 1.6">{{ prettyJson(detailRow.fingerprintJson) }}</pre>
+        <div style="color: var(--muted); font-size: var(--text-xs); margin-top: 6px">
           改指纹阈值/门禁请去「素材库 → 质量与风格」（本书）或品类预设页；此处只读。
         </div>
       </div>

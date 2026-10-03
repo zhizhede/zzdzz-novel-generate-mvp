@@ -34,7 +34,7 @@
         <el-form-item v-if="filters.level !== 'OUTLINE'" label="卷号">
           <el-input-number v-model="filters.volumeNo" :min="0" :max="9999" :controls="false" placeholder="不限"
                            size="small" style="width: 80px" @change="load" />
-          <span style="font-size: 12px; color: #bbb; margin-left: 4px">0＝未分卷</span>
+          <span style="font-size: var(--text-xs); color: var(--meta); margin-left: 4px">0＝未分卷</span>
         </el-form-item>
         <el-form-item v-if="filters.level !== 'OUTLINE'" label="章号">
           <el-input-number v-model="filters.fromChapter" :min="1" :max="99999" :controls="false" placeholder="起"
@@ -102,8 +102,8 @@
               :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">
-          <div style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
-            <div v-if="!row.hasOutline" style="color: #e6a23c">
+          <div style="padding: 4px 12px; font-size: var(--text-sm); line-height: 1.9">
+            <div v-if="!row.hasOutline" style="color: var(--warn)">
               这本书还没有大纲——去「书籍管理」点「继续向导 → AI 生成大纲」，或工作台提交生成任务时会自动规划。
             </div>
             <pre v-else style="white-space: pre-wrap; margin: 0; font-family: inherit">{{ row.outline }}</pre>
@@ -146,14 +146,14 @@
               :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">
-          <div style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
+          <div style="padding: 4px 12px; font-size: var(--text-sm); line-height: 1.9">
             <div v-if="row.hasReview">
               <div><b>卷复盘摘要</b>：{{ row.reviewSummary || '（复盘未给摘要）' }}</div>
-              <div style="color: #909399">
+              <div style="color: var(--muted)">
                 落差 {{ row.reviewDrifts }} 条（其中 major {{ row.reviewMajor }} 条）· 复盘覆盖第 {{ reviewRange(row) }}
               </div>
             </div>
-            <div v-else style="color: #e6a23c">
+            <div v-else style="color: var(--warn)">
               这一卷还没有卷复盘（复盘在规划下一卷前自动跑；导入书要先有卷纲才有卷可比）。
             </div>
           </div>
@@ -181,12 +181,12 @@
       </el-table-column>
       <el-table-column label="章纲覆盖" width="110">
         <template #default="{ row }">
-          <span :style="row.outlineChapters === 0 ? 'color:#f56c6c' : ''">{{ row.outlineChapters }}/{{ row.chapterCount }} 章</span>
+          <span :style="row.outlineChapters === 0 ? 'color:var(--danger)' : ''">{{ row.outlineChapters }}/{{ row.chapterCount }} 章</span>
         </template>
       </el-table-column>
       <el-table-column label="正文覆盖" width="110">
         <template #default="{ row }">
-          <span :style="row.textChapters === 0 ? 'color:#909399' : ''">{{ row.textChapters }}/{{ row.chapterCount }} 章</span>
+          <span :style="row.textChapters === 0 ? 'color:var(--muted)' : ''">{{ row.textChapters }}/{{ row.chapterCount }} 章</span>
         </template>
       </el-table-column>
       <el-table-column label="本卷正文" width="100">
@@ -195,7 +195,7 @@
       <el-table-column label="章预算带" width="120">
         <template #default="{ row }">
           <span v-if="row.budgetMin">{{ row.budgetMin }}–{{ row.budgetMax }} 字</span>
-          <span v-else style="color: #bbb">—</span>
+          <span v-else style="color: var(--meta)">—</span>
         </template>
       </el-table-column>
       <el-table-column label="卷复盘" width="100">
@@ -203,7 +203,7 @@
           <el-tag v-if="row.hasReview" size="small" :type="row.reviewMajor ? 'danger' : 'success'">
             {{ row.reviewMajor ? row.reviewMajor + ' 处 major' : '已复盘' }}
           </el-tag>
-          <span v-else style="color: #bbb">未复盘</span>
+          <span v-else style="color: var(--meta)">未复盘</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="110">
@@ -218,14 +218,14 @@
               :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">
-          <div style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
+          <div style="padding: 4px 12px; font-size: var(--text-sm); line-height: 1.9">
             <div>目标：{{ row.goal || '—' }}</div>
             <div>钩子：{{ row.hook || '—' }}</div>
             <div>时间跨度：{{ row.timeNote || '—' }}</div>
-            <div v-if="!row.hasOutline" style="color: #e6a23c">
+            <div v-if="!row.hasOutline" style="color: var(--warn)">
               本章还没有章纲——「规划」页可对单章「重新生成章纲」，或提交生成任务时自动产出。
             </div>
-            <pre v-else style="white-space: pre-wrap; margin: 6px 0 0; background: #f7f8fa; padding: 8px; border-radius: 6px">{{ row.outline }}</pre>
+            <pre v-else style="white-space: pre-wrap; margin: 6px 0 0; background: var(--surface-warm); padding: 8px; border-radius: 6px">{{ row.outline }}</pre>
           </div>
         </template>
       </el-table-column>
@@ -240,7 +240,7 @@
       <el-table-column label="卷" width="80">
         <template #default="{ row }">
           <span v-if="row.volumeNo">{{ row.volumeNo }}</span>
-          <span v-else style="color: #bbb">—</span>
+          <span v-else style="color: var(--meta)">—</span>
         </template>
       </el-table-column>
       <el-table-column label="章" width="70">
@@ -264,7 +264,7 @@
       <el-table-column label="预算" width="100">
         <template #default="{ row }">
           <span v-if="row.budgetMin">{{ row.budgetMin }}-{{ row.budgetMax }}</span>
-          <span v-else style="color: #bbb">—</span>
+          <span v-else style="color: var(--meta)">—</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="100">
@@ -275,7 +275,7 @@
       <el-table-column label="正文" width="90">
         <template #default="{ row }">
           <span v-if="row.hasText">{{ row.textChars }} 字</span>
-          <span v-else style="color: #bbb">—</span>
+          <span v-else style="color: var(--meta)">—</span>
         </template>
       </el-table-column>
       <el-table-column label="伏笔" width="70">
@@ -292,8 +292,8 @@
       <div style="display: flex; justify-content: flex-end; margin-bottom: 6px">
         <el-button size="small" @click="copyText">复制</el-button>
       </div>
-      <pre style="max-height: 60vh; overflow: auto; white-space: pre-wrap; background: #f7f8fa; padding: 10px; border-radius: 6px; font-size: 12px; line-height: 1.7">{{ textBody }}</pre>
-      <div style="color: #999; font-size: 12px; margin-top: 6px">
+      <pre style="max-height: 60vh; overflow: auto; white-space: pre-wrap; background: var(--surface-warm); padding: 10px; border-radius: 6px; font-size: var(--text-xs); line-height: 1.7">{{ textBody }}</pre>
+      <div style="color: var(--muted); font-size: var(--text-xs); margin-top: 6px">
         此处只读。改大纲去「规划」页（或书籍管理 → 继续向导），改卷纲/章纲去「规划」页对应行；改完这里刷新即可看到。
       </div>
     </el-dialog>

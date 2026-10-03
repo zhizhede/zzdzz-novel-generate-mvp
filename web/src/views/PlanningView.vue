@@ -14,26 +14,26 @@
         <el-input v-model="story" type="textarea" :rows="22" />
         <div style="margin-top: 8px">
           <el-button type="primary" @click="saveStory">保存大纲</el-button>
-          <span style="color: #999; font-size: 12px; margin-left: 10px">全书脉络 / 主线 / 卷走向；保存后自动进入每章生成的上下文</span>
+          <span style="color: var(--muted); font-size: var(--text-xs); margin-left: 10px">全书脉络 / 主线 / 卷走向；保存后自动进入每章生成的上下文</span>
         </div>
       </el-tab-pane>
 
       <!-- 卷纲 -->
       <el-tab-pane :label="`卷纲（${planChapters.length} 章规划）`">
-        <div v-if="planTask" style="margin-bottom: 10px; padding: 8px 12px; background: #fdf6ec; border-radius: 6px">
+        <div v-if="planTask" style="margin-bottom: 10px; padding: 8px 12px; background: var(--tag-attn-bg); border-radius: 6px">
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px">
             <el-tag size="small" type="warning">卷纲规划中</el-tag>
-            <span style="font-size: 12px; color: #999">{{ planTask.currentStep || '排队等待中' }} · 第 {{ planTask.fromChapter }} 章起
+            <span style="font-size: var(--text-xs); color: var(--muted)">{{ planTask.currentStep || '排队等待中' }} · 第 {{ planTask.fromChapter }} 章起
               <template v-if="planTask.status === 'DONE'"> · 完成</template>
             </span>
           </div>
           <el-progress :percentage="planTaskPercent" :stroke-width="8" :show-text="false" />
-          <div v-if="planTask.status === 'DONE'" style="font-size: 12px; color: #67c23a; margin-top: 4px">规划完成并落库 ✓</div>
+          <div v-if="planTask.status === 'DONE'" style="font-size: var(--text-xs); color: var(--success); margin-top: 4px">规划完成并落库 ✓</div>
         </div>
         <div style="margin-bottom: 10px; display: flex; gap: 14px; align-items: center">
           <el-button size="small" type="primary" @click="openAdd">新增章规划</el-button>
           <el-button size="small" type="success" :loading="autoPlanBusy" :disabled="!!planTask && planTask.status !== 'DONE'" @click="openAutoPlan">AI 规划下一卷</el-button>
-          <span style="display: flex; align-items: center; gap: 6px; color: #999; font-size: 12px">
+          <span style="display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--text-xs)">
             卷纲人工审核
             <el-switch v-model="planMode" active-value="manual" inactive-value="auto" @change="switchPlanMode" />
             <span>（自动=AI 审校通过直接落库；人工=出草稿，编辑后采纳）</span>
@@ -45,7 +45,7 @@
             <span v-else>第 {{ v.volNo }} 卷 · {{ v.arc }}（{{ v.chapters?.length || 0 }} 章）</span>
             <el-button size="small" plain :loading="retroBusy === v.volNo" @click="runReview(v)">卷级复盘</el-button>
           </div>
-          <div v-if="isImportVolume(v)" style="font-size: 12px; color: #909399; margin: -2px 0 6px 0; line-height: 1.7">
+          <div v-if="isImportVolume(v)" style="font-size: var(--text-xs); color: var(--muted); margin: -2px 0 6px 0; line-height: 1.7">
             导入成稿卷：这 {{ v.chapters?.length || 0 }} 章是你导入的原文（正文已成），目标/钩子为空是正常的——
             卷纲/章纲是「写之前」的规划，成稿章不需要再规划；生成管线从第 {{ firstGeneratedChapterNo }} 章接着写。
           </div>
@@ -62,7 +62,7 @@
                 <el-tag size="small" :type="row.hasText ? 'success' : 'info'">
                   {{ row.hasText ? '正文已成' : '规划就绪·待生成' }}
                 </el-tag>
-                <span v-if="row.sceneCount" style="font-size: 11px; color: #999"> {{ row.sceneCount }}场</span>
+                <span v-if="row.sceneCount" style="font-size: var(--text-xs); color: var(--muted)"> {{ row.sceneCount }}场</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="220">
@@ -91,23 +91,23 @@
             {{ outlineTask ? '章纲生成中…' : '生成章纲（入队）' }}
           </el-button>
         </div>
-        <div v-if="noOutlineChapters.length" style="font-size: 12px; color: #909399; margin-bottom: 10px; line-height: 1.7">
+        <div v-if="noOutlineChapters.length" style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 10px; line-height: 1.7">
           暂无章纲 {{ noOutlineChapters.length }} 章：{{ rangeLabel(noOutlineChapters) }}
           <template v-if="importNoOutline.length">。其中 {{ rangeLabel(importNoOutline) }} 是<b>导入成稿章</b>——章纲是写之前拆场景用的，
             正文已成就不再规划（这是正常的，不是漏跑）；确实要补纲就勾上方「含已有正文的章」</template>
           <template v-else>。这些章没有规划行（先跑卷纲）或缺章纲，可点上方批量生成。</template>
         </div>
-        <div style="font-size: 12px; color: #999; margin-bottom: 10px; line-height: 1.7">
+        <div style="font-size: var(--text-xs); color: var(--muted); margin-bottom: 10px; line-height: 1.7">
           入队后在工作台生成队列看实时进度（约 1-2 分钟/章，可停止）；已有章纲覆盖重建，无规划行的章自动跳过。
           <b>已有正文的章默认跳过</b>（老路径会把该章状态退回「待生成」并删掉它的场景与门禁报告，之后一续跑就会把这一章重写，
           等于毁掉已写完的正文）——导入书自带的成稿章因此默认没有章纲。
           勾上「含已有正文的章」则改为<b>保全状态</b>出纲：只补章纲与场景拆解，章状态、正文、门禁报告都不动（要花 1-2 分钟/章）。
           提前出的章纲缺「前情」（此前章节的摘要与结尾），量产建议交给管线逐章自动出；启动生成时已有章纲直接复用、不再重出。
         </div>
-        <div v-if="outlineTask" style="margin-bottom: 10px; padding: 8px 12px; background: #fdf6ec; border-radius: 6px">
+        <div v-if="outlineTask" style="margin-bottom: 10px; padding: 8px 12px; background: var(--tag-attn-bg); border-radius: 6px">
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px">
             <el-tag size="small" type="warning">章纲生成中</el-tag>
-            <span style="font-size: 12px; color: #999">
+            <span style="font-size: var(--text-xs); color: var(--muted)">
               任务 #{{ outlineTask.id }} · 第 {{ outlineTask.fromChapter }}-{{ outlineTask.toChapter }} 章
               <template v-if="outlineTask.status === 'RUNNING' && outlineTask.currentChapter">
                 · 当前第 {{ outlineTask.currentChapter }} 章 · {{ outlineTask.lastMessage || '' }}
@@ -119,23 +119,23 @@
                        :stroke-width="8" :show-text="false" />
         </div>
         <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap">
-          <span style="font-size: 13px; color: #606266">筛选：</span>
+          <span style="font-size: var(--text-sm); color: var(--fg-2)">筛选：</span>
           <el-select v-model="sceneFilterChapter" clearable placeholder="全部章纲（按章）" size="small" style="width: 210px">
             <el-option v-for="c in sceneChapterOptions" :key="c.value" :value="c.value" :label="c.label">
               <span>{{ c.label }}</span>
-              <span style="float: right; color: #999; font-size: 12px">{{ c.count }} 场景</span>
+              <span style="float: right; color: var(--muted); font-size: var(--text-xs)">{{ c.count }} 场景</span>
             </el-option>
           </el-select>
           <el-select v-model="sceneFilterMaterial" clearable filterable placeholder="按素材（出场人物/事物）" size="small" style="width: 210px">
             <el-option v-for="m in sceneMaterialOptions" :key="m.name" :value="m.name" :label="m.name">
               <span>{{ m.name }}</span>
-              <span style="float: right; color: #999; font-size: 12px">{{ m.count }} 场景</span>
+              <span style="float: right; color: var(--muted); font-size: var(--text-xs)">{{ m.count }} 场景</span>
             </el-option>
           </el-select>
           <el-input v-model="sceneFilterText" clearable placeholder="搜内容：目标 / 必揭示 / 禁出现" size="small"
                     style="width: 230px" />
           <el-button v-if="sceneFiltersActive" size="small" link type="primary" @click="clearSceneFilters">清空筛选</el-button>
-          <span style="font-size: 12px; color: #999; margin-left: auto">
+          <span style="font-size: var(--text-xs); color: var(--muted); margin-left: auto">
             {{ filteredScenes.length }} / {{ allScenes.length }} 场景 · 涉及 {{ filteredChapterCount }} 章
           </span>
         </div>
@@ -143,7 +143,7 @@
         <DataTable v-else :data="filteredScenes" border size="small" max-height="560">
           <el-table-column label="所属章纲" width="180" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-link type="primary" :underline="false" style="font-size: 12px"
+              <el-link type="primary" :underline="false" style="font-size: var(--text-xs)"
                        @click="sceneFilterChapter = row.chapterNo">第 {{ row.chapterNo }} 章 · {{ row.chapterTitle }}</el-link>
             </template>
           </el-table-column>
@@ -151,9 +151,9 @@
           <el-table-column prop="goal" label="场景目标" min-width="300" show-overflow-tooltip />
           <el-table-column label="要素" min-width="300">
             <template #default="{ row }">
-              <div v-if="(row.present || []).length" style="font-size: 12px">出场：{{ row.present.join('、') }}</div>
-              <div v-if="(row.mustReveal || []).length" style="font-size: 12px; color: #67c23a">必揭示：{{ row.mustReveal.join('、') }}</div>
-              <div v-if="(row.mustNot || []).length" style="font-size: 12px; color: #f56c6c">禁出现：{{ row.mustNot.join('、') }}</div>
+              <div v-if="(row.present || []).length" style="font-size: var(--text-xs)">出场：{{ row.present.join('、') }}</div>
+              <div v-if="(row.mustReveal || []).length" style="font-size: var(--text-xs); color: var(--success)">必揭示：{{ row.mustReveal.join('、') }}</div>
+              <div v-if="(row.mustNot || []).length" style="font-size: var(--text-xs); color: var(--danger)">禁出现：{{ row.mustNot.join('、') }}</div>
             </template>
           </el-table-column>
           <el-table-column prop="wordsBudget" label="预算" width="70" />
@@ -174,7 +174,7 @@
       </div>
       <el-input v-model="autoPlanForm.seedOutline" type="textarea" :rows="6"
                 placeholder="本卷种子大纲（可空——留空则 AI 依据全书大纲与事实账/世界状态/伏笔账自主设计本卷主线，并在卷简报里说明四个关键决策）" />
-      <div style="color: #999; font-size: 12px; margin-top: 8px">
+      <div style="color: var(--muted); font-size: var(--text-xs); margin-top: 8px">
         流程：生成 → 结构校验 → AI 规划审校（BLOCKER 自动重写 ≤3 轮）→ 落库；引用到的 proposed 伏笔自动采纳排期。
       </div>
       <template #footer>
@@ -188,7 +188,7 @@
       <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 8px">
         <span>卷名</span>
         <el-input v-model="draft.arc" style="width: 200px" size="small" />
-        <span style="color: #999; font-size: 12px">可直接编辑；采纳后不再过 AI 审校</span>
+        <span style="color: var(--muted); font-size: var(--text-xs)">可直接编辑；采纳后不再过 AI 审校</span>
       </div>
       <el-input v-model="draft.brief" type="textarea" :rows="4" style="margin-bottom: 10px" placeholder="卷简报" />
       <DataTable :data="draft.rows" border size="small" max-height="420">
@@ -216,7 +216,7 @@
           </template>
         </el-table-column>
       </DataTable>
-      <div v-if="(autoPlanResult?.warnings || []).length" style="color: #e6a23c; font-size: 12px; margin-top: 6px">
+      <div v-if="(autoPlanResult?.warnings || []).length" style="color: var(--warn); font-size: var(--text-xs); margin-top: 6px">
         {{ autoPlanResult.warnings.join('；') }}
       </div>
       <template #footer>
@@ -257,12 +257,12 @@
           <el-tag :type="retro.review?.overall === 'pass' ? 'success' : retro.review?.overall === 'critical' ? 'danger' : 'warning'">
             {{ retro.review?.overall === 'pass' ? '整体达标' : retro.review?.overall === 'critical' ? '严重漂移' : retro.review?.overall === 'drift' ? '存在漂移' : '仅机械对账' }}
           </el-tag>
-          <span style="color: #999; font-size: 12px">机械对账为确定性结果；叙事漂移为 LLM 分析（复审可覆盖）</span>
+          <span style="color: var(--muted); font-size: var(--text-xs)">机械对账为确定性结果；叙事漂移为 LLM 分析（复审可覆盖）</span>
         </div>
         <div style="white-space: pre-wrap; line-height: 1.8; margin-bottom: 12px">{{ retro.review?.summary }}</div>
 
         <div style="font-weight: bold; margin: 10px 0 6px">机械对账</div>
-        <div style="font-size: 13px; margin-bottom: 4px">
+        <div style="font-size: var(--text-sm); margin-bottom: 4px">
           章节数 {{ retro.mechanical?.chapters }} · 总字数 {{ retro.mechanical?.text_len_total }} ·
           状态分布 {{ JSON.stringify(retro.mechanical?.status_count || {}) }}
         </div>
@@ -290,7 +290,7 @@
           <el-table-column prop="issue" label="漂移" min-width="220" />
           <el-table-column prop="suggestion" label="建议" min-width="200" />
         </DataTable>
-        <div v-else style="color: #999; font-size: 13px">无漂移项。</div>
+        <div v-else style="color: var(--muted); font-size: var(--text-sm)">无漂移项。</div>
 
         <div style="font-weight: bold; margin: 12px 0 6px">建议采纳（流 D）</div>
         <DataTable v-if="proposals.length" :data="proposals" border size="small">
@@ -308,17 +308,17 @@
                 <el-button size="small" type="success" plain @click="decideProposal(row, true)">采纳</el-button>
                 <el-button size="small" plain @click="decideProposal(row, false)">忽略</el-button>
               </template>
-              <span v-else style="color:#999;font-size:12px">{{ row.decisionNote || '已决策' }}</span>
+              <span v-else style="color:var(--muted);font-size: var(--text-xs)">{{ row.decisionNote || '已决策' }}</span>
             </template>
           </el-table-column>
         </DataTable>
-        <div v-else style="color: #999; font-size: 13px">本卷暂无提案（复盘生成后自动落入）。</div>
+        <div v-else style="color: var(--muted); font-size: var(--text-sm)">本卷暂无提案（复盘生成后自动落入）。</div>
 
         <div v-if="(retro.review?.highlights || []).length" style="font-weight: bold; margin: 12px 0 6px">亮点</div>
-        <ul v-if="(retro.review?.highlights || []).length" style="margin: 0 0 10px 18px; font-size: 13px">
+        <ul v-if="(retro.review?.highlights || []).length" style="margin: 0 0 10px 18px; font-size: var(--text-sm)">
           <li v-for="(h, i) in retro.review.highlights" :key="i">{{ h }}</li>
         </ul>
-        <div v-if="retro.review?.next_volume" style="font-size: 13px">
+        <div v-if="retro.review?.next_volume" style="font-size: var(--text-sm)">
           <b>下一卷建议：</b>{{ retro.review.next_volume }}
         </div>
       </template>

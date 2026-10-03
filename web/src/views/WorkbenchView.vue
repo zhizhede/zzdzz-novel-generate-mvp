@@ -30,11 +30,11 @@
         <el-button type="primary" size="small" :loading="running" @click="run">启动生成</el-button>
         <el-button size="small" type="danger" plain @click="stopAllTasks">全部停止</el-button>
         <el-tag :type="running ? 'warning' : 'info'" size="small">{{ running ? '运行中' : '空闲' }}</el-tag>
-        <span style="color:#999;font-size:12px">{{ lastMessage }}</span>
+        <span style="color:var(--muted);font-size: var(--text-xs)">{{ lastMessage }}</span>
         <el-badge :value="pendingCount" :hidden="!pendingCount" style="margin-left: auto">
           <el-button size="small" plain @click="openPending">待审批{{ pendingCount ? ` ${pendingCount} 章` : '' }}</el-button>
         </el-badge>
-        <router-link to="/chapters" style="font-size: 12px; margin-left: 12px">去章节页阅读 →</router-link>
+        <router-link to="/chapters" style="font-size: var(--text-xs); margin-left: 12px">去章节页阅读 →</router-link>
       </div>
     </el-card>
 
@@ -48,16 +48,16 @@
         </el-table-column>
       </DataTable>
       <el-empty v-else description="当前无待审批章节" :image-size="50" />
-      <div style="font-size: 12px; color: #999; margin-top: 8px">点行跳转章节页审批</div>
+      <div style="font-size: var(--text-xs); color: var(--muted); margin-top: 8px">点行跳转章节页审批</div>
     </el-dialog>
 
     <!-- 无人续跑链状态（开了无人续跑的书才有；目标进度/暂停原因/恢复入口） -->
     <el-card v-if="autoChain && autoChain.enabled" shadow="never" style="margin-bottom: 12px">
       <template #header>
         <div style="display: flex; align-items: center; gap: 10px">
-          <b style="font-size: 13px">无人续跑</b>
+          <b style="font-size: var(--text-sm)">无人续跑</b>
           <el-tag size="small" :type="autoChainTagType">{{ autoChainText }}</el-tag>
-          <span style="font-size: 12px; color: #999">
+          <span style="font-size: var(--text-xs); color: var(--muted)">
             {{ autoChain.currentChapters }}/{{ autoChain.targetChapters ?? '∞' }} 章 · 已规划 {{ autoChain.volumes }} 卷
           </span>
           <el-button v-if="autoChain.state !== 'REACHED' && autoChain.state !== 'RUNNING'"
@@ -65,14 +65,14 @@
             {{ autoChain.state === 'PAUSED' ? '恢复续跑' : '启动续跑' }}
           </el-button>
           <el-button size="small" plain @click="openDeriveEditor">参数设置</el-button>
-          <span v-if="autoChain.message" style="font-size: 12px; color: #e6a23c; flex: 1; text-align: right">
+          <span v-if="autoChain.message" style="font-size: var(--text-xs); color: var(--warn); flex: 1; text-align: right">
             {{ autoChain.message }}
           </span>
         </div>
       </template>
       <el-progress v-if="autoChain.targetChapters"
                    :percentage="Math.min(100, Math.round(autoChain.currentChapters / autoChain.targetChapters * 100))" />
-      <div v-else style="font-size: 12px; color: #999">未设目标章数：续跑按卷推进，达到保险丝或人工停止为止</div>
+      <div v-else style="font-size: var(--text-xs); color: var(--muted)">未设目标章数：续跑按卷推进，达到保险丝或人工停止为止</div>
     </el-card>
 
     <!-- 本书生成参数（唯一修改入口：开书向导的设定落库后在此查看/修改） -->
@@ -80,14 +80,14 @@
       <el-form label-width="92px" v-if="deriveEdit">
         <el-form-item label="掺水量">
           <div style="display: flex; align-items: center; gap: 12px; width: 100%">
-            <span style="font-size: 12px; color: #999">干货</span>
+            <span style="font-size: var(--text-xs); color: var(--muted)">干货</span>
             <el-slider v-model="deriveEdit.water" :min="0" :max="100" :step="5" style="flex: 1" />
-            <span style="font-size: 12px; color: #999">舒缓</span>
+            <span style="font-size: var(--text-xs); color: var(--muted)">舒缓</span>
             <el-tag size="small" :type="deriveEdit.water >= 70 ? 'warning' : deriveEdit.water <= 30 ? 'success' : 'info'">
               {{ deriveEdit.water >= 70 ? '可注水' : deriveEdit.water <= 30 ? '零注水' : '均衡' }}
             </el-tag>
           </div>
-          <div style="font-size: 12px; color: #999; line-height: 1.7; width: 100%">
+          <div style="font-size: var(--text-xs); color: var(--muted); line-height: 1.7; width: 100%">
             保存时自动换算质量口径：注水软阈值 <b>{{ waterGates.reader_fat_ratio_block }}</b> ·
             硬上限 <b>{{ waterGates.reader_fat_ratio_hard }}</b> ·
             审校下限 <b>{{ waterGates.ai_review_fix_floor }}</b>（越干越严；高级区可手动覆盖）
@@ -105,9 +105,9 @@
         </el-form-item>
         <el-form-item label="节奏">
           <el-input-number v-model="deriveEdit.chaptersPerVolume" :min="3" :max="30" size="small" />
-          <span style="margin-left: 6px; font-size: 13px">章/卷</span>
+          <span style="margin-left: 6px; font-size: var(--text-sm)">章/卷</span>
           <el-input-number v-model="deriveEdit.targetChapters" :min="10" :max="2000" :step="50" size="small" style="margin-left: 16px" />
-          <span style="margin-left: 6px; font-size: 13px">章目标（总）</span>
+          <span style="margin-left: 6px; font-size: var(--text-sm)">章目标（总）</span>
         </el-form-item>
         <el-form-item label="节奏说明">
           <el-input v-model="deriveEdit.pacingNote" type="textarea" :rows="2" placeholder="给卷规划的节奏交代（可选）" />
@@ -124,14 +124,14 @@
         </el-form-item>
         <el-form-item label="无人续跑">
           <el-switch v-model="deriveEdit.autoContinue" />
-          <span style="margin-left: 8px; font-size: 12px; color: #999">开=写到总目标为止全自动（规划/审批强制自动）</span>
+          <span style="margin-left: 8px; font-size: var(--text-xs); color: var(--muted)">开=写到总目标为止全自动（规划/审批强制自动）</span>
         </el-form-item>
         <el-form-item label="审批模式">
           <el-radio-group v-model="deriveEdit.approvalMode" size="small">
             <el-radio-button value="auto">自动放行</el-radio-button>
             <el-radio-button value="manual">人工审批</el-radio-button>
           </el-radio-group>
-          <span style="margin-left: 8px; font-size: 12px; color: #999">每章写完后的放行方式</span>
+          <span style="margin-left: 8px; font-size: var(--text-xs); color: var(--muted)">每章写完后的放行方式</span>
         </el-form-item>
         <el-form-item label="队列优先级">
           <el-radio-group v-model="deriveEdit.priority" size="small">
@@ -142,34 +142,34 @@
         </el-form-item>
         <el-form-item label="规划模式">
           <el-switch v-model="planManual" active-value="manual" inactive-value="auto" />
-          <span style="margin-left: 8px; font-size: 12px; color: #999">
+          <span style="margin-left: 8px; font-size: var(--text-xs); color: var(--muted)">
             {{ planManual === 'manual' ? '人工：卷纲出草稿，去「规划」页采纳后才生效' : '自动：AI 审校通过直接落库，立即可开跑' }}
           </span>
         </el-form-item>
       </el-form>
       <el-collapse style="margin-top: 4px">
         <el-collapse-item name="quality">
-          <template #title><span style="font-size: 13px; color: #606266">质量口径（高级，一般不用动）</span></template>
-          <div style="font-size: 12px; color: #999; line-height: 1.8; margin-bottom: 8px">
+          <template #title><span style="font-size: var(--text-sm); color: var(--fg-2)">质量口径（高级，一般不用动）</span></template>
+          <div style="font-size: var(--text-xs); color: var(--muted); line-height: 1.8; margin-bottom: 8px">
             每章写完由读者评审/审校把关，以下数值决定拦多狠：改掺水量保存后前三项会按新掺水量重新换算；
             不动掺水量时此处手调优先。判定明细见各章门禁报告。
           </div>
-          <div style="display: grid; grid-template-columns: 150px 110px 1fr; gap: 6px 10px; align-items: center; font-size: 12px">
+          <div style="display: grid; grid-template-columns: 150px 110px 1fr; gap: 6px 10px; align-items: center; font-size: var(--text-xs)">
             <span>注水软阈值</span>
             <el-input-number v-model="readerStd.reader_fat_ratio_block" :min="0" :max="1" :step="0.01" size="small" style="width: 100px" />
-            <span style="color: #999">读者评审注水率超过→打回重写一轮（结构全过且未破硬上限时可放行）</span>
+            <span style="color: var(--muted)">读者评审注水率超过→打回重写一轮（结构全过且未破硬上限时可放行）</span>
             <span>注水硬上限</span>
             <el-input-number v-model="readerStd.reader_fat_ratio_hard" :min="0" :max="1" :step="0.01" size="small" style="width: 100px" />
-            <span style="color: #999">注水率红线，超了必拦（结构再好也不放）</span>
+            <span style="color: var(--muted)">注水率红线，超了必拦（结构再好也不放）</span>
             <span>恢复线比例</span>
             <el-input-number v-model="readerStd.reader_fix_len_min" :min="0.3" :max="1" :step="0.05" size="small" style="width: 100px" />
-            <span style="color: #999">修订稿字数下限 = 章预算下限 × 此值，防删残</span>
+            <span style="color: var(--muted)">修订稿字数下限 = 章预算下限 × 此值，防删残</span>
             <span>扩写护栏</span>
             <el-input-number v-model="readerStd.reader_fix_len_max" :min="1" :max="2" :step="0.05" size="small" style="width: 100px" />
-            <span style="color: #999">修订稿长度上限 = 章预算 × 此值，防膨胀</span>
+            <span style="color: var(--muted)">修订稿长度上限 = 章预算 × 此值，防膨胀</span>
             <span>审校下限</span>
             <el-input-number v-model="readerStd.ai_review_fix_floor" :min="0.3" :max="1" :step="0.05" size="small" style="width: 100px" />
-            <span style="color: #999">AI 修稿不足原文此比例→视为异常保留原文</span>
+            <span style="color: var(--muted)">AI 修稿不足原文此比例→视为异常保留原文</span>
           </div>
         </el-collapse-item>
       </el-collapse>
@@ -199,7 +199,7 @@
           <template #default="{ row }">
             <el-progress :percentage="Math.round(row.doneChapters / row.totalChapters * 100)"
               :stroke-width="10" :format="() => `${row.doneChapters}/${row.totalChapters}`" />
-            <div v-if="taskPace(row)" style="font-size: 11px; color: #999; margin-top: 2px; line-height: 1.4">{{ taskPace(row) }}</div>
+            <div v-if="taskPace(row)" style="font-size: var(--text-xs); color: var(--muted); margin-top: 2px; line-height: 1.4">{{ taskPace(row) }}</div>
           </template>
         </el-table-column>
         <el-table-column label="当前章" width="70">
@@ -207,14 +207,14 @@
         </el-table-column>
         <el-table-column label="当前阶段" min-width="140">
           <template #default="{ row }">
-            <el-link v-if="row.status === 'RUNNING'" type="primary" :underline="false" style="font-size:12px;color:#e6a23c" @click="openSession(row)">{{ row.currentStep || '准备中' }} ⤢</el-link>
-            <span v-else style="color:#bbb">-</span>
+            <el-link v-if="row.status === 'RUNNING'" type="primary" :underline="false" style="font-size: var(--text-xs);color:var(--warn)" @click="openSession(row)">{{ row.currentStep || '准备中' }} ⤢</el-link>
+            <span v-else style="color:var(--meta)">-</span>
           </template>
         </el-table-column>
         <el-table-column label="本章tokens" width="95">
           <template #default="{ row }">
-            <span v-if="row.status === 'RUNNING' && row.chapterTokens != null" style="font-size:12px;color:#606266">{{ row.chapterTokens.toLocaleString() }}</span>
-            <span v-else style="color:#bbb">-</span>
+            <span v-if="row.status === 'RUNNING' && row.chapterTokens != null" style="font-size: var(--text-xs);color:var(--fg-2)">{{ row.chapterTokens.toLocaleString() }}</span>
+            <span v-else style="color:var(--meta)">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="lastMessage" label="消息" min-width="150" show-overflow-tooltip />
@@ -234,7 +234,7 @@
     <el-row :gutter="12">
       <el-col :span="10">
         <el-card shadow="never" header="生成进程（实时）">
-          <div ref="logBox" style="height: 560px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.9">
+          <div ref="logBox" style="height: 560px; overflow-y: auto; font-family: monospace; font-size: var(--text-xs); line-height: 1.9">
             <div v-for="(l, i) in logs" :key="i" :style="{ color: l.color }">{{ l.text }}</div>
           </div>
         </el-card>
@@ -243,22 +243,22 @@
         <el-card shadow="never" header="生成输出（实时流式）">
           <div ref="outBox" style="height: 560px; overflow-y: auto">
             <div v-for="s in scenes" :key="s.key" style="margin-bottom: 16px">
-              <div style="color:#999;font-size:12px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+              <div style="color:var(--muted);font-size: var(--text-xs);margin-bottom:4px;display:flex;align-items:center;gap:8px">
                 <span>{{ s.title }}</span>
                 <el-tag v-if="s.streaming" type="warning" size="small" effect="plain">
                   {{ s.text ? '正文流式生成中' : (s.think ? '思考中…' : '检索上下文中…') }}
                 </el-tag>
                 <el-tag v-else size="small" effect="plain" type="info">{{ s.phase === 'reused' ? '复用缓存' : '已完成' }}</el-tag>
-                <el-link v-if="s.think" type="info" :underline="false" style="font-size:12px" @click="s.thinkOpen = !s.thinkOpen">
+                <el-link v-if="s.think" type="info" :underline="false" style="font-size: var(--text-xs)" @click="s.thinkOpen = !s.thinkOpen">
                   {{ s.thinkOpen ? '收起思考' : `思考过程（${s.think.length}字）` }}
                 </el-link>
               </div>
-              <div v-if="s.streaming && !s.think && !s.text" style="color:#b0b3ba;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px">
+              <div v-if="s.streaming && !s.think && !s.text" style="color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px">
                 ⏳ 检索与打包上下文（世界状态/事实账/RAG 召回，约 10-20 秒后开始逐字输出）…
               </div>
               <div v-if="s.think && (s.thinkOpen || (s.streaming && !s.text))"
-                   style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:220px;overflow-y:auto">{{ s.think }}</div>
-              <div style="white-space: pre-wrap; border-left: 3px solid #409eff; padding-left: 10px">{{ s.text }}<span v-if="s.streaming && s.text" style="color:#409eff">▍</span></div>
+                   style="white-space:pre-wrap;color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px;margin-bottom:6px;max-height:220px;overflow-y:auto">{{ s.think }}</div>
+              <div style="white-space: pre-wrap; border-left: 3px solid var(--accent); padding-left: 10px">{{ s.text }}<span v-if="s.streaming && s.text" style="color:var(--accent)">▍</span></div>
             </div>
             <el-empty v-if="!scenes.length" description="启动生成后在此实时看到 AI 的思考与正文逐字流出" :image-size="60" />
           </div>
@@ -273,9 +273,9 @@
         <div style="display:flex; align-items:center; gap:12px; padding-right: 32px">
           <b>{{ sessionTask ? `任务 #${sessionTask.id} · ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : sessionTask.kind === 'OUTLINE' ? ` · 章纲 ${sessionTask.fromChapter}-${sessionTask.toChapter}` : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '' }}</b>
           <el-tag v-if="sessionTask" size="small" :type="TASK_COLOR[sessionTask.status] || 'info'">{{ TASK_TEXT[sessionTask.status] || sessionTask.status }}</el-tag>
-          <span v-if="sessionTask?.status === 'RUNNING'" style="color:#e6a23c;font-size:13px">{{ sessionTask.currentStep || '准备中' }}</span>
-          <span v-if="sessionTask?.status === 'RUNNING' && taskPace(sessionTask)" style="color:#999;font-size:12px">{{ taskPace(sessionTask) }}</span>
-          <span v-if="sessionTask?.status === 'RUNNING' && sessionTask.chapterTokens != null" style="font-size:13px;color:#606266">本章 {{ sessionTask.chapterTokens.toLocaleString() }} tokens</span>
+          <span v-if="sessionTask?.status === 'RUNNING'" style="color:var(--warn);font-size: var(--text-sm)">{{ sessionTask.currentStep || '准备中' }}</span>
+          <span v-if="sessionTask?.status === 'RUNNING' && taskPace(sessionTask)" style="color:var(--muted);font-size: var(--text-xs)">{{ taskPace(sessionTask) }}</span>
+          <span v-if="sessionTask?.status === 'RUNNING' && sessionTask.chapterTokens != null" style="font-size: var(--text-sm);color:var(--fg-2)">本章 {{ sessionTask.chapterTokens.toLocaleString() }} tokens</span>
           <span style="flex:1"></span>
           <el-button v-if="sessionTask?.status === 'RUNNING'" size="small" type="danger" @click="stopTask(sessionTask)">停止</el-button>
         </div>
@@ -284,58 +284,58 @@
         @scroll="onSessionScroll">
         <div v-for="(t, i) in transcript" :key="i" style="margin-bottom: 14px">
           <!-- 章节分节头 -->
-          <div v-if="t.type === 'header'" style="border-bottom: 1px solid #e4e7ed; padding-bottom: 6px; margin: 18px 0 10px">
-            <b style="font-size: 15px">第{{ t.chapterNo }}章 {{ t.title }}</b>
+          <div v-if="t.type === 'header'" style="border-bottom: 1px solid var(--border); padding-bottom: 6px; margin: 18px 0 10px">
+            <b style="font-size: var(--text-md)">第{{ t.chapterNo }}章 {{ t.title }}</b>
             <el-tag v-if="t.state" size="small" style="margin-left:8px" :type="t.state === '完成' ? 'success' : 'danger'">{{ t.state }}</el-tag>
           </div>
           <!-- 场景：流式思考/正文块 -->
           <div v-else-if="t.type === 'scene'">
-            <div style="color:#67c23a;font-size:13px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+            <div style="color:var(--success);font-size: var(--text-sm);margin-bottom:4px;display:flex;align-items:center;gap:8px">
               <b>场景 {{ t.sceneNo }}</b>
-              <span style="color:#999;font-size:12px">{{ t.goal }}</span>
+              <span style="color:var(--muted);font-size: var(--text-xs)">{{ t.goal }}</span>
               <el-tag v-if="t.streaming" type="warning" size="small" effect="plain">{{ t.text ? '正文流式生成中' : (t.think ? '思考中…' : '检索上下文中…') }}</el-tag>
               <el-tag v-else size="small" effect="plain" type="info">{{ t.phase === 'reused' ? '复用缓存' : '完成' }}</el-tag>
-              <el-link v-if="t.think" type="info" :underline="false" style="font-size:12px" @click="t.thinkOpen = !t.thinkOpen">
+              <el-link v-if="t.think" type="info" :underline="false" style="font-size: var(--text-xs)" @click="t.thinkOpen = !t.thinkOpen">
                 {{ t.thinkOpen ? '收起思考' : `思考（${t.think.length}字）` }}
               </el-link>
             </div>
-            <div v-if="t.streaming && !t.think && !t.text" style="color:#b0b3ba;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px">
+            <div v-if="t.streaming && !t.think && !t.text" style="color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px">
               ⏳ 检索与打包上下文（约 10-20 秒后开始逐字输出）…
             </div>
             <div v-if="t.think && (t.thinkOpen || (t.streaming && !t.text))"
-                 style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
-            <div style="white-space:pre-wrap; border-left: 3px solid #409eff; padding-left: 10px; font-size: 14px; line-height: 1.9">{{ t.text }}<span v-if="t.streaming && t.text" style="color:#409eff">▍</span></div>
+                 style="white-space:pre-wrap;color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
+            <div style="white-space:pre-wrap; border-left: 3px solid var(--accent); padding-left: 10px; font-size: var(--text-base); line-height: 1.9">{{ t.text }}<span v-if="t.streaming && t.text" style="color:var(--accent)">▍</span></div>
           </div>
           <!-- 卷规划/审校：流式思考块（JSON 正文不逐字展示，思考流才是透明化主体） -->
           <div v-else-if="t.type === 'pstream'">
-            <div style="color:#e6a23c;font-size:13px;margin-bottom:4px;display:flex;align-items:center;gap:8px">
+            <div style="color:var(--warn);font-size: var(--text-sm);margin-bottom:4px;display:flex;align-items:center;gap:8px">
               <b>{{ t.title }}</b>
               <el-tag v-if="t.streaming" type="warning" size="small" effect="plain">{{ t.think ? '思考中…' : '打包上下文中…' }}</el-tag>
-              <el-link v-if="t.think" type="info" :underline="false" style="font-size:12px" @click="t.thinkOpen = !t.thinkOpen">
+              <el-link v-if="t.think" type="info" :underline="false" style="font-size: var(--text-xs)" @click="t.thinkOpen = !t.thinkOpen">
                 {{ t.thinkOpen ? '收起思考' : `思考（${t.think.length}字）` }}
               </el-link>
             </div>
             <div v-if="t.think && (t.thinkOpen || t.streaming)"
-                 style="white-space:pre-wrap;color:#8a8f99;font-size:12px;border-left:3px solid #d9dee5;padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
+                 style="white-space:pre-wrap;color:var(--meta);font-size: var(--text-xs);border-left:3px solid var(--border-soft);padding-left:10px;margin-bottom:6px;max-height:260px;overflow-y:auto">{{ t.think }}</div>
           </div>
           <!-- 通用步骤/判定行 -->
-          <div v-else style="font-size: 13px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap">
-            <span :style="{ color: t.color || '#606266' }">▸ {{ t.title }}</span>
-            <span v-if="t.note" style="color:#999;font-size:12px">{{ t.note }}</span>
-            <el-link v-if="t.reason" type="danger" :underline="false" style="font-size:12px" @click="t.open = !t.open">{{ t.open ? '收起原因' : '原因' }}</el-link>
-            <div v-if="t.reason && t.open" style="width:100%; white-space:pre-wrap; color:#c45656; font-size:12px; background:#fef0f0; padding:6px 10px; border-radius:4px; margin-top:4px">{{ t.reason }}</div>
+          <div v-else style="font-size: var(--text-sm); display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap">
+            <span :style="{ color: t.color || 'var(--fg-2)' }">▸ {{ t.title }}</span>
+            <span v-if="t.note" style="color:var(--muted);font-size: var(--text-xs)">{{ t.note }}</span>
+            <el-link v-if="t.reason" type="danger" :underline="false" style="font-size: var(--text-xs)" @click="t.open = !t.open">{{ t.open ? '收起原因' : '原因' }}</el-link>
+            <div v-if="t.reason && t.open" style="width:100%; white-space:pre-wrap; color:var(--danger); font-size: var(--text-xs); background:var(--tag-danger-bg); padding:6px 10px; border-radius:4px; margin-top:4px">{{ t.reason }}</div>
             <template v-if="t.logId">
-              <el-link type="primary" :underline="false" style="font-size:12px" @click="toggleLogDetail(t)">
+              <el-link type="primary" :underline="false" style="font-size: var(--text-xs)" @click="toggleLogDetail(t)">
                 {{ t.detailOpen ? '收起详情' : (t.detailLoading ? '加载中…' : '思考与结果') }}
               </el-link>
-              <div v-if="t.detailOpen && t.detail" style="width:100%; margin-top:4px; border:1px solid #ebeef5; border-radius:6px; padding:8px 10px; background:#fafcff">
+              <div v-if="t.detailOpen && t.detail" style="width:100%; margin-top:4px; border:1px solid var(--border); border-radius:6px; padding:8px 10px; background:var(--surface)">
                 <div v-if="t.detail.reasoningText" style="margin-bottom:8px">
-                  <div style="font-size:12px; color:#8a8f99; margin-bottom:4px">▸ 思考（{{ t.detail.reasoningText.length }} 字）</div>
-                  <div style="white-space:pre-wrap; color:#8a8f99; font-size:12px; border-left:3px solid #d9dee5; padding-left:10px; max-height:260px; overflow-y:auto">{{ t.detail.reasoningText }}</div>
+                  <div style="font-size: var(--text-xs); color:var(--meta); margin-bottom:4px">▸ 思考（{{ t.detail.reasoningText.length }} 字）</div>
+                  <div style="white-space:pre-wrap; color:var(--meta); font-size: var(--text-xs); border-left:3px solid var(--border-soft); padding-left:10px; max-height:260px; overflow-y:auto">{{ t.detail.reasoningText }}</div>
                 </div>
                 <div v-if="t.detail.content">
-                  <div style="font-size:12px; color:#606266; margin-bottom:4px">▸ 最终输出（{{ t.detail.content.length }} 字）</div>
-                  <div style="white-space:pre-wrap; font-size:13px; line-height:1.8; color:#303133; max-height:420px; overflow-y:auto">{{ t.detail.content }}</div>
+                  <div style="font-size: var(--text-xs); color:var(--fg-2); margin-bottom:4px">▸ 最终输出（{{ t.detail.content.length }} 字）</div>
+                  <div style="white-space:pre-wrap; font-size: var(--text-sm); line-height:1.8; color:var(--fg); max-height:420px; overflow-y:auto">{{ t.detail.content }}</div>
                 </div>
               </div>
             </template>
@@ -484,7 +484,7 @@ async function seedSession(row) {
           const p = planEventPayload(e)
           return { type: 'line', title: `第 ${e.chapterNo ?? '?'} 章 · 章纲 ${e.phase}`,
             note: p.sceneCount ? `${p.sceneCount} 个场景` : (p.reason || ''),
-            color: e.phase === 'failed' ? '#c45656' : e.phase === 'start' ? '#e6a23c' : '#67c23a' }
+            color: e.phase === 'failed' ? 'var(--danger)' : e.phase === 'start' ? 'var(--warn)' : 'var(--success)' }
         })
       transcript.value.push({ type: 'header', chapterNo: 0, title: `章纲批量生成（任务 #${row.id}）——已发生的过程回放` })
       transcript.value.push(...scoped)
@@ -512,7 +512,7 @@ async function seedSession(row) {
         .slice(0, 12)
         .reverse() // 转录按时间正序展示（旧在上）；取最新 12 条
         .map((e) => ({ type: 'line', title: planEventTitle(e), reason: planEventReason(e),
-          color: e.phase === 'failed' ? '#c45656' : e.phase === 'retry' ? '#e6a23c' : '#67c23a' }))
+          color: e.phase === 'failed' ? 'var(--danger)' : e.phase === 'retry' ? 'var(--warn)' : 'var(--success)' }))
       transcript.value.push({ type: 'header', chapterNo: 0, title: `卷纲规划（任务 #${row.id}）——已发生的过程回放` })
       transcript.value.push(...seed)
       if (!seed.length) transcript.value.push({ type: 'line', title: '暂无卷纲事件（首轮生成中，完成后此处实时出现轮次与判定）' })
@@ -534,16 +534,16 @@ async function seedSession(row) {
     const entries = []
     for (const s of t.steps || []) entries.push({ time: s.updateTime || s.createTime,
       line: { type: 'line', title: `${STEP_LABEL[s.step] || s.step}${s.subKey ? ' · 场景 ' + s.subKey : ''} · ${s.status}`,
-        note: s.attempt > 1 ? `第 ${s.attempt} 次尝试` : '', color: s.status === 'DONE' ? '#67c23a' : s.status === 'RUNNING' ? '#e6a23c' : '#c45656' } })
+        note: s.attempt > 1 ? `第 ${s.attempt} 次尝试` : '', color: s.status === 'DONE' ? 'var(--success)' : s.status === 'RUNNING' ? 'var(--warn)' : 'var(--danger)' } })
     for (const c of t.calls || []) entries.push({ time: c.createTime,
       line: { type: 'line', title: `${NODE_LABEL[c.node] || c.node}${c.status === 'error' ? '（失败）' : ''}`,
         note: `${(c.totalTokens || 0).toLocaleString()} tok · ${(c.latencyMs / 1000).toFixed(0)}s${c.cost != null ? ' · ¥' + c.cost.toFixed(4) : ''}`,
         logId: c.id,
-        color: c.status === 'error' ? '#c45656' : '#606266' } })
+        color: c.status === 'error' ? 'var(--danger)' : 'var(--fg-2)' } })
     for (const k of t.checks || []) entries.push({ time: k.createTime,
       line: { type: 'line', title: `${GATE_LABEL[k.gateType] || k.gateType}${k.sceneId ? ' · 场景级' : ''} · 第 ${k.round || 1} 轮 · ${k.passed ? '通过' : '未过'}`,
         reason: k.passed ? undefined : (gateFailBrief(k.result) || undefined),
-        color: k.passed ? '#67c23a' : '#e6a23c' } })
+        color: k.passed ? 'var(--success)' : 'var(--warn)' } })
     entries.sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
     for (const e of entries) seed.push(e.line)
     // 历史打底放在已有实时条目之前（本页若已积累 live 事件）
@@ -576,7 +576,7 @@ function closePlanThink(label) {
 /** SSE 事件 → 转录条目（与日志并行累积；本页会话期间有效，历史回溯走章节抽屉·档案）。 */
 function pushTranscript(event, d) {
   if (event === 'run') {
-    transcript.value.push({ type: 'line', title: `任务 ${d.phase}`, note: d.message, color: '#909399' })
+    transcript.value.push({ type: 'line', title: `任务 ${d.phase}`, note: d.message, color: 'var(--muted)' })
   } else if (event === 'chapter') {
     if (d.phase === 'start') {
       transcript.value.push({ type: 'header', chapterNo: d.chapterNo, title: d.title, state: null })
@@ -584,12 +584,12 @@ function pushTranscript(event, d) {
       const h = [...transcript.value].reverse().find((t) => t.type === 'header' && t.chapterNo === d.chapterNo)
       if (h) h.state = d.phase === 'done' ? `完成（${d.chars} 字）` : d.phase === 'stopped' ? '终止' : '失败'
       if (d.phase !== 'done') {
-        transcript.value.push({ type: 'line', title: d.phase === 'stopped' ? '用户终止' : '章失败', reason: d.reason, color: '#c45656' })
+        transcript.value.push({ type: 'line', title: d.phase === 'stopped' ? '用户终止' : '章失败', reason: d.reason, color: 'var(--danger)' })
       }
     }
   } else if (event === 'scene') {
     if (d.reason === 'rag_degraded') {
-      transcript.value.push({ type: 'line', title: 'RAG 召回失败，本场景降级不注入', reason: d.message, color: '#e6a23c' })
+      transcript.value.push({ type: 'line', title: 'RAG 召回失败，本场景降级不注入', reason: d.message, color: 'var(--warn)' })
     } else if (d.phase === 'start') {
       transcript.value.push({ type: 'scene', chapterNo: d.chapterNo, sceneNo: d.sceneNo, goal: d.goal,
         text: '', think: '', thinkOpen: false, streaming: true, phase: d.phase })
@@ -603,58 +603,58 @@ function pushTranscript(event, d) {
     transcript.value.push({
       type: 'line', open: false,
       title: `${event === 'gate' ? '场景 ' + d.sceneNo + ' 门禁' : '章级门禁'}${d.passed ? '通过' : '未过'}${d.rewrite ? '，重写' : ''}`,
-      reason: d.reason || undefined, color: d.passed ? '#67c23a' : '#e6a23c' })
+      reason: d.reason || undefined, color: d.passed ? 'var(--success)' : 'var(--warn)' })
   } else if (event === 'revise') {
-    transcript.value.push({ type: 'line', title: `修订 ${d.phase}`, note: d.chars ? d.chars + ' 字' : '', color: '#e6a23c' })
+    transcript.value.push({ type: 'line', title: `修订 ${d.phase}`, note: d.chars ? d.chars + ' 字' : '', color: 'var(--warn)' })
   } else if (event === 'reader') {
     if (d.phase === 'verdict') {
-      transcript.value.push({ type: 'line', title: `读者评审第 ${d.round} 轮：${d.verdict}`, note: (d.issues || []).join('，'), color: d.verdict === 'pass' ? '#67c23a' : '#e6a23c' })
+      transcript.value.push({ type: 'line', title: `读者评审第 ${d.round} 轮：${d.verdict}`, note: (d.issues || []).join('，'), color: d.verdict === 'pass' ? 'var(--success)' : 'var(--warn)' })
     } else {
-      transcript.value.push({ type: 'line', title: `读者评审 ${d.phase}`, note: d.verdict ? `verdict=${d.verdict}` : '', color: '#e6a23c' })
+      transcript.value.push({ type: 'line', title: `读者评审 ${d.phase}`, note: d.verdict ? `verdict=${d.verdict}` : '', color: 'var(--warn)' })
     }
   } else if (event === 'review') {
     if (d.phase === 'verdict') {
-      transcript.value.push({ type: 'line', open: false, title: `AI 审校第 ${d.round} 轮：${d.verdict}（${(d.issues || []).length} 条意见）`, reason: (d.issues || []).join('\n') || undefined, color: d.verdict === 'pass' ? '#67c23a' : '#e6a23c' })
+      transcript.value.push({ type: 'line', open: false, title: `AI 审校第 ${d.round} 轮：${d.verdict}（${(d.issues || []).length} 条意见）`, reason: (d.issues || []).join('\n') || undefined, color: d.verdict === 'pass' ? 'var(--success)' : 'var(--warn)' })
     } else {
       const t = d.phase === 'start' ? 'AI 审校中'
         : d.phase === 'done' ? `AI 审校：${d.verdict}${d.blocked ? '（转人工）' : ''}` : 'AI 审校异常（fail-open）'
-      transcript.value.push({ type: 'line', title: t, color: '#e6a23c' })
+      transcript.value.push({ type: 'line', title: t, color: 'var(--warn)' })
     }
   } else if (event === 'digest') {
-    transcript.value.push({ type: 'line', title: '事实账落库（digest）', color: '#67c23a' })
+    transcript.value.push({ type: 'line', title: '事实账落库（digest）', color: 'var(--success)' })
   } else if (event === 'approve') {
-    transcript.value.push({ type: 'line', title: `待人工审批${d.reason === 'review_blocker' ? '（审校硬伤未清）' : ''}`, color: '#e6a23c' })
+    transcript.value.push({ type: 'line', title: `待人工审批${d.reason === 'review_blocker' ? '（审校硬伤未清）' : ''}`, color: 'var(--warn)' })
   } else if (event === 'heal') {
-    transcript.value.push({ type: 'line', title: '自愈', note: d.message, color: '#e6a23c' })
+    transcript.value.push({ type: 'line', title: '自愈', note: d.message, color: 'var(--warn)' })
   } else if (event === 'outline') {
     const label = d.chapterNo ? `第 ${d.chapterNo} 章 · 章纲 ${d.phase}` : `章纲 ${d.phase}`
     transcript.value.push({ type: 'line', title: label,
       note: d.sceneCount ? d.sceneCount + ' 个场景' : (d.reason || ''),
-      color: d.phase === 'failed' ? '#c45656' : d.phase === 'start' ? '#e6a23c' : '#67c23a' })
+      color: d.phase === 'failed' ? 'var(--danger)' : d.phase === 'start' ? 'var(--warn)' : 'var(--success)' })
   } else if (event === 'assemble') {
-    transcript.value.push({ type: 'line', title: `拼章完成（${d.chars} 字），章级门禁检测中`, color: '#909399' })
+    transcript.value.push({ type: 'line', title: `拼章完成（${d.chars} 字），章级门禁检测中`, color: 'var(--muted)' })
   } else if (event === 'volume_plan' || event === 'volume_plan_review') {
     const label = event === 'volume_plan' ? '卷纲规划' : '卷纲审校'
     if (d.phase === 'chunk') {
       upsertPlanThink(label, d.delta)
     } else if (event === 'volume_plan_review') {
       if (d.phase === 'start') {
-        transcript.value.push({ type: 'line', title: `卷纲审校中（第 ${d.round} 轮）`, color: '#e6a23c' })
+        transcript.value.push({ type: 'line', title: `卷纲审校中（第 ${d.round} 轮）`, color: 'var(--warn)' })
       } else if (d.phase === 'verdict') {
         transcript.value.push({ type: 'line', title: `卷纲审校第 ${d.round} 轮：${d.verdict}`,
-          reason: (d.issues || []).join('\n') || undefined, color: d.verdict === 'BLOCKER' ? '#e6a23c' : '#67c23a' })
+          reason: (d.issues || []).join('\n') || undefined, color: d.verdict === 'BLOCKER' ? 'var(--warn)' : 'var(--success)' })
       }
       closePlanThink(label)
     } else {
       closePlanThink(label)
-      if (d.phase === 'retry') transcript.value.push({ type: 'line', title: `卷纲规划第 ${d.round} 轮重写（${d.check}）`, reason: d.reason, color: '#e6a23c' })
-      else if (d.phase === 'failed') transcript.value.push({ type: 'line', title: '卷纲规划放弃（轮次用尽）', reason: d.reason, color: '#c45656' })
-      else if (d.phase === 'start') transcript.value.push({ type: 'line', title: `卷纲规划开始（第 ${d.volNo} 卷，从第 ${d.from} 章）`, color: '#67c23a' })
-      else if (d.phase === 'adopted') transcript.value.push({ type: 'line', title: `卷纲落库（${d.chapters} 章）`, color: '#67c23a' })
-      else if (d.phase === 'draft') transcript.value.push({ type: 'line', title: '卷纲草稿完成（manual 待采纳）', color: '#67c23a' })
+      if (d.phase === 'retry') transcript.value.push({ type: 'line', title: `卷纲规划第 ${d.round} 轮重写（${d.check}）`, reason: d.reason, color: 'var(--warn)' })
+      else if (d.phase === 'failed') transcript.value.push({ type: 'line', title: '卷纲规划放弃（轮次用尽）', reason: d.reason, color: 'var(--danger)' })
+      else if (d.phase === 'start') transcript.value.push({ type: 'line', title: `卷纲规划开始（第 ${d.volNo} 卷，从第 ${d.from} 章）`, color: 'var(--success)' })
+      else if (d.phase === 'adopted') transcript.value.push({ type: 'line', title: `卷纲落库（${d.chapters} 章）`, color: 'var(--success)' })
+      else if (d.phase === 'draft') transcript.value.push({ type: 'line', title: '卷纲草稿完成（manual 待采纳）', color: 'var(--success)' })
     }
   } else if (event === 'volume_retro') {
-    transcript.value.push({ type: 'line', title: `卷级复盘 ${d.phase}`, color: '#909399' })
+    transcript.value.push({ type: 'line', title: `卷级复盘 ${d.phase}`, color: 'var(--muted)' })
   }
   scrollSession()
 }
@@ -671,9 +671,9 @@ async function loadStd() {
 }
 
 const COLORS = {
-  run: '#909399', chapter: '#409eff', outline: '#67c23a', scene: '#303133',
-  gate: '#e6a23c', assemble: '#909399', chapter_gate: '#67c23a',
-  revise: '#e6a23c', review: '#e6a23c', digest: '#67c23a', approve: '#e6a23c'
+  run: 'var(--muted)', chapter: 'var(--accent)', outline: 'var(--success)', scene: 'var(--fg)',
+  gate: 'var(--warn)', assemble: 'var(--muted)', chapter_gate: 'var(--success)',
+  revise: 'var(--warn)', review: 'var(--warn)', digest: 'var(--success)', approve: 'var(--warn)'
 }
 
 function log(event, data) {
@@ -720,7 +720,7 @@ function log(event, data) {
   }
   else if (event === 'volume_plan_review') text += `卷纲审校 ${d.phase}`
   else if (event === 'volume_retro') text += `卷级复盘 ${d.phase}`
-  logs.value.push({ text, color: COLORS[event] || '#303133' })
+  logs.value.push({ text, color: COLORS[event] || 'var(--fg)' })
   scrollLog()
   if (event === 'run') running.value = d.phase === 'start'
   if (event === 'scene' && d.phase === 'start') previewScene(d)

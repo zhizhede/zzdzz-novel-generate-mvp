@@ -4,17 +4,17 @@
              @update:model-value="(open) => emit('update:modelValue', open)">
     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px">
       <el-input v-model="form.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: 220px" />
-      <span v-if="form.text" style="font-size: 12px; color: #999">
+      <span v-if="form.text" style="font-size: var(--text-xs); color: var(--muted)">
         已载入 {{ (form.text.length / 10000).toFixed(1) }} 万字
       </span>
-      <span v-else-if="form.fileBase64" style="font-size: 12px; color: #999">已载入文档/电子书</span>
+      <span v-else-if="form.fileBase64" style="font-size: var(--text-xs); color: var(--muted)">已载入文档/电子书</span>
     </div>
     <TextFileDropZone style="margin-bottom: 8px"
                       sub-hint="支持 txt / docx / 无 DRM 的 mobi、azw；整本或长片段都行，也可直接粘贴到下方文本框"
                       @loaded="onFileLoaded" />
     <el-input v-model="form.text" type="textarea" :rows="8"
               placeholder="或直接粘贴小说正文（整本或长片段，最多 800 万字）。系统自动切块存入语料库并出文风分析，之后可在列表里深度解析。" />
-    <div style="font-size: 12px; color: #999; margin-top: 6px">
+    <div style="font-size: var(--text-xs); color: var(--muted); margin-top: 6px">
       分析为纯机械指标（秒级、零 LLM 成本）；深度解析（LLM）在列表行单独触发。样本偏少（<10 块）会给低置信提示，仍会入库。
     </div>
     <template #footer>

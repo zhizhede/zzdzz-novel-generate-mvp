@@ -3,7 +3,7 @@
     <el-main><router-view /></el-main>
   </el-container>
   <el-container v-else style="height: 100vh">
-    <el-aside width="180px" style="border-right: 1px solid #eee">
+    <el-aside width="180px" style="border-right: 1px solid var(--border)">
       <div style="padding: 18px 16px; font-weight: bold">小说生成平台</div>
       <el-menu :default-active="$route.path" router>
         <el-menu-item index="/">工作台</el-menu-item>

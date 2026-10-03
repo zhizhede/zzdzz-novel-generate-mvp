@@ -5,7 +5,7 @@
              @closed="emit('closed')">
     <div v-loading="loading">
       <template v-if="draft">
-        <div style="font-size: 13px; color: #606266; line-height: 1.9; margin-bottom: 8px">
+        <div style="font-size: var(--text-sm); color: var(--fg-2); line-height: 1.9; margin-bottom: 8px">
           <div>书：<b>{{ draft.title }}</b></div>
           <div>统计样本：{{ draft.chapterCount }} 章 · {{ (draft.totalChars / 10000).toFixed(1) }} 万字 ·
             {{ draft.metricCount }} 项指标</div>
@@ -28,7 +28,7 @@
 
         <el-collapse>
           <el-collapse-item title="原始指纹 JSON（采纳时原样提交）">
-            <pre style="max-height: 200px; overflow: auto; background: #f7f8fa; padding: 10px; border-radius: 6px; font-size: 12px; line-height: 1.6">{{ prettyJson }}</pre>
+            <pre style="max-height: 200px; overflow: auto; background: var(--surface-warm); padding: 10px; border-radius: 6px; font-size: var(--text-xs); line-height: 1.6">{{ prettyJson }}</pre>
           </el-collapse-item>
         </el-collapse>
       </template>

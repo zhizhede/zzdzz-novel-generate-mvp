@@ -16,7 +16,7 @@
       <template #default="{ row }">{{ row.absMax == null ? '-' : row.absMax }}</template>
     </el-table-column>
     <template #empty>
-      <span style="color: #bbb">没有指标</span>
+      <span style="color: var(--meta)">没有指标</span>
     </template>
   </DataTable>
 </template>

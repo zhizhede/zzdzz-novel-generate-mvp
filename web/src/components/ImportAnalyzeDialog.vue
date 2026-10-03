@@ -1,37 +1,37 @@
 <template>
   <el-dialog v-model="visible" :title="`解析《${title || ''}》`" width="720px" :close-on-click-modal="false"
              @close="stopPoll">
-    <div v-if="status" style="margin-bottom: 8px; font-size: 13px">
+    <div v-if="status" style="margin-bottom: 8px; font-size: var(--text-sm)">
       <el-tag size="small" :type="STATUS_TYPE[status.status] || 'info'">{{ STATUS_TEXT[status.status] || status.status }}</el-tag>
-      <span style="margin-left: 8px; color: #606266">{{ status.message || runningHint }}</span>
+      <span style="margin-left: 8px; color: var(--fg-2)">{{ status.message || runningHint }}</span>
     </div>
 
     <!-- 进度/结果：本次提交的步骤逐行渲染（后端每步落库，刷新页面也不丢） -->
     <div v-if="status && status.plannedSteps && status.plannedSteps.length" style="margin-bottom: 10px">
       <div v-for="key in status.plannedSteps" :key="key"
-           style="display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 13px; line-height: 1.7">
+           style="display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: var(--text-sm); line-height: 1.7">
         <span style="width: 16px">{{ icon(key) }}</span>
         <span style="min-width: 190px">{{ label(key) }}</span>
         <el-tag v-if="isToggleable(key)" size="small" effect="plain"
                 :type="skippedInRun(key) ? 'info' : 'warning'">
           {{ skippedInRun(key) ? '跳过已有' : '覆盖重做' }}
         </el-tag>
-        <span :style="{ color: resultOf(key) ? colorOf(resultOf(key).status) : '#909399' }">
+        <span :style="{ color: resultOf(key) ? colorOf(resultOf(key).status) : 'var(--muted)' }">
           {{ resultOf(key) ? (resultOf(key).message || resultOf(key).status) : (isRunning(key) ? '进行中…' : '待执行') }}
         </span>
-        <span v-if="resultOf(key)" style="color: #bbb; margin-left: auto">{{ Math.round(resultOf(key).elapsedMs / 1000) }}s</span>
+        <span v-if="resultOf(key)" style="color: var(--meta); margin-left: auto">{{ Math.round(resultOf(key).elapsedMs / 1000) }}s</span>
       </div>
     </div>
 
     <!-- 空闲态：可勾选重跑（用于给已有书补资产；导入时已由导入弹窗提交过） -->
     <el-card v-if="!busy" shadow="never" style="margin-top: 10px">
-      <div style="font-size: 13px; margin-bottom: 6px">
+      <div style="font-size: var(--text-sm); margin-bottom: 6px">
         <b>再跑一次解析</b>（默认<b>不跳过</b>＝已有内容覆盖重做；只想补缺的，把该步切到「跳过已有」）
       </div>
       <el-checkbox-group v-model="picked">
         <div v-for="s in ANALYZE_STEPS" :key="s.key" style="margin-bottom: 3px">
           <el-checkbox :label="s.key">
-            <span style="font-size: 13px">{{ s.label }}</span>
+            <span style="font-size: var(--text-sm)">{{ s.label }}</span>
           </el-checkbox>
           <template v-if="isToggleable(s.key)">
             <el-radio-group :model-value="skipMode(s.key)" size="small" style="margin-left: 8px"
@@ -41,7 +41,7 @@
             </el-radio-group>
           </template>
           <el-tag v-else size="small" type="info" effect="plain" style="margin-left: 8px">{{ existingPolicy(s.key) }}</el-tag>
-          <span style="font-size: 12px; color: #999; margin-left: 6px">{{ s.hint }}</span>
+          <span style="font-size: var(--text-xs); color: var(--muted); margin-left: 6px">{{ s.hint }}</span>
         </div>
       </el-checkbox-group>
       <div style="margin-top: 8px">
@@ -50,7 +50,7 @@
         <el-button type="primary" size="small" :disabled="!picked.length" @click="start">开始解析</el-button>
       </div>
     </el-card>
-    <div v-else style="font-size: 12px; color: #999">
+    <div v-else style="font-size: var(--text-xs); color: var(--muted)">
       解析在后台跑（关掉这个窗口也会继续），随时回到这里或刷新页面都能看到进度；完成情况也会写进本书的解析任务行。
     </div>
 
@@ -120,7 +120,7 @@ function icon (key) {
   return '❌'
 }
 function colorOf (s) {
-  return s === 'SUCCESS' ? '#67c23a' : s === 'SKIPPED' ? '#909399' : '#f56c6c'
+  return s === 'SUCCESS' ? 'var(--success)' : s === 'SKIPPED' ? 'var(--muted)' : 'var(--danger)'
 }
 
 async function loadStatus (notifyFinished = false) {
