@@ -28,7 +28,7 @@
    ↓
 DB      PostgreSQL（is_deleted 软删除，见共识文档 §二#4）
 
-model/   dto(库实体) / vo(web 出入参)  贯穿各层，依赖方向单向向下，禁止反向与跨层
+model/   entity(DO 库实体) / dto(入参) / vo(出参)  贯穿各层，依赖方向单向向下，禁止反向与跨层
 ```
 
 **铁律**：
@@ -209,7 +209,7 @@ model/entity/ 十个 DO 与上表同时落地。
 - 实体上不声明 `isDeleted`（撤销当天先加后撤的一次反复），MP 全局逻辑删除配置一并移除；软删条件只由 DAO 的 SQL 自己带（XML 里 `is_deleted = FALSE` 逐条写）。详见 §3「SQL 规约」。
 - 31 个实体抽 `BaseDO`（只含 `@TableId id`）；`lombok.config` 加 `equalsAndHashCode.callSuper = call`。
 
-### 8.4 2026-10-03 决定：回退 2026-09-21 的命名配对（用户定调，落地中）
+### 8.4 2026-10-03 决定：回退 2026-09-21 的命名配对（用户定调，主体已落地）
 
 **目标配对（恢复 2026-09-21 之前的原规则）**：`DO=库实体 / DTO=入参 / VO=出参`。
 
