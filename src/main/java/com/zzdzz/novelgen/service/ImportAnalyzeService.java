@@ -25,18 +25,20 @@ import java.util.concurrent.Executors;
 
 /**
  * 导入书籍后的「解析链」：把导入正文里**已经存在**的东西用 LLM 抽出来，落成素材库资产
- * （事实账/世界状态/伏笔提议、大纲、素材卡、世界观、文风规则、向量索引）。
+ * （事实账/世界状态/伏笔提议、大纲、素材卡、世界观、文风规则、向量索引、**已有章的章纲反推**）。
  *
- * **只解析，不规划**（2026-10-03 用户定调）：本链**不含卷纲/章纲**——导入书的解析不该顺手规划出一卷续写，
- * 那属于规划页（「AI 规划下一卷」）与生成管线。原先的 VOLUME_PLAN / CHAPTER_OUTLINES 两步已移出枚举。
+ * **只解析，不规划**（2026-10-03 用户定调）：本链**不产生新章、不规划续写卷**——导入书的解析不该顺手
+ * 规划出一卷续写，那属于规划页（「AI 规划下一卷」）与生成管线。原先的 `VOLUME_PLAN`（规划下一卷）与
+ * 旧的 `CHAPTER_OUTLINES`（把新规划卷入生成队列）两步已移除；现在链里的 `DERIVE_CHAPTER_OUTLINES` 是
+ * **反推**——读已有正文，把它实际怎么分场拆出来，不动正文与章状态。
  *
  * 运行形态与「样本深度解析」同构：全局单线程 runner（一本一本地跑，瓶颈在 LLM）+ 一行活跃任务表
  * （import_analyze_tasks，重复提交＝重置同一行）——单步动辄几十秒到十几分钟，不能挂在 HTTP 请求上。
  * 逐步 fail-open：某步失败只记该步 FAILED 并继续下一步（一步炸不该让整链白跑），链终态只反映「有没有未完成」
  * （全部 SUCCESS/SKIPPED = DONE，其余 = FAILED，前端按步渲染）。
  *
- * 「已有内容」的处置：每步可单独选**跳过 / 覆盖重做**（默认不跳过＝覆盖），只有 DIGESTS / CARDS / EMBEDDINGS
- * 三步的该开关有实际效果（这三步原本是「已有即跳过」），其余步的处置是固定的（大纲/世界观/规则覆盖同名文档）。
+ * 「已有内容」的处置：每步可单独选**跳过 / 覆盖重做**（默认不跳过＝覆盖），DIGESTS / CARDS / EMBEDDINGS /
+ * DERIVE_CHAPTER_OUTLINES 四步的该开关有实际效果，其余步的处置是固定的（大纲/世界观/规则覆盖同名文档）。
  * 开关随 steps 一起写进任务行，前端进度面板据此标出本次选择。
  */
 @Service
@@ -46,6 +48,11 @@ public class ImportAnalyzeService {
 
     /** 逐章事实账的章数上限：导入书动辄上百章，全量重跑既慢又贵，默认取末尾 N 章（续写前情够用）。 */
     static final int DIGEST_CHAPTER_CAP = 20;
+    /**
+     * 章纲反推的章数上限：单章 LLM 约几十秒，导入书上百章不能无上限全跑——取前 N 章（章号升序），
+     * 超出部分在步骤消息里明说，下轮（或调高此值）再补。
+     */
+    static final int DERIVE_OUTLINE_CHAPTER_CAP = 30;
     /** 单步结果里消息长度上限（任务行 message 列有限长，且前端只展示一行）。 */
     private static final int MESSAGE_MAX = 300;
 
@@ -56,6 +63,7 @@ public class ImportAnalyzeService {
     private final NovelService novelService;
     private final GenrePresetService genrePresetService;
     private final EmbeddingService embeddingService;
+    private final OutlineService outlineService;
     private final ObjectMapper mapper;
 
     /** 全局串行 runner：一次只跑一本书的解析链（可续跑靠任务行，不靠线程）。 */
@@ -178,6 +186,7 @@ public class ImportAnalyzeService {
                 yield new StepResult("SUCCESS",
                         (skipExisting ? "新增向量 " : "向量已重算 ") + n + " 条", Map.of("created", n));
             }
+            case DERIVE_CHAPTER_OUTLINES -> deriveChapterOutlines(novelId, !skipExisting);
         };
     }
 
@@ -199,6 +208,32 @@ public class ImportAnalyzeService {
         }
         return new StepResult("SUCCESS", note, Map.of("digested", r.digested(), "attempted", r.requested(),
                 "skipped", r.skipped()));
+    }
+
+    /**
+     * 章纲反推：把本书**已有正文**的章按实际分场拆出来（写 outline_yaml + chapter_scenes）。
+     * 事后描述而非写作规划——走 OutlineService 的保全状态分支，正文/章状态/门禁报告都不动。
+     * 取前 {@link #DERIVE_OUTLINE_CHAPTER_CAP} 章（章号升序，单章几十秒不做无上限全跑）；单章失败只记数。
+     */
+    private StepResult deriveChapterOutlines(long novelId, boolean overwrite) {
+        OutlineService.DeriveResult r = outlineService.deriveChapterOutlines(
+                novelId, overwrite, DERIVE_OUTLINE_CHAPTER_CAP);
+        if (r.bookChapters() == 0) {
+            return new StepResult("SKIPPED", "本书还没有带正文的章，没有可反推的章纲", Map.of());
+        }
+        String note = "已反推 " + r.derived() + "/" + r.requested() + " 章章纲（场景拆解，正文与章状态未动）；"
+                + (overwrite ? "覆盖重写已有章纲" : "只补没有章纲的章");
+        if (r.skipped() > 0) {
+            note += "，跳过已有 " + r.skipped() + " 章";
+        }
+        if (r.failed() > 0) {
+            note += "，" + r.failed() + " 章失败（可稍后重跑）";
+        }
+        if (r.bookChapters() > r.requested()) {
+            note += "；本书 " + r.bookChapters() + " 章有正文，本次只取前 " + r.requested() + " 章";
+        }
+        return new StepResult("SUCCESS", note, Map.of("derived", r.derived(), "skipped", r.skipped(),
+                "failed", r.failed(), "requested", r.requested(), "bookChapters", r.bookChapters()));
     }
 
     // ===== 助手 =====

@@ -6,11 +6,11 @@ import java.util.Locale;
 
 /**
  * 导入书籍后的「解析链」步骤：**只解析，不规划**——把导入正文里已经存在的东西用 LLM 抽出来，
- * 落成素材库资产。**不含卷纲/章纲**（那是规划，属规划页与生成管线，2026-10-03 用户定调）：
+ * 落成素材库资产。**不规划新章**（那是规划页与生成管线，2026-10-03 用户定调）：
  * 导入书的解析不该顺手规划出一卷续写，规划是另一个入口、另一个决定。
  *
- * 顺序即执行顺序（也是依赖顺序）：事实账 → 大纲 → 素材卡 → 世界观 → 文风规则 → 向量索引。
- * 依赖说明：大纲用得上事实账；世界观用得上素材卡。
+ * 顺序即执行顺序（也是依赖顺序）：事实账 → 大纲 → 素材卡 → 世界观 → 文风规则 → 向量索引 → 章纲反推。
+ * 依赖说明：大纲用得上事实账；世界观用得上素材卡；**章纲反推只读本章正文**，不依赖其他步。
  */
 public enum ImportAnalyzeStep {
 
@@ -25,7 +25,14 @@ public enum ImportAnalyzeStep {
     /** 文风规则提炼（语料节选 → 规则列表），写回本书风格包 rules_md。 */
     RULES("RULES", "文风规则（写回风格包）"),
     /** 事实账 + 素材卡向量化（RAG 语义检索前置；走 embedding 模型，与会话 LLM 分开接入）。 */
-    EMBEDDINGS("EMBEDDINGS", "向量索引（RAG 召回前置）");
+    EMBEDDINGS("EMBEDDINGS", "向量索引（RAG 召回前置）"),
+    /**
+     * 从**已有正文**反推章纲：把成稿章按实际分场拆成场景（写 outline_yaml + chapter_scenes），
+     * 是「这章实际怎么写的」的事后描述，**不是**写作规划——不动正文、章状态与门禁报告。
+     * 单章几十秒，故只取前若干章（见 ImportAnalyzeService.DERIVE_OUTLINE_CHAPTER_CAP）。
+     * 与已移除的旧 `CHAPTER_OUTLINES`（把新规划卷入库生成队列）是两回事，故用新键。
+     */
+    DERIVE_CHAPTER_OUTLINES("DERIVE_CHAPTER_OUTLINES", "章纲（从正文反推场景拆解）");
 
     private final String wire;
     private final String label;

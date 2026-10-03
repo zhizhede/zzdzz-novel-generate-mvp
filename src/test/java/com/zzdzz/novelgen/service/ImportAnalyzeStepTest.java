@@ -18,15 +18,20 @@ class ImportAnalyzeStepTest {
     @Test
     void allStepsAreOrderedByDependency() {
         assertThat(ImportAnalyzeStep.all().stream().map(ImportAnalyzeStep::wire).toList()).containsExactly(
-                "DIGESTS", "OUTLINE", "CARDS", "WORLD", "RULES", "EMBEDDINGS");
+                "DIGESTS", "OUTLINE", "CARDS", "WORLD", "RULES", "EMBEDDINGS", "DERIVE_CHAPTER_OUTLINES");
     }
 
-    /** 解析链不含规划步骤：卷纲/章纲的键必须不被认识（它们属规划页，不属这里）。 */
+    /**
+     * 解析链不含**规划**步骤：旧的卷纲（规划下一卷）与旧的章纲（把新规划卷入队）的键必须不被认识
+     * ——它们属规划页。现在的章纲步是另一件事（从已有正文反推），用新键 DERIVE_CHAPTER_OUTLINES。
+     */
     @Test
     void planningStepsAreNotPartOfParsingChain() {
         assertThat(ImportAnalyzeStep.of("VOLUME_PLAN")).isNull();
         assertThat(ImportAnalyzeStep.of("CHAPTER_OUTLINES")).isNull();
         assertThat(ImportAnalyzeStep.ordered(List.of("VOLUME_PLAN", "CHAPTER_OUTLINES"))).isEmpty();
+        assertThat(ImportAnalyzeStep.of("DERIVE_CHAPTER_OUTLINES"))
+                .isEqualTo(ImportAnalyzeStep.DERIVE_CHAPTER_OUTLINES);
     }
 
     @Test
@@ -58,7 +63,7 @@ class ImportAnalyzeStepTest {
 
     @Test
     void summarizeCountsSuccessSkipAndFail() {
-        ImportAnalyzeService service = new ImportAnalyzeService(null, null, null, null, null, null, null,
+        ImportAnalyzeService service = new ImportAnalyzeService(null, null, null, null, null, null, null, null,
                 new ObjectMapper());
         List<java.util.Map<String, Object>> results = List.of(
                 java.util.Map.of("step", "DIGESTS", "status", "SUCCESS"),

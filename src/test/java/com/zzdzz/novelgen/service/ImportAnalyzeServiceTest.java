@@ -44,7 +44,7 @@ class ImportAnalyzeServiceTest {
     // ===== 任务行 steps 的读写兼容 =====
 
     private ImportAnalyzeService service(ImportAnalyzeTaskDataService taskData) {
-        return new ImportAnalyzeService(null, null, taskData, null, null, null, null, new ObjectMapper());
+        return new ImportAnalyzeService(null, null, taskData, null, null, null, null, null, new ObjectMapper());
     }
 
     private ImportAnalyzeTaskDO task(String stepsJson) {
