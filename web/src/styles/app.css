@@ -24,3 +24,20 @@ body {
   font-size: var(--text-base);
   line-height: var(--leading-body);
 }
+
+/* ── 表格：表头不竖排 ──────────────────────────────────────────────────
+ * Element Plus 的 .cell 默认 word-break: break-all，列被压窄时中文表头会
+ * 竖着折成一列（规划页的「时间跨度」折成 4 行就是这么来的）。
+ * 表头改 nowrap。
+ *
+ * 注意：这里只治表头。列被压扁的根因是「声明列宽合计 > 容器宽度」，
+ * 已通过取消逐页 max-width 解决；口径见
+ * docs/design/前端设计系统与交互优化.md §三。 */
+.el-table th.el-table__cell > .cell {
+  white-space: nowrap;
+}
+
+/* 数字列不抖动：等宽数字。行内由模板按需加 class="num"，见 DataTable 组件。 */
+.el-table .num > .cell {
+  font-variant-numeric: tabular-nums;
+}

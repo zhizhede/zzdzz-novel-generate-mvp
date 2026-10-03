@@ -109,7 +109,7 @@
 
     <!-- 大纲层：一书一行；缺大纲的书也列出来（缺口清单） -->
     <el-table v-if="filters.level === 'OUTLINE'" :data="rows" v-loading="loading" border size="small"
-              style="max-width: 1500px" :row-class-name="gapRowClass">
+              :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
@@ -153,7 +153,7 @@
 
     <!-- 卷纲层：一书一卷一行（章行聚合 + 卷复盘） -->
     <el-table v-else-if="filters.level === 'VOLUME'" :data="rows" v-loading="loading" border size="small"
-              style="max-width: 1600px" :row-class-name="gapRowClass">
+              :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: 4px 12px; font-size: 13px; line-height: 1.9">
@@ -224,7 +224,7 @@
     </el-table>
 
     <!-- 章纲层：一章一行 -->
-    <el-table v-else :data="rows" v-loading="loading" border size="small" style="max-width: 1600px"
+    <el-table v-else :data="rows" v-loading="loading" border size="small"
               :row-class-name="gapRowClass">
       <el-table-column type="expand">
         <template #default="{ row }">

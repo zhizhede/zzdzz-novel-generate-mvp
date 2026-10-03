@@ -49,7 +49,7 @@
             导入成稿卷：这 {{ v.chapters?.length || 0 }} 章是你导入的原文（正文已成），目标/钩子为空是正常的——
             卷纲/章纲是「写之前」的规划，成稿章不需要再规划；生成管线从第 {{ firstGeneratedChapterNo }} 章接着写。
           </div>
-          <el-table :data="v.chapters" border size="small" style="max-width: 980px">
+          <el-table :data="v.chapters" border size="small">
             <el-table-column prop="chapterNo" label="章" width="60" />
             <el-table-column prop="title" label="标题" width="160" />
             <el-table-column prop="goal" label="目标" min-width="220" show-overflow-tooltip />

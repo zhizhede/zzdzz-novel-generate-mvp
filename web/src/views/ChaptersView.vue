@@ -67,7 +67,7 @@
           </el-tab-pane>
           <el-tab-pane :label="`门禁（${detail.gateReport ? (detail.gateReport.passed ? '通过' : '未过') : '无'}）`" name="gates">
             <el-table v-if="detail.gateReport" :data="detail.gateReport.checks || []" border size="small">
-              <el-table-column prop="check" label="指标" width="200" />
+              <el-table-column prop="check" label="指标" min-width="200" />
               <el-table-column prop="value" label="实测" width="100" />
               <el-table-column prop="baseline" label="基线" width="100" />
               <el-table-column prop="abs_max" label="天花板" width="100" />

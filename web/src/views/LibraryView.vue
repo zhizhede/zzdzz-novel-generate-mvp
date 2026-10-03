@@ -26,7 +26,7 @@
             设定层实体（角色/物品/地点/现象/地标/灾害/组织）；生成时按「常驻 + 本场景别名命中」自动取值注入
           </span>
         </div>
-        <el-table :data="cards" border size="small" style="max-width: 980px">
+        <el-table :data="cards" border size="small">
           <el-table-column label="类型" width="80">
             <template #default="{ row }">{{ kindLabel[row.kind] || row.kind }}</template>
           </el-table-column>
@@ -68,9 +68,9 @@
           <el-input v-model="newCanon.name" placeholder="文档名称" style="width: 200px" size="small" />
           <el-button type="primary" size="small" @click="createCanon">新增文档</el-button>
         </div>
-        <el-table :data="canon" border size="small" style="max-width: 680px">
+        <el-table :data="canon" border size="small">
           <el-table-column prop="kind" label="类型" width="110" />
-          <el-table-column prop="name" label="名称" width="180" />
+          <el-table-column prop="name" label="名称" min-width="180" />
           <el-table-column label="操作" width="150">
             <template #default="{ row }">
               <el-button size="small" @click="openCanon(row)">编辑</el-button>
@@ -98,7 +98,7 @@
         <div v-if="foreshadows.some((f) => f.status === 'proposed')" style="margin-bottom: 8px; font-size: 12px; color: #e6a23c">
           有 AI 自动提议的新伏笔待处理——采纳后进入埋设编排，忽略则弃用
         </div>
-        <el-table :data="foreshadows" border size="small" style="max-width: 900px">
+        <el-table :data="foreshadows" border size="small">
           <el-table-column prop="code" label="编号" width="70" />
           <el-table-column prop="content" label="内容" min-width="280" show-overflow-tooltip />
           <el-table-column prop="plantedIn" label="埋设章" width="80" />
@@ -128,7 +128,7 @@
       <!-- 事实账 -->
       <el-tab-pane :label="`事实账（${digests.length}）`">
         <div style="color: #999; font-size: 12px; margin-bottom: 8px">续写前情链的唯一来源——发现摘要与正文不符时在此人工修正</div>
-        <el-table :data="digests" border size="small" style="max-width: 860px">
+        <el-table :data="digests" border size="small">
           <el-table-column prop="chapterNo" label="章" width="70" />
           <el-table-column prop="contentMd" label="摘要" min-width="480" show-overflow-tooltip />
           <el-table-column label="操作" width="80">
@@ -151,7 +151,7 @@
           <el-button size="small" @click="backfillWs" :loading="wsBackfilling">对本章重新抽取</el-button>
           <span style="color: #999; font-size: 12px">回填 = 轻量 LLM 调用重做快照，不动事实账</span>
         </div>
-        <div style="max-width: 860px">
+        <div>
           <el-input v-model="wsText" type="textarea" :rows="18" placeholder="选择章号后加载快照 JSON" />
           <div style="margin-top: 8px">
             <el-button type="primary" @click="saveWs">保存纠偏</el-button>
@@ -177,7 +177,7 @@
           </span>
         </div>
 
-        <el-table :data="llmPrices" border size="small" style="max-width: 1020px; margin-bottom: 6px">
+        <el-table :data="llmPrices" border size="small" style="margin-bottom: 6px">
           <el-table-column prop="model" label="模型" width="130" />
           <el-table-column label="空闲价（命中/未命中/输出）" min-width="200">
             <template #default="{ row }">{{ row.idleInputHit }} / {{ row.idleInputMiss }} / {{ row.idleOutput }} {{ row.currency }}/百万</template>
@@ -195,7 +195,7 @@
           </el-table-column>
         </el-table>
 
-        <el-table :data="llmNodes" border size="small" style="max-width: 1020px">
+        <el-table :data="llmNodes" border size="small">
           <el-table-column prop="node" label="节点" width="160" />
           <el-table-column prop="remark" label="说明" min-width="200" show-overflow-tooltip />
           <el-table-column label="模型（留空=默认）" width="140">
@@ -245,7 +245,7 @@
             某用途无启用行时回退服务端本地配置。
           </span>
         </div>
-        <el-table :data="llmProviders" border size="small" style="max-width: 1080px">
+        <el-table :data="llmProviders" border size="small">
           <el-table-column prop="name" label="名称" width="130" />
           <el-table-column label="用途" width="90">
             <template #default="{ row }">
@@ -285,7 +285,7 @@
         <div style="color: #999; font-size: 12px; margin-bottom: 8px">
           管线/门禁/提示词的行为参数，平台级生效（30 秒内）；删掉库内行即回退代码默认。改错会让门禁或自愈行为变形，改前看清说明。
         </div>
-        <el-table :data="tunings" border size="small" style="max-width: 900px">
+        <el-table :data="tunings" border size="small">
           <el-table-column prop="key" label="键" width="220" />
           <el-table-column prop="description" label="说明" min-width="300" show-overflow-tooltip />
           <el-table-column label="值" width="160">
@@ -311,7 +311,7 @@
           <el-input v-model="promptFilter" placeholder="按节点/标题筛选" size="small" clearable style="width: 220px" />
           <el-button type="primary" size="small" @click="openPromptCreate">新建提示词</el-button>
         </div>
-        <el-table :data="filteredPrompts" border size="small" style="max-width: 1180px" @row-click="(r) => viewPrompt(r.id)">
+        <el-table :data="filteredPrompts" border size="small" @row-click="(r) => viewPrompt(r.id)">
           <el-table-column prop="node" label="节点" width="150" />
           <el-table-column prop="phase" label="阶段" width="110" />
           <el-table-column prop="title" label="用途" min-width="240" show-overflow-tooltip />
@@ -408,15 +408,15 @@
             </div>
           </el-tab-pane>
           <el-tab-pane label="指纹基线（只读）" name="fingerprint">
-            <el-table :data="fingerprintRows" border size="small" style="max-width: 720px">
-              <el-table-column prop="metric" label="指标" width="220" />
+            <el-table :data="fingerprintRows" border size="small">
+              <el-table-column prop="metric" label="指标" min-width="220" />
               <el-table-column prop="value" label="基线值" width="100" />
               <el-table-column prop="tolerance" label="容差" width="100" />
               <el-table-column prop="abs_max" label="天花板" width="100" />
             </el-table>
           </el-tab-pane>
           <el-tab-pane label="门禁配置（可编辑）" name="gate">
-            <div style="max-width: 720px">
+            <div>
               <div style="font-size: 13px; margin-bottom: 6px">AI 腔黑名单（每行一个，正文中出现即判未过）</div>
               <el-input v-model="bannedText" type="textarea" :rows="8" placeholder="心中暗想" />
               <div style="display: flex; gap: 12px; align-items: center; margin: 10px 0">
@@ -463,8 +463,8 @@
           <span style="color: #999; font-size: 12px">品类随时新增；机械指标零成本；n&lt;10 低置信提示不拒绝</span>
         </div>
         <el-input v-model="corpusText" type="textarea" :rows="5" placeholder="粘贴一章原稿正文后点导入（可反复导入，量级不限）"
-                  style="max-width: 860px; margin-bottom: 10px" />
-        <el-table v-if="corpusRows.length" :data="corpusRows" border size="small" style="max-width: 860px; margin-bottom: 12px">
+                  style="margin-bottom: 10px" />
+        <el-table v-if="corpusRows.length" :data="corpusRows" border size="small" style="margin-bottom: 12px">
           <el-table-column prop="title" label="章标题" min-width="200" />
           <el-table-column prop="wordCount" label="字数" width="90" />
           <el-table-column label="操作" width="80">
@@ -474,7 +474,7 @@
           </el-table-column>
         </el-table>
 
-        <el-card v-if="draft" shadow="never" style="max-width: 860px; margin-bottom: 12px">
+        <el-card v-if="draft" shadow="never" style="margin-bottom: 12px">
           <template #header>
             <span style="font-size: 13px">「{{ draft.genre }}」提取草稿（{{ draft.chapters }} 章 · {{ draft.metricCount }} 项指标）</span>
           </template>
@@ -491,7 +491,7 @@
           </div>
         </el-card>
 
-        <el-table :data="presets" border size="small" style="max-width: 860px">
+        <el-table :data="presets" border size="small">
           <el-table-column prop="id" label="ID" width="60" />
           <el-table-column prop="name" label="预设" min-width="160" />
           <el-table-column prop="description" label="说明" min-width="240" show-overflow-tooltip />
@@ -512,7 +512,7 @@
             快速档抽样前 40 章出骨架（约几分钟）；完整档全书逐章（长篇 1-3 小时，可断点续跑）。
           </span>
         </div>
-        <el-table :data="samples" border size="small" style="max-width: 1080px"
+        <el-table :data="samples" border size="small"
                   :row-class-name="({ row }) => (row.id === highlightSampleId ? 'sample-highlight' : '')">
           <el-table-column type="expand">
             <template #default="{ row }">

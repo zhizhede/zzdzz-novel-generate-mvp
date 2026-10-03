@@ -71,7 +71,7 @@
       覆盖品类 {{ matchedGenreCount }} 个
     </div>
 
-    <el-table :data="rows" v-loading="loading" border size="small" style="max-width: 1500px"
+    <el-table :data="rows" v-loading="loading" border size="small"
               :row-key="(row) => `${row.source}-${row.refId}`"
               :row-class-name="({ row }) => (row.source === 'SAMPLE' && row.refId === highlightSampleId ? 'fp-highlight' : '')">
       <el-table-column type="expand">

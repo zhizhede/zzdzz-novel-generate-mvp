@@ -29,9 +29,9 @@
 
         <el-table :data="items" border size="small" @row-click="open">
           <el-table-column prop="id" label="ID" width="60" />
-          <el-table-column prop="node" label="节点" width="140" />
+          <el-table-column prop="node" label="节点" min-width="140" />
           <el-table-column prop="chapterId" label="章ID" width="70" />
-          <el-table-column prop="model" label="模型" width="130" />
+          <el-table-column prop="model" label="模型" min-width="130" />
           <el-table-column prop="promptTokens" label="Prompt" width="90" />
           <el-table-column prop="completionTokens" label="Completion" width="110" />
           <el-table-column prop="totalTokens" label="总tokens" width="90" />
