@@ -182,7 +182,7 @@ flowchart LR
     D --> E[实体归并+sample_merge] --> F[卷汇总/全书大纲/世界观/标签]
 ```
 
-验收口径：①语料与资产全部落库（preset_corpus/imported_samples/sample_plot_nodes/sample_cards），删除仅软删；②FAST→FULL 升级与重启恢复不重析已析章（UNIQUE(sample,level,seq)）；③解析失败留缺口可续跑，不产生半截资产展示；④mobi/azw3 无 DRM 可提取，DRM/HUFF 人话拒绝。
+验收口径：①语料与资产全部落库（preset_corpus/imported_samples/sample_plot_nodes/sample_cards），删除为物理删除（2026-10-03 前为软删，已下线）；②FAST→FULL 升级与重启恢复不重析已析章（UNIQUE(sample,level,seq)）；③解析失败留缺口可续跑，不产生半截资产展示；④mobi/azw3 无 DRM 可提取，DRM/HUFF 人话拒绝。
 
 ### 流 D：衍生开书与草稿态
 
@@ -241,6 +241,8 @@ flowchart LR
 **已知交汇（实弹踩到，故意不改门禁）**：`dialogue_end_punct_ratio` 在场景级/章级都有硬下限 0.5（既有反 AI 腔规则，见 GateService）。若本书自身就低于该线（如「夜班守则」风格基线 0.09），或全书对白句末普遍无标点导致该指标被全零剔除，采纳本书自己的指纹后**该指标仍按 0.5 判**——草稿 notes 会在两种情况下都明确告知。
 
 ## 六、软删 × 唯一键 × 召回：四条口径（2026-09-30 增补，全库排查后固化）
+
+> **【2026-10-03 软删机制整体下线，本节按「删除＝真删」重读】**：删除不再是打 `is_deleted` 标记，而是物理 `DELETE`；条件唯一索引的 `WHERE is_deleted = FALSE` 谓词恒为真、等同普通唯一索引（列与索引保留当死列/死谓词）。因此下面提到「软删行不进索引 / 软删包不再被复用」等表述，历史背景读作「已删除的行不存在」即可；`is_deleted` 在代码里只剩 3 处 `ON CONFLICT` 谓词（必须保留）。删父行现已由 V37 外键 `ON DELETE CASCADE` 保证。详见 `docs/code-standards.md §0 流水 1 / §8.6`。
 
 新写删除/插入/召回相关代码时按这四条判断，别只照抄某张表的具体做法。
 

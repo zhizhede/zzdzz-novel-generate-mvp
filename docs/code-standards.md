@@ -11,10 +11,11 @@
 
 **变更流水（倒序）**：
 
-1. **2026-10-03｜时间三件套上提 `BaseDO`（用户定调）**：`createTime/updateTime/deleteTime` 由各实体改为基类统一持有（30 张业务表逐表核过三列俱在、且统一 `NOT NULL DEFAULT now()`）。此前 20 个实体各自手写、10 个根本没建模。**同一条「不进基类」的旧结论只对 `isDeleted` 继续成立**——软删标记不进领域模型这条铁律没变，变的只是它的邻座。被本次推翻的原话（§4「`BaseDO`」条、已按 §8.5 改写）："`isDeleted` 与时间戳刻意都不进基类"。**已接受**的代价：`update_time` 由 SQL 内 `NOW()` 维护，而 MP 更新策略是 NOT_NULL，所以「读出来→改字段→updateById」会把旧值写回 SET；现存两处 updateById 里 `ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null，不进 SET）不受影响，`LlmProviderService.update` 命中该路径（既有问题，本次未修，修法见 §4）。落地：`/api/chapters/**` 等 17 个端点实弹 200、MP 生成 SQL 已带三个继承列、`mvn test` 232/232。
-2. **2026-10-03｜回退命名配对（用户定调，已落地主体）**：恢复 `DO=库实体（model/entity）/ DTO=入参（model/dto）/ VO=出参（model/vo）`，撤销 2026-09-21 的「DTO=库实体、DO 后缀废除」。已落地：31 实体 `XxxDTO→XxxDO` 迁 `model/entity/`、7 个纯收参类入 `model/dto/`、`LoginVO` 拆成 `LoginDTO`+`LoginVO`。未落地：controller 内嵌的 23 个入参 record 提取归位（见 §8.4 进度）。**方式上的纠正**：本次先在本节留下流水、并在 §8.4 抄录原规则原文，再动代码——不再「先改代码、顺手把规约覆盖掉」。
-3. **2026-09-21｜命名配对切换（提交 `8df2bed`，142 文件）**：`DO→DTO` 22 个实体并把 `model/entity/` 并进 `model/dto/`；27 个收参类 `XxxDTO→XxxVO`；同提交重写本规约 54 行 + `AGENTS.md` 铁律。**本次变更的问题不只是内容，而是方式**：正文被覆盖式改写、无变更记录，导致原规则不可追溯。
-4. **2026-09-10｜规约首版**：基准为阿里巴巴《Java 开发手册》+ 命名参考，采用 `DO / DTO / VO` 三件套。
+1. **2026-10-03｜软删机制整体下线（用户定调：「把软删相关的设定全部从代码层清除」）**：删除一律**物理删除**。被推翻的原话是 §4「软删标记不进领域模型」「已知缺口（待收口）」两条，以及 §3.6「`is_deleted/...` 一并建模」——**"软删标记不进领域模型" 这条定调本身没被推翻，是被"整个软删都不要了"覆盖了**：既然不再软删，就没有标记该不该进模型的问题。落地范围：①XML 里 152 处 `is_deleted` 读过滤删除、Java 里 35 处 `.eq("is_deleted", false)` 删除；②6 个 `softDelete*` 语句改 `DELETE FROM`，方法名统一去 soft（`deletePlan`/`deleteCustom`/`deleteCard`/`deleteOrphanPack`…）；③`BaseDO` 去掉 `deleteTime`（只剩 `createTime/updateTime`）；④存量软删行一次性物理清洗（全库 30 张表软删行 0 行，整库备份 `var/purge-backup-20261003-201839.sql`）、活数据未动；⑤**新迁移 V37**：19 个外键加 `ON DELETE CASCADE`（父为 novels/chapters/imported_samples），否则硬删有内容的书会撞 `chapters_novel_id_fkey`——这是原先记在"已知缺口"里、被标为"必须拍板"的那个决定，本次拍板为级联。**刻意保留的两处**：库里 `is_deleted`/`delete_time` 两列与 8 个条件唯一索引留作死列/死谓词（同日定调「列留库里当死列，只清代码」）；3 处 `ON CONFLICT (...) WHERE is_deleted = FALSE` 必须原样保留（索引带谓词，去掉会报 no unique or exclusion constraint）。**前端同步**：6 处写着"软删，可恢复"的删除确认文案改口（否则会骗用户）；提示词页删掉那个恒为 false 的删除列开关。证据：`mvn test` 232/232、前端 `npm run build` 通过、26 个端点实弹 200、删书（级联）/删提示词/删素材卡三路实弹均物理消失、日志零异常。
+2. **2026-10-03｜时间三件套上提 `BaseDO`（用户定调，同日其后被上一条收窄为两列）**：`createTime/updateTime/deleteTime` 由各实体改为基类统一持有（30 张业务表逐表核过三列俱在、且统一 `NOT NULL DEFAULT now()`）。此前 20 个实体各自手写、10 个根本没建模。**同一条「不进基类」的旧结论只对 `isDeleted` 继续成立**——软删标记不进领域模型这条铁律当时没变，变的只是它的邻座。被本次推翻的原话（§4「`BaseDO`」条、已按 §8.5 改写）："`isDeleted` 与时间戳刻意都不进基类"。**当时已记下**的代价：`update_time` 由 SQL 内 `NOW()` 维护，而 MP 更新策略是 NOT_NULL，所以「读出来→改字段→updateById」会把旧值写回 SET；现存两处 updateById 里 `ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null，不进 SET）不受影响，`LlmProviderService.update` 命中该路径（既有问题，未修，修法见 §4）。落地：`/api/chapters/**` 等 17 个端点实弹 200、MP 生成 SQL 已带继承列、`mvn test` 232/232。
+3. **2026-10-03｜回退命名配对（用户定调，已落地主体）**：恢复 `DO=库实体（model/entity）/ DTO=入参（model/dto）/ VO=出参（model/vo）`，撤销 2026-09-21 的「DTO=库实体、DO 后缀废除」。已落地：31 实体 `XxxDTO→XxxDO` 迁 `model/entity/`、7 个纯收参类入 `model/dto/`、`LoginVO` 拆成 `LoginDTO`+`LoginVO`。未落地：controller 内嵌的 23 个入参 record 提取归位（见 §8.4 进度）。**方式上的纠正**：本次先在本节留下流水、并在 §8.4 抄录原规则原文，再动代码——不再「先改代码、顺手把规约覆盖掉」。
+4. **2026-09-21｜命名配对切换（提交 `8df2bed`，142 文件）**：`DO→DTO` 22 个实体并把 `model/entity/` 并进 `model/dto/`；27 个收参类 `XxxDTO→XxxVO`；同提交重写本规约 54 行 + `AGENTS.md` 铁律。**本次变更的问题不只是内容，而是方式**：正文被覆盖式改写、无变更记录，导致原规则不可追溯。
+5. **2026-09-10｜规约首版**：基准为阿里巴巴《Java 开发手册》+ 命名参考，采用 `DO / DTO / VO` 三件套。
 
 **流程约束（今后）**：改命名/分层这类规约，**同一提交内只允许改规约正文 + 本节追加一条流水**；代码迁移单独提交，提交信息里引用本节的条目号。禁止只改正文不留痕。
 
@@ -27,7 +28,7 @@
    ↓ 只做：业务编排
 数据层   dao/（全部 SQL 唯一容身处）
    ↓
-DB      PostgreSQL（is_deleted 软删除，见共识文档 §二#4）
+DB      PostgreSQL（删除＝物理删除；`is_deleted` 列留作死列，见 §4）
 
 model/   entity(DO 库实体) / dto(入参) / vo(出参)  贯穿各层，依赖方向单向向下，禁止反向与跨层
 ```
@@ -116,7 +117,7 @@ com.zzdzz.novelgen
 
 **DO（entity/）=库实体**：与表一一对应（清单以 `model/entity/` 现状为准），MyBatis-Plus `@Data + @TableName`。原规约的「MVP 用 record、只能由 DAO 的 RowMapper 构造」两条自 2026-09-13 数据层切 MyBatis-Plus 后已不适用（MP 的写入依赖无参构造 + setter），**其余（与表一一对应、DO 不出 service）不变**：
 
-- 字段 camelCase 对应表列；`create_time/update_time/delete_time` **由 `BaseDO` 统一提供，实体里不再重复声明**（见 §4）；`is_deleted` 不建模（软删标记不进领域模型，见 §4）；JSONB/List 字段挂 TypeHandler + autoResultMap
+- 字段 camelCase 对应表列；`create_time/update_time` **由 `BaseDO` 统一提供，实体里不再重复声明**（见 §4）；`is_deleted`/`delete_time` **不建模**（软删机制已下线，两列留库当死列，见 §8.6）；JSONB/List 字段挂 TypeHandler + autoResultMap
 - 只经 mapper 写入（BaseMapper / 自定义语句），禁止业务代码绕过数据层改库
 - **库实体不出 service 层**：mapper 返回 DTO 给 service 是终点，跨层出参一律 VO（service 内 `from()` 转换）
 
@@ -137,15 +138,15 @@ com.zzdzz.novelgen
 |---|---|---|
 | Controller / Runner | 参数校验（@Valid 或手动）、调 service、包 `Result<T>`、声明开放路径 | 业务逻辑、SQL、返回库实体（XxxDTO）、吞异常 |
 | Service | 业务规则、状态机推进（`UPDATE…WHERE status=前置` 抢占）、事务边界、调 LlmPort 并落台账、写门禁/摘要 | 拼接 SQL、依赖 HttpServletRequest、持有可变单例状态 |
-| DAO | SQL 全部集中于此、软删条件 `is_deleted=false` 必带、预编译参数 | 业务判断、调其他 DAO（组合留给 service） |
+| DAO | SQL 全部集中于此、预编译参数 | 业务判断、调其他 DAO（组合留给 service） |
 
 **SQL 规约**：
 - 一律预编译参数（`?`），禁止字符串拼接；JSONB 入参用 `?::jsonb`。
 - `update_time` 由 SQL 内 `NOW()` 维护，应用不手传时间。
-- **软删标记不进领域模型（2026-10-03 定调）**：**实体上不声明 `isDeleted`**，也**不开** MP 的全局逻辑删除（`global-config.db-config.logic-delete-field` 已移除）。软删条件只由 DAO 的 SQL 自己带：**手写 XML 里 `is_deleted = FALSE` 必须逐条写**——这是唯一的过滤点，漏一条那一条就读得到软删行。**禁止任何查询刻意读取软删行**（`StylePackMapper.findReusablePackId` 曾刻意捞已软删的包来复用，已按此口径去掉）。
-- **已知缺口（待收口）**：MP 自己生成的 SQL（`BaseMapper`/`IService`/`Wrapper`，本项目约 43 个调用点）在没有实体字段的情况下**无法自动过滤软删行**，`getById` 会取到软删行（`NovelService.requireNovel`、`GenerationQueueService.requireNovelTitle` 这类判空守卫因此对已软删的 id 失效）。要让「软删行不可见」在这个前提下继续成立，只能把软删行**真正删掉**（代码走硬删 + 存量软删行清洗），那是另一件事，未做。
-- **`BaseDO`（2026-10-03 抽，同日扩）**：30 个 XxxDO 一律 `extends BaseDO`。基类放**每张表都有、且每个实体都要建模的列**：`@TableId private Long id`（此前 30 份各自手写）+ `createTime/updateTime/deleteTime`（同日从 20 个实体上提，见 §0 流水 1 与 §8.5）。判定口径是「全表都有」而非「看着常用」——`novelId` 之类只在部分表里，不许进基类。
-- **`isDeleted` 仍不进基类**（2026-10-03 用户定调，两次一致）：软删标记不进领域模型，软删条件只由 DAO 的 SQL 自己带。
+- **删除＝物理删除（2026-10-03 软删机制下线，见 §0 流水 1 与 §8.6）**：代码里**不再有** `is_deleted` 过滤、**不再有** `softDelete*` 方法（已改名 `delete*` 且真的 `DELETE FROM`）。库里 `is_deleted`/`delete_time` 两列与那些 `WHERE is_deleted=false` 的条件唯一索引保留当死列/死谓词，**不要在新代码里读写它们**。
+- **唯一必须保留 `is_deleted` 的写法**：`ON CONFLICT (<cols>) WHERE is_deleted = FALSE`（现有 3 处：Embedding/WorldState/VolumeReview 的 upsert）。条件唯一索引还在，去掉谓词 PostgreSQL 会报 `no unique or exclusion constraint matching the ON CONFLICT specification`。
+- **删父行要级联**：19 个外键（父为 `novels`/`chapters`/`imported_samples`）已加 `ON DELETE CASCADE`（迁移 V37），删书自动带走章节/场景/门禁报告/事实账/伏笔/世界状态/素材卡/正典/任务/事件/复盘。**没有级联外键的两处要显式清**：`embeddings`（无外键）与 `style_packs`（父表，删包不该牵走别的书）——见 `NovelService.deleteNovel` + `StylePackMapper.deleteOrphanPack`。
+- **`BaseDO`（2026-10-03 抽，同日扩并收窄）**：30 个 XxxDO 一律 `extends BaseDO`。基类放**每张表都有、且每个实体都要建模的列**：`@TableId private Long id`（此前 30 份各自手写）+ `createTime/updateTime`（同日从 20 个实体上提，见 §0 流水 2 与 §8.5；`deleteTime` 曾一并上提、随软删下线移除，见 §8.6）。判定口径是「全表都有」而非「看着常用」——`novelId` 之类只在部分表里，不许进基类。
 - **时间列进基类的已知代价（知悉并接受）**：`update_time` 由 SQL 内 `NOW()` 维护、应用不手传，而 MP 更新策略是 NOT_NULL——「读出来→改字段→updateById」会把读到的旧 `update_time` 写回 SET（表上无触发器，落库即旧值）。现存 updateById 只有两处：`ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null → 不进 SET，安全）、`LlmProviderService.update`（命中，该行 `update_time` 不前进）。**修法（未做）**：给基类 `updateTime` 挂 `@TableField(update = "now()")`，让 MP 的 SET 直接写 `now()`。
 - **投影查询里时间列保持 null**：只取部分列的 SQL 不填充它们，用前判空（如规划资产页的 content-only 查询只填 `CanonDocDO.content`）。
 - 状态机抢占必须是条件更新并检查影响行数（影响 0 行 = 并发冲突，报冲突而非静默）。
@@ -263,7 +264,27 @@ Controller/Runner 禁止：…返回 DO…
 
 **风险与实弹**：MP 生成的 SQL 列清单会变（读路径多三列）、`INSERT` 不受影响（null → NOT_NULL 策略跳过 → 走 DB 默认值）。验证四层：`grep`（无实体再声明时间列）→ `mvn compile` → `mvn test` 232/232 → 重启实弹：17 个端点全 200、日志零异常，且打开 mapper DEBUG 后确认 MP 为 `ChapterDO` 生成的是 `SELECT id,novel_id,…,reject_reason,create_time,update_time,delete_time FROM chapters WHERE id=?`——**继承字段确实进了 SQL**（这一层必须看，否则「字段没被 MP 认下」会静默表现为读出来恒 null）。
 
-**文档同步**：本节 + §0 流水 1 + §2 包结构 + §3.6 + §4「`BaseDO`」条 + `AGENTS.md` 铁律与坑 20。按 §0「流程约束」，**改规约与改代码分属两个提交**。
+**文档同步**：本节 + §0 流水 2 + §2 包结构 + §3.6 + §4「`BaseDO`」条 + `AGENTS.md` 铁律与坑 20。按 §0「流程约束」，**改规约与改代码分属两个提交**。
+
+**【同日后被 §8.6 收窄】**：本节的 `deleteTime` 已随软删下线从 `BaseDO` 移除，只留 `createTime/updateTime`。本节按「只追加」规则保留原文。
+
+### 8.6 2026-10-03 增量（软删机制整体下线，用户定调）
+
+**用户要求**：原话「那把软删相关的设定全部从代码层清除，提示词这个页面不暴露删除按钮」。触发点是当天早些时候的一次核查：软删的**写**是好的（`SET is_deleted=true, delete_time=NOW()`），但**读**是半瘫的——手写 XML 都带 `is_deleted = FALSE`（挡住了），而 MP 自生成的 SQL 带不了，实弹两例：`GET /api/chapters/338` 返回了已软删章节的完整正文、`GET /api/novels/42/derive-config` 返回了已软删书的配置；列表接口反而是干净的，所以表面上「看着正常」，漏点全在"按 id 取单个"的路径上（`getById` 打在软删实体上约 17 处）。结论是**与其留一个半瘫的软删，不如整体下线**。
+
+**落地范围**：
+1. 读过滤：XML 152 处 `is_deleted` 谓词、Java 35 处 `.eq("is_deleted", false)` 全部删除。**踩到的坑**：脚本按行删谓词时，遇到「`WHERE is_deleted = FALSE` 是语句里唯一的 WHERE、后面还跟着 `AND (...)`」会删出缺 WHERE 的破碎 SQL（`ChapterMapper.listPlanRows`、`LlmCallLogMapper` 的 findPage/countBy/totalsBy 共 4 处），MyBatis 启动不报、执行才炸——已逐条修回 `WHERE (...)`，并写了 `var/check_sql_structure.py` 做语句块级自检。
+2. 写路径：6 个 `softDelete*` 语句改 `DELETE FROM`（canon_docs / chapters / llm_node_config / material_cards / prompt_templates / style_packs），方法名去 soft 统一为 `delete`/`deletePlan`/`deleteCustom`/`deleteCard`/`deleteBySample`/`deleteByLevel`/`deleteOrphanPack`。
+3. `BaseDO` 去掉 `deleteTime`。
+4. **存量清洗**：30 张表软删行 + 软删书的关联树（书软删时未级联标记下属行，故 28 本软删书名下 95 章等约 300 行也要清）一次性物理删除，共约 1000 行；整库备份 `var/purge-backup-20261003-201839.sql`（183MB），清洗后活数据实测未动（15 本书、book 1 的 30 章、723 条门禁报告、1784 条 llm_call_log 全在）。**清洗脚本差点犯的错**：章族子表用 `chapter_id IN (SELECT id FROM chapters)` 是未加限制的全表——会把活书的门禁报告一起删掉；改成显式目标集（软删章 ∪ 软删书名下的章）后才执行。
+5. **迁移 V37**：给 19 个外键（父为 `novels`/`chapters`/`imported_samples`）加 `ON DELETE CASCADE`。不加级联的话 `DELETE FROM novels WHERE id=?` 会被 `chapters_novel_id_fkey` 挡住（AGENTS.md 里记的「必须拍板」那条，本次拍板为级联）。`style_packs`/`users` 作父的三个外键**刻意不加**——删包/删用户不该牵走别的业务实体。
+6. 前端：6 处「软删，可恢复」的删除确认文案改口（`BooksView`/`WizardView`/`LibraryView` ×2 等）——不改就是骗用户；提示词页那个恒为 `false` 的 `showPromptDelete` 开关连同删除列、`deletePrompt` 死代码一并去掉，**后端 `DELETE /api/prompts/{id}` 保留**（用户明确要求只去 UI）。
+
+**刻意保留**：`is_deleted`/`delete_time` 两列与 8 个 `WHERE is_deleted=false` 条件唯一索引留库当死列/死谓词（同日定调「列留库里当死列，只清代码」，不写迁移删列）；**3 处 `ON CONFLICT (...) WHERE is_deleted = FALSE` 必须原样保留**——索引谓词还在，去掉会报 `no unique or exclusion constraint matching the ON CONFLICT specification`。
+
+**证据**：`mvn test` 232/232（两个 NovelService 测试的构造器与断言跟着改）、前端 `npm run build` 通过、26 个端点实弹 200（另两个非 200 是我自己写错的 URL：缺 `novelId` 参数、路径不存在）、日志零异常；三路删除实弹——删书（书/章/卡/正典/风格包/向量全为 0，级联生效）、删自定义提示词、删素材卡，均物理消失且全库 `is_deleted=true` 为 0 行。
+
+**文档同步**：本节 + §0 流水 1 + §1 图 + §3.6 + §4 全部软删条目 + `AGENTS.md`（铁律「数据库」条、坑 9/11/20、端点速查）+ `docs/STATUS.md`。按 §0「流程约束」，**规约改动与代码改动分属两个提交**。`docs/architecture/pipeline-contracts.md §六` 的四条口径按「删除＝真删」重读。
 
 ## §9. 前端补充（web/）
 
