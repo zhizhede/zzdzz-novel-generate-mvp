@@ -79,3 +79,13 @@ body {
 .el-table .row-notice > td.el-table__cell {
   background-color: color-mix(in oklab, var(--warn), var(--bg) 90%) !important;
 }
+
+/* ── 阅读面所在的全屏弹窗 ────────────────────────────────────────────
+ * 去掉 body 内边距并给足高度，让 ReadingPane 自己滚（它内部是 flex 列 +
+ * 可滚动正文区）。
+ * 必须写在全局：el-dialog 默认 teleport 到 body，组件里的 scoped 样式够不到它。 */
+.reader-dialog .el-dialog__body {
+  padding: 0;
+  height: calc(100vh - 56px);   /* 56px ≈ 全屏弹窗头部高度 */
+  overflow: hidden;
+}

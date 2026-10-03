@@ -19,13 +19,14 @@
 
     <div v-if="showThink" class="ss-think">{{ item.think }}</div>
 
-    <div v-if="variant === 'scene'" class="ss-text">{{ item.text }}<span
+    <div v-if="variant === 'scene'" class="ss-text" :style="textStyle">{{ item.text }}<span
       v-if="item.streaming && item.text" class="ss-cursor">▍</span></div>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
+import { readingSettings } from '../readingSettings'
 
 /**
  * 场景流式块：工作台「生成输出（实时流式）」与会话转录视图共用。
@@ -68,6 +69,13 @@ const showThink = computed(() => {
     ? (props.item.thinkOpen || (props.item.streaming && !props.item.text))
     : (props.item.thinkOpen || props.item.streaming)
 })
+
+/** 正文块吃同一份阅读偏好（字号/行高），与会话视图之外的阅读面保持一致。
+ *  版心不管：会话视图有自己的 880px 容器。 */
+const textStyle = computed(() => ({
+  fontSize: readingSettings.size + 'px',
+  lineHeight: readingSettings.leading
+}))
 </script>
 
 <style scoped>
@@ -105,8 +113,7 @@ const showThink = computed(() => {
   white-space: pre-wrap;
   border-left: 3px solid var(--accent);
   padding-left: 10px;
-  font-size: var(--text-base);
-  line-height: 1.9;
+  /* 字号与行高由 :style 绑定阅读偏好（见 script 的 textStyle） */
 }
 .ss-cursor {
   color: var(--accent);

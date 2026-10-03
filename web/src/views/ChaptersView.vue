@@ -187,14 +187,11 @@
       </template>
     </el-drawer>
 
-    <!-- 阅读模式：全屏沉浸 -->
-    <el-dialog v-model="reader" :title="detail ? `第${detail.chapterNo}章 ${detail.title}` : ''" fullscreen
-      style="background: var(--tag-attn-bg)">
-      <div style="max-width: 720px; margin: 0 auto; padding: 24px 0 60px">
-        <div v-if="detail" style="white-space: pre-wrap; font-size: var(--text-lg); line-height: 2.1;
-          font-family: 'Source Han Serif SC', 'Noto Serif SC', serif; color: var(--fg)">{{ detail.fullText }}</div>
-        <div style="text-align: center; color: var(--meta); margin-top: 32px">— 完 —</div>
-      </div>
+    <!-- 阅读模式：全屏沉浸。排版（字号/行高/版心/字体/底色）与持久化见
+         components/ReadingPane.vue；版心按全角字数用 em 表达。 -->
+    <el-dialog v-model="reader" :title="detail ? `第${detail.chapterNo}章 ${detail.title}` : ''"
+               fullscreen class="reader-dialog">
+      <ReadingPane v-if="detail" :text="detail.fullText" />
     </el-dialog>
 
     <!-- Q5a：场景草稿人工编辑（生成前状态），保存即重过该场景机械门禁 -->
@@ -258,6 +255,7 @@ import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import { NODE_LABEL, GATE_LABEL, STEP_LABEL } from '../labels'
 import DataTable from '../components/DataTable.vue'
 import PageHeader from '../components/PageHeader.vue'
+import ReadingPane from '../components/ReadingPane.vue'
 
 const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FINAL: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', OUTLINE_APPROVED: 'success', GATE_MECHANICAL: '', GATE_AI_REVIEW: 'warning', INTERRUPTED: 'info' }
 const STATUS_TEXT = { NEW: '待生成', OUTLINED: '章纲就绪', OUTLINE_APPROVED: '章纲已批', GATE_MECHANICAL: '门禁修订中', GATE_AI_REVIEW: '审校中', REVISING: '修订中', DIGESTED: '已完成', FINAL: '导入正文', PENDING_APPROVAL: '待审批', FAILED: '失败', INTERRUPTED: '已中断' }
