@@ -21,19 +21,4 @@ public class LlmCallLogDO extends BaseDO {
     private String reasoningText;
     private String requestJson;
     private String responseJson;
-    private java.time.OffsetDateTime createTime;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }

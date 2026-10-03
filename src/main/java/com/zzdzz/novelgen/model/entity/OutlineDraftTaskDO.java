@@ -3,8 +3,6 @@ package com.zzdzz.novelgen.model.entity;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.time.OffsetDateTime;
-
 /** outline_draft_tasks：AI 大纲草稿异步任务（向导点击秒回，后台并发生成，结果可轮询拉取）。 */
 @Data
 @TableName("outline_draft_tasks")
@@ -22,10 +20,4 @@ public class OutlineDraftTaskDO extends BaseDO {
     private String result;
 
     private String message;
-
-    private OffsetDateTime createTime;
-
-    private OffsetDateTime updateTime;
-
-    private OffsetDateTime deleteTime;
 }

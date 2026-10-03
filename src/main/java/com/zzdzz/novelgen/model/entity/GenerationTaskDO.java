@@ -23,19 +23,4 @@ public class GenerationTaskDO extends BaseDO {
     private boolean cancelRequested;
     /** 插队暂停请求（④ 批启用） */
     private boolean pauseRequested;
-    private java.time.OffsetDateTime createTime;
-    private java.time.OffsetDateTime updateTime;
-    private java.time.OffsetDateTime deleteTime;
-
-
-
-
-
-
-
-
-
-
-
-
 }

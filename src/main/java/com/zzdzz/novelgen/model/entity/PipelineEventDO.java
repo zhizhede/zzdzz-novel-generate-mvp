@@ -14,16 +14,4 @@ public class PipelineEventDO extends BaseDO {
     private String phase;
     @TableField(typeHandler = com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler.class)
     private JsonNode payload;
-    private java.time.OffsetDateTime createTime;
-    private java.time.OffsetDateTime updateTime;
-    private java.time.OffsetDateTime deleteTime;
-
-
-
-
-
-
-
-
-
 }

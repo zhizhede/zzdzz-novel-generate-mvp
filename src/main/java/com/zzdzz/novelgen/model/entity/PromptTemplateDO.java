@@ -1,7 +1,6 @@
 package com.zzdzz.novelgen.model.entity;
 
 import com.baomidou.mybatisplus.annotation.TableName;
-import java.time.OffsetDateTime;
 import lombok.Data;
 
 /** PromptTemplateDO。 */
@@ -16,18 +15,11 @@ public class PromptTemplateDO extends BaseDO {
     private int version;
     private boolean custom;
     private boolean enabled;
-    private OffsetDateTime updateTime;
-
-
-
-
-
 
     @Deprecated
     public boolean exact() {
         return isExact();
     }
-
 
     @Deprecated
     public boolean custom() {
@@ -38,5 +30,4 @@ public class PromptTemplateDO extends BaseDO {
     public boolean enabled() {
         return isEnabled();
     }
-
 }

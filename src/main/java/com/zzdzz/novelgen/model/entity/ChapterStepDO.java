@@ -20,7 +20,4 @@ public class ChapterStepDO extends BaseDO {
     private String status;
     /** 结构化明细：失败原因原文、verdict、产出摘要（JSON 文本） */
     private String detail;
-    private java.time.OffsetDateTime createTime;
-    private java.time.OffsetDateTime updateTime;
-    private java.time.OffsetDateTime deleteTime;
 }

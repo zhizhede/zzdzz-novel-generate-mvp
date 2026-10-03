@@ -11,9 +11,10 @@
 
 **变更流水（倒序）**：
 
-1. **2026-10-03｜回退命名配对（用户定调，已落地主体）**：恢复 `DO=库实体（model/entity）/ DTO=入参（model/dto）/ VO=出参（model/vo）`，撤销 2026-09-21 的「DTO=库实体、DO 后缀废除」。已落地：31 实体 `XxxDTO→XxxDO` 迁 `model/entity/`、7 个纯收参类入 `model/dto/`、`LoginVO` 拆成 `LoginDTO`+`LoginVO`。未落地：controller 内嵌的 23 个入参 record 提取归位（见 §8.4 进度）。**方式上的纠正**：本次先在本节留下流水、并在 §8.4 抄录原规则原文，再动代码——不再「先改代码、顺手把规约覆盖掉」。
-2. **2026-09-21｜命名配对切换（提交 `8df2bed`，142 文件）**：`DO→DTO` 22 个实体并把 `model/entity/` 并进 `model/dto/`；27 个收参类 `XxxDTO→XxxVO`；同提交重写本规约 54 行 + `AGENTS.md` 铁律。**本次变更的问题不只是内容，而是方式**：正文被覆盖式改写、无变更记录，导致原规则不可追溯。
-3. **2026-09-10｜规约首版**：基准为阿里巴巴《Java 开发手册》+ 命名参考，采用 `DO / DTO / VO` 三件套。
+1. **2026-10-03｜时间三件套上提 `BaseDO`（用户定调）**：`createTime/updateTime/deleteTime` 由各实体改为基类统一持有（30 张业务表逐表核过三列俱在、且统一 `NOT NULL DEFAULT now()`）。此前 20 个实体各自手写、10 个根本没建模。**同一条「不进基类」的旧结论只对 `isDeleted` 继续成立**——软删标记不进领域模型这条铁律没变，变的只是它的邻座。被本次推翻的原话（§4「`BaseDO`」条、已按 §8.5 改写）："`isDeleted` 与时间戳刻意都不进基类"。**已接受**的代价：`update_time` 由 SQL 内 `NOW()` 维护，而 MP 更新策略是 NOT_NULL，所以「读出来→改字段→updateById」会把旧值写回 SET；现存两处 updateById 里 `ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null，不进 SET）不受影响，`LlmProviderService.update` 命中该路径（既有问题，本次未修，修法见 §4）。落地：`/api/chapters/**` 等 17 个端点实弹 200、MP 生成 SQL 已带三个继承列、`mvn test` 232/232。
+2. **2026-10-03｜回退命名配对（用户定调，已落地主体）**：恢复 `DO=库实体（model/entity）/ DTO=入参（model/dto）/ VO=出参（model/vo）`，撤销 2026-09-21 的「DTO=库实体、DO 后缀废除」。已落地：31 实体 `XxxDTO→XxxDO` 迁 `model/entity/`、7 个纯收参类入 `model/dto/`、`LoginVO` 拆成 `LoginDTO`+`LoginVO`。未落地：controller 内嵌的 23 个入参 record 提取归位（见 §8.4 进度）。**方式上的纠正**：本次先在本节留下流水、并在 §8.4 抄录原规则原文，再动代码——不再「先改代码、顺手把规约覆盖掉」。
+3. **2026-09-21｜命名配对切换（提交 `8df2bed`，142 文件）**：`DO→DTO` 22 个实体并把 `model/entity/` 并进 `model/dto/`；27 个收参类 `XxxDTO→XxxVO`；同提交重写本规约 54 行 + `AGENTS.md` 铁律。**本次变更的问题不只是内容，而是方式**：正文被覆盖式改写、无变更记录，导致原规则不可追溯。
+4. **2026-09-10｜规约首版**：基准为阿里巴巴《Java 开发手册》+ 命名参考，采用 `DO / DTO / VO` 三件套。
 
 **流程约束（今后）**：改命名/分层这类规约，**同一提交内只允许改规约正文 + 本节追加一条流水**；代码迁移单独提交，提交信息里引用本节的条目号。禁止只改正文不留痕。
 
@@ -45,7 +46,7 @@ com.zzdzz.novelgen
 ├── service/        # 业务：XxxService（含管线节点：OutlineService、GateService…）
 ├── dao/            # 数据访问：XxxMapper（MyBatis-Plus，SQL 在此类与 resources/mapper/*.xml）
 ├── model/
-│   ├── entity/     # XxxDO：库实体，与表一一对应（mapper 层配对，@TableName）；**一律 extends BaseDO**（只含 id）
+│   ├── entity/     # XxxDO：库实体，与表一一对应（mapper 层配对，@TableName）；**一律 extends BaseDO**（id + 时间三件套）
 │   ├── dto/        # 入参：XxxRequest / XxxDTO（如 XxxQueryDTO）
 │   ├── enums/      # 状态枚举（wire() 返回落库字符串原值）
 │   └── vo/         # 出参：XxxResponse / XxxVO
@@ -115,7 +116,7 @@ com.zzdzz.novelgen
 
 **DO（entity/）=库实体**：与表一一对应（清单以 `model/entity/` 现状为准），MyBatis-Plus `@Data + @TableName`。原规约的「MVP 用 record、只能由 DAO 的 RowMapper 构造」两条自 2026-09-13 数据层切 MyBatis-Plus 后已不适用（MP 的写入依赖无参构造 + setter），**其余（与表一一对应、DO 不出 service）不变**：
 
-- 字段 camelCase 对应表列；`is_deleted/create_time/update_time/delete_time` 一并建模；JSONB/List 字段挂 TypeHandler + autoResultMap
+- 字段 camelCase 对应表列；`create_time/update_time/delete_time` **由 `BaseDO` 统一提供，实体里不再重复声明**（见 §4）；`is_deleted` 不建模（软删标记不进领域模型，见 §4）；JSONB/List 字段挂 TypeHandler + autoResultMap
 - 只经 mapper 写入（BaseMapper / 自定义语句），禁止业务代码绕过数据层改库
 - **库实体不出 service 层**：mapper 返回 DTO 给 service 是终点，跨层出参一律 VO（service 内 `from()` 转换）
 
@@ -143,7 +144,10 @@ com.zzdzz.novelgen
 - `update_time` 由 SQL 内 `NOW()` 维护，应用不手传时间。
 - **软删标记不进领域模型（2026-10-03 定调）**：**实体上不声明 `isDeleted`**，也**不开** MP 的全局逻辑删除（`global-config.db-config.logic-delete-field` 已移除）。软删条件只由 DAO 的 SQL 自己带：**手写 XML 里 `is_deleted = FALSE` 必须逐条写**——这是唯一的过滤点，漏一条那一条就读得到软删行。**禁止任何查询刻意读取软删行**（`StylePackMapper.findReusablePackId` 曾刻意捞已软删的包来复用，已按此口径去掉）。
 - **已知缺口（待收口）**：MP 自己生成的 SQL（`BaseMapper`/`IService`/`Wrapper`，本项目约 43 个调用点）在没有实体字段的情况下**无法自动过滤软删行**，`getById` 会取到软删行（`NovelService.requireNovel`、`GenerationQueueService.requireNovelTitle` 这类判空守卫因此对已软删的 id 失效）。要让「软删行不可见」在这个前提下继续成立，只能把软删行**真正删掉**（代码走硬删 + 存量软删行清洗），那是另一件事，未做。
-- **`BaseDO`（2026-10-03 抽）**：31 个 XxxDO 一律 `extends BaseDO`，基类**只放每张表都有的一列**——`@TableId private Long id`（此前 31 份各自手写）。**`isDeleted` 与时间戳刻意都不进基类**：前者是不进领域模型的软删标记；后者是 `update_time` 由 SQL 内 `NOW()` 维护，进了基类后任何「查出来→改字段→updateById」都会把旧值写回去覆盖 NOW()（MP 更新策略是 NOT_NULL，非空字段都进 SET）。
+- **`BaseDO`（2026-10-03 抽，同日扩）**：30 个 XxxDO 一律 `extends BaseDO`。基类放**每张表都有、且每个实体都要建模的列**：`@TableId private Long id`（此前 30 份各自手写）+ `createTime/updateTime/deleteTime`（同日从 20 个实体上提，见 §0 流水 1 与 §8.5）。判定口径是「全表都有」而非「看着常用」——`novelId` 之类只在部分表里，不许进基类。
+- **`isDeleted` 仍不进基类**（2026-10-03 用户定调，两次一致）：软删标记不进领域模型，软删条件只由 DAO 的 SQL 自己带。
+- **时间列进基类的已知代价（知悉并接受）**：`update_time` 由 SQL 内 `NOW()` 维护、应用不手传，而 MP 更新策略是 NOT_NULL——「读出来→改字段→updateById」会把读到的旧 `update_time` 写回 SET（表上无触发器，落库即旧值）。现存 updateById 只有两处：`ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null → 不进 SET，安全）、`LlmProviderService.update`（命中，该行 `update_time` 不前进）。**修法（未做）**：给基类 `updateTime` 挂 `@TableField(update = "now()")`，让 MP 的 SET 直接写 `now()`。
+- **投影查询里时间列保持 null**：只取部分列的 SQL 不填充它们，用前判空（如规划资产页的 content-only 查询只填 `CanonDocDO.content`）。
 - 状态机抢占必须是条件更新并检查影响行数（影响 0 行 = 并发冲突，报冲突而非静默）。
 - **查询条件超过 3 个时建 `XxxQueryDTO`**（`model/dto/`）：controller 组装查询条件 → DAO 接收 DTO 拼 WHERE；2-3 个简单参数直接用方法签名裸参数，不造空壳。**查询结果一律返回 DO 或类型化投影 record**（随 DataService 声明），不在 mapper 造 VO。
 
@@ -208,6 +212,7 @@ model/entity/ 十个 DO 与上表同时落地。
 
 - 实体上不声明 `isDeleted`（撤销当天先加后撤的一次反复），MP 全局逻辑删除配置一并移除；软删条件只由 DAO 的 SQL 自己带（XML 里 `is_deleted = FALSE` 逐条写）。详见 §3「SQL 规约」。
 - 31 个实体抽 `BaseDO`（只含 `@TableId id`）；`lombok.config` 加 `equalsAndHashCode.callSuper = call`。
+- **【当日晚些时候被 §8.5 扩展】**：上一条的「只含 id」已不成立——用户在「抽公共字段」的要求下把 `create_time/update_time/delete_time` 也放进基类。本条按 §0「只追加」规则保留原文，不代表现状。
 
 ### 8.4 2026-10-03 决定：回退 2026-09-21 的命名配对（用户定调，主体已落地）
 
@@ -247,6 +252,18 @@ Controller/Runner 禁止：…返回 DO…
 - ⬜ 原规约 §3.6 的「DO 用 record」不执行（与 MyBatis-Plus 冲突，见上）。
 
 **待决**：原规则另有一条「DO 用 record（不可变，构造即完整）」——当前实体是 Lombok `@Data` + MyBatis-Plus（`save()`/`updateById()`/XML `resultType` 都依赖无参构造 + setter），改成 record 会动到 MP 的写入路径，属独立决定，本次不随改名一起做。若仍要执行，单独开一条。
+
+### 8.5 2026-10-03 增量（时间三件套上提 `BaseDO`，用户定调）
+
+**用户要求**：把 DO 里能抽出来的公共字段都挪进 `BaseDO`（点名「如时间等字段」）。**判定口径**：只抽「每张表都有」的列——`create_time/update_time/delete_time` 三列 30 张业务表逐表 `information_schema.columns` 核过俱在、且统一 `NOT NULL DEFAULT now()`（`delete_time` 可空）。`novelId`、`status` 这类只在部分表里的字段**不抽**。
+
+**改动**：`BaseDO` 从「只有 `id`」变为「`id` + 三个 `OffsetDateTime`」；20 个各自手写过这三列的实体删掉重复声明（含随之无用的 `import java.time.OffsetDateTime`），10 个此前完全没建模的实体（`ChapterDO`/`DigestDO`/`ForeshadowDO`/`LlmModelPriceDO`/`LlmNodeConfigDO`/`MaterialCardDO`/`PresetCorpusDO`/`SceneDO`/`TuningDO`/`UserDO`）就此获得这三列。**`isDeleted` 不动**：软删标记不进领域模型这条铁律与本次互不冲突。
+
+**为什么这次可以进基类（与被推翻的旧结论的差别）**：旧结论担心的唯一后果是「读出来→改字段→updateById 把旧 `update_time` 写回」，而实测全仓只有 2 处 updateById 调用点，其中 `ChapterStepDataServiceImpl.finish` 传的是新建 patch（时间列全 null，NOT_NULL 策略下不进 SET）。真正的命中点 `LlmProviderService.update` 是**既有问题**（该实体本来就声明了 `updateTime`，上提前后行为完全一致），不是本次引入。修法（未做）见 §4。
+
+**风险与实弹**：MP 生成的 SQL 列清单会变（读路径多三列）、`INSERT` 不受影响（null → NOT_NULL 策略跳过 → 走 DB 默认值）。验证四层：`grep`（无实体再声明时间列）→ `mvn compile` → `mvn test` 232/232 → 重启实弹：17 个端点全 200、日志零异常，且打开 mapper DEBUG 后确认 MP 为 `ChapterDO` 生成的是 `SELECT id,novel_id,…,reject_reason,create_time,update_time,delete_time FROM chapters WHERE id=?`——**继承字段确实进了 SQL**（这一层必须看，否则「字段没被 MP 认下」会静默表现为读出来恒 null）。
+
+**文档同步**：本节 + §0 流水 1 + §2 包结构 + §3.6 + §4「`BaseDO`」条 + `AGENTS.md` 铁律与坑 20。按 §0「流程约束」，**改规约与改代码分属两个提交**。
 
 ## §9. 前端补充（web/）
 

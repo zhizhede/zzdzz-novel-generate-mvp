@@ -16,7 +16,4 @@ public class ImportAnalyzeTaskDO extends BaseDO {
     /** 逐步结果 JSON 数组文本：[{step,status,message,elapsedMs,counts}]。 */
     private String doneSteps;
     private String message;
-    private java.time.OffsetDateTime createTime;
-    private java.time.OffsetDateTime updateTime;
-    private java.time.OffsetDateTime deleteTime;
 }

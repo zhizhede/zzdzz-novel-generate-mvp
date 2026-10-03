@@ -3,8 +3,6 @@ package com.zzdzz.novelgen.model.entity;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.time.OffsetDateTime;
-
 /** sample_cards：导入样本的结构化资产卡（平台级全员可复用；kind 对齐 material_cards 全类 + world）。 */
 @Data
 @TableName("sample_cards")
@@ -35,10 +33,4 @@ public class SampleCardDO extends BaseDO {
 
     /** 出现章数（重要度依据）。 */
     private Integer mentions;
-
-    private OffsetDateTime createTime;
-
-    private OffsetDateTime updateTime;
-
-    private OffsetDateTime deleteTime;
 }

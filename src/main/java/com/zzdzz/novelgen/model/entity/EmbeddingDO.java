@@ -14,17 +14,4 @@ public class EmbeddingDO extends BaseDO {
     private Integer chapterNo;
     private String content;
     private String embedding;
-    private java.time.OffsetDateTime createTime;
-    private java.time.OffsetDateTime updateTime;
-    private java.time.OffsetDateTime deleteTime;
-
-
-
-
-
-
-
-
-
-
 }

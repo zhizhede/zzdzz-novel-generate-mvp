@@ -3,8 +3,6 @@ package com.zzdzz.novelgen.model.entity;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.time.OffsetDateTime;
-
 /** sample_parse_tasks：导入小说深度解析任务（每样本一行活跃任务，断点续跑按章行幂等跳过）。 */
 @Data
 @TableName("sample_parse_tasks")
@@ -26,10 +24,4 @@ public class SampleParseTaskDO extends BaseDO {
     private String stage;
 
     private String message;
-
-    private OffsetDateTime createTime;
-
-    private OffsetDateTime updateTime;
-
-    private OffsetDateTime deleteTime;
 }

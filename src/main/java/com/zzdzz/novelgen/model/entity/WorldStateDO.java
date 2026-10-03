@@ -12,14 +12,4 @@ public class WorldStateDO extends BaseDO {
     private Integer chapterNo;
     @TableField(typeHandler = com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler.class)
     private JsonNode state;
-    private java.time.OffsetDateTime createTime;
-    private java.time.OffsetDateTime updateTime;
-    private java.time.OffsetDateTime deleteTime;
-
-
-
-
-
-
-
 }

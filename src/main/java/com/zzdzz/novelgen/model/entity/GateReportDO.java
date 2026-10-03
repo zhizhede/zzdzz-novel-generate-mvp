@@ -13,16 +13,9 @@ public class GateReportDO extends BaseDO {
     private int round;
     private boolean passed;
     private String result;
-    private java.time.OffsetDateTime createTime;
-
-
-
-
-
 
     @Deprecated
     public boolean passed() {
         return isPassed();
     }
-
 }

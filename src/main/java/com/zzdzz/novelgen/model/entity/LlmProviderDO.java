@@ -3,8 +3,6 @@ package com.zzdzz.novelgen.model.entity;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
-import java.time.OffsetDateTime;
-
 /** LLM 接入配置（平台级）：baseUrl/apiKey 密文/默认模型/超时。明文 key 不落库不出库。 */
 @Data
 @TableName(value = "llm_providers")
@@ -21,7 +19,4 @@ public class LlmProviderDO extends BaseDO {
     private Integer readTimeoutMs;
     private boolean enabled;
     private String remark;
-    private OffsetDateTime createTime;
-    private OffsetDateTime updateTime;
-    private OffsetDateTime deleteTime;
 }
