@@ -14,6 +14,8 @@ public record ImportAnalyzeStatusVO(
         String currentStep,
         /** 本次提交的步骤键（按执行顺序）。 */
         List<String> plannedSteps,
+        /** plannedSteps 里对「已有内容」选择**跳过**的步骤键（不在其中的＝覆盖重做）。 */
+        List<String> skipExistingSteps,
         /** 已完成（含失败/跳过）的步骤结果。 */
         List<StepResultVO> results,
         /** 终态汇总（人话）。 */

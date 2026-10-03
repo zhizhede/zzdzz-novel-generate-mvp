@@ -29,4 +29,10 @@ public interface EmbeddingDataService extends IService<EmbeddingDTO> {
     List<MissingRow> findMissingCards(long novelId, int limit);
 
     int countByNovel(long novelId);
+
+    /**
+     * 硬删本书全部向量（含软删残留）——只给「覆盖重算」用：向量是纯派生索引，清掉即由源行重建。
+     * 不用软删是因为唯一索引 uq_embeddings_source 只管活行，软删会留下死行、让每次重算多积一批。
+     */
+    int deleteByNovel(long novelId);
 }

@@ -191,17 +191,27 @@
           <div style="width: 100%">
             <div style="font-size: 12px; color: #999; margin-bottom: 4px">
               落库后自动跑一轮 LLM 解析把这本书的资产补齐（<b>默认全勾</b>，可逐项取消；不勾＝只落库不解析）。
+              「已有内容」默认<b>不跳过</b>（覆盖重做）；只想补缺的，把该步切到「跳过已有」。
               解析在后台跑，关掉页面也继续；进度随时在「解析」入口或本书解析任务里查看。
             </div>
             <el-checkbox-group v-model="importForm.analyzeSteps">
               <div v-for="s in ANALYZE_STEPS" :key="s.key" style="line-height: 1.9">
                 <el-checkbox :label="s.key"><span style="font-size: 13px">{{ s.label }}</span></el-checkbox>
+                <template v-if="isToggleable(s.key)">
+                  <el-radio-group :model-value="skipMode(s.key)" size="small" style="margin-left: 6px"
+                                  @update:model-value="(v) => setSkipMode(s.key, v)">
+                    <el-radio-button value="overwrite">覆盖重做</el-radio-button>
+                    <el-radio-button value="skip">跳过已有</el-radio-button>
+                  </el-radio-group>
+                </template>
+                <el-tag v-else size="small" type="info" effect="plain" style="margin-left: 6px">{{ existingPolicy(s.key) }}</el-tag>
                 <span style="font-size: 12px; color: #999; margin-left: 6px">{{ s.hint }}</span>
               </div>
             </el-checkbox-group>
             <div style="margin-top: 4px">
               <el-button size="small" link type="primary" @click="importForm.analyzeSteps = allStepKeys()">全选</el-button>
               <el-button size="small" link @click="importForm.analyzeSteps = []">全不选</el-button>
+              <el-button size="small" link @click="importForm.analyzeSkipExisting = []">全部覆盖重做</el-button>
             </div>
           </div>
         </el-form-item>
@@ -253,7 +263,7 @@ import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import TextFileDropZone from '../components/TextFileDropZone.vue'
 import FingerprintDraftDialog from '../components/FingerprintDraftDialog.vue'
 import ImportAnalyzeDialog from '../components/ImportAnalyzeDialog.vue'
-import { ANALYZE_STEPS, allStepKeys } from '../importAnalyze'
+import { ANALYZE_STEPS, allStepKeys, existingPolicy, isToggleable } from '../importAnalyze'
 
 const SOURCE_LABEL = { IMPORTED: '手动导入', DERIVED: '系统衍生', ORIGINAL: '系统纯原创' }
 const SOURCE_TYPE = { IMPORTED: 'warning', DERIVED: 'success', ORIGINAL: 'info' }
@@ -396,8 +406,17 @@ const importStatus = ref('导入并入库')
 const importForm = reactive({
   title: '', description: '', presetId: null, text: '', fileBase64: '',
   // 导入后解析的勾选项（默认全勾，用户可逐项取消）＋机械提指纹（零 LLM，仍是独立开关）
-  analyzeSteps: allStepKeys(), fingerprintOn: false
+  analyzeSteps: allStepKeys(), analyzeSkipExisting: [], fingerprintOn: false
 })
+
+/** 「已有内容」开关：默认覆盖重做（不跳过）；切到跳过已有的步进 analyzeSkipExisting。 */
+function skipMode (key) {
+  return importForm.analyzeSkipExisting.includes(key) ? 'skip' : 'overwrite'
+}
+function setSkipMode (key, mode) {
+  const rest = importForm.analyzeSkipExisting.filter((k) => k !== key)
+  importForm.analyzeSkipExisting = mode === 'skip' ? [...rest, key] : rest
+}
 const presets = ref([])
 
 async function loadPresets() {
@@ -430,7 +449,9 @@ async function submitImport() {
       presetId: importForm.presetId,
       text: importForm.text,
       fileBase64: importForm.fileBase64 || undefined,
-      analyzeSteps: importForm.analyzeSteps
+      analyzeSteps: importForm.analyzeSteps,
+      // 只提交勾选中的步的「跳过已有」选择（后端同样会过滤一次）
+      analyzeSkipExistingSteps: importForm.analyzeSkipExisting.filter((k) => importForm.analyzeSteps.includes(k))
     })
     highlightNovelId.value = r.novelId
     ElMessage.success(`已导入《${r.title}》：${r.chapterCount} 章`)
@@ -448,6 +469,7 @@ async function submitImport() {
     importForm.text = ''
     importForm.fileBase64 = ''
     importForm.analyzeSteps = allStepKeys()
+    importForm.analyzeSkipExisting = []
     importForm.fingerprintOn = false
     await reloadAll()
     if (!books.value.some((b) => b.id === r.novelId)) {

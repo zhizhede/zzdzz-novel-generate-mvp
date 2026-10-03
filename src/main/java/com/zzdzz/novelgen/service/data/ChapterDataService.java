@@ -43,6 +43,9 @@ public interface ChapterDataService extends IService<ChapterDTO> {
     /** 全库规划行（书升序 + 章号升序）：规划资产页读模型用，一次查询覆盖所有书。 */
     List<ChapterPlanRow> listPlanRows();
 
+    /** 同上但限定本书（规划页读正文/章纲实况用：带 textChars，不拉全文）。 */
+    List<ChapterPlanRow> listPlanRowsByNovel(long novelId);
+
     Optional<ChapterDTO> find(long novelId, int chapterNo);
 
     Optional<ChapterDTO> findById(long chapterId);
@@ -73,6 +76,9 @@ public interface ChapterDataService extends IService<ChapterDTO> {
 
     /** 章纲回填并推进状态；同时清掉旧的场景与门禁报告（外键顺序：先报告后场景）。 */
     void resetForReoutline(long chapterId, String outlineYaml);
+
+    /** 只更新章纲（状态/正文/场景都不动）——已有正文的章重出章纲时的安全写法。 */
+    void updateOutlineYaml(long chapterId, String outlineYaml);
 
     /** 人工打回清场（流 A）：删场景/门禁报告/步骤行，状态→NEW，正文与章纲清空，意见落行。 */
     void rejectReset(long chapterId, String reason);

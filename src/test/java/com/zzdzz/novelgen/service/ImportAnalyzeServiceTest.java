@@ -1,0 +1,163 @@
+package com.zzdzz.novelgen.service;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzdzz.novelgen.model.dto.ImportAnalyzeTaskDTO;
+import com.zzdzz.novelgen.model.enums.ImportAnalyzeStep;
+import com.zzdzz.novelgen.model.vo.ImportAnalyzeStatusVO;
+import com.zzdzz.novelgen.service.data.ImportAnalyzeTaskDataService;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Set;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/**
+ * 解析链「跳过已有 / 覆盖重做」的口径基线（2026-09-30 用户定调：每个已有内容的部分都给开关，**默认不跳过**）：
+ * ①只有本次勾选的步才谈得上跳过；②任务行 steps 新格式（对象）与旧格式（裸字符串）都要读得出来。
+ */
+class ImportAnalyzeServiceTest {
+
+    // ===== 跳过集合：只对勾选的步生效 =====
+
+    @Test
+    void skipOnlyAppliesToSelectedSteps() {
+        Set<ImportAnalyzeStep> skip = ImportAnalyzeService.effectiveSkip(
+                ImportAnalyzeStep.ordered(List.of("DIGESTS", "OUTLINE")),
+                List.of("CARDS", "digests", "不存在的键"));
+
+        // CARDS 没勾选、未知键无效；大小写不敏感地命中 DIGESTS
+        assertThat(skip).containsExactly(ImportAnalyzeStep.DIGESTS);
+    }
+
+    @Test
+    void nothingSkippedByDefault() {
+        Set<ImportAnalyzeStep> skip = ImportAnalyzeService.effectiveSkip(
+                ImportAnalyzeStep.ordered(ImportAnalyzeStep.all().stream().map(ImportAnalyzeStep::wire).toList()),
+                null);
+
+        assertThat(skip).isEmpty();   // 默认不跳过＝覆盖重做
+    }
+
+    // ===== 任务行 steps 的读写兼容 =====
+
+    private ImportAnalyzeService service(ImportAnalyzeTaskDataService taskData) {
+        return new ImportAnalyzeService(null, null, taskData, null, null, null, null, null, null, new ObjectMapper());
+    }
+
+    private ImportAnalyzeTaskDTO task(String stepsJson) {
+        ImportAnalyzeTaskDTO t = new ImportAnalyzeTaskDTO();
+        t.setId(9L);
+        t.setNovelId(34L);
+        t.setStatus("DONE");
+        t.setSteps(stepsJson);
+        t.setDoneSteps("[]");
+        t.setMessage("解析链结束");
+        return t;
+    }
+
+    @Test
+    void statusReadsLegacyPlainKeyArray() {
+        ImportAnalyzeTaskDataService taskData = mock(ImportAnalyzeTaskDataService.class);
+        when(taskData.findAliveByNovel(34L)).thenReturn(task("[\"DIGESTS\",\"OUTLINE\"]"));
+
+        ImportAnalyzeStatusVO s = service(taskData).status(34L);
+
+        assertThat(s.plannedSteps()).containsExactly("DIGESTS", "OUTLINE");
+        assertThat(s.skipExistingSteps()).isEmpty();   // 旧格式没有开关字段：按默认（覆盖）解释
+    }
+
+    @Test
+    void statusReadsStepObjectsWithSkipFlags() {
+        ImportAnalyzeTaskDataService taskData = mock(ImportAnalyzeTaskDataService.class);
+        when(taskData.findAliveByNovel(34L)).thenReturn(task(
+                "[{\"key\":\"DIGESTS\",\"skipExisting\":true},{\"key\":\"CARDS\",\"skipExisting\":false},"
+                        + "{\"key\":\"OUTLINE\",\"skipExisting\":false}]"));
+
+        ImportAnalyzeStatusVO s = service(taskData).status(34L);
+
+        assertThat(s.plannedSteps()).containsExactly("DIGESTS", "CARDS", "OUTLINE");
+        assertThat(s.skipExistingSteps()).containsExactly("DIGESTS");
+    }
+
+    @Test
+    void statusIgnoresUnknownKeysAndBrokenJson() {
+        ImportAnalyzeTaskDataService taskData = mock(ImportAnalyzeTaskDataService.class);
+        when(taskData.findAliveByNovel(34L)).thenReturn(task("[{\"key\":\"NOPE\"},{\"key\":\"CARDS\"}]"));
+        assertThat(service(taskData).status(34L).plannedSteps()).containsExactly("CARDS");
+
+        when(taskData.findAliveByNovel(34L)).thenReturn(task("{不是数组"));
+        assertThat(service(taskData).status(34L).plannedSteps()).isEmpty();
+    }
+
+    @Test
+    void noTaskMeansNullStatus() {
+        ImportAnalyzeTaskDataService taskData = mock(ImportAnalyzeTaskDataService.class);
+        when(taskData.findAliveByNovel(34L)).thenReturn(null);
+        assertThat(service(taskData).status(34L)).isNull();
+    }
+
+    // ===== 卷纲步的目标决策：已有卷纲时「原地重规划」而不是往后编新卷号 =====
+
+    @Test
+    void volumePlanCreatesFirstVolumeWhenNothingPlanned() {
+        ImportAnalyzeService.PlanTarget t = ImportAnalyzeService.planTarget(null, 18, 0, false);
+
+        assertThat(t.volNo()).isEqualTo(1);      // 空档：新增一卷，导入书首次跑就是第 1 卷
+        assertThat(t.replan()).isFalse();
+        assertThat(t.skip()).isFalse();
+    }
+
+    @Test
+    void volumePlanReplansSameVolumeWhenCovered() {
+        // 正文止于 17、已有第 2 卷规划到 27 → 起点仍是 18，覆盖＝原地重规划第 2 卷（不是新增第 3 卷）
+        ImportAnalyzeService.PlanTarget t = ImportAnalyzeService.planTarget(27, 18, 2, false);
+
+        assertThat(t.volNo()).isEqualTo(2);
+        assertThat(t.replan()).isTrue();
+        assertThat(t.skip()).isFalse();
+    }
+
+    @Test
+    void volumePlanSkipsWhenCoveredAndSkipChosen() {
+        ImportAnalyzeService.PlanTarget t = ImportAnalyzeService.planTarget(27, 18, 2, true);
+
+        assertThat(t.skip()).isTrue();
+        assertThat(t.replan()).isTrue();
+    }
+
+    @Test
+    void volumePlanAddsNewVolumeWhenPlanEndsBeforeStart() {
+        // 已有卷只规划到第 10 章、正文已到 17 → 第 18 章起是空档，照旧新增一卷
+        ImportAnalyzeService.PlanTarget t = ImportAnalyzeService.planTarget(10, 18, 3, false);
+
+        assertThat(t.volNo()).isEqualTo(4);
+        assertThat(t.replan()).isFalse();
+    }
+
+    // ===== 章纲步的目标卷：导入成稿卷不算「规划卷」（2026-10-01：用户三次反馈「解析还是从第18章开始」的根因面）=====
+
+    @Test
+    void chapterOutlinesIgnoresImportVolumeWhenNothingElsePlanned() {
+        // 只有导入成稿卷（volume_no=1 / arc=导入正文）→ 没有可出纲的规划卷，应为 null（本步 SKIPPED）
+        assertThat(ImportAnalyzeService.plannedVolumeNo(List.of(
+                chapter(1, 1, "导入正文"), chapter(2, 1, "导入正文")))).isNull();
+    }
+
+    @Test
+    void chapterOutlinesPicksNewestPlannedVolumeNotImportVolume() {
+        // 导入正文=卷 1，规划卷=卷 2 → 目标卷是 2（章纲只给新规划那卷出）
+        assertThat(ImportAnalyzeService.plannedVolumeNo(List.of(
+                chapter(1, 1, "导入正文"), chapter(18, 2, "空船归港")))).isEqualTo(2);
+    }
+
+    private static com.zzdzz.novelgen.model.dto.ChapterDTO chapter(int no, Integer volNo, String arc) {
+        com.zzdzz.novelgen.model.dto.ChapterDTO c = new com.zzdzz.novelgen.model.dto.ChapterDTO();
+        c.setChapterNo(no);
+        c.setVolumeNo(volNo);
+        c.setArc(arc);
+        return c;
+    }
+}

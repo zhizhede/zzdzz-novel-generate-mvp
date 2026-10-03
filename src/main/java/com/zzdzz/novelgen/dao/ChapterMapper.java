@@ -29,7 +29,7 @@ public interface ChapterMapper extends BaseMapper<ChapterDTO> {
     List<ChapterDataService.ChapterTextRow> listTextsByNovel(@Param("novelId") long novelId);
 
     /** 全库规划行（书升序 + 章号升序，正文只取长度不取全文）：规划资产页读模型用。 */
-    List<ChapterDataService.ChapterPlanRow> listPlanRows();
+    List<ChapterDataService.ChapterPlanRow> listPlanRows(@Param("novelId") Long novelId);
 
     String findFullText(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
 
@@ -50,6 +50,9 @@ public interface ChapterMapper extends BaseMapper<ChapterDTO> {
     int deleteScenes(@Param("chapterId") long chapterId);
 
     int deleteChapterSteps(@Param("chapterId") long chapterId);
+
+    /** 只写章纲、不动状态（给已有正文的章出纲用：不能让成品章退回「待生成」）。 */
+    int updateOutlineYaml(@Param("chapterId") long chapterId, @Param("outlineYaml") String outlineYaml);
 
     int markOutlined(@Param("chapterId") long chapterId, @Param("outlineYaml") String outlineYaml);
 

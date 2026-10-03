@@ -22,8 +22,13 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
     }
 
     @Override
+    public List<ChapterPlanRow> listPlanRowsByNovel(long novelId) {
+        return baseMapper.listPlanRows(novelId);
+    }
+
+    @Override
     public List<ChapterPlanRow> listPlanRows() {
-        return baseMapper.listPlanRows();
+        return baseMapper.listPlanRows(null);
     }
 
     @Override
@@ -74,6 +79,11 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
                            int budgetMin, int budgetMax) {
         baseMapper.insertPlan(novelId, chapterNo, volumeNo, arc, title, goal, hook, timeNote,
                 ruleRefs, foreshadowRefs, budgetMin, budgetMax);
+    }
+
+    @Override
+    public void updateOutlineYaml(long chapterId, String outlineYaml) {
+        baseMapper.updateOutlineYaml(chapterId, outlineYaml);
     }
 
     @Override

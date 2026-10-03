@@ -50,4 +50,9 @@ public class EmbeddingDataServiceImpl extends ServiceImpl<EmbeddingMapper, Embed
     public int countByNovel(long novelId) {
         return baseMapper.countByNovel(novelId);
     }
+
+    @Override
+    public int deleteByNovel(long novelId) {
+        return baseMapper.deleteByNovel(novelId);
+    }
 }

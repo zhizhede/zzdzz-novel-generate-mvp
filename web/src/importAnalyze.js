@@ -1,18 +1,59 @@
 /**
- * 导入书籍「解析链」的步骤清单（前端单选一份，与后端 ImportAnalyzeStep 枚举逐项对齐）：
+ * 导入书籍「解析链」的步骤清单（前端单源一份，与后端 ImportAnalyzeStep 枚举逐项对齐）：
  * key = 后端 wire 值；label/hint 只用于勾选界面与进度标题。
  * 顺序即执行顺序（也是依赖顺序）：事实账 → 大纲 → 素材卡 → 世界观 → 文风规则 → 向量索引 → 卷纲 → 章纲。
+ *
+ * existing：该步遇到「已有内容」时的处置口径。
+ *   '可选'   = 界面给「跳过已有 / 覆盖重做」开关（默认覆盖＝不跳过），提交时进 skipExistingSteps 的是选了跳过的那些；
+ *   其余字符串 = 固定口径，界面上只做说明（不给开关，避免假装能选）。
  */
 export const ANALYZE_STEPS = [
-  { key: 'DIGESTS', label: '事实账 + 世界状态 + 伏笔提议', hint: '逐章 LLM（默认取末尾 20 章，已有事实账的章自动跳过）——续写前情链的唯一来源' },
-  { key: 'OUTLINE', label: '全书大纲', hint: '依据章节结构与事实账合成，写 canon「大纲」（已写过则覆盖）' },
-  { key: 'CARDS', label: '素材卡（角色/物品/地点…）', hint: '抽设定层实体卡写素材库；已有同名同类卡不覆盖，只补新的' },
-  { key: 'WORLD', label: '世界观文档', hint: '合成世界观写 canon「世界观」（已写过则覆盖）' },
-  { key: 'RULES', label: '文风规则（写回风格包）', hint: '按本书语料提炼规则，写回风格包 rules_md——场景生成直接采用' },
-  { key: 'EMBEDDINGS', label: '向量索引（RAG 召回前置）', hint: '事实账与素材卡向量化；不开则场景生成召回不到本书内容' },
-  { key: 'VOLUME_PLAN', label: '卷纲（规划下一卷）', hint: '接在已有正文之后规划一卷（含前置卷复盘），auto 模式直接落库、manual 出草稿；约 2-10 分钟' },
-  { key: 'CHAPTER_OUTLINES', label: '章纲（批量入队）', hint: '把新规划那卷的章纲提交给生成队列（本链只负责入队，进度看工作台）' }
+  {
+    key: 'DIGESTS',
+    label: '事实账 + 世界状态 + 伏笔提议',
+    hint: '逐章 LLM（取末尾 20 章）——续写前情链的唯一来源；覆盖＝这些章重算并原地更新事实账、重写世界状态快照',
+    existing: '可选'
+  },
+  { key: 'OUTLINE', label: '全书大纲', hint: '依据章节结构与事实账合成，写 canon「大纲」', existing: '固定覆盖' },
+  {
+    key: 'CARDS',
+    label: '素材卡（角色/物品/地点…）',
+    hint: '抽设定层实体卡写素材库；覆盖＝用新结果更新已有卡（保留人工钉住与状态），跳过＝保留人工写过的卡',
+    existing: '可选'
+  },
+  { key: 'WORLD', label: '世界观文档', hint: '合成世界观写 canon「世界观」', existing: '固定覆盖' },
+  { key: 'RULES', label: '文风规则（写回风格包）', hint: '按本书语料提炼规则，写回风格包 rules_md——场景生成直接采用', existing: '固定覆盖' },
+  {
+    key: 'EMBEDDINGS',
+    label: '向量索引（RAG 召回前置）',
+    hint: '事实账与素材卡向量化；覆盖＝清掉本书旧向量全量重嵌（事实账被重算后旧向量即陈旧，不刷新会被召回）',
+    existing: '可选'
+  },
+  {
+    key: 'VOLUME_PLAN',
+    label: '卷纲（规划下一卷）',
+    hint: '接在已有正文之后规划一卷（含前置卷复盘），auto 模式直接落库、manual 出草稿；约 2-10 分钟。'
+      + '覆盖＝该段章节已有卷纲时原地重规划那一卷（卷号不变）；跳过＝已有卷纲就不动',
+    existing: '可选'
+  },
+  {
+    key: 'CHAPTER_OUTLINES',
+    label: '章纲（批量入队）',
+    hint: '把新规划那卷的章纲提交给生成队列（本链只负责入队，进度看工作台）',
+    existing: '已有正文的章跳过'
+  }
 ]
+
+/** 该步是否给「跳过已有 / 覆盖重做」开关。 */
+export function isToggleable (key) {
+  return (ANALYZE_STEPS.find((s) => s.key === key) || {}).existing === '可选'
+}
+
+/** 该步「已有内容」的固定口径说明（没有开关时展示）。 */
+export function existingPolicy (key) {
+  const s = ANALYZE_STEPS.find((x) => x.key === key)
+  return s && s.existing !== '可选' ? s.existing : ''
+}
 
 /** 默认全勾（用户可逐项取消）。 */
 export function allStepKeys () {

@@ -12,6 +12,10 @@
            style="display: flex; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 13px; line-height: 1.7">
         <span style="width: 16px">{{ icon(key) }}</span>
         <span style="min-width: 190px">{{ label(key) }}</span>
+        <el-tag v-if="isToggleable(key)" size="small" effect="plain"
+                :type="skippedInRun(key) ? 'info' : 'warning'">
+          {{ skippedInRun(key) ? '跳过已有' : '覆盖重做' }}
+        </el-tag>
         <span :style="{ color: resultOf(key) ? colorOf(resultOf(key).status) : '#909399' }">
           {{ resultOf(key) ? (resultOf(key).message || resultOf(key).status) : (isRunning(key) ? '进行中…' : '待执行') }}
         </span>
@@ -22,13 +26,21 @@
     <!-- 空闲态：可勾选重跑（用于给已有书补资产；导入时已由导入弹窗提交过） -->
     <el-card v-if="!busy" shadow="never" style="margin-top: 10px">
       <div style="font-size: 13px; margin-bottom: 6px">
-        <b>再跑一次解析</b>（已有资产按各自口径「跳过或覆盖」：事实账与素材卡跳过已有、大纲/世界观/规则覆盖、向量 upsert）
+        <b>再跑一次解析</b>（默认<b>不跳过</b>＝已有内容覆盖重做；只想补缺的，把该步切到「跳过已有」）
       </div>
       <el-checkbox-group v-model="picked">
-        <div v-for="s in ANALYZE_STEPS" :key="s.key" style="margin-bottom: 2px">
+        <div v-for="s in ANALYZE_STEPS" :key="s.key" style="margin-bottom: 3px">
           <el-checkbox :label="s.key">
             <span style="font-size: 13px">{{ s.label }}</span>
           </el-checkbox>
+          <template v-if="isToggleable(s.key)">
+            <el-radio-group :model-value="skipMode(s.key)" size="small" style="margin-left: 8px"
+                            @update:model-value="(v) => setSkipMode(s.key, v)">
+              <el-radio-button value="overwrite">覆盖重做</el-radio-button>
+              <el-radio-button value="skip">跳过已有</el-radio-button>
+            </el-radio-group>
+          </template>
+          <el-tag v-else size="small" type="info" effect="plain" style="margin-left: 8px">{{ existingPolicy(s.key) }}</el-tag>
           <span style="font-size: 12px; color: #999; margin-left: 6px">{{ s.hint }}</span>
         </div>
       </el-checkbox-group>
@@ -52,7 +64,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
-import { ANALYZE_STEPS, allStepKeys, stepLabel } from '../importAnalyze'
+import { ANALYZE_STEPS, allStepKeys, existingPolicy, isToggleable, stepLabel } from '../importAnalyze'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -71,10 +83,24 @@ const visible = computed({
 
 const status = ref(null)
 const picked = ref(allStepKeys())
+/** 选择「跳过已有」的步（默认空 = 全部覆盖重做）。 */
+const skipExisting = ref([])
 let timer = null
 
 const busy = computed(() => status.value && (status.value.status === 'RUNNING' || status.value.status === 'QUEUED'))
 const runningHint = computed(() => (busy.value ? '解析在后台进行，本窗口会自动刷新…' : ''))
+
+function skipMode (key) {
+  return skipExisting.value.includes(key) ? 'skip' : 'overwrite'
+}
+function setSkipMode (key, mode) {
+  const rest = skipExisting.value.filter((k) => k !== key)
+  skipExisting.value = mode === 'skip' ? [...rest, key] : rest
+}
+/** 本次运行（后端任务行）里该步是不是「跳过已有」——进度行据实标注，而不是显示当前开关状态。 */
+function skippedInRun (key) {
+  return !!status.value && (status.value.skipExistingSteps || []).includes(key)
+}
 
 function resultOf (key) {
   return (status.value && status.value.results || []).find((r) => r.step === key)
@@ -131,9 +157,14 @@ function stopPoll () {
 
 async function start () {
   try {
-    await api.post(`/api/novels/${props.novelId}/import-analyze`, { steps: picked.value })
+    // 只提交勾选中的步；「跳过已有」也只对勾选中的步生效（后端同样会过滤一次）
+    const skipped = skipExisting.value.filter((k) => picked.value.includes(k))
+    await api.post(`/api/novels/${props.novelId}/import-analyze`, {
+      steps: picked.value,
+      skipExistingSteps: skipped
+    })
     ElMessage.success('解析已入队——逐步进度见下')
-    status.value = { status: 'QUEUED', plannedSteps: picked.value, results: [] }
+    status.value = { status: 'QUEUED', plannedSteps: picked.value, skipExistingSteps: skipped, results: [] }
     startPoll()
   } catch (e) {
     ElMessage.error(e.message)

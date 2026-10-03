@@ -18,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -30,7 +31,8 @@ import java.util.Set;
  * ②全书大纲 → canon_docs(misc/大纲)——**复用** {@link LlmNode#SAMPLE_OUTLINE} 提示词；
  * ③世界观文档 → canon_docs(world/世界观)——**复用** {@link LlmNode#SAMPLE_WORLD} 提示词。
  * 复用样本节点提示词是刻意的：提示词只在 PromptCatalog 有一份，双源必然漂移（历史教训）。
- * 三步都写成幂等/可覆盖：素材卡按 (kind,name) 跳过已有，大纲与世界观覆盖同名文档。
+ * 三步都写成幂等/可覆盖：素材卡按 (kind,name) 跳过已有（解析链选了「覆盖已有」则改为更新那一行，保留人工 pinned/status）、
+ * 大纲与世界观覆盖同名文档。
  * 入库前一律先跑一遍 digest（解析链里 DIGESTS 排在前面），所以这里能拿事实账当摘要源。
  */
 @Service
@@ -63,13 +65,26 @@ public class BookAssetExtractService {
     private final LlmJson llmJson;
     private final PromptTemplateService promptTemplates;
 
-    /** ①素材卡：章节结构 + 事实账 → 设定卡，写 material_cards（已有同名同类卡跳过）。返回新增张数。 */
-    public int extractCards(long novelId) {
+    /** 素材卡写入结果：created+updated ＝本次实际落库张数（跳过模式下 updated 恒为 0）。 */
+    public record CardWriteResult(int created, int updated) {
+    }
+
+    /** ①素材卡：章节结构 + 事实账 → 设定卡，写 material_cards（已有同名同类卡跳过）。 */
+    public CardWriteResult extractCards(long novelId) {
+        return extractCards(novelId, false);
+    }
+
+    /**
+     * overwrite=false（默认）：已有同名同类卡跳过——人工写过的优先，不覆盖不重复。
+     * overwrite=true（用户选「覆盖已有」）：用模型新结果更新那一行（摘要/正文/别名/出处），
+     * 但**保留**卡上的人工状态（pinned 钉住标记与 status），免得覆盖把人工取舍一起抹掉。
+     */
+    public CardWriteResult extractCards(long novelId, boolean overwrite) {
         NovelDTO novel = requireNovel(novelId);
         String block = chapterDigestBlock(novelId);
         if (block.isBlank()) {
             log.info("书籍素材卡提取跳过：无章节摘要可用 novelId={}", novelId);
-            return 0;
+            return new CardWriteResult(0, 0);
         }
         String user = promptTemplates.format(LlmNode.BOOK_CARDS, "user",
                 String.valueOf(MAX_CARDS), novel.getTitle(), block);
@@ -78,17 +93,42 @@ public class BookAssetExtractService {
                         LlmPort.Message.user(user)), LlmTemps.DIGEST);
         List<CardDraft> drafts = llmJson.ask(req, this::parseCards, 2);
 
+        Map<String, MaterialCardDTO> existing = overwrite ? cardsByKindName(novelId) : Map.of();
         int created = 0;
+        int updated = 0;
         for (CardDraft d : drafts) {
-            if (d.name().isBlank() || cardData.exists(novelId, d.kind(), d.name())) {
-                continue;   // 已有同名同类卡（人工写过的优先）——不覆盖、不重复
+            if (d.name().isBlank()) {
+                continue;
+            }
+            MaterialCardDTO hit = existing.get(cardKey(d.kind(), d.name()));
+            if (hit != null) {
+                cardData.update(hit.getId(), d.name(), d.aliases(), d.summary(), d.content(),
+                        hit.isPinned(), hit.getStatus(), d.sourceChapter());
+                updated++;
+                continue;
+            }
+            if (cardData.exists(novelId, d.kind(), d.name())) {
+                continue;   // 已有同名同类卡且本次选择跳过
             }
             cardData.insert(novelId, d.kind(), d.name(), d.aliases(), d.summary(), d.content(),
                     d.pinned(), "active", d.sourceChapter());
             created++;
         }
-        log.info("书籍素材卡提取：novelId={} 模型给出 {} 张，新增 {} 张", novelId, drafts.size(), created);
-        return created;
+        log.info("书籍素材卡提取：novelId={} 模型给出 {} 张，新增 {} 张、覆盖 {} 张", novelId, drafts.size(), created, updated);
+        return new CardWriteResult(created, updated);
+    }
+
+    /** 已有卡按 kind+name 建索引（覆盖模式的命中判断；name 只比精确值，与唯一索引同口径）。 */
+    private Map<String, MaterialCardDTO> cardsByKindName(long novelId) {
+        Map<String, MaterialCardDTO> out = new HashMap<>();
+        for (MaterialCardDTO c : cardData.listByNovel(novelId, null)) {
+            out.put(cardKey(c.getKind(), c.getName()), c);
+        }
+        return out;
+    }
+
+    private static String cardKey(String kind, String name) {
+        return kind + "\u0000" + name;
     }
 
     /** ②全书大纲：章节结构 + 事实账 → 大纲文本，写 canon(misc/大纲) 并返回正文。 */

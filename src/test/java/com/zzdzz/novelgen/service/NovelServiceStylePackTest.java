@@ -96,7 +96,7 @@ class NovelServiceStylePackTest {
     }
 
     private static NovelImportVO importVo(String title, String text) {
-        return new NovelImportVO(title, null, null, text, null, null);
+        return new NovelImportVO(title, null, null, text, null, null, null);
     }
 
     // ===== 取名/复用 =====

@@ -46,7 +46,7 @@ public class NovelController {
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
         com.zzdzz.novelgen.service.NovelService.NovelImportResultVO result = novelService.importBook(dto, userId);
         if (dto.analyzeSteps() != null && !dto.analyzeSteps().isEmpty()) {
-            importAnalyzeService.submit(result.novelId(), dto.analyzeSteps());
+            importAnalyzeService.submit(result.novelId(), dto.analyzeSteps(), dto.analyzeSkipExistingSteps());
         }
         return Result.success(result);
     }
@@ -58,7 +58,8 @@ public class NovelController {
     @PostMapping("/{id}/import-analyze")
     public Result<java.util.Map<String, Object>> submitAnalyze(@PathVariable long id,
                                                      @RequestBody com.zzdzz.novelgen.model.vo.ImportAnalyzeRequestVO dto) {
-        long taskId = importAnalyzeService.submit(id, dto == null ? null : dto.steps());
+        long taskId = importAnalyzeService.submit(id, dto == null ? null : dto.steps(),
+                dto == null ? null : dto.skipExistingSteps());
         return Result.success(java.util.Map.of("taskId", taskId));
     }
 

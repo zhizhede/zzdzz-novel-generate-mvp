@@ -49,4 +49,10 @@
     <select id="countByNovel" resultType="int">
                 SELECT count(*) FROM embeddings WHERE novel_id = #{novelId} AND is_deleted = FALSE
     </select>
+
+    <!-- 硬删（含软删残留）：只给「覆盖重算」用——向量是纯派生索引，清掉即由源行重建。
+         不用软删的理由：uq_embeddings_source 只管活行，软删会留下死行、每次重算多积一批。 -->
+    <delete id="deleteByNovel">
+DELETE FROM embeddings WHERE novel_id = #{novelId}
+    </delete>
 </mapper>

@@ -59,6 +59,7 @@
                        create_time AS "createTime", update_time AS "updateTime"
                 FROM chapters
                 WHERE is_deleted = false
+                  AND (#{novelId,jdbcType=BIGINT}::bigint IS NULL OR novel_id = #{novelId})
                 ORDER BY novel_id, chapter_no
     </select>
 
@@ -106,6 +107,11 @@
     <delete id="deleteChapterSteps">
                 DELETE FROM chapter_steps WHERE chapter_id=#{chapterId}
     </delete>
+
+    <update id="updateOutlineYaml">
+                UPDATE chapters SET outline_yaml=#{outlineYaml}, update_time=NOW()
+                WHERE id=#{chapterId} AND is_deleted=false
+    </update>
 
     <update id="markOutlined">
                 UPDATE chapters SET outline_yaml=#{outlineYaml}, status='OUTLINED', update_time=NOW() WHERE id=#{chapterId}

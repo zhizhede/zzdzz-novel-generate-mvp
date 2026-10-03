@@ -229,8 +229,10 @@ public class NovelService {
 
     /**
      * 取本书的私有风格包（开书/导入共用）。活名唯一约束 uq_style_packs_name_alive 不认历史残留，
-     * 所以顺序为：①同名可复用包（已软删的、或删书残留的孤儿包）原地改写复活 → ②活名空缺则新建 →
+     * 所以顺序为：①同名可复用包（**活着但无活书引用的孤儿包**）原地改写复用 → ②活名空缺则新建 →
      * ③活名被在用的包/预设占着才退让改名（书名·风格·2…）。任何一步都不该再抛数据库唯一键异常。
+     * 2026-10-03 起「软删行一律不可见」，故不再回收已软删的包：同名包被删后重导走 ② 新建一行
+     * （软删行不占活名，条件唯一索引放行），代价是留一行历史数据。
      */
     private long acquireStylePack(String title, String description, String rulesMd, String fingerprint,
                                  String gateConfig) {
@@ -240,7 +242,7 @@ public class NovelService {
             Long reusable = stylePackData.findReusablePackId(name);
             if (reusable != null) {
                 stylePackData.reusePack(reusable, name, description, rulesMd, fingerprint, gateConfig);
-                log.info("风格包复用：name={} packId={}（原为软删包或删书残留孤儿包）", name, reusable);
+                log.info("风格包复用：name={} packId={}（无活书引用的孤儿包，原地改写复用）", name, reusable);
                 return reusable;
             }
             if (stylePackData.findIdByName(name) == null) {
@@ -299,6 +301,14 @@ public class NovelService {
     /** 导入正文上限：与样本导入同一量级（超出请分段导入）。电子书字节上限见 GenrePresetService.MAX_EBOOK_BYTES。 */
     private static final int IMPORT_MAX_CHARS = 8_000_000;
 
+    /**
+     * 导入正文自成一卷（第 1 卷，arc 固定为「导入正文」）：导入的书**正文就是第一卷**，
+     * 后续卷规划于是从第 2 卷起接在正文之后——否则导入章永远是「未分卷」，首次卷规划会把这卷编成
+     * 「第 1 卷」（卷号对不上正文），规划页还会出现「第 0 卷 · 未分卷」这个伪分组。
+     */
+    static final int IMPORT_VOLUME_NO = 1;
+    static final String IMPORT_VOLUME_ARC = "导入正文";
+
     /** 「第N章」章标题（阿拉伯数字）：与 ImportRunner 的章文件命名口径一致。 */
     private static final java.util.regex.Pattern CHAPTER_HEADING =
             java.util.regex.Pattern.compile("^\\s*第\\s*(\\d{1,4})\\s*章\\s*(.*)$");
@@ -332,7 +342,8 @@ public class NovelService {
     }
 
     /** 补事实账结果（逐章成败，失败不抛断整体）。 */
-    public record DigestBackfillVO(int requested, int digested, List<String> notes) {
+    /** skipped = 本次因「已有事实账且选了跳过」而未重算的章数（force 模式下恒为 0）。 */
+    public record DigestBackfillVO(int requested, int digested, int skipped, List<String> notes) {
     }
 
     /**
@@ -368,8 +379,9 @@ public class NovelService {
         long novelId = novelData.insert(userId, title, vo.description() == null ? "" : vo.description().strip(),
                 packId, "auto", "active", NovelSourceType.IMPORTED.wire());
         for (ChapterSlice s : slices) {
-            chapterData.insertPlan(novelId, s.no(), null, null, s.title(), null, null, null, "[]", "[]",
-                    band == null ? 0 : (int) band[0], band == null ? 0 : (int) band[1]);
+            // 导入正文即第 1 卷（见 IMPORT_VOLUME_NO）：续写卷规划从第 2 卷起，规划页不再出现「未分卷」伪分组
+            chapterData.insertPlan(novelId, s.no(), IMPORT_VOLUME_NO, IMPORT_VOLUME_ARC, s.title(), null, null, null,
+                    "[]", "[]", band == null ? 0 : (int) band[0], band == null ? 0 : (int) band[1]);
             ChapterDTO chapter = chapterData.find(novelId, s.no())
                     .orElseThrow(() -> new IllegalStateException("导入落章失败：novelId=" + novelId + " no=" + s.no()));
             chapterData.saveFullText(chapter.getId(), s.content());
@@ -388,17 +400,26 @@ public class NovelService {
      * 事务外执行（LLM 调用不得进事务）；已导入的章状态保持 FINAL 不动——事实账是补充记忆，不改变章状态。
      */
     public DigestBackfillVO backfillDigests(long novelId, int recent) {
+        return backfillDigests(novelId, recent, false);
+    }
+
+    /**
+     * force=false（默认）：已有事实账的章跳过（省 token 的幂等口径）。
+     * force=true（用户选「覆盖已有」）：这些章重算并原地更新事实账 —— 解析链里「跳过/覆盖」开关的落点。
+     */
+    public DigestBackfillVO backfillDigests(long novelId, int recent, boolean force) {
         requireNovel(novelId);
         if (recent <= 0) {
-            return new DigestBackfillVO(0, 0, new ArrayList<>());
+            return new DigestBackfillVO(0, 0, 0, new ArrayList<>());
         }
         int want = Math.min(recent, 20);
         List<ChapterDTO> chapters = new ArrayList<>(chapterData.listSummariesByNovel(novelId));
         List<String> notes = new ArrayList<>();
         if (chapters.isEmpty()) {
-            return new DigestBackfillVO(0, 0, List.of("本书还没有章节，无需补事实账"));
+            return new DigestBackfillVO(0, 0, 0, List.of("本书还没有章节，无需补事实账"));
         }
         int digested = 0;
+        int skipped = 0;
         int attempted = 0;
         for (int i = chapters.size() - 1; i >= 0 && attempted < want; i--) {
             ChapterDTO summary = chapters.get(i);
@@ -408,18 +429,23 @@ public class NovelService {
             }
             attempted++;
             try {
-                digestService.digest(novelId, full.getId(), full.getChapterNo(), full.getFullText());
-                digested++;
+                if (digestService.digest(novelId, full.getId(), full.getChapterNo(), full.getFullText(), force)) {
+                    digested++;
+                } else {
+                    skipped++;
+                }
             } catch (Exception e) {
                 notes.add("第 " + full.getChapterNo() + " 章事实账生成失败：" + (e.getMessage() == null ? "未知错误" : e.getMessage()));
                 log.warn("导入后补事实账失败：novelId={} 章={} {}", novelId, full.getChapterNo(), e.getMessage());
             }
         }
         if (digested < attempted) {
-            notes.add("已成功 " + digested + "/" + attempted + " 章；失败章可在章节页重新审批或稍后重试补账");
+            notes.add("已成功 " + digested + "/" + attempted + " 章"
+                    + (skipped > 0 ? "（" + skipped + " 章已有事实账，本次选了跳过）" : "")
+                    + "；失败章可在章节页重新审批或稍后重试补账");
         }
-        log.info("导入后补事实账：novelId={} 成功 {}/{}", novelId, digested, attempted);
-        return new DigestBackfillVO(attempted, digested, notes);
+        log.info("导入后补事实账：novelId={} 成功 {}/{}（跳过已有 {}）覆盖={}", novelId, digested, attempted, skipped, force);
+        return new DigestBackfillVO(attempted, digested, skipped, notes);
     }
 
     /** 导入正文取值：粘贴文本优先，其次电子书 base64（共用 MobiExtractor 的 data URL 解码与体积守卫）。 */

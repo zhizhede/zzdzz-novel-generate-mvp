@@ -23,4 +23,6 @@ public interface EmbeddingMapper extends BaseMapper<EmbeddingDTO> {
     List<EmbeddingDataService.MissingRow> findMissingCards(@Param("novelId") long novelId, @Param("limit") int limit);
 
     int countByNovel(@Param("novelId") long novelId);
+
+    int deleteByNovel(@Param("novelId") long novelId);
 }

@@ -19,5 +19,10 @@ public record NovelImportVO(
          * 导入后要跑的解析链步骤键（ImportAnalyzeStep；不传/空 = 只落库不解析，界面默认全勾）。
          * 落库是短事务、解析是长时间 LLM，故二者在同一次请求里**先落库再入队**（提交在事务外，见 NovelController）。
          */
-        List<String> analyzeSteps) {
+        List<String> analyzeSteps,
+        /**
+         * analyzeSteps 里遇到**已有内容**选择跳过的步骤键（默认不传/空 = 不跳过 = 覆盖重做）。
+         * 只对 DIGESTS / CARDS / EMBEDDINGS 生效，语义同 ImportAnalyzeRequestVO.skipExistingSteps。
+         */
+        List<String> analyzeSkipExistingSteps) {
 }
