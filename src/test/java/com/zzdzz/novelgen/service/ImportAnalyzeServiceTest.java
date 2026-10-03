@@ -44,7 +44,7 @@ class ImportAnalyzeServiceTest {
     // ===== 任务行 steps 的读写兼容 =====
 
     private ImportAnalyzeService service(ImportAnalyzeTaskDataService taskData) {
-        return new ImportAnalyzeService(null, null, taskData, null, null, null, null, null, null, new ObjectMapper());
+        return new ImportAnalyzeService(null, null, taskData, null, null, null, null, new ObjectMapper());
     }
 
     private ImportAnalyzeTaskDO task(String stepsJson) {
@@ -99,65 +99,19 @@ class ImportAnalyzeServiceTest {
         assertThat(service(taskData).status(34L)).isNull();
     }
 
-    // ===== 卷纲步的目标决策：已有卷纲时「原地重规划」而不是往后编新卷号 =====
-
+    /**
+     * 解析链只解析不规划：历史任务行里遗留的规划步键（VOLUME_PLAN / CHAPTER_OUTLINES，两步已于 2026-10-03 移出本链）
+     * 在进度读回时被忽略，不会当成一步解析结果渲染出来。
+     */
     @Test
-    void volumePlanCreatesFirstVolumeWhenNothingPlanned() {
-        ImportAnalyzeService.PlanTarget t = ImportAnalyzeService.planTarget(null, 18, 0, false);
+    void statusDropsLegacyPlanningStepKeys() {
+        ImportAnalyzeTaskDataService taskData = mock(ImportAnalyzeTaskDataService.class);
+        when(taskData.findAliveByNovel(34L)).thenReturn(task(
+                "[{\"key\":\"DIGESTS\",\"skipExisting\":false},{\"key\":\"VOLUME_PLAN\",\"skipExisting\":false},"
+                        + "{\"key\":\"CHAPTER_OUTLINES\",\"skipExisting\":false},{\"key\":\"EMBEDDINGS\",\"skipExisting\":false}]"));
 
-        assertThat(t.volNo()).isEqualTo(1);      // 空档：新增一卷，导入书首次跑就是第 1 卷
-        assertThat(t.replan()).isFalse();
-        assertThat(t.skip()).isFalse();
-    }
+        ImportAnalyzeStatusVO s = service(taskData).status(34L);
 
-    @Test
-    void volumePlanReplansSameVolumeWhenCovered() {
-        // 正文止于 17、已有第 2 卷规划到 27 → 起点仍是 18，覆盖＝原地重规划第 2 卷（不是新增第 3 卷）
-        ImportAnalyzeService.PlanTarget t = ImportAnalyzeService.planTarget(27, 18, 2, false);
-
-        assertThat(t.volNo()).isEqualTo(2);
-        assertThat(t.replan()).isTrue();
-        assertThat(t.skip()).isFalse();
-    }
-
-    @Test
-    void volumePlanSkipsWhenCoveredAndSkipChosen() {
-        ImportAnalyzeService.PlanTarget t = ImportAnalyzeService.planTarget(27, 18, 2, true);
-
-        assertThat(t.skip()).isTrue();
-        assertThat(t.replan()).isTrue();
-    }
-
-    @Test
-    void volumePlanAddsNewVolumeWhenPlanEndsBeforeStart() {
-        // 已有卷只规划到第 10 章、正文已到 17 → 第 18 章起是空档，照旧新增一卷
-        ImportAnalyzeService.PlanTarget t = ImportAnalyzeService.planTarget(10, 18, 3, false);
-
-        assertThat(t.volNo()).isEqualTo(4);
-        assertThat(t.replan()).isFalse();
-    }
-
-    // ===== 章纲步的目标卷：导入成稿卷不算「规划卷」（2026-10-01：用户三次反馈「解析还是从第18章开始」的根因面）=====
-
-    @Test
-    void chapterOutlinesIgnoresImportVolumeWhenNothingElsePlanned() {
-        // 只有导入成稿卷（volume_no=1 / arc=导入正文）→ 没有可出纲的规划卷，应为 null（本步 SKIPPED）
-        assertThat(ImportAnalyzeService.plannedVolumeNo(List.of(
-                chapter(1, 1, "导入正文"), chapter(2, 1, "导入正文")))).isNull();
-    }
-
-    @Test
-    void chapterOutlinesPicksNewestPlannedVolumeNotImportVolume() {
-        // 导入正文=卷 1，规划卷=卷 2 → 目标卷是 2（章纲只给新规划那卷出）
-        assertThat(ImportAnalyzeService.plannedVolumeNo(List.of(
-                chapter(1, 1, "导入正文"), chapter(18, 2, "空船归港")))).isEqualTo(2);
-    }
-
-    private static com.zzdzz.novelgen.model.entity.ChapterDO chapter(int no, Integer volNo, String arc) {
-        com.zzdzz.novelgen.model.entity.ChapterDO c = new com.zzdzz.novelgen.model.entity.ChapterDO();
-        c.setChapterNo(no);
-        c.setVolumeNo(volNo);
-        c.setArc(arc);
-        return c;
+        assertThat(s.plannedSteps()).containsExactly("DIGESTS", "EMBEDDINGS");
     }
 }

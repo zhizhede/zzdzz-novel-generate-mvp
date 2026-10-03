@@ -10,7 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 导入解析链的勾选与顺序语义（纯函数，不连库）：
- * ①默认全跑 = 不传勾选就按枚举全序；②未知键忽略；③勾选顺序不影响执行顺序（依赖顺序由枚举定）；
+ * ①解析链只解析不规划（枚举里没有卷纲/章纲）；②未知键忽略；③勾选顺序不影响执行顺序（依赖顺序由枚举定）；
  * ④空勾选 = 不解析（API 显式 opt-in，不让纯接口建书默默烧一轮 LLM）。
  */
 class ImportAnalyzeStepTest {
@@ -18,14 +18,22 @@ class ImportAnalyzeStepTest {
     @Test
     void allStepsAreOrderedByDependency() {
         assertThat(ImportAnalyzeStep.all().stream().map(ImportAnalyzeStep::wire).toList()).containsExactly(
-                "DIGESTS", "OUTLINE", "CARDS", "WORLD", "RULES", "EMBEDDINGS", "VOLUME_PLAN", "CHAPTER_OUTLINES");
+                "DIGESTS", "OUTLINE", "CARDS", "WORLD", "RULES", "EMBEDDINGS");
+    }
+
+    /** 解析链不含规划步骤：卷纲/章纲的键必须不被认识（它们属规划页，不属这里）。 */
+    @Test
+    void planningStepsAreNotPartOfParsingChain() {
+        assertThat(ImportAnalyzeStep.of("VOLUME_PLAN")).isNull();
+        assertThat(ImportAnalyzeStep.of("CHAPTER_OUTLINES")).isNull();
+        assertThat(ImportAnalyzeStep.ordered(List.of("VOLUME_PLAN", "CHAPTER_OUTLINES"))).isEmpty();
     }
 
     @Test
     void userSelectionIsReorderedToExecutionOrder() {
-        List<ImportAnalyzeStep> picked = ImportAnalyzeStep.ordered(List.of("CHAPTER_OUTLINES", "DIGESTS", "WORLD"));
+        List<ImportAnalyzeStep> picked = ImportAnalyzeStep.ordered(List.of("EMBEDDINGS", "DIGESTS", "WORLD"));
         assertThat(picked.stream().map(ImportAnalyzeStep::wire).toList())
-                .containsExactly("DIGESTS", "WORLD", "CHAPTER_OUTLINES");
+                .containsExactly("DIGESTS", "WORLD", "EMBEDDINGS");
     }
 
     @Test
@@ -50,8 +58,8 @@ class ImportAnalyzeStepTest {
 
     @Test
     void summarizeCountsSuccessSkipAndFail() {
-        ImportAnalyzeService service = new ImportAnalyzeService(null, null, null, null, null, null, null, null,
-                null, new ObjectMapper());
+        ImportAnalyzeService service = new ImportAnalyzeService(null, null, null, null, null, null, null,
+                new ObjectMapper());
         List<java.util.Map<String, Object>> results = List.of(
                 java.util.Map.of("step", "DIGESTS", "status", "SUCCESS"),
                 java.util.Map.of("step", "WORLD", "status", "SKIPPED"),

@@ -5,7 +5,6 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.ImportAnalyzeTaskDO;
-import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.model.enums.ImportAnalyzeStep;
 import com.zzdzz.novelgen.model.vo.ImportAnalyzeStatusVO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
@@ -25,8 +24,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * 导入书籍后的「解析链」：把素材库能通过 LLM 生成的东西（事实账/世界状态/伏笔提议、素材卡、世界观、文风规则、
- * 向量索引）与大纲/卷纲/章纲串成**可选、可续跑**的多步任务，用户勾选哪些跑哪些（默认全跑）。
+ * 导入书籍后的「解析链」：把导入正文里**已经存在**的东西用 LLM 抽出来，落成素材库资产
+ * （事实账/世界状态/伏笔提议、大纲、素材卡、世界观、文风规则、向量索引）。
+ *
+ * **只解析，不规划**（2026-10-03 用户定调）：本链**不含卷纲/章纲**——导入书的解析不该顺手规划出一卷续写，
+ * 那属于规划页（「AI 规划下一卷」）与生成管线。原先的 VOLUME_PLAN / CHAPTER_OUTLINES 两步已移出枚举。
  *
  * 运行形态与「样本深度解析」同构：全局单线程 runner（一本一本地跑，瓶颈在 LLM）+ 一行活跃任务表
  * （import_analyze_tasks，重复提交＝重置同一行）——单步动辄几十秒到十几分钟，不能挂在 HTTP 请求上。
@@ -34,8 +36,8 @@ import java.util.concurrent.Executors;
  * （全部 SUCCESS/SKIPPED = DONE，其余 = FAILED，前端按步渲染）。
  *
  * 「已有内容」的处置：每步可单独选**跳过 / 覆盖重做**（默认不跳过＝覆盖），只有 DIGESTS / CARDS / EMBEDDINGS
- * 三步的该开关有实际效果（这三步原本是「已有即跳过」），其余步的处置是固定的（大纲/世界观/规则覆盖、卷纲新增一卷、
- * 章纲把新卷章行入队）。开关随 steps 一起写进任务行，前端进度面板据此标出本次选择。
+ * 三步的该开关有实际效果（这三步原本是「已有即跳过」），其余步的处置是固定的（大纲/世界观/规则覆盖同名文档）。
+ * 开关随 steps 一起写进任务行，前端进度面板据此标出本次选择。
  */
 @Service
 @Slf4j
@@ -52,10 +54,8 @@ public class ImportAnalyzeService {
     private final ImportAnalyzeTaskDataService taskData;
     private final BookAssetExtractService bookAssets;
     private final NovelService novelService;
-    private final PlanningService planningService;
     private final GenrePresetService genrePresetService;
     private final EmbeddingService embeddingService;
-    private final GenerationQueueService queueService;
     private final ObjectMapper mapper;
 
     /** 全局串行 runner：一次只跑一本书的解析链（可续跑靠任务行，不靠线程）。 */
@@ -143,8 +143,7 @@ public class ImportAnalyzeService {
      * ①DIGESTS：默认重算已有事实账的章，选跳过则只补缺的；
      * ②CARDS：默认用新结果更新已有同类同名卡，选跳过则保留（人工写过的优先）；
      * ③EMBEDDINGS：默认清掉本书旧向量全量重嵌（事实账/卡被覆盖后旧向量即陈旧），选跳过则只补缺的。
-     * 固定口径：OUTLINE/WORLD/RULES 覆盖同名文档；VOLUME_PLAN 新增一卷；
-     * CHAPTER_OUTLINES 把新规划那卷的章行批量入队（其中已有正文的章由生成侧守卫跳过）。
+     * 固定口径：OUTLINE/WORLD/RULES 覆盖同名文档。
      */
     private StepResult runStep(long novelId, ImportAnalyzeStep step, boolean skipExisting) {
         return switch (step) {
@@ -179,8 +178,6 @@ public class ImportAnalyzeService {
                 yield new StepResult("SUCCESS",
                         (skipExisting ? "新增向量 " : "向量已重算 ") + n + " 条", Map.of("created", n));
             }
-            case VOLUME_PLAN -> volumePlan(novelId, skipExisting);
-            case CHAPTER_OUTLINES -> chapterOutlines(novelId);
         };
     }
 
@@ -202,92 +199,6 @@ public class ImportAnalyzeService {
         }
         return new StepResult("SUCCESS", note, Map.of("digested", r.digested(), "attempted", r.requested(),
                 "skipped", r.skipped()));
-    }
-
-    /**
-     * 卷纲：规划「下一卷」（接在已有正文最末章之后；含前置卷复盘）。auto 模式直接落库，manual 模式出草稿。
-     * 「已有内容」＝该段章节**已有规划行**（重复跑解析链时的常态）：
-     * 覆盖（默认）＝**原地重规划那一卷**（同卷号、同起点，adopt 会软删该起点起的旧行再插新行）——
-     * 否则每重跑一次就往后编一个新卷号、把上一卷的规划行顶掉（真库踩过：第 1 卷被第 2 卷顶掉）；
-     * 跳过＝已有规划行覆盖到起点就完全不动。
-     */
-    private StepResult volumePlan(long novelId, boolean skipExisting) {
-        NovelDO novel = novelData.getById(novelId);
-        Integer lastWithText = chapterData.maxChapterWithText(novelId);
-        int from = (lastWithText == null ? 0 : lastWithText) + 1;
-        PlanTarget t = planTarget(chapterData.maxPlannedChapterNo(novelId), from,
-                chapterData.maxVolumeNo(novelId), skipExisting);
-        if (t.skip()) {
-            return new StepResult("SKIPPED",
-                    "第 " + t.volNo() + " 卷已规划到第 " + chapterData.maxPlannedChapterNo(novelId)
-                            + " 章（自第 " + from + " 章起），本次选了跳过——未动已有卷纲",
-                    Map.of("volNo", t.volNo(), "from", from));
-        }
-        Map<String, Object> r = planningService.autoPlan(novelId, t.volNo(), from, null, null);
-        boolean adopted = Boolean.TRUE.equals(r.get("adopted"));
-        Object arc = r.get("arc");
-        Object rows = r.get("rows");
-        int rowCount = rows instanceof List<?> list ? list.size() : 0;
-        if (!adopted) {
-            return new StepResult("SUCCESS",
-                    "第 " + t.volNo() + " 卷草稿已生成（manual 模式，待你在规划页采纳）",
-                    Map.of("volNo", t.volNo(), "rows", rowCount));
-        }
-        return new StepResult("SUCCESS", "第 " + t.volNo() + " 卷" + (t.replan() ? "已原地重规划：" : "已落库：")
-                + (arc == null ? "" : arc) + "，" + rowCount + " 章（自第 " + from + " 章起）",
-                Map.of("volNo", t.volNo(), "rows", rowCount, "from", from));
-    }
-
-    /** 卷纲步的目标：{volNo, replan, skip}。已有规划行覆盖到起点＝重规划同一卷，否则新增一卷。 */
-    record PlanTarget(int volNo, boolean replan, boolean skip) {
-    }
-
-    static PlanTarget planTarget(Integer maxPlannedChapterNo, int from, int maxVolumeNo, boolean skipExisting) {
-        boolean covered = maxPlannedChapterNo != null && maxPlannedChapterNo >= from;
-        if (!covered) {
-            return new PlanTarget(maxVolumeNo + 1, false, false);   // 空档：新增一卷（首次跑就是第 1 卷）
-        }
-        return new PlanTarget(maxVolumeNo, true, skipExisting);      // 已有覆盖：原地重规划该卷，或按选择跳过
-    }
-
-    /** 章纲要出纲的「规划卷」＝号最大的非导入成稿卷；只有导入正文（无规划卷）时返回 null。 */
-    static Integer plannedVolumeNo(List<ChapterDO> chapters) {
-        return chapters.stream()
-                .filter(c -> c.getVolumeNo() != null && !NovelService.IMPORT_VOLUME_ARC.equals(c.getArc()))
-                .map(ChapterDO::getVolumeNo)
-                .max(Integer::compareTo)
-                .orElse(null);
-    }
-
-    /** 章纲：把最近规划出的那一卷的章行批量入队（本链只提交，进度看工作台队列）。
-     *  **导入成稿卷不算目标卷**——导入书的 volume_no=1/arc=导入正文 是原文（正文已成），出章纲既无意义也会被守卫跳过；
-     *  只导入、还没规划下一卷的书，本步直接 SKIPPED 并在消息里说明，不再入队一个「全跳过」的空任务。 */
-    private StepResult chapterOutlines(long novelId) {
-        List<ChapterDO> chapters = chapterData.listSummariesByNovel(novelId);
-        if (chapters.isEmpty()) {
-            return new StepResult("SKIPPED", "本书还没有规划章行", Map.of());
-        }
-        Integer volNo = plannedVolumeNo(chapters);
-        if (volNo == null) {
-            return new StepResult("SKIPPED",
-                    "本书只有导入成稿正文（尚无规划卷）——成稿章不需要章纲，续写卷规划后才出纲", Map.of());
-        }
-        List<Integer> nos = chapters.stream()
-                .filter(c -> volNo.equals(c.getVolumeNo()))
-                .map(ChapterDO::getChapterNo)
-                .sorted()
-                .toList();
-        if (nos.isEmpty()) {
-            return new StepResult("SKIPPED", "没有可批量生成章纲的章行（先跑卷纲）", Map.of());
-        }
-        int from = nos.get(0);
-        int to = nos.get(nos.size() - 1);
-        NovelDO novel = novelData.getById(novelId);
-        long taskId = queueService.submitOutline(novelId, novel.getTitle(), from, to, null);
-        return new StepResult("SUCCESS",
-                "第 " + from + "–" + to + " 章章纲已入队（任务 " + taskId + "，进度见工作台）；"
-                        + "本步只给新规划那卷出纲，导入成稿章不重出章纲（正文已成、无需规划）",
-                Map.of("from", from, "to", to, "taskId", taskId));
     }
 
     // ===== 助手 =====

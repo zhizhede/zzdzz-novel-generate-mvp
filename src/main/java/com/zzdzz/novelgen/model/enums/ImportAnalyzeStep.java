@@ -5,9 +5,12 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 导入书籍后的「解析链」步骤：素材库能通过 LLM 生成的东西 + 大纲/卷纲/章纲，勾选哪些就跑哪些（默认全跑）。
- * 顺序即执行顺序（也是依赖顺序）：事实账 → 大纲 → 素材卡 → 世界观 → 文风规则 → 向量索引 → 卷纲 → 章纲。
- * 依赖说明：大纲用得上事实账；世界观用得上素材卡；卷规划读大纲/事实账/世界状态/伏笔账；章纲要有卷纲的新章行。
+ * 导入书籍后的「解析链」步骤：**只解析，不规划**——把导入正文里已经存在的东西用 LLM 抽出来，
+ * 落成素材库资产。**不含卷纲/章纲**（那是规划，属规划页与生成管线，2026-10-03 用户定调）：
+ * 导入书的解析不该顺手规划出一卷续写，规划是另一个入口、另一个决定。
+ *
+ * 顺序即执行顺序（也是依赖顺序）：事实账 → 大纲 → 素材卡 → 世界观 → 文风规则 → 向量索引。
+ * 依赖说明：大纲用得上事实账；世界观用得上素材卡。
  */
 public enum ImportAnalyzeStep {
 
@@ -22,11 +25,7 @@ public enum ImportAnalyzeStep {
     /** 文风规则提炼（语料节选 → 规则列表），写回本书风格包 rules_md。 */
     RULES("RULES", "文风规则（写回风格包）"),
     /** 事实账 + 素材卡向量化（RAG 语义检索前置；走 embedding 模型，与会话 LLM 分开接入）。 */
-    EMBEDDINGS("EMBEDDINGS", "向量索引（RAG 召回前置）"),
-    /** 规划下一卷（含前置卷复盘；auto 模式直接落库，manual 模式出草稿）。 */
-    VOLUME_PLAN("VOLUME_PLAN", "卷纲（规划下一卷）"),
-    /** 新规划卷的章纲批量入队（走生成队列，本链只负责提交）。 */
-    CHAPTER_OUTLINES("CHAPTER_OUTLINES", "章纲（批量入队）");
+    EMBEDDINGS("EMBEDDINGS", "向量索引（RAG 召回前置）");
 
     private final String wire;
     private final String label;
