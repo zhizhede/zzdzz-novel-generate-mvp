@@ -3,7 +3,7 @@ package com.zzdzz.novelgen.service;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.llm.LlmProperties;
 import com.zzdzz.novelgen.llm.SecretCipher;
-import com.zzdzz.novelgen.model.dto.LlmProviderDTO;
+import com.zzdzz.novelgen.model.entity.LlmProviderDO;
 import com.zzdzz.novelgen.service.data.LlmProviderDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,17 +45,17 @@ class LlmProviderServiceTest {
     void createEncryptsKeyNeverStoresPlaintext() {
         when(providerData.findByName("主接入")).thenReturn(null);
         // 真 MyBatis-Plus save 会回填自增 ID——mock 照做
-        when(providerData.save(any(LlmProviderDTO.class))).thenAnswer(inv -> {
-            LlmProviderDTO p = inv.getArgument(0);
+        when(providerData.save(any(LlmProviderDO.class))).thenAnswer(inv -> {
+            LlmProviderDO p = inv.getArgument(0);
             p.setId(42L);
             return true;
         });
         service.create("主接入", "https://api.example.com", "sk-live-secret-9999", "model-x", "chat",
                 null, null, true, "备注");
 
-        ArgumentCaptor<LlmProviderDTO> captor = ArgumentCaptor.forClass(LlmProviderDTO.class);
+        ArgumentCaptor<LlmProviderDO> captor = ArgumentCaptor.forClass(LlmProviderDO.class);
         verify(providerData).save(captor.capture());
-        LlmProviderDTO saved = captor.getValue();
+        LlmProviderDO saved = captor.getValue();
         assertThat(saved.getApiKeyCipher()).doesNotContain("sk-live-secret");
         assertThat(cipher.decrypt(saved.getApiKeyCipher())).isEqualTo("sk-live-secret-9999");
         assertThat(saved.getRole()).isEqualTo("chat");
@@ -66,13 +66,13 @@ class LlmProviderServiceTest {
     @Test
     void roleDefaultsToChatAndRejectsUnknown() {
         when(providerData.findByName(anyString())).thenReturn(null);
-        when(providerData.save(any(LlmProviderDTO.class))).thenAnswer(inv -> {
-            LlmProviderDTO p = inv.getArgument(0);
+        when(providerData.save(any(LlmProviderDO.class))).thenAnswer(inv -> {
+            LlmProviderDO p = inv.getArgument(0);
             p.setId(9L);
             return true;
         });
         service.create("默认用途", "https://api.example.com", "sk-x", "m", null, null, null, true, null);
-        ArgumentCaptor<LlmProviderDTO> captor = ArgumentCaptor.forClass(LlmProviderDTO.class);
+        ArgumentCaptor<LlmProviderDO> captor = ArgumentCaptor.forClass(LlmProviderDO.class);
         verify(providerData).save(captor.capture());
         assertThat(captor.getValue().getRole()).isEqualTo("chat");
 
@@ -85,15 +85,15 @@ class LlmProviderServiceTest {
     @Test
     void embeddingRowOnlyDisablesOtherEmbeddingRows() {
         when(providerData.findByName("MiniMax 向量")).thenReturn(null);
-        when(providerData.save(any(LlmProviderDTO.class))).thenAnswer(inv -> {
-            LlmProviderDTO p = inv.getArgument(0);
+        when(providerData.save(any(LlmProviderDO.class))).thenAnswer(inv -> {
+            LlmProviderDO p = inv.getArgument(0);
             p.setId(2L);
             return true;
         });
         service.create("MiniMax 向量", "https://api.minimaxi.com/v1", "sk-mm", "embo-01", "embedding",
                 null, null, true, null);
 
-        ArgumentCaptor<LlmProviderDTO> captor = ArgumentCaptor.forClass(LlmProviderDTO.class);
+        ArgumentCaptor<LlmProviderDO> captor = ArgumentCaptor.forClass(LlmProviderDO.class);
         verify(providerData).save(captor.capture());
         assertThat(captor.getValue().getRole()).isEqualTo("embedding");
         verify(providerData).disableAllOthersInRole(2L, "embedding");
@@ -101,7 +101,7 @@ class LlmProviderServiceTest {
 
     @Test
     void listMasksKey() {
-        LlmProviderDTO row = new LlmProviderDTO();
+        LlmProviderDO row = new LlmProviderDO();
         row.setId(1L);
         row.setName("主接入");
         row.setBaseUrl("https://api.example.com");
@@ -118,7 +118,7 @@ class LlmProviderServiceTest {
 
     @Test
     void updateBlankKeyKeepsOldCipher() {
-        LlmProviderDTO row = new LlmProviderDTO();
+        LlmProviderDO row = new LlmProviderDO();
         row.setId(1L);
         row.setName("主接入");
         row.setBaseUrl("https://api.example.com");
@@ -156,7 +156,7 @@ class LlmProviderServiceTest {
 
     @Test
     void createRejectsDuplicateName() {
-        when(providerData.findByName("重名")).thenReturn(new LlmProviderDTO());
+        when(providerData.findByName("重名")).thenReturn(new LlmProviderDO());
         assertThatThrownBy(() -> service.create("重名", "https://api.example.com", "sk-x", null, null,
                 null, null, true, null))
                 .isInstanceOf(BizException.class).hasMessageContaining("同名");

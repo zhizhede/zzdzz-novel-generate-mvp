@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
-import com.zzdzz.novelgen.model.vo.StyleFingerprintQueryVO;
+import com.zzdzz.novelgen.model.dto.StyleFingerprintQueryDTO;
 import com.zzdzz.novelgen.model.vo.StyleFingerprintVO;
 import org.junit.jupiter.api.Test;
 
@@ -28,14 +28,14 @@ class StyleFingerprintServiceTest {
     private static final StyleFingerprintVO BOOK = row("BOOK", 18, "草稿落库验证书", null, 8, null, null,
             "2026-09-20", List.of());
 
-    private static StyleFingerprintQueryVO query(String source, String keyword, String genre, String confidence,
+    private static StyleFingerprintQueryDTO query(String source, String keyword, String genre, String confidence,
                                                  Integer minMetrics, Long minChars, Long maxChars,
                                                  String from, String to) {
-        return new StyleFingerprintQueryVO(source, keyword, genre, confidence, minMetrics, minChars, maxChars,
+        return new StyleFingerprintQueryDTO(source, keyword, genre, confidence, minMetrics, minChars, maxChars,
                 from, to, null);
     }
 
-    private static StyleFingerprintQueryVO empty() {
+    private static StyleFingerprintQueryDTO empty() {
         return query(null, null, null, null, null, null, null, null, null);
     }
 

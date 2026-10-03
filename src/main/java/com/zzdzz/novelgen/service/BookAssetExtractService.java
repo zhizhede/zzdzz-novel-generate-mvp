@@ -5,9 +5,9 @@ import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.llm.LlmTemps;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
-import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.entity.MaterialCardDO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.DigestDataService;
@@ -52,9 +52,9 @@ public class BookAssetExtractService {
     private static final int DIGEST_BLOCK_MAX_CHARS = 24000;
 
     private static final Set<String> KINDS = Set.of(
-            MaterialCardDTO.KIND_CHARACTER, MaterialCardDTO.KIND_ITEM, MaterialCardDTO.KIND_LOCATION,
-            MaterialCardDTO.KIND_LANDMARK, MaterialCardDTO.KIND_PHENOMENON, MaterialCardDTO.KIND_DISASTER,
-            MaterialCardDTO.KIND_ORG, MaterialCardDTO.KIND_MISC);
+            MaterialCardDO.KIND_CHARACTER, MaterialCardDO.KIND_ITEM, MaterialCardDO.KIND_LOCATION,
+            MaterialCardDO.KIND_LANDMARK, MaterialCardDO.KIND_PHENOMENON, MaterialCardDO.KIND_DISASTER,
+            MaterialCardDO.KIND_ORG, MaterialCardDO.KIND_MISC);
 
     private final NovelDataService novelData;
     private final ChapterDataService chapterData;
@@ -80,7 +80,7 @@ public class BookAssetExtractService {
      * 但**保留**卡上的人工状态（pinned 钉住标记与 status），免得覆盖把人工取舍一起抹掉。
      */
     public CardWriteResult extractCards(long novelId, boolean overwrite) {
-        NovelDTO novel = requireNovel(novelId);
+        NovelDO novel = requireNovel(novelId);
         String block = chapterDigestBlock(novelId);
         if (block.isBlank()) {
             log.info("书籍素材卡提取跳过：无章节摘要可用 novelId={}", novelId);
@@ -93,14 +93,14 @@ public class BookAssetExtractService {
                         LlmPort.Message.user(user)), LlmTemps.DIGEST);
         List<CardDraft> drafts = llmJson.ask(req, this::parseCards, 2);
 
-        Map<String, MaterialCardDTO> existing = overwrite ? cardsByKindName(novelId) : Map.of();
+        Map<String, MaterialCardDO> existing = overwrite ? cardsByKindName(novelId) : Map.of();
         int created = 0;
         int updated = 0;
         for (CardDraft d : drafts) {
             if (d.name().isBlank()) {
                 continue;
             }
-            MaterialCardDTO hit = existing.get(cardKey(d.kind(), d.name()));
+            MaterialCardDO hit = existing.get(cardKey(d.kind(), d.name()));
             if (hit != null) {
                 cardData.update(hit.getId(), d.name(), d.aliases(), d.summary(), d.content(),
                         hit.isPinned(), hit.getStatus(), d.sourceChapter());
@@ -119,9 +119,9 @@ public class BookAssetExtractService {
     }
 
     /** 已有卡按 kind+name 建索引（覆盖模式的命中判断；name 只比精确值，与唯一索引同口径）。 */
-    private Map<String, MaterialCardDTO> cardsByKindName(long novelId) {
-        Map<String, MaterialCardDTO> out = new HashMap<>();
-        for (MaterialCardDTO c : cardData.listByNovel(novelId, null)) {
+    private Map<String, MaterialCardDO> cardsByKindName(long novelId) {
+        Map<String, MaterialCardDO> out = new HashMap<>();
+        for (MaterialCardDO c : cardData.listByNovel(novelId, null)) {
             out.put(cardKey(c.getKind(), c.getName()), c);
         }
         return out;
@@ -133,7 +133,7 @@ public class BookAssetExtractService {
 
     /** ②全书大纲：章节结构 + 事实账 → 大纲文本，写 canon(misc/大纲) 并返回正文。 */
     public String synthesizeOutline(long novelId) {
-        NovelDTO novel = requireNovel(novelId);
+        NovelDO novel = requireNovel(novelId);
         String block = chapterDigestBlock(novelId);
         String stats = "书名：" + novel.getTitle() + "\n章节数："
                 + chapterData.listTextsByNovel(novelId).size() + "\n";
@@ -154,7 +154,7 @@ public class BookAssetExtractService {
 
     /** ③世界观文档：章节结构 + 已有素材卡 → 世界观文本，写 canon(world/世界观) 并返回正文。 */
     public String synthesizeWorld(long novelId) {
-        NovelDTO novel = requireNovel(novelId);
+        NovelDO novel = requireNovel(novelId);
         String block = chapterDigestBlock(novelId);
         String cardBlock = cardBlock(novelId);
         String user = promptTemplates.format(LlmNode.SAMPLE_WORLD, "user",
@@ -177,7 +177,7 @@ public class BookAssetExtractService {
 
     /** 章节结构 + 该章事实账（无事实账时退回章名与目标/钩子），供三步共用。 */
     private String chapterDigestBlock(long novelId) {
-        List<ChapterDTO> chapters = chapterData.listSummariesByNovel(novelId);
+        List<ChapterDO> chapters = chapterData.listSummariesByNovel(novelId);
         Map<Integer, String> digestByChapterNo = new LinkedHashMap<>();
         for (DigestDataService.DigestItem d : digestData.listByNovel(novelId)) {
             if (d.contentMd() != null && !d.contentMd().isBlank()) {
@@ -186,7 +186,7 @@ public class BookAssetExtractService {
         }
         StringBuilder sb = new StringBuilder();
         int chars = 0;
-        for (ChapterDTO c : chapters) {
+        for (ChapterDO c : chapters) {
             String digest = digestByChapterNo.get(c.getChapterNo());
             StringBuilder line = new StringBuilder();
             line.append("第").append(c.getChapterNo()).append("章 ").append(nullToEmpty(c.getTitle()));
@@ -212,7 +212,7 @@ public class BookAssetExtractService {
     /** 已有素材卡摘要（世界观合成的「设定类实体卡」输入）。 */
     private String cardBlock(long novelId) {
         StringBuilder sb = new StringBuilder();
-        for (MaterialCardDTO c : cardData.listByNovel(novelId, null)) {
+        for (MaterialCardDO c : cardData.listByNovel(novelId, null)) {
             sb.append("- ").append(kindLabel(c.getKind())).append("｜").append(c.getName());
             if (c.getSummary() != null && !c.getSummary().isBlank()) {
                 sb.append("：").append(c.getSummary().strip());
@@ -227,13 +227,13 @@ public class BookAssetExtractService {
 
     private String kindLabel(String kind) {
         return switch (kind == null ? "" : kind) {
-            case MaterialCardDTO.KIND_CHARACTER -> "角色";
-            case MaterialCardDTO.KIND_ITEM -> "物品";
-            case MaterialCardDTO.KIND_LOCATION -> "地点";
-            case MaterialCardDTO.KIND_LANDMARK -> "地标";
-            case MaterialCardDTO.KIND_PHENOMENON -> "现象";
-            case MaterialCardDTO.KIND_DISASTER -> "灾害";
-            case MaterialCardDTO.KIND_ORG -> "组织";
+            case MaterialCardDO.KIND_CHARACTER -> "角色";
+            case MaterialCardDO.KIND_ITEM -> "物品";
+            case MaterialCardDO.KIND_LOCATION -> "地点";
+            case MaterialCardDO.KIND_LANDMARK -> "地标";
+            case MaterialCardDO.KIND_PHENOMENON -> "现象";
+            case MaterialCardDO.KIND_DISASTER -> "灾害";
+            case MaterialCardDO.KIND_ORG -> "组织";
             default -> "其他";
         };
     }
@@ -307,7 +307,7 @@ public class BookAssetExtractService {
 
     static String normalizeKind(String raw) {
         String v = raw == null ? "" : raw.strip().toLowerCase(Locale.ROOT);
-        return KINDS.contains(v) ? v : MaterialCardDTO.KIND_MISC;
+        return KINDS.contains(v) ? v : MaterialCardDO.KIND_MISC;
     }
 
     private static String text(JsonNode node, String field) {
@@ -336,8 +336,8 @@ public class BookAssetExtractService {
         return s == null ? "" : s;
     }
 
-    private NovelDTO requireNovel(long novelId) {
-        NovelDTO novel = novelData.getById(novelId);
+    private NovelDO requireNovel(long novelId) {
+        NovelDO novel = novelData.getById(novelId);
         if (novel == null) {
             throw new com.zzdzz.novelgen.common.web.BizException(
                     com.zzdzz.novelgen.common.web.ErrorCode.NOT_FOUND, "作品不存在: " + novelId);

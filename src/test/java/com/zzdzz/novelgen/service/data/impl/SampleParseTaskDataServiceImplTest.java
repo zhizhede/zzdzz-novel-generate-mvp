@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
-import com.zzdzz.novelgen.model.dto.SampleParseTaskDTO;
+import com.zzdzz.novelgen.model.entity.SampleParseTaskDO;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 
@@ -21,7 +21,7 @@ class SampleParseTaskDataServiceImplTest {
     @Test
     void concurrentDoubleSubmitReusesTheRowThatWon() {
         SampleParseTaskDataServiceImpl impl = spy(new SampleParseTaskDataServiceImpl());
-        SampleParseTaskDTO twin = new SampleParseTaskDTO();
+        SampleParseTaskDO twin = new SampleParseTaskDO();
         twin.setId(88L);
         twin.setSampleId(7L);
         twin.setStatus("QUEUED");

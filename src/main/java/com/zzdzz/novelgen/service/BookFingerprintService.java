@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.model.vo.BookFingerprintDraftVO;
 import com.zzdzz.novelgen.model.vo.FingerprintApplyVO;
 import com.zzdzz.novelgen.model.vo.FingerprintMetricVO;
@@ -46,7 +46,7 @@ public class BookFingerprintService {
 
     /** 按本书正文试提指纹（草稿，不落库）。 */
     public BookFingerprintDraftVO draft(long novelId) {
-        NovelDTO novel = requireNovel(novelId);
+        NovelDO novel = requireNovel(novelId);
         List<ChapterDataService.ChapterTextRow> rows = chapterData.listTextsByNovel(novelId);
         if (rows.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR,
@@ -133,7 +133,7 @@ public class BookFingerprintService {
         if (!root.isObject() || !root.path("baseline").isObject() || root.path("baseline").isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "指纹必须是含 baseline 指标对象的 JSON");
         }
-        NovelDTO novel = novelData.getById(novelId);
+        NovelDO novel = novelData.getById(novelId);
         if (novel == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在或已删除: " + novelId);
         }
@@ -161,8 +161,8 @@ public class BookFingerprintService {
                 root.path("baseline").size(), Boolean.TRUE.equals(vo.syncBudgetBand()));
     }
 
-    private NovelDTO requireNovel(long novelId) {
-        NovelDTO novel = novelData.getById(novelId);
+    private NovelDO requireNovel(long novelId) {
+        NovelDO novel = novelData.getById(novelId);
         if (novel == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }

@@ -9,7 +9,7 @@ public record PresetVO(long id, String name, String description, Integer budgetM
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** gateConfigJson 解析章长带（坏 JSON/无带给 null，前端隐藏展示）。 */
-    public static PresetVO from(com.zzdzz.novelgen.model.dto.StylePackDTO d, String gateConfigJson) {
+    public static PresetVO from(com.zzdzz.novelgen.model.entity.StylePackDO d, String gateConfigJson) {
         Integer lo = null;
         Integer hi = null;
         try {

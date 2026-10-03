@@ -1,6 +1,6 @@
 package com.zzdzz.novelgen.llm;
 
-import com.zzdzz.novelgen.model.dto.LlmProviderDTO;
+import com.zzdzz.novelgen.model.entity.LlmProviderDO;
 import com.zzdzz.novelgen.service.data.LlmProviderDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,8 +35,8 @@ class LlmProviderResolverTest {
         resolver = new LlmProviderResolver(providerData, cipher, props);
     }
 
-    private LlmProviderDTO row(long id, String baseUrl, String key, String model, Integer readMs, String role) {
-        LlmProviderDTO p = new LlmProviderDTO();
+    private LlmProviderDO row(long id, String baseUrl, String key, String model, Integer readMs, String role) {
+        LlmProviderDO p = new LlmProviderDO();
         p.setId(id);
         p.setName("接入-" + id);
         p.setBaseUrl(baseUrl);
@@ -103,7 +103,7 @@ class LlmProviderResolverTest {
 
     @Test
     void brokenCipherRowFallsBackToYaml() {
-        LlmProviderDTO bad = row(1L, "https://db.example.com", "sk-db", "db-model", null, "chat");
+        LlmProviderDO bad = row(1L, "https://db.example.com", "sk-db", "db-model", null, "chat");
         bad.setApiKeyCipher("not-a-valid-cipher");
         when(providerData.listEnabled("chat")).thenReturn(List.of(bad));
         LlmProviderResolver.Resolved r = resolver.resolve(LlmRole.CHAT);

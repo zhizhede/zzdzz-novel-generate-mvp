@@ -1,13 +1,13 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.ImportedSampleDTO;
+import com.zzdzz.novelgen.model.entity.ImportedSampleDO;
 
 /** 导入小说样本台账数据服务。 */
-public interface ImportedSampleDataService extends IService<ImportedSampleDTO> {
+public interface ImportedSampleDataService extends IService<ImportedSampleDO> {
 
     /** 按导入时间倒序列出未删样本。 */
-    java.util.List<ImportedSampleDTO> listAlive();
+    java.util.List<ImportedSampleDO> listAlive();
 
     /** 台账落行（analysis 为完整分析快照 JSON 文本，XML 内 ::jsonb 转型）。 */
     long insert(String title, String genre, int chunks, long totalChars, String source, String analysis);

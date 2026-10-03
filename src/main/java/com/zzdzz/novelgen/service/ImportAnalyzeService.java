@@ -3,9 +3,9 @@ package com.zzdzz.novelgen.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
-import com.zzdzz.novelgen.model.dto.ImportAnalyzeTaskDTO;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.entity.ImportAnalyzeTaskDO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.model.enums.ImportAnalyzeStep;
 import com.zzdzz.novelgen.model.vo.ImportAnalyzeStatusVO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
@@ -80,7 +80,7 @@ public class ImportAnalyzeService {
         }
         // 只有同时被勾选的步才谈得上「跳过已有」；未知键在此被 ordered 丢弃
         Set<ImportAnalyzeStep> skip = effectiveSkip(steps, skipExistingKeys);
-        ImportAnalyzeTaskDTO alive = taskData.findAliveByNovel(novelId);
+        ImportAnalyzeTaskDO alive = taskData.findAliveByNovel(novelId);
         if (alive != null && ("QUEUED".equals(alive.getStatus()) || "RUNNING".equals(alive.getStatus()))) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "这本书已有解析任务在跑（" + alive.getStatus() + "，当前 " + alive.getCurrentStep() + "），请等它跑完");
@@ -95,7 +95,7 @@ public class ImportAnalyzeService {
 
     /** 解析进度/结果（无任务返回 null，前端据此隐藏面板）。 */
     public ImportAnalyzeStatusVO status(long novelId) {
-        ImportAnalyzeTaskDTO task = taskData.findAliveByNovel(novelId);
+        ImportAnalyzeTaskDO task = taskData.findAliveByNovel(novelId);
         return task == null ? null : toStatus(task);
     }
 
@@ -186,7 +186,7 @@ public class ImportAnalyzeService {
 
     /** 事实账（含世界状态与伏笔提议）：取末尾 N 章逐章跑；overwrite=false 时已有事实账的章跳过。 */
     private StepResult digests(long novelId, boolean overwrite) {
-        List<ChapterDTO> chapters = chapterData.listSummariesByNovel(novelId);
+        List<ChapterDO> chapters = chapterData.listSummariesByNovel(novelId);
         if (chapters.isEmpty()) {
             return new StepResult("SKIPPED", "本书还没有章节", Map.of());
         }
@@ -212,7 +212,7 @@ public class ImportAnalyzeService {
      * 跳过＝已有规划行覆盖到起点就完全不动。
      */
     private StepResult volumePlan(long novelId, boolean skipExisting) {
-        NovelDTO novel = novelData.getById(novelId);
+        NovelDO novel = novelData.getById(novelId);
         Integer lastWithText = chapterData.maxChapterWithText(novelId);
         int from = (lastWithText == null ? 0 : lastWithText) + 1;
         PlanTarget t = planTarget(chapterData.maxPlannedChapterNo(novelId), from,
@@ -251,10 +251,10 @@ public class ImportAnalyzeService {
     }
 
     /** 章纲要出纲的「规划卷」＝号最大的非导入成稿卷；只有导入正文（无规划卷）时返回 null。 */
-    static Integer plannedVolumeNo(List<ChapterDTO> chapters) {
+    static Integer plannedVolumeNo(List<ChapterDO> chapters) {
         return chapters.stream()
                 .filter(c -> c.getVolumeNo() != null && !NovelService.IMPORT_VOLUME_ARC.equals(c.getArc()))
-                .map(ChapterDTO::getVolumeNo)
+                .map(ChapterDO::getVolumeNo)
                 .max(Integer::compareTo)
                 .orElse(null);
     }
@@ -263,7 +263,7 @@ public class ImportAnalyzeService {
      *  **导入成稿卷不算目标卷**——导入书的 volume_no=1/arc=导入正文 是原文（正文已成），出章纲既无意义也会被守卫跳过；
      *  只导入、还没规划下一卷的书，本步直接 SKIPPED 并在消息里说明，不再入队一个「全跳过」的空任务。 */
     private StepResult chapterOutlines(long novelId) {
-        List<ChapterDTO> chapters = chapterData.listSummariesByNovel(novelId);
+        List<ChapterDO> chapters = chapterData.listSummariesByNovel(novelId);
         if (chapters.isEmpty()) {
             return new StepResult("SKIPPED", "本书还没有规划章行", Map.of());
         }
@@ -274,7 +274,7 @@ public class ImportAnalyzeService {
         }
         List<Integer> nos = chapters.stream()
                 .filter(c -> volNo.equals(c.getVolumeNo()))
-                .map(ChapterDTO::getChapterNo)
+                .map(ChapterDO::getChapterNo)
                 .sorted()
                 .toList();
         if (nos.isEmpty()) {
@@ -282,7 +282,7 @@ public class ImportAnalyzeService {
         }
         int from = nos.get(0);
         int to = nos.get(nos.size() - 1);
-        NovelDTO novel = novelData.getById(novelId);
+        NovelDO novel = novelData.getById(novelId);
         long taskId = queueService.submitOutline(novelId, novel.getTitle(), from, to, null);
         return new StepResult("SUCCESS",
                 "第 " + from + "–" + to + " 章章纲已入队（任务 " + taskId + "，进度见工作台）；"
@@ -316,7 +316,7 @@ public class ImportAnalyzeService {
         return sb.toString();
     }
 
-    private ImportAnalyzeStatusVO toStatus(ImportAnalyzeTaskDTO task) {
+    private ImportAnalyzeStatusVO toStatus(ImportAnalyzeTaskDO task) {
         List<ImportAnalyzeStatusVO.StepResultVO> rows = new ArrayList<>();
         for (var n : readJsonArray(task.getDoneSteps())) {
             rows.add(new ImportAnalyzeStatusVO.StepResultVO(

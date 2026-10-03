@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.model.enums.NovelSourceType;
-import com.zzdzz.novelgen.model.vo.NovelQueryVO;
+import com.zzdzz.novelgen.model.dto.NovelQueryDTO;
 import com.zzdzz.novelgen.model.vo.NovelVO;
 import org.junit.jupiter.api.Test;
 
@@ -29,14 +29,14 @@ class NovelServiceTest {
     private static final NovelVO ORIGINAL = book(8, "草稿落库验证书", null, "ORIGINAL", "draft", "auto", 0, false,
             "2026-09-20");
 
-    private static NovelQueryVO query(String keyword, String sourceType, String status, String approvalMode,
+    private static NovelQueryDTO query(String keyword, String sourceType, String status, String approvalMode,
                                       String autoContinue, Integer minChapters, Integer maxChapters,
                                       String from, String to) {
-        return new NovelQueryVO(keyword, sourceType, status, approvalMode, autoContinue, minChapters, maxChapters,
+        return new NovelQueryDTO(keyword, sourceType, status, approvalMode, autoContinue, minChapters, maxChapters,
                 from, to, null);
     }
 
-    private static NovelQueryVO empty() {
+    private static NovelQueryDTO empty() {
         return query(null, null, null, null, null, null, null, null, null);
     }
 

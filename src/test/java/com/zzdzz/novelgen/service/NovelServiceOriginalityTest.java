@@ -4,11 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.dto.ImportedSampleDTO;
-import com.zzdzz.novelgen.model.dto.SampleCardDTO;
-import com.zzdzz.novelgen.model.dto.SamplePlotNodeDTO;
-import com.zzdzz.novelgen.model.dto.StylePackDTO;
-import com.zzdzz.novelgen.model.vo.NovelCreateVO;
+import com.zzdzz.novelgen.model.entity.ImportedSampleDO;
+import com.zzdzz.novelgen.model.entity.SampleCardDO;
+import com.zzdzz.novelgen.model.entity.SamplePlotNodeDO;
+import com.zzdzz.novelgen.model.entity.StylePackDO;
+import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
 import com.zzdzz.novelgen.service.data.ImportedSampleDataService;
@@ -67,27 +67,27 @@ class NovelServiceOriginalityTest {
                 new PromptTemplateService(promptDao), new ObjectMapper());
     }
 
-    private NovelCreateVO vo(Long sampleId) {
-        return new NovelCreateVO("新书", "简介", 1L, sampleId, null,
-                new NovelCreateVO.DeriveConfigVO(50, "第三人称限知", null, null, 10, 100, false, 1, List.of()),
+    private NovelCreateDTO vo(Long sampleId) {
+        return new NovelCreateDTO("新书", "简介", 1L, sampleId, null,
+                new NovelCreateDTO.DeriveConfigVO(50, "第三人称限知", null, null, 10, 100, false, 1, List.of()),
                 null, null);
     }
 
     private void stubHappyPath(String firstOutline, String... rewrites) {
-        StylePackDTO preset = new StylePackDTO();
+        StylePackDO preset = new StylePackDO();
         preset.setId(1L);
         preset.setName("预设");
         preset.setPreset(true);
         when(stylePackData.getById(1L)).thenReturn(preset);
-        ImportedSampleDTO sample = new ImportedSampleDTO();
+        ImportedSampleDO sample = new ImportedSampleDO();
         sample.setTitle("原书");
         sample.setTags("[]");
         when(sampleData.getById(7L)).thenReturn(sample);
-        SamplePlotNodeDTO book = new SamplePlotNodeDTO();
+        SamplePlotNodeDO book = new SamplePlotNodeDO();
         book.setLevel("book");
         book.setSummary("原书剧情骨架：少年离家、苦修、入世、觉悟。");
         when(plotData.listBySample(7L)).thenReturn(List.of(book));
-        SampleCardDTO c = new SampleCardDTO();
+        SampleCardDO c = new SampleCardDO();
         c.setKind("character");
         c.setImportance(3);
         c.setName("原书主角");

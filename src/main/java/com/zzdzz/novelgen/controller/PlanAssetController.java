@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.controller;
 
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.vo.PlanAssetQueryVO;
+import com.zzdzz.novelgen.model.dto.PlanAssetQueryDTO;
 import com.zzdzz.novelgen.model.vo.PlanAssetVO;
 import com.zzdzz.novelgen.service.PlanAssetService;
 import lombok.RequiredArgsConstructor;
@@ -19,9 +19,9 @@ public class PlanAssetController {
 
     private final PlanAssetService planAssetService;
 
-    /** 三层列表（筛选条件见 PlanAssetQueryVO；level 缺省 CHAPTER，全空条件 = 该层全量按书+章号）。 */
+    /** 三层列表（筛选条件见 PlanAssetQueryDTO；level 缺省 CHAPTER，全空条件 = 该层全量按书+章号）。 */
     @GetMapping
-    public Result<List<PlanAssetVO>> list(PlanAssetQueryVO condition) {
+    public Result<List<PlanAssetVO>> list(PlanAssetQueryDTO condition) {
         return Result.success(planAssetService.query(condition));
     }
 }

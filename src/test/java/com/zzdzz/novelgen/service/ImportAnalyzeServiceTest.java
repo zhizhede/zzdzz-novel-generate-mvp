@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zzdzz.novelgen.model.dto.ImportAnalyzeTaskDTO;
+import com.zzdzz.novelgen.model.entity.ImportAnalyzeTaskDO;
 import com.zzdzz.novelgen.model.enums.ImportAnalyzeStep;
 import com.zzdzz.novelgen.model.vo.ImportAnalyzeStatusVO;
 import com.zzdzz.novelgen.service.data.ImportAnalyzeTaskDataService;
@@ -47,8 +47,8 @@ class ImportAnalyzeServiceTest {
         return new ImportAnalyzeService(null, null, taskData, null, null, null, null, null, null, new ObjectMapper());
     }
 
-    private ImportAnalyzeTaskDTO task(String stepsJson) {
-        ImportAnalyzeTaskDTO t = new ImportAnalyzeTaskDTO();
+    private ImportAnalyzeTaskDO task(String stepsJson) {
+        ImportAnalyzeTaskDO t = new ImportAnalyzeTaskDO();
         t.setId(9L);
         t.setNovelId(34L);
         t.setStatus("DONE");
@@ -153,8 +153,8 @@ class ImportAnalyzeServiceTest {
                 chapter(1, 1, "导入正文"), chapter(18, 2, "空船归港")))).isEqualTo(2);
     }
 
-    private static com.zzdzz.novelgen.model.dto.ChapterDTO chapter(int no, Integer volNo, String arc) {
-        com.zzdzz.novelgen.model.dto.ChapterDTO c = new com.zzdzz.novelgen.model.dto.ChapterDTO();
+    private static com.zzdzz.novelgen.model.entity.ChapterDO chapter(int no, Integer volNo, String arc) {
+        com.zzdzz.novelgen.model.entity.ChapterDO c = new com.zzdzz.novelgen.model.entity.ChapterDO();
         c.setChapterNo(no);
         c.setVolumeNo(volNo);
         c.setArc(arc);

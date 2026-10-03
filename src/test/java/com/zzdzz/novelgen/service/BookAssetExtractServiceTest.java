@@ -3,9 +3,9 @@ package com.zzdzz.novelgen.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
-import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.entity.MaterialCardDO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.MaterialCardDataService;
@@ -51,11 +51,11 @@ class BookAssetExtractServiceTest {
         assertThat(drafts).hasSize(2);
         BookAssetExtractService.CardDraft lina = drafts.get(0);
         assertThat(lina.name()).isEqualTo("莉娜");
-        assertThat(lina.kind()).isEqualTo(MaterialCardDTO.KIND_CHARACTER);
+        assertThat(lina.kind()).isEqualTo(MaterialCardDO.KIND_CHARACTER);
         assertThat(lina.aliases()).containsExactly("莉娜小姐");   // 与规范名相同的别名去掉
         assertThat(lina.pinned()).isTrue();
         assertThat(lina.sourceChapter()).isEqualTo(1);
-        assertThat(drafts.get(1).kind()).isEqualTo(MaterialCardDTO.KIND_MISC);
+        assertThat(drafts.get(1).kind()).isEqualTo(MaterialCardDO.KIND_MISC);
         assertThat(drafts.get(1).sourceChapter()).isNull();
     }
 
@@ -101,9 +101,9 @@ class BookAssetExtractServiceTest {
 
     @Test
     void normalizeKindFallsBackToMisc() {
-        assertThat(BookAssetExtractService.normalizeKind(" CHARACTER ")).isEqualTo(MaterialCardDTO.KIND_CHARACTER);
-        assertThat(BookAssetExtractService.normalizeKind("vehicles")).isEqualTo(MaterialCardDTO.KIND_MISC);
-        assertThat(BookAssetExtractService.normalizeKind(null)).isEqualTo(MaterialCardDTO.KIND_MISC);
+        assertThat(BookAssetExtractService.normalizeKind(" CHARACTER ")).isEqualTo(MaterialCardDO.KIND_CHARACTER);
+        assertThat(BookAssetExtractService.normalizeKind("vehicles")).isEqualTo(MaterialCardDO.KIND_MISC);
+        assertThat(BookAssetExtractService.normalizeKind(null)).isEqualTo(MaterialCardDO.KIND_MISC);
     }
 
     // ===== 已有素材卡的「跳过 / 覆盖」（解析链开关；默认不跳过）=====
@@ -124,10 +124,10 @@ class BookAssetExtractServiceTest {
         BookAssetExtractService svc = new BookAssetExtractService(novelData, chapterData, digestData, cardData,
                 null, llm, new LlmJson(llm, prompts), prompts);
 
-        NovelDTO novel = new NovelDTO();
+        NovelDO novel = new NovelDO();
         novel.setTitle("黑潮号");
         when(novelData.getById(34L)).thenReturn(novel);
-        ChapterDTO ch = new ChapterDTO();
+        ChapterDO ch = new ChapterDO();
         ch.setChapterNo(1);
         ch.setTitle("登船");
         when(chapterData.listSummariesByNovel(34L)).thenReturn(List.of(ch));
@@ -140,14 +140,14 @@ class BookAssetExtractServiceTest {
     @Test
     void overwriteUpdatesExistingCardInPlace() {
         BookAssetExtractService svc = wired();
-        MaterialCardDTO existing = new MaterialCardDTO();
+        MaterialCardDO existing = new MaterialCardDO();
         existing.setId(55L);
-        existing.setKind(MaterialCardDTO.KIND_CHARACTER);
+        existing.setKind(MaterialCardDO.KIND_CHARACTER);
         existing.setName("莉娜");
         existing.setPinned(true);
         existing.setStatus("archived");
         when(cardData.listByNovel(34L, null)).thenReturn(List.of(existing));
-        when(cardData.exists(34L, MaterialCardDTO.KIND_CHARACTER, "莉娜")).thenReturn(true);
+        when(cardData.exists(34L, MaterialCardDO.KIND_CHARACTER, "莉娜")).thenReturn(true);
 
         BookAssetExtractService.CardWriteResult w = svc.extractCards(34L, true);
 
@@ -164,7 +164,7 @@ class BookAssetExtractServiceTest {
     @Test
     void skipExistingLeavesCardUntouched() {
         BookAssetExtractService svc = wired();
-        when(cardData.exists(34L, MaterialCardDTO.KIND_CHARACTER, "莉娜")).thenReturn(true);
+        when(cardData.exists(34L, MaterialCardDO.KIND_CHARACTER, "莉娜")).thenReturn(true);
 
         BookAssetExtractService.CardWriteResult skipped = svc.extractCards(34L, false);
         assertThat(skipped.created()).isZero();
@@ -179,13 +179,13 @@ class BookAssetExtractServiceTest {
     void freshCardIsInsertedInBothModes() {
         BookAssetExtractService svc = wired();
         when(cardData.listByNovel(34L, null)).thenReturn(List.of());
-        when(cardData.exists(34L, MaterialCardDTO.KIND_CHARACTER, "莉娜")).thenReturn(false);
+        when(cardData.exists(34L, MaterialCardDO.KIND_CHARACTER, "莉娜")).thenReturn(false);
 
         BookAssetExtractService.CardWriteResult fresh = svc.extractCards(34L, true);
         assertThat(fresh.created()).isEqualTo(1);
         assertThat(fresh.updated()).isZero();
 
-        verify(cardData).insert(eq(34L), eq(MaterialCardDTO.KIND_CHARACTER), eq("莉娜"), any(), eq("新摘要"),
+        verify(cardData).insert(eq(34L), eq(MaterialCardDO.KIND_CHARACTER), eq("莉娜"), any(), eq("新摘要"),
                 eq("新正文"), eq(false), eq("active"), eq(2));
         verify(cardData, times(0)).update(anyLong(), any(), any(), any(), any(), any(), any(), any());
     }

@@ -3,8 +3,8 @@ package com.zzdzz.novelgen.controller;
 import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.AuthInterceptor;
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.vo.ApprovalModeVO;
-import com.zzdzz.novelgen.model.vo.NovelCreateVO;
+import com.zzdzz.novelgen.model.dto.ApprovalModeDTO;
+import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.NovelVO;
 import com.zzdzz.novelgen.service.NovelService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,7 +31,7 @@ public class NovelController {
 
 
     @GetMapping
-    public Result<List<NovelVO>> list(com.zzdzz.novelgen.model.vo.NovelQueryVO condition) {
+    public Result<List<NovelVO>> list(com.zzdzz.novelgen.model.dto.NovelQueryDTO condition) {
         return Result.success(novelService.list(condition));
     }
 
@@ -83,20 +83,20 @@ public class NovelController {
 
     /** 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选样本资产克隆与衍生配置（P2）。 */
     @PostMapping
-    public Result<NovelVO> create(@RequestBody NovelCreateVO dto, HttpServletRequest request) {
+    public Result<NovelVO> create(@RequestBody NovelCreateDTO dto, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
         return Result.success(novelService.create(dto, userId));
     }
 
     @PutMapping("/{id}/approval-mode")
-    public Result<Void> setApprovalMode(@PathVariable long id, @RequestBody ApprovalModeVO dto) {
+    public Result<Void> setApprovalMode(@PathVariable long id, @RequestBody ApprovalModeDTO dto) {
         novelService.setApprovalMode(id, dto.mode());
         return Result.success();
     }
 
     /** 开书向导「AI 生成大纲」：异步提交，秒回任务 id（POST）——向导不阻塞，业务方可连续批量提交；GET 轮询状态与结果。 */
     @PostMapping("/outline-draft")
-    public Result<Long> outlineDraft(@RequestBody NovelCreateVO dto) {
+    public Result<Long> outlineDraft(@RequestBody NovelCreateDTO dto) {
         return Result.success(outlineDraftService.submit(dto, dto.novelId()));
     }
 
@@ -109,12 +109,12 @@ public class NovelController {
 
     /** 某书最新一份大纲任务（草稿恢复：进向导时取回生成结果/进度）。 */
     @GetMapping("/{id}/outline-draft/latest")
-    public Result<com.zzdzz.novelgen.model.dto.OutlineDraftTaskDTO> latestOutlineDraft(@PathVariable long id) {
+    public Result<com.zzdzz.novelgen.model.entity.OutlineDraftTaskDO> latestOutlineDraft(@PathVariable long id) {
         return Result.success(outlineDraftService.latestByNovel(id));
     }
 
     @GetMapping("/outline-draft/{taskId}")
-    public Result<com.zzdzz.novelgen.model.dto.OutlineDraftTaskDTO> outlineDraftStatus(@PathVariable long taskId) {
+    public Result<com.zzdzz.novelgen.model.entity.OutlineDraftTaskDO> outlineDraftStatus(@PathVariable long taskId) {
         return Result.success(outlineDraftService.status(taskId));
     }
 
@@ -141,7 +141,7 @@ public class NovelController {
     /** 衍生配置编辑（书全生命周期可改；开无人续跑同时强制规划模式 auto）。 */
     @PutMapping("/{id}/derive-config")
     public Result<com.zzdzz.novelgen.service.NovelService.DeriveConfigFullVO> updateDeriveConfig(
-            @PathVariable long id, @RequestBody NovelCreateVO vo) {
+            @PathVariable long id, @RequestBody NovelCreateDTO vo) {
         return Result.success(novelService.updateDeriveConfig(id, vo.deriveConfig()));
     }
 

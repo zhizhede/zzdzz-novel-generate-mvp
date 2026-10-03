@@ -1,11 +1,11 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.dto.ImportAnalyzeTaskDTO;
+import com.zzdzz.novelgen.model.entity.ImportAnalyzeTaskDO;
 import org.apache.ibatis.annotations.Param;
 
 /** import_analyze_tasks 表 Mapper：两个 JSONB 列走 XML 显式 ::jsonb（MP 自动绑 varchar 塞不进 jsonb）。 */
-public interface ImportAnalyzeTaskMapper extends BaseMapper<ImportAnalyzeTaskDTO> {
+public interface ImportAnalyzeTaskMapper extends BaseMapper<ImportAnalyzeTaskDO> {
 
     /** 新建任务行，返回 id。 */
     long insertTask(@Param("novelId") long novelId, @Param("stepsJson") String stepsJson);

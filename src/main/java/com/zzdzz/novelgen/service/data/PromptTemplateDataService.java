@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.PromptTemplateDTO;
+import com.zzdzz.novelgen.model.entity.PromptTemplateDO;
 
 import java.util.List;
 
 /** prompt_templates 数据服务接口（原 PromptTemplateDAO）。 */
-public interface PromptTemplateDataService extends IService<PromptTemplateDTO> {
+public interface PromptTemplateDataService extends IService<PromptTemplateDO> {
 
     int updateContent(long id, String content);
 
@@ -15,9 +15,9 @@ public interface PromptTemplateDataService extends IService<PromptTemplateDTO> {
 
     int reset(long id, String content, String catalogHash);
 
-    List<PromptTemplateDTO> findAll();
+    List<PromptTemplateDO> findAll();
 
-    java.util.Optional<PromptTemplateDTO> findById(long id);
+    java.util.Optional<PromptTemplateDO> findById(long id);
 
     /** 目录同步：先插缺失，再更新未定制的过期行（内容变化 version+1），最后 touch。 */
     void sync(String node, String phase, String title, String content, boolean exact, String catalogHash);
@@ -35,7 +35,7 @@ public interface PromptTemplateDataService extends IService<PromptTemplateDTO> {
     java.util.Optional<Reset> findNodePhase(long id);
 
     /** node+phase 定位（活跃行）。 */
-    java.util.Optional<PromptTemplateDTO> findByNodeAndPhase(String node, String phase);
+    java.util.Optional<PromptTemplateDO> findByNodeAndPhase(String node, String phase);
 
     /** 新建自定义行（custom=true），返回 id。 */
     long insertCustom(String node, String phase, String title, String content);

@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.model.dto.CanonDocDTO;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
+import com.zzdzz.novelgen.model.entity.CanonDocDO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.model.enums.NovelSourceType;
-import com.zzdzz.novelgen.model.vo.PlanAssetQueryVO;
+import com.zzdzz.novelgen.model.dto.PlanAssetQueryDTO;
 import com.zzdzz.novelgen.model.vo.PlanAssetVO;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
@@ -55,10 +55,10 @@ public class PlanAssetService {
     private static final ObjectMapper PARSER = new ObjectMapper();
 
     /** 规划资产列表：按 level 取一层读模型 → 条件筛选 → 排序。 */
-    public List<PlanAssetVO> query(PlanAssetQueryVO condition) {
+    public List<PlanAssetVO> query(PlanAssetQueryDTO condition) {
         String level = level(condition == null ? null : condition.level());
-        Map<Long, NovelDTO> novels = new LinkedHashMap<>();
-        for (NovelDTO n : novelData.listAlive()) {
+        Map<Long, NovelDO> novels = new LinkedHashMap<>();
+        for (NovelDO n : novelData.listAlive()) {
             novels.put(n.getId(), n);
         }
         List<ChapterDataService.ChapterPlanRow> rows = chapterData.listPlanRows();
@@ -80,14 +80,14 @@ public class PlanAssetService {
     // ===== 三层读模型 =====
 
     /** 大纲层：活书各一行；没有大纲文档的书也出行（hasOutline=false），缺口一眼可见。 */
-    private List<PlanAssetVO> outlineRows(Map<Long, NovelDTO> novels) {
-        Map<Long, CanonDocDTO> docs = new LinkedHashMap<>();
-        for (CanonDocDTO doc : canonData.listAliveByKindName(STORY_KIND, STORY_NAME)) {
+    private List<PlanAssetVO> outlineRows(Map<Long, NovelDO> novels) {
+        Map<Long, CanonDocDO> docs = new LinkedHashMap<>();
+        for (CanonDocDO doc : canonData.listAliveByKindName(STORY_KIND, STORY_NAME)) {
             docs.put(doc.getNovelId(), doc);
         }
         List<PlanAssetVO> rows = new ArrayList<>();
-        for (NovelDTO novel : novels.values()) {
-            CanonDocDTO doc = docs.get(novel.getId());
+        for (NovelDO novel : novels.values()) {
+            CanonDocDO doc = docs.get(novel.getId());
             String content = doc == null ? null : doc.getContent();
             boolean has = content != null && !content.isBlank();
             rows.add(new PlanAssetVO(LEVEL_OUTLINE, novel.getId(), novel.getTitle(),
@@ -104,7 +104,7 @@ public class PlanAssetService {
     }
 
     /** 卷纲层：按 (书, 卷号) 聚合章行；volume_no 为空的导入章归一组（arc=未分卷）。 */
-    private List<PlanAssetVO> volumeRows(Map<Long, NovelDTO> novels,
+    private List<PlanAssetVO> volumeRows(Map<Long, NovelDO> novels,
                                          List<ChapterDataService.ChapterPlanRow> rows,
                                          Map<String, VolumeReviewDataService.VolumeReviewRow> reviews) {
         Map<String, List<ChapterDataService.ChapterPlanRow>> groups = new LinkedHashMap<>();
@@ -115,7 +115,7 @@ public class PlanAssetService {
         for (Map.Entry<String, List<ChapterDataService.ChapterPlanRow>> e : groups.entrySet()) {
             List<ChapterDataService.ChapterPlanRow> group = e.getValue();
             ChapterDataService.ChapterPlanRow first = group.get(0);
-            NovelDTO novel = novels.get(first.novelId());
+            NovelDO novel = novels.get(first.novelId());
             if (novel == null) {
                 continue;   // 软删书的残留章行不进列表
             }
@@ -163,11 +163,11 @@ public class PlanAssetService {
     }
 
     /** 章纲层：一章一行（章纲 YAML 原样带出，正文只带字数）。 */
-    private List<PlanAssetVO> chapterRows(Map<Long, NovelDTO> novels,
+    private List<PlanAssetVO> chapterRows(Map<Long, NovelDO> novels,
                                           List<ChapterDataService.ChapterPlanRow> rows) {
         List<PlanAssetVO> out = new ArrayList<>();
         for (ChapterDataService.ChapterPlanRow r : rows) {
-            NovelDTO novel = novels.get(r.novelId());
+            NovelDO novel = novels.get(r.novelId());
             if (novel == null) {
                 continue;   // 软删书的残留章行不进列表
             }
@@ -187,7 +187,7 @@ public class PlanAssetService {
     // ===== 筛选与排序（纯函数，单测锁定语义） =====
 
     /** 单行条件判定：与层级无关的条件在不适用的层上不生效（如大纲层不判章状态/正文）。 */
-    static boolean matches(PlanAssetVO row, PlanAssetQueryVO q) {
+    static boolean matches(PlanAssetVO row, PlanAssetQueryDTO q) {
         if (q == null) {
             return true;
         }

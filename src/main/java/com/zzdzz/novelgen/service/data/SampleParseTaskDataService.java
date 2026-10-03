@@ -1,13 +1,13 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.SampleParseTaskDTO;
+import com.zzdzz.novelgen.model.entity.SampleParseTaskDO;
 
 /** 导入小说深度解析任务数据服务。 */
-public interface SampleParseTaskDataService extends IService<SampleParseTaskDTO> {
+public interface SampleParseTaskDataService extends IService<SampleParseTaskDO> {
 
     /** 该样本的活跃任务行（每样本唯一，无则 null）。 */
-    SampleParseTaskDTO findAliveBySample(long sampleId);
+    SampleParseTaskDO findAliveBySample(long sampleId);
 
     /** 复位任务行进入新一轮（QUEUED、清进度、更新 mode）；行不存在则新建。 */
     long resetForRun(long sampleId, String mode);

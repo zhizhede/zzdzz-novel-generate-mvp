@@ -1,13 +1,13 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.ImportAnalyzeTaskDTO;
+import com.zzdzz.novelgen.model.entity.ImportAnalyzeTaskDO;
 
 /** import_analyze_tasks 数据服务接口。 */
-public interface ImportAnalyzeTaskDataService extends IService<ImportAnalyzeTaskDTO> {
+public interface ImportAnalyzeTaskDataService extends IService<ImportAnalyzeTaskDO> {
 
     /** 本书的活跃解析任务（无则 null）。 */
-    ImportAnalyzeTaskDTO findAliveByNovel(long novelId);
+    ImportAnalyzeTaskDO findAliveByNovel(long novelId);
 
     /**
      * 提交一次解析：存在活跃行则重置它（清空逐步结果），否则新建。返回任务 id。

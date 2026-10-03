@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.service;
 
-import com.zzdzz.novelgen.model.dto.OutlineDraftTaskDTO;
-import com.zzdzz.novelgen.model.vo.NovelCreateVO;
+import com.zzdzz.novelgen.model.entity.OutlineDraftTaskDO;
+import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.service.data.OutlineDraftTaskDataService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
@@ -37,7 +37,7 @@ public class OutlineDraftService {
             });
 
     /** 提交生成任务：秒回任务 id（novelId=已落库的草稿书，可为 null 兼容直连 API）。 */
-    public long submit(NovelCreateVO vo, Long novelId) {
+    public long submit(NovelCreateDTO vo, Long novelId) {
         String request;
         try {
             request = mapper.writeValueAsString(vo);
@@ -51,16 +51,16 @@ public class OutlineDraftService {
     }
 
     /** 任务状态与结果（前端轮询）。 */
-    public OutlineDraftTaskDTO status(long taskId) {
+    public OutlineDraftTaskDO status(long taskId) {
         return taskData.getById(taskId);
     }
 
     /** 某书最新一份大纲任务（草稿恢复）。 */
-    public OutlineDraftTaskDTO latestByNovel(long novelId) {
+    public OutlineDraftTaskDO latestByNovel(long novelId) {
         return taskData.latestByNovel(novelId);
     }
 
-    private void safeRun(long taskId, NovelCreateVO vo) {
+    private void safeRun(long taskId, NovelCreateDTO vo) {
         if (taskData.casStatus(taskId, "QUEUED", "RUNNING") == 0) {
             log.warn("大纲任务 #{} 抢占失败（非 QUEUED），跳过", taskId);
             return;
@@ -78,14 +78,14 @@ public class OutlineDraftService {
     /** 重启善后：RUNNING 任务复位 QUEUED 并重放（入参快照在库，结果幂等覆盖）。 */
     @EventListener(ApplicationReadyEvent.class)
     public void recoverRunning() {
-        List<OutlineDraftTaskDTO> running = taskData.list(
-                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<OutlineDraftTaskDTO>()
+        List<OutlineDraftTaskDO> running = taskData.list(
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<OutlineDraftTaskDO>()
                         .eq("status", "RUNNING")
                         .eq("is_deleted", false));
-        for (OutlineDraftTaskDTO t : running) {
+        for (OutlineDraftTaskDO t : running) {
             if (taskData.casStatus(t.getId(), "RUNNING", "QUEUED") > 0) {
                 try {
-                    NovelCreateVO vo = mapper.readValue(t.getRequest(), NovelCreateVO.class);
+                    NovelCreateDTO vo = mapper.readValue(t.getRequest(), NovelCreateDTO.class);
                     pool.submit(() -> safeRun(t.getId(), vo));
                     log.warn("大纲草稿任务 {} 重启复位重放", t.getId());
                 } catch (Exception e) {

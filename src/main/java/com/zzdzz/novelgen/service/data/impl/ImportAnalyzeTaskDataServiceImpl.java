@@ -4,18 +4,18 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.ImportAnalyzeTaskMapper;
-import com.zzdzz.novelgen.model.dto.ImportAnalyzeTaskDTO;
+import com.zzdzz.novelgen.model.entity.ImportAnalyzeTaskDO;
 import com.zzdzz.novelgen.service.data.ImportAnalyzeTaskDataService;
 import org.springframework.stereotype.Service;
 
 /** import_analyze_tasks 数据服务实现。 */
 @Service
-public class ImportAnalyzeTaskDataServiceImpl extends ServiceImpl<ImportAnalyzeTaskMapper, ImportAnalyzeTaskDTO>
+public class ImportAnalyzeTaskDataServiceImpl extends ServiceImpl<ImportAnalyzeTaskMapper, ImportAnalyzeTaskDO>
         implements ImportAnalyzeTaskDataService {
 
     @Override
-    public ImportAnalyzeTaskDTO findAliveByNovel(long novelId) {
-        return getOne(new QueryWrapper<ImportAnalyzeTaskDTO>()
+    public ImportAnalyzeTaskDO findAliveByNovel(long novelId) {
+        return getOne(new QueryWrapper<ImportAnalyzeTaskDO>()
                 .eq("novel_id", novelId)
                 .eq("is_deleted", false)
                 .orderByDesc("id")
@@ -24,7 +24,7 @@ public class ImportAnalyzeTaskDataServiceImpl extends ServiceImpl<ImportAnalyzeT
 
     @Override
     public long resetForRun(long novelId, String stepsJson) {
-        ImportAnalyzeTaskDTO row = findAliveByNovel(novelId);
+        ImportAnalyzeTaskDO row = findAliveByNovel(novelId);
         if (row == null) {
             try {
                 return baseMapper.insertTask(novelId, stepsJson);
@@ -43,7 +43,7 @@ public class ImportAnalyzeTaskDataServiceImpl extends ServiceImpl<ImportAnalyzeT
 
     @Override
     public void markCurrent(long taskId, String step) {
-        update(new UpdateWrapper<ImportAnalyzeTaskDTO>()
+        update(new UpdateWrapper<ImportAnalyzeTaskDO>()
                 .eq("id", taskId)
                 .set("status", "RUNNING")
                 .set("current_step", step));
@@ -56,7 +56,7 @@ public class ImportAnalyzeTaskDataServiceImpl extends ServiceImpl<ImportAnalyzeT
 
     @Override
     public void finish(long taskId, String status, String message) {
-        update(new UpdateWrapper<ImportAnalyzeTaskDTO>()
+        update(new UpdateWrapper<ImportAnalyzeTaskDO>()
                 .eq("id", taskId)
                 .set("status", status)
                 .set("current_step", null)

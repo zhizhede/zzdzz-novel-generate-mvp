@@ -22,7 +22,7 @@
                 
     </update>
 
-    <select id="findAll" resultType="com.zzdzz.novelgen.model.dto.PromptTemplateDTO">
+    <select id="findAll" resultType="com.zzdzz.novelgen.model.entity.PromptTemplateDO">
 
                 SELECT * FROM prompt_templates WHERE is_deleted = FALSE ORDER BY node, phase
                 
@@ -50,10 +50,10 @@
                 SELECT node, phase FROM prompt_templates WHERE id = #{id} AND is_deleted = FALSE
     </select>
 
-    <select id="findById" resultType="com.zzdzz.novelgen.model.dto.PromptTemplateDTO">
+    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.PromptTemplateDO">
                 SELECT * FROM prompt_templates WHERE id = #{id} AND is_deleted = FALSE
     </select>
-    <select id="findByNodeAndPhase" resultType="com.zzdzz.novelgen.model.dto.PromptTemplateDTO">
+    <select id="findByNodeAndPhase" resultType="com.zzdzz.novelgen.model.entity.PromptTemplateDO">
                 SELECT * FROM prompt_templates
                 WHERE node=#{node} AND phase=#{phase} AND is_deleted=false
                 LIMIT 1

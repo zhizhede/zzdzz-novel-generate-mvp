@@ -4,18 +4,18 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.SampleParseTaskMapper;
-import com.zzdzz.novelgen.model.dto.SampleParseTaskDTO;
+import com.zzdzz.novelgen.model.entity.SampleParseTaskDO;
 import com.zzdzz.novelgen.service.data.SampleParseTaskDataService;
 import org.springframework.stereotype.Service;
 
 /** 导入小说深度解析任务数据服务实现。 */
 @Service
-public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskMapper, SampleParseTaskDTO>
+public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskMapper, SampleParseTaskDO>
         implements SampleParseTaskDataService {
 
     @Override
-    public SampleParseTaskDTO findAliveBySample(long sampleId) {
-        return getOne(new QueryWrapper<SampleParseTaskDTO>()
+    public SampleParseTaskDO findAliveBySample(long sampleId) {
+        return getOne(new QueryWrapper<SampleParseTaskDO>()
                 .eq("sample_id", sampleId)
                 .eq("is_deleted", false)
                 .orderByDesc("id")
@@ -24,9 +24,9 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
 
     @Override
     public long resetForRun(long sampleId, String mode) {
-        SampleParseTaskDTO row = findAliveBySample(sampleId);
+        SampleParseTaskDO row = findAliveBySample(sampleId);
         if (row == null) {
-            row = new SampleParseTaskDTO();
+            row = new SampleParseTaskDO();
             row.setSampleId(sampleId);
             row.setMode(mode);
             row.setStatus("QUEUED");
@@ -49,7 +49,7 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
                 }
             }
         }
-        update(new UpdateWrapper<SampleParseTaskDTO>()
+        update(new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", row.getId())
                 .set("mode", mode)
                 .set("status", "QUEUED")
@@ -62,7 +62,7 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
 
     @Override
     public int casStatus(long taskId, String fromStatus, String toStatus) {
-        return baseMapper.update(null, new UpdateWrapper<SampleParseTaskDTO>()
+        return baseMapper.update(null, new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", taskId)
                 .eq("status", fromStatus)
                 .eq("is_deleted", false)
@@ -71,7 +71,7 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
 
     @Override
     public void updateProgress(long taskId, int doneUnits, String stage) {
-        baseMapper.update(null, new UpdateWrapper<SampleParseTaskDTO>()
+        baseMapper.update(null, new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", taskId)
                 .eq("is_deleted", false)
                 .set("done_units", doneUnits)
@@ -80,7 +80,7 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
 
     @Override
     public void updateTotal(long taskId, int totalUnits) {
-        baseMapper.update(null, new UpdateWrapper<SampleParseTaskDTO>()
+        baseMapper.update(null, new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", taskId)
                 .eq("is_deleted", false)
                 .set("total_units", totalUnits));
@@ -88,7 +88,7 @@ public class SampleParseTaskDataServiceImpl extends ServiceImpl<SampleParseTaskM
 
     @Override
     public void finish(long taskId, String status, String stage, String message) {
-        baseMapper.update(null, new UpdateWrapper<SampleParseTaskDTO>()
+        baseMapper.update(null, new UpdateWrapper<SampleParseTaskDO>()
                 .eq("id", taskId)
                 .eq("is_deleted", false)
                 .set("status", status)

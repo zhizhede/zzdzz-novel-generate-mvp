@@ -1,20 +1,20 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.dto.SceneDTO;
+import com.zzdzz.novelgen.model.entity.SceneDO;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
 /** chapter_scenes 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/SceneMapper.xml。 */
-public interface SceneMapper extends BaseMapper<SceneDTO> {
+public interface SceneMapper extends BaseMapper<SceneDO> {
 
     int countByChapter(@Param("chapterId") long chapterId);
 
-    List<SceneDTO> findByChapter(@Param("chapterId") long chapterId);
+    List<SceneDO> findByChapter(@Param("chapterId") long chapterId);
 
     /** 跨章全量：按章号+场景号排序（章纲 tab 全景展示）。 */
-    List<SceneDTO> listByNovel(@Param("novelId") long novelId);
+    List<SceneDO> listByNovel(@Param("novelId") long novelId);
 
     Long findId(@Param("chapterId") long chapterId, @Param("sceneNo") int sceneNo);
 

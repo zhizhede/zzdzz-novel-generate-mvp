@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.vo.PlanModeVO;
+import com.zzdzz.novelgen.model.dto.PlanModeDTO;
 import com.zzdzz.novelgen.model.vo.RetroProposalVO;
 import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.OutlineService;
@@ -104,7 +104,7 @@ public class PlanningController {
     }
 
     @PutMapping("/plan-mode")
-    public Result<Void> setPlanMode(@PathVariable long novelId, @RequestBody PlanModeVO dto) {
+    public Result<Void> setPlanMode(@PathVariable long novelId, @RequestBody PlanModeDTO dto) {
         planningService.setPlanMode(novelId, dto.mode());
         return Result.success();
     }

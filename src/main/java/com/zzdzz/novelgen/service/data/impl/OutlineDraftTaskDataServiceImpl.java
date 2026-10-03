@@ -3,13 +3,13 @@ package com.zzdzz.novelgen.service.data.impl;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.OutlineDraftTaskMapper;
-import com.zzdzz.novelgen.model.dto.OutlineDraftTaskDTO;
+import com.zzdzz.novelgen.model.entity.OutlineDraftTaskDO;
 import com.zzdzz.novelgen.service.data.OutlineDraftTaskDataService;
 import org.springframework.stereotype.Service;
 
 /** AI 大纲草稿任务数据服务实现。 */
 @Service
-public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTaskMapper, OutlineDraftTaskDTO>
+public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTaskMapper, OutlineDraftTaskDO>
         implements OutlineDraftTaskDataService {
 
     @Override
@@ -18,8 +18,8 @@ public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTas
     }
 
     @Override
-    public OutlineDraftTaskDTO latestByNovel(long novelId) {
-        return getOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<OutlineDraftTaskDTO>()
+    public OutlineDraftTaskDO latestByNovel(long novelId) {
+        return getOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<OutlineDraftTaskDO>()
                 .eq("novel_id", novelId)
                 .eq("is_deleted", false)
                 .orderByDesc("id")
@@ -28,7 +28,7 @@ public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTas
 
     @Override
     public int casStatus(long taskId, String fromStatus, String toStatus) {
-        return baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDTO>()
+        return baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDO>()
                 .eq("id", taskId)
                 .eq("status", fromStatus)
                 .eq("is_deleted", false)
@@ -37,7 +37,7 @@ public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTas
 
     @Override
     public void finishDone(long taskId, String result) {
-        baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDTO>()
+        baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDO>()
                 .eq("id", taskId)
                 .eq("is_deleted", false)
                 .set("status", "DONE")
@@ -46,7 +46,7 @@ public class OutlineDraftTaskDataServiceImpl extends ServiceImpl<OutlineDraftTas
 
     @Override
     public void finishFailed(long taskId, String message) {
-        baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDTO>()
+        baseMapper.update(null, new UpdateWrapper<OutlineDraftTaskDO>()
                 .eq("id", taskId)
                 .eq("is_deleted", false)
                 .set("status", "FAILED")

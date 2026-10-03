@@ -5,9 +5,9 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
-import com.zzdzz.novelgen.model.dto.PresetCorpusDTO;
-import com.zzdzz.novelgen.model.dto.StylePackDTO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
+import com.zzdzz.novelgen.model.entity.PresetCorpusDO;
+import com.zzdzz.novelgen.model.entity.StylePackDO;
 import com.zzdzz.novelgen.model.vo.PresetCorpusVO;
 import com.zzdzz.novelgen.model.vo.PresetDraftVO;
 import com.zzdzz.novelgen.model.vo.PresetVO;
@@ -59,7 +59,7 @@ public class GenrePresetService {
             throw new BizException(ErrorCode.PARAM_ERROR, "品类名过长（≤64 字）");
         }
         String c = requireText(content, "语料正文必填");
-        PresetCorpusDTO row = new PresetCorpusDTO();
+        PresetCorpusDO row = new PresetCorpusDO();
         row.setGenre(g);
         row.setTitle(title == null || title.isBlank() ? null : title.strip());
         row.setContent(c);
@@ -71,7 +71,7 @@ public class GenrePresetService {
         if (corpusData.getById(id) == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "语料不存在: " + id);
         }
-        corpusData.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PresetCorpusDTO>()
+        corpusData.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PresetCorpusDO>()
                 .eq("id", id).set("is_deleted", true).set("delete_time", java.time.OffsetDateTime.now()));
     }
 
@@ -80,13 +80,13 @@ public class GenrePresetService {
     /** 对某品类语料提取草稿（机械指标分位带宽，规模自适应）。 */
     public PresetDraftVO extractDraft(String genre) {
         String g = requireText(genre, "品类必填");
-        List<PresetCorpusDTO> rows = corpusData.listByGenre(g);
+        List<PresetCorpusDO> rows = corpusData.listByGenre(g);
         if (rows.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "品类「" + g + "」无语料，先导入");
         }
         Map<String, List<Double>> series = new LinkedHashMap<>();
         List<Double> cjkSeries = new ArrayList<>();
-        for (PresetCorpusDTO row : rows) {
+        for (PresetCorpusDO row : rows) {
             Map<String, Object> m = GateService.computeMetrics(row.getContent());
             for (Map.Entry<String, Object> e : m.entrySet()) {
                 if (e.getKey().equals("cjk")) {
@@ -224,9 +224,9 @@ public class GenrePresetService {
         } catch (Exception e) {
             throw new IllegalStateException("指纹序列化失败", e);
         }
-        List<StylePackDTO> presets = stylePackData.listPresets();
+        List<StylePackDO> presets = stylePackData.listPresets();
         List<SampleAnalyzeVO.PresetSimilarityVO> sims = new ArrayList<>();
-        for (StylePackDTO p : presets) {
+        for (StylePackDO p : presets) {
             double score = fingerprintSimilarity(fingerprintJson, p.getFingerprint());
             sims.add(new SampleAnalyzeVO.PresetSimilarityVO(p.getId(), p.getName(), round2(score), score >= 0));
         }
@@ -263,7 +263,7 @@ public class GenrePresetService {
         if (g.length() > 64) {
             throw new BizException(ErrorCode.PARAM_ERROR, "品类名过长（≤64 字）");
         }
-        List<PresetCorpusDTO> existing = corpusData.listByGenre(g);
+        List<PresetCorpusDO> existing = corpusData.listByGenre(g);
         int chunks;
         if (!existing.isEmpty()) {
             chunks = existing.size();
@@ -281,7 +281,7 @@ public class GenrePresetService {
         long presetId = adopt(g,
                 requireText(presetName, "预设名必填"),
                 description == null || description.isBlank() ? "开书向导由导入小说创建，" + chunks + " 块语料" : description);
-        StylePackDTO justAdopted = stylePackData.getById(presetId);
+        StylePackDO justAdopted = stylePackData.getById(presetId);
         if (justAdopted == null) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "预设刚写入却查不到（可能已被并发删除）: " + presetId);
         }
@@ -308,11 +308,11 @@ public class GenrePresetService {
 
     /** 应用到书：拷贝预设的指纹/门禁/规则进该书的风格包（覆盖，前端二次确认）。 */
     public void applyToNovel(long presetId, long novelId) {
-        StylePackDTO preset = stylePackData.getById(presetId);
+        StylePackDO preset = stylePackData.getById(presetId);
         if (preset == null || !preset.isPreset()) {
             throw new BizException(ErrorCode.NOT_FOUND, "预设不存在: " + presetId);
         }
-        NovelDTO novel = novelData.getById(novelId);
+        NovelDO novel = novelData.getById(novelId);
         if (novel == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }
@@ -469,7 +469,7 @@ public class GenrePresetService {
      *  ③都没有（典型：手动导入的书）时**回落到本书自己的正文**——导入书本就自带全文，这是它唯一可用的口径
      *  （此前这条路径直接抛错，等于「导入书永远提不出规则」）。 */
     public String extractRulesForNovel(long novelId) {
-        NovelDTO novel = novelData.getById(novelId);
+        NovelDO novel = novelData.getById(novelId);
         if (novel == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }
@@ -477,7 +477,7 @@ public class GenrePresetService {
         StringBuilder corpus = new StringBuilder();
         int budget = 16000;
         if (genre != null && !genre.isBlank()) {
-            for (PresetCorpusDTO row : corpusData.listByGenre(genre)) {
+            for (PresetCorpusDO row : corpusData.listByGenre(genre)) {
                 if (budget <= 0) break;
                 String c = row.getContent() == null ? "" : row.getContent();
                 String piece = "\n【语料块】\n" + c.substring(0, Math.min(c.length(), 3000));
@@ -526,7 +526,7 @@ public class GenrePresetService {
     }
 
     /** 本书语料品类：优先 derive_config.sourceSampleId 的样本品类；回退风格包上直接关联的导入样本。 */
-    private String resolveRulesGenre(NovelDTO novel) {
+    private String resolveRulesGenre(NovelDO novel) {
         Long sampleId = com.zzdzz.novelgen.service.DeriveSupport
                 .parse(novelData.findDeriveConfig(novel.getId())).sourceSampleId();
         if (sampleId != null) {

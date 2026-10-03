@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.ChapterMapper;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import org.springframework.stereotype.Service;
 
@@ -13,11 +13,11 @@ import java.util.Optional;
 
 /** chapters 数据服务实现。 */
 @Service
-public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDTO>
+public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO>
         implements ChapterDataService {
 
     @Override
-    public Optional<ChapterDTO> find(long novelId, int chapterNo) {
+    public Optional<ChapterDO> find(long novelId, int chapterNo) {
         return Optional.ofNullable(baseMapper.findByNovelAndNo(novelId, chapterNo));
     }
 
@@ -32,12 +32,12 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDT
     }
 
     @Override
-    public Optional<ChapterDTO> findById(long chapterId) {
+    public Optional<ChapterDO> findById(long chapterId) {
         return Optional.ofNullable(getById(chapterId));
     }
 
     @Override
-    public List<ChapterDTO> listSummariesByNovel(long novelId) {
+    public List<ChapterDO> listSummariesByNovel(long novelId) {
         return baseMapper.listSummaries(novelId);
     }
 

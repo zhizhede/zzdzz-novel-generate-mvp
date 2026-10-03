@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.StylePackDTO;
+import com.zzdzz.novelgen.model.entity.StylePackDO;
 
 import java.util.List;
 
 /** style_packs 数据服务接口（原 StylePackDAO）。 */
-public interface StylePackDataService extends IService<StylePackDTO> {
+public interface StylePackDataService extends IService<StylePackDO> {
 
     Long findIdByName(String name);
 
@@ -30,7 +30,7 @@ public interface StylePackDataService extends IService<StylePackDTO> {
     String findGateConfigById(long id);
 
     /** 预设列表。 */
-    java.util.List<StylePackDTO> listPresets();
+    java.util.List<StylePackDO> listPresets();
 
     /** 预设落库（is_preset=TRUE），返回 id。 */
     long insertPreset(String name, String description, String rulesMd, String fingerprint, String gateConfig);

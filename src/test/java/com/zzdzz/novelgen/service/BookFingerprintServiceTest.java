@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.model.vo.BookFingerprintDraftVO;
 import com.zzdzz.novelgen.model.vo.FingerprintApplyVO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
@@ -48,7 +48,7 @@ class BookFingerprintServiceTest {
         chapterData = mock(ChapterDataService.class);
         stylePackData = mock(StylePackDataService.class);
         novelData = mock(NovelDataService.class);
-        NovelDTO novel = new NovelDTO();
+        NovelDO novel = new NovelDO();
         novel.setId(9L);
         novel.setTitle("测试书");
         novel.setStylePackId(33L);
@@ -144,7 +144,7 @@ class BookFingerprintServiceTest {
 
     @Test
     void applyRejectsBookWithoutStylePack() {
-        NovelDTO packless = new NovelDTO();
+        NovelDO packless = new NovelDO();
         packless.setId(77L);
         packless.setStylePackId(null);
         when(novelData.getById(77L)).thenReturn(packless);

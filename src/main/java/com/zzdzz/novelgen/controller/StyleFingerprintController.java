@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.controller;
 
 import com.zzdzz.novelgen.common.web.Result;
-import com.zzdzz.novelgen.model.vo.StyleFingerprintQueryVO;
+import com.zzdzz.novelgen.model.dto.StyleFingerprintQueryDTO;
 import com.zzdzz.novelgen.model.vo.StyleFingerprintVO;
 import com.zzdzz.novelgen.service.StyleFingerprintService;
 import lombok.RequiredArgsConstructor;
@@ -19,9 +19,9 @@ public class StyleFingerprintController {
 
     private final StyleFingerprintService styleFingerprintService;
 
-    /** 指纹列表（筛选条件见 StyleFingerprintQueryVO；全空 = 全量按提取时间倒序）。 */
+    /** 指纹列表（筛选条件见 StyleFingerprintQueryDTO；全空 = 全量按提取时间倒序）。 */
     @GetMapping
-    public Result<List<StyleFingerprintVO>> list(StyleFingerprintQueryVO condition) {
+    public Result<List<StyleFingerprintVO>> list(StyleFingerprintQueryDTO condition) {
         return Result.success(styleFingerprintService.query(condition));
     }
 }

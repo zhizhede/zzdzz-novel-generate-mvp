@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO;
+import com.zzdzz.novelgen.model.entity.LlmNodeConfigDO;
 import com.zzdzz.novelgen.service.data.LlmNodeConfigDataService;
 import com.zzdzz.novelgen.service.data.LlmCallLogDataService;
 import org.springframework.stereotype.Component;
@@ -62,7 +62,7 @@ public class MiniMaxClient implements LlmPort {
     public ChatResult chat(ChatRequest request) {
         long start = System.currentTimeMillis();
         LlmProviderResolver.Resolved provider = providerResolver.resolve(LlmRole.CHAT);
-        LlmNodeConfigDTO cfg = resolveConfig(request.node());
+        LlmNodeConfigDO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
                 ? cfg.getModel() : defaultModel(provider);
         Map<String, Object> body = buildBody(request, cfg, model);
@@ -135,7 +135,7 @@ public class MiniMaxClient implements LlmPort {
     private ChatResult chatStream(ChatRequest request, StreamDelta onDelta, int attempt) {
         long start = System.currentTimeMillis();
         LlmProviderResolver.Resolved provider = providerResolver.resolve(LlmRole.CHAT);
-        LlmNodeConfigDTO cfg = resolveConfig(request.node());
+        LlmNodeConfigDO cfg = resolveConfig(request.node());
         String model = cfg != null && cfg.getModel() != null && !cfg.getModel().isBlank()
                 ? cfg.getModel() : defaultModel(provider);
         Map<String, Object> body = buildBody(request, cfg, model);
@@ -530,7 +530,7 @@ public class MiniMaxClient implements LlmPort {
 
 
     /** 节点路由配置：查询失败不拦截调用（走全局默认）。 */
-    private LlmNodeConfigDTO resolveConfig(String node) {
+    private LlmNodeConfigDO resolveConfig(String node) {
         try {
             return nodeConfigDAO.findEnabled(node);
         } catch (Exception e) {
@@ -583,7 +583,7 @@ public class MiniMaxClient implements LlmPort {
     }
 
     private Map<String, Object> buildBody(ChatRequest request,
-                                          LlmNodeConfigDTO cfg, String model) {
+                                          LlmNodeConfigDO cfg, String model) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model);
         List<Map<String, String>> messages = new ArrayList<>();

@@ -20,7 +20,7 @@ public record ImportedSampleVO(
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    public static ImportedSampleVO from(com.zzdzz.novelgen.model.dto.ImportedSampleDTO d) {
+    public static ImportedSampleVO from(com.zzdzz.novelgen.model.entity.ImportedSampleDO d) {
         return new ImportedSampleVO(d.getId(), d.getTitle(), d.getGenre(), d.getChunks(), d.getTotalChars(),
                 d.getSource(), d.getPresetId(), d.getAnalysis(), parseTags(d.getTags()), d.getCreateTime());
     }

@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
-import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
+import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 import com.zzdzz.novelgen.service.data.MaterialCardDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,11 +37,11 @@ class MaterialCardServiceTest {
                 mock(PromptTemplateService.class));
     }
 
-    private MaterialCardDTO card() {
-        MaterialCardDTO d = new MaterialCardDTO();
+    private MaterialCardDO card() {
+        MaterialCardDO d = new MaterialCardDO();
         d.setId(7L);
         d.setNovelId(3L);
-        d.setKind(MaterialCardDTO.KIND_CHARACTER);
+        d.setKind(MaterialCardDO.KIND_CHARACTER);
         d.setName("旧名");
         d.setStatus("active");
         return d;
@@ -50,7 +50,7 @@ class MaterialCardServiceTest {
     @Test
     void renameOntoAnotherLiveCardIsRefusedBeforeSql() {
         when(cardDAO.findById(7L)).thenReturn(card());
-        when(cardDAO.existsOther(3L, MaterialCardDTO.KIND_CHARACTER, "已占用", 7L)).thenReturn(true);
+        when(cardDAO.existsOther(3L, MaterialCardDO.KIND_CHARACTER, "已占用", 7L)).thenReturn(true);
 
         assertThatThrownBy(() -> service.update(7L, "已占用", null, "摘要", null, null, null, null))
                 .isInstanceOf(BizException.class)
@@ -61,7 +61,7 @@ class MaterialCardServiceTest {
     @Test
     void renameToFreeNameGoesThrough() {
         when(cardDAO.findById(7L)).thenReturn(card());
-        when(cardDAO.existsOther(3L, MaterialCardDTO.KIND_CHARACTER, "新名", 7L)).thenReturn(false);
+        when(cardDAO.existsOther(3L, MaterialCardDO.KIND_CHARACTER, "新名", 7L)).thenReturn(false);
 
         service.update(7L, "新名", List.of(), "摘要", "正文", true, "active", 2);
 
@@ -70,9 +70,9 @@ class MaterialCardServiceTest {
 
     @Test
     void createStillChecksAndNamesTheConflict() {
-        when(cardDAO.exists(3L, MaterialCardDTO.KIND_CHARACTER, "已占用")).thenReturn(true);
+        when(cardDAO.exists(3L, MaterialCardDO.KIND_CHARACTER, "已占用")).thenReturn(true);
 
-        assertThatThrownBy(() -> service.create(3L, MaterialCardDTO.KIND_CHARACTER, "已占用",
+        assertThatThrownBy(() -> service.create(3L, MaterialCardDO.KIND_CHARACTER, "已占用",
                 null, null, null, null, null, null))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("已存在同名卡");

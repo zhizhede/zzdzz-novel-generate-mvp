@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.NovelMapper;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import org.springframework.stereotype.Service;
 
@@ -10,10 +10,10 @@ import java.util.List;
 
 /** novels 数据服务实现。 */
 @Service
-public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDTO> implements NovelDataService {
+public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDO> implements NovelDataService {
 
     @Override
-    public List<NovelDTO> listAlive() {
+    public List<NovelDO> listAlive() {
         return baseMapper.listAlive();
     }
 
@@ -29,7 +29,7 @@ public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDTO> imp
 
     @Override
     public int activate(long novelId) {
-        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDTO>()
+        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDO>()
                 .eq("id", novelId)
                 .eq("status", "draft")
                 .eq("is_deleted", false)
@@ -90,7 +90,7 @@ public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDTO> imp
 
     @Override
     public int updateProfile(long novelId, String title, String description) {
-        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDTO>()
+        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDO>()
                 .eq("id", novelId)
                 .eq("is_deleted", false)
                 .set("title", title)
@@ -99,7 +99,7 @@ public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDTO> imp
 
     @Override
     public int softDelete(long novelId) {
-        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDTO>()
+        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDO>()
                 .eq("id", novelId)
                 .eq("is_deleted", false)
                 .set("is_deleted", true)

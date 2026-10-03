@@ -5,18 +5,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import com.zzdzz.novelgen.model.dto.CanonDocDTO;
-import com.zzdzz.novelgen.model.dto.ImportedSampleDTO;
-import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
-import com.zzdzz.novelgen.model.dto.SampleCardDTO;
-import com.zzdzz.novelgen.model.dto.SamplePlotNodeDTO;
-import com.zzdzz.novelgen.model.dto.StylePackDTO;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.entity.CanonDocDO;
+import com.zzdzz.novelgen.model.entity.ImportedSampleDO;
+import com.zzdzz.novelgen.model.entity.MaterialCardDO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
+import com.zzdzz.novelgen.model.entity.SampleCardDO;
+import com.zzdzz.novelgen.model.entity.SamplePlotNodeDO;
+import com.zzdzz.novelgen.model.entity.StylePackDO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.enums.ChapterStatus;
 import com.zzdzz.novelgen.model.enums.NovelSourceType;
 import com.zzdzz.novelgen.model.enums.PlanMode;
-import com.zzdzz.novelgen.model.vo.NovelCreateVO;
+import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.NovelImportVO;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.llm.LlmJson;
@@ -70,7 +70,7 @@ public class NovelService {
      * 书籍管理列表：读全量活书 → 按条件筛选 → 排序（书籍量级为百千级，读侧内存筛，不额外落 SQL）。
      * 筛选/排序语义见 {@link #matches} 与 {@link #comparator}（纯函数，单测锁定）。
      */
-    public List<NovelVO> list(com.zzdzz.novelgen.model.vo.NovelQueryVO condition) {
+    public List<NovelVO> list(com.zzdzz.novelgen.model.dto.NovelQueryDTO condition) {
         return novelData.listAlive().stream().map(n -> {
             DeriveSupport.Cfg c = DeriveSupport.parse(novelData.findDeriveConfig(n.getId()));
             return new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(),
@@ -87,7 +87,7 @@ public class NovelService {
      * 单行条件判定（纯函数：无库依赖，便于单测锁定筛选语义）。
      * keyword 命中书名/简介；未填的条件不参与筛选。
      */
-    static boolean matches(NovelVO row, com.zzdzz.novelgen.model.vo.NovelQueryVO q) {
+    static boolean matches(NovelVO row, com.zzdzz.novelgen.model.dto.NovelQueryDTO q) {
         if (q == null) {
             return true;
         }
@@ -216,7 +216,7 @@ public class NovelService {
         DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
         if (cfg.autoContinueOn()) {
             novelData.updateDeriveConfig(novelId, deriveConfigJson(
-                    new NovelCreateVO.DeriveConfigVO(cfg.water(), cfg.pov(), cfg.povCharacter(), cfg.pacingNote(),
+                    new NovelCreateDTO.DeriveConfigVO(cfg.water(), cfg.pov(), cfg.povCharacter(), cfg.pacingNote(),
                             cfg.chaptersPerVolume(), cfg.targetChapters(), false, cfg.priority(), cfg.tags()), novelId));
         }
         novelData.updateAutoState(novelId, "OFF", "书籍已删除，无人续跑已关闭");
@@ -266,11 +266,11 @@ public class NovelService {
      * （掺水量换算进本书 gate_config；POV/节奏进提示词；无人续跑强制 auto 双模式）。
      */
     @Transactional
-    public NovelVO create(NovelCreateVO vo, long userId) {
+    public NovelVO create(NovelCreateDTO vo, long userId) {
         String title = requireTitle(vo.title());
-        StylePackDTO preset = requirePreset(vo.presetId());
+        StylePackDO preset = requirePreset(vo.presetId());
         String gateConfig = stylePackData.findGateConfigById(preset.getId());
-        NovelCreateVO.DeriveConfigVO derive = vo.deriveConfig();
+        NovelCreateDTO.DeriveConfigVO derive = vo.deriveConfig();
         if (derive != null && derive.water() != null) {
             gateConfig = DeriveSupport.applyWaterGates(gateConfig, derive.water());
         }
@@ -289,7 +289,7 @@ public class NovelService {
         if (vo.sampleId() != null) {
             cloneSampleAssets(novelId, vo.sampleId(), vo.cloneAssets());
         }
-        NovelDTO n = novelData.getById(novelId);
+        NovelDO n = novelData.getById(novelId);
         return new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(), n.getStatus(),
                 NovelSourceType.normalize(n.getSourceType()), 0,
                 n.getCreateTime(), derive != null && derive.autoContinue() != null && derive.autoContinue(),
@@ -355,7 +355,7 @@ public class NovelService {
     public NovelImportResultVO importBook(NovelImportVO vo, long userId) {
         String title = requireTitle(vo.title());
         // 预设可选：选了就克隆其口径（指纹+门禁+规则）；没选建空风格包，指纹稍后由前端按本书正文提回填。
-        StylePackDTO preset = vo.presetId() == null ? null : requirePreset(vo.presetId());
+        StylePackDO preset = vo.presetId() == null ? null : requirePreset(vo.presetId());
         String text = importText(vo.text(), vo.fileBase64());
         List<ChapterSlice> slices = new ArrayList<>(splitChapters(text));
         List<String> notes = new ArrayList<>();
@@ -382,7 +382,7 @@ public class NovelService {
             // 导入正文即第 1 卷（见 IMPORT_VOLUME_NO）：续写卷规划从第 2 卷起，规划页不再出现「未分卷」伪分组
             chapterData.insertPlan(novelId, s.no(), IMPORT_VOLUME_NO, IMPORT_VOLUME_ARC, s.title(), null, null, null,
                     "[]", "[]", band == null ? 0 : (int) band[0], band == null ? 0 : (int) band[1]);
-            ChapterDTO chapter = chapterData.find(novelId, s.no())
+            ChapterDO chapter = chapterData.find(novelId, s.no())
                     .orElseThrow(() -> new IllegalStateException("导入落章失败：novelId=" + novelId + " no=" + s.no()));
             chapterData.saveFullText(chapter.getId(), s.content());
             chapterData.updateStatus(chapter.getId(), ChapterStatus.FINAL.wire());
@@ -413,7 +413,7 @@ public class NovelService {
             return new DigestBackfillVO(0, 0, 0, new ArrayList<>());
         }
         int want = Math.min(recent, 20);
-        List<ChapterDTO> chapters = new ArrayList<>(chapterData.listSummariesByNovel(novelId));
+        List<ChapterDO> chapters = new ArrayList<>(chapterData.listSummariesByNovel(novelId));
         List<String> notes = new ArrayList<>();
         if (chapters.isEmpty()) {
             return new DigestBackfillVO(0, 0, 0, List.of("本书还没有章节，无需补事实账"));
@@ -422,8 +422,8 @@ public class NovelService {
         int skipped = 0;
         int attempted = 0;
         for (int i = chapters.size() - 1; i >= 0 && attempted < want; i--) {
-            ChapterDTO summary = chapters.get(i);
-            ChapterDTO full = chapterData.find(novelId, summary.getChapterNo()).orElse(null);
+            ChapterDO summary = chapters.get(i);
+            ChapterDO full = chapterData.find(novelId, summary.getChapterNo()).orElse(null);
             if (full == null || full.getFullText() == null || full.getFullText().isBlank()) {
                 continue;
             }
@@ -593,12 +593,12 @@ public class NovelService {
     }
 
     /** 品类预设校验（开书与导入共用）：必须存在且 is_preset。 */
-    private StylePackDTO requirePreset(Long presetId) {
+    private StylePackDO requirePreset(Long presetId) {
         if (presetId == null) {
             throw new BizException(ErrorCode.PARAM_ERROR,
                     "请选择品类预设（没有可用预设时，先到素材库·质量与风格·品类预设提取一个）");
         }
-        StylePackDTO preset = stylePackData.getById(presetId);
+        StylePackDO preset = stylePackData.getById(presetId);
         if (preset == null || !preset.isPreset()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "所选预设不存在: " + presetId);
         }
@@ -606,8 +606,8 @@ public class NovelService {
     }
 
     /** 样本资产克隆：素材卡（★2+，★3 置常驻）/世界观文档/剧情骨架预填大纲（标注待改写）。 */
-    private void cloneSampleAssets(long novelId, long sampleId, NovelCreateVO.CloneAssetsVO flags) {
-        ImportedSampleDTO sample = sampleData.getById(sampleId);
+    private void cloneSampleAssets(long novelId, long sampleId, NovelCreateDTO.CloneAssetsVO flags) {
+        ImportedSampleDO sample = sampleData.getById(sampleId);
         if (sample == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "所选导入样本不存在: " + sampleId);
         }
@@ -616,7 +616,7 @@ public class NovelService {
         boolean cloneOutline = flags == null || flags.plotOutline() == null || flags.plotOutline();
         if (cloneCards) {
             int count = 0;
-            for (SampleCardDTO c : sampleCardData.listBySample(sampleId)) {
+            for (SampleCardDO c : sampleCardData.listBySample(sampleId)) {
                 if (c.getKind().equals("world") || (c.getImportance() == null || c.getImportance() < 2)) {
                     continue;
                 }
@@ -636,7 +636,7 @@ public class NovelService {
             log.info("样本资产克隆：sampleId={} → novelId={} 设定卡 {} 张（★2+，人物卡不克隆）", sampleId, novelId, count);
         }
         if (cloneWorld) {
-            for (SampleCardDTO c : sampleCardData.listBySample(sampleId)) {
+            for (SampleCardDO c : sampleCardData.listBySample(sampleId)) {
                 if (c.getKind().equals("world") && c.getContentMd() != null && !c.getContentMd().isBlank()) {
                     canonData.insert(novelId, "world", "世界观", stripFastNote(c.getContentMd()));
                     break;
@@ -644,7 +644,7 @@ public class NovelService {
             }
         }
         if (cloneOutline) {
-            for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+            for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
                 if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
                     canonData.insert(novelId, "misc", "大纲",
                             "> 由样本《" + sample.getTitle() + "》剧情骨架生成，供参考改写——确认人设与主线后再交给卷规划。\n\n"
@@ -656,7 +656,7 @@ public class NovelService {
     }
 
     /** derive_config JSON 组装（空值字段不落，读侧 fail-open 给默认）。 */
-    private String deriveConfigJson(NovelCreateVO.DeriveConfigVO d, Long sampleId) {
+    private String deriveConfigJson(NovelCreateDTO.DeriveConfigVO d, Long sampleId) {
         Map<String, Object> m = new LinkedHashMap<>();
         if (d.water() != null) {
             m.put("water", Math.max(0, Math.min(100, d.water())));
@@ -717,7 +717,7 @@ public class NovelService {
      * sourceSampleId 保留原值；开无人续跑同时强制规划模式 auto（与开书口径一致）。
      * 掺水量变更时注水/审校三阈值按新水重算写入本书 gate_config——与开书同一换算（单一口径），
      * 其余门禁键（恢复线/扩写护栏等）不动。 */
-    public DeriveConfigFullVO updateDeriveConfig(long novelId, NovelCreateVO.DeriveConfigVO d) {
+    public DeriveConfigFullVO updateDeriveConfig(long novelId, NovelCreateDTO.DeriveConfigVO d) {
         requireNovel(novelId);
         DeriveSupport.Cfg old = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
         novelData.updateDeriveConfig(novelId, deriveConfigJson(d, old.sourceSampleId()));
@@ -747,14 +747,14 @@ public class NovelService {
      * 开书向导「AI 生成大纲」：基本信息 + 衍生设定（含样本骨架与标签）→ 大纲草稿 markdown。
      * 纯生成不落库（llm_call_log 照常记账）；样本只借结构与节奏气质，提示词明令禁止搬运专有设定。
      */
-    public String draftOutline(NovelCreateVO vo) {
+    public String draftOutline(NovelCreateDTO vo) {
         // 只做非空校验，不做全站查重——草稿流程里书已落库，worker 重放会撞自己的名字
         if (vo.title() == null || vo.title().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "书名必填");
         }
         String title = vo.title().strip();
-        NovelCreateVO.DeriveConfigVO d = vo.deriveConfig();
-        StylePackDTO preset = vo.presetId() == null ? null : stylePackData.getById(vo.presetId());
+        NovelCreateDTO.DeriveConfigVO d = vo.deriveConfig();
+        StylePackDO preset = vo.presetId() == null ? null : stylePackData.getById(vo.presetId());
         if (preset == null || !preset.isPreset()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "请先在第一步选择品类预设（文风语境）");
         }
@@ -763,7 +763,7 @@ public class NovelService {
         String skeleton = "";
         java.util.List<String> tags = d != null && d.tags() != null ? d.tags() : new java.util.ArrayList<>();
         if (vo.sampleId() != null) {
-            ImportedSampleDTO sample = sampleData.getById(vo.sampleId());
+            ImportedSampleDO sample = sampleData.getById(vo.sampleId());
             if (sample != null) {
                 if (tags.isEmpty()) {
                     try {
@@ -785,7 +785,7 @@ public class NovelService {
         String worldConstraint = "";
         if (worldCloned && vo.novelId() != null) {
             String worldDoc = "";
-            for (CanonDocDTO doc : canonData.listByNovel(vo.novelId())) {
+            for (CanonDocDO doc : canonData.listByNovel(vo.novelId())) {
                 if (doc.getKind().equals("world") && doc.getContent() != null && !doc.getContent().isBlank()) {
                     worldDoc = truncate(doc.getContent(), 2200);
                     break;
@@ -831,7 +831,7 @@ public class NovelService {
      * 大纲复刻把关：对照样本书级骨架与原书人物名（★2+）评审，判复刻→带原因重写≤N轮→仍复刻抛错（任务 FAILED）。
      * 评审调用本身故障 fail-open 放行（与卷规划审校同口径）但必留 warn——判定结果绝不静默丢弃。
      */
-    private String ensureOriginality(NovelCreateVO vo, String outline) {
+    private String ensureOriginality(NovelCreateDTO vo, String outline) {
         String skeleton = sampleBookSkeleton(vo.sampleId());
         if (skeleton.isBlank()) {
             return outline; // 样本还没深度解析出书级骨架——没有可比对象，放行
@@ -859,7 +859,7 @@ public class NovelService {
     }
 
     /** 复刻评审（derive_originality）；调用/解析失败返回 null（fail-open 放行，warn 留痕）。 */
-    private OriginalityVerdict judgeOriginality(NovelCreateVO vo, String skeleton, List<String> names, String outline) {
+    private OriginalityVerdict judgeOriginality(NovelCreateDTO vo, String skeleton, List<String> names, String outline) {
         try {
             String user = promptTemplates.format(LlmNode.DERIVE_ORIGINALITY, "user",
                     skeleton, names.isEmpty() ? "（样本未解析出 ★2+ 人物卡）" : String.join("、", names),
@@ -878,7 +878,7 @@ public class NovelService {
     }
 
     /** 复刻重写：derive_outline/rewrite 段 + 原 system，产出替换稿。 */
-    private String rewriteOutline(NovelCreateVO vo, String outline, String reasons) {
+    private String rewriteOutline(NovelCreateDTO vo, String outline, String reasons) {
         String user = promptTemplates.format(LlmNode.DERIVE_OUTLINE, "rewrite", reasons, truncate(outline, 3200));
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(LlmNode.DERIVE_OUTLINE, vo.novelId(), null,
                 List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.DERIVE_OUTLINE, "system")),
@@ -893,7 +893,7 @@ public class NovelService {
 
     /** 样本书级剧情骨架（深度解析产物；未解析返回空串）。 */
     private String sampleBookSkeleton(long sampleId) {
-        for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+        for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
             if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
                 return truncate(n.getSummary(), 1200);
             }
@@ -904,7 +904,7 @@ public class NovelService {
     /** 原书主要人物名（★2+ 人物卡，去重，上限 20）。 */
     private List<String> sampleCharacterNames(long sampleId) {
         LinkedHashSet<String> names = new LinkedHashSet<>();
-        for (SampleCardDTO c : sampleCardData.listBySample(sampleId)) {
+        for (SampleCardDO c : sampleCardData.listBySample(sampleId)) {
             if (c.getKind().equals("character") && c.getImportance() != null && c.getImportance() >= 2
                     && c.getName() != null && !c.getName().isBlank()) {
                 names.add(c.getName().strip());

@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
-import com.zzdzz.novelgen.model.dto.StylePackDTO;
-import com.zzdzz.novelgen.model.vo.NovelCreateVO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
+import com.zzdzz.novelgen.model.entity.StylePackDO;
+import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.NovelImportVO;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
@@ -71,8 +71,8 @@ class NovelServiceStylePackTest {
                 new PromptTemplateService(promptDao), new ObjectMapper());
     }
 
-    private static StylePackDTO preset(long id, String name) {
-        StylePackDTO p = new StylePackDTO();
+    private static StylePackDO preset(long id, String name) {
+        StylePackDO p = new StylePackDO();
         p.setId(id);
         p.setName(name);
         p.setPreset(true);
@@ -81,8 +81,8 @@ class NovelServiceStylePackTest {
         return p;
     }
 
-    private static NovelDTO novel(long id, String title) {
-        NovelDTO d = new NovelDTO();
+    private static NovelDO novel(long id, String title) {
+        NovelDO d = new NovelDO();
         d.setId(id);
         d.setTitle(title);
         d.setDescription("");
@@ -91,8 +91,8 @@ class NovelServiceStylePackTest {
         return d;
     }
 
-    private static NovelCreateVO createVo(String title) {
-        return new NovelCreateVO(title, "简介", 1L, null, null, null, null, null);
+    private static NovelCreateDTO createVo(String title) {
+        return new NovelCreateDTO(title, "简介", 1L, null, null, null, null, null);
     }
 
     private static NovelImportVO importVo(String title, String text) {
@@ -117,7 +117,7 @@ class NovelServiceStylePackTest {
 
     @Test
     void reusesOrphanPackOfDeletedBookInsteadOfInserting() {
-        ChapterDTO chapter = new ChapterDTO();
+        ChapterDO chapter = new ChapterDO();
         chapter.setId(900L);
         when(stylePackData.findReusablePackId("黑潮号·风格")).thenReturn(36L);
         when(novelData.insert(anyLong(), eq("黑潮号"), anyString(), eq(36L), anyString(), anyString(), anyString()))

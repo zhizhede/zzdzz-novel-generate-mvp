@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.service;
 
 import com.zzdzz.novelgen.common.web.BizException;
-import com.zzdzz.novelgen.model.vo.PlanAssetQueryVO;
+import com.zzdzz.novelgen.model.dto.PlanAssetQueryDTO;
 import com.zzdzz.novelgen.model.vo.PlanAssetVO;
 import org.junit.jupiter.api.Test;
 
@@ -50,15 +50,15 @@ class PlanAssetServiceTest {
                 OffsetDateTime.parse("2026-09-21T00:00:00+08:00"), null);
     }
 
-    private static PlanAssetQueryVO q(String level, Long novelId, String sourceType, String keyword,
+    private static PlanAssetQueryDTO q(String level, Long novelId, String sourceType, String keyword,
                                       Integer volumeNo, Integer fromChapter, Integer toChapter, String status,
                                       String hasOutline, String hasText, String skeleton,
                                       Long minChars, Long maxChars, String from, String to, String sort) {
-        return new PlanAssetQueryVO(level, novelId, sourceType, keyword, volumeNo, fromChapter, toChapter,
+        return new PlanAssetQueryDTO(level, novelId, sourceType, keyword, volumeNo, fromChapter, toChapter,
                 status, hasOutline, hasText, skeleton, minChars, maxChars, from, to, sort);
     }
 
-    private static PlanAssetQueryVO levelOnly(String level) {
+    private static PlanAssetQueryDTO levelOnly(String level) {
         return q(level, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
@@ -92,7 +92,7 @@ class PlanAssetServiceTest {
 
     @Test
     void hasOutlineNoFindsTheGaps() {
-        PlanAssetQueryVO noOutline = q("OUTLINE", null, null, null, null, null, null, null, "NO", null, null,
+        PlanAssetQueryDTO noOutline = q("OUTLINE", null, null, null, null, null, null, null, "NO", null, null,
                 null, null, null, null, null);
         assertThat(PlanAssetService.matches(outline(2, false, null, null, "2026-09-01"), noOutline)).isTrue();
         assertThat(PlanAssetService.matches(outline(2, true, "大纲正文", false, "2026-09-01"), noOutline)).isFalse();
