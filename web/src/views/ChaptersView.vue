@@ -5,7 +5,7 @@
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
     </PageHeader>
-    <DataTable :data="chapters" border size="small" @row-click="open" style="cursor: pointer">
+    <DataTable :data="chapters" border size="small" @row-click="open">
       <el-table-column prop="chapterNo" label="章" width="60" />
       <el-table-column prop="title" label="标题" min-width="160" />
       <el-table-column prop="status" label="状态" width="150">
