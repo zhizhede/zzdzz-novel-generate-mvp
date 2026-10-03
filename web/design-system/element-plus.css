@@ -166,6 +166,21 @@
   --el-tag-text-color: var(--tag-accent-fg);
 }
 
+/* ─── el-table：表头必须写在 `.el-table` 上，不能写 :root ───────────
+ * Element Plus 把 --el-table-header-bg-color / -text-color 声明在 `.el-table`
+ * 选择器内（不是 :root）。自定义属性在同一个元素上有自己的声明时，**元素自身
+ * 的声明优先于从 :root 继承来的值**，与源码顺序无关。所以写在 :root 里会静默
+ * 失效：构建通过、产物里两行都在，表头纹丝不动。
+ * 这也正是本文件上方 .el-tag--* 用组件选择器的原因——本段只是跟上同一口径。
+ *
+ * 改什么：表头默认与数据行同底（--el-fill-color-blank = --surface），文字用比
+ * 正文更浅的 --el-text-color-secondary。于是它 600 的字重被浅色抵消，列名看着
+ * 与正文一般淡。底给结构色 --table-head-bg，字色提到 --fg（正文本是 --fg-2）。 */
+.el-table {
+  --el-table-header-bg-color: var(--table-head-bg);
+  --el-table-header-text-color: var(--fg);
+}
+
 /* ─── el-dialog：统一成「标题条与动作条钉住、只有内容滚动」 ──────────
  * 为什么必须在这一层做：Element Plus 的弹窗**没有 max-height**，内容一长就
  * 长出视口，标题与底部按钮一起被顶出屏幕外（全屏弹窗除外，它自己是
