@@ -22,9 +22,12 @@
 import 'element-plus/dist/index.css'
 import './styles/tokens.css'        // → @import 本包的 tokens.css
 import './styles/element-plus.css'  // → @import 本包的 element-plus.css
+import './styles/app.css'           // 应用壳层：根元素上羊皮纸底、body 归零
 ```
 
 顺序不能反：Element Plus 默认值必须先落，否则会盖回品牌值。
+
+`app.css` 是必需的一层而非可选：Element Plus **不消费** `--el-bg-color-page`（产物里没有任何选择器用它），布局容器也透明，且本项目此前无任何全局样式（body 的 UA 默认 8px 外边距一直在）。缺了它，画布不会变羊皮纸、应用外面还留一圈白边。
 
 ## 上游
 

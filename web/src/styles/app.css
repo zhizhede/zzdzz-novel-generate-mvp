@@ -1,0 +1,26 @@
+/* 应用壳层基础规则。
+ *
+ * 为什么必须单独有这一层：
+ *   1. Element Plus 不消费 --el-bg-color-page —— 产物里没有任何选择器用它，
+ *      而 el-container / el-main / el-aside 也都是透明无背景的。不在此处给
+ *      根元素上底，设计系统最标志性的「羊皮纸画布」根本不会出现。
+ *   2. 本项目此前没有任何全局样式（web/src 下 CSS 文件数为 0），index.html
+ *      也无内联样式，因此 body 的 UA 默认 8px 外边距一直在生效——应用外面
+ *      套着一圈白边。
+ *
+ * OpenDesign 的包契约不含基础 reset：它假设产物是自带 <style> 的独立
+ * artifact，根规则由作者自己写。本项目是挂载式 SPA，故由应用层补齐。
+ */
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+}

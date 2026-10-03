@@ -1,0 +1,4 @@
+/* 应用层 Element Plus 映射入口：转发设计系统包的 --el-* 映射层。
+ * 必须在 element-plus/dist/index.css 之后生效（见 main.js 的引入顺序），
+ * 否则 Element Plus 默认值会把品牌值盖回去。 */
+@import '../../design-system/element-plus.css';
