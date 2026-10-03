@@ -1,6 +1,6 @@
 <template>
   <!-- 导入新小说（共用弹窗）：素材库「导入小说」页与文风指纹页共用，落库口径只有这一条路 -->
-  <el-dialog :model-value="modelValue" title="导入新小说" width="640px"
+  <el-dialog :model-value="modelValue" title="导入新小说" width="var(--dlg-w-md)"
              @update:model-value="(open) => emit('update:modelValue', open)">
     <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px">
       <el-input v-model="form.name" placeholder="小说名（用于命名品类，可选）" size="small" style="width: var(--ctrl-w-2xl)" />

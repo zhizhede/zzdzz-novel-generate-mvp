@@ -39,7 +39,7 @@
     </el-card>
 
     <!-- 待审批明细（此前只有计数，章列表接口一直有数据没展示） -->
-    <el-dialog v-model="pendingOpen" title="待审批章节" width="480px">
+    <el-dialog v-model="pendingOpen" title="待审批章节" width="var(--dlg-w-sm)">
       <DataTable v-if="pendingList.length" :data="pendingList" border size="small" @row-click="goPending">
         <el-table-column prop="chapterNo" label="章号" width="70" />
         <el-table-column prop="title" label="标题" min-width="160" />
@@ -76,7 +76,7 @@
     </el-card>
 
     <!-- 本书生成参数（唯一修改入口：开书向导的设定落库后在此查看/修改） -->
-    <el-dialog v-model="deriveEditorOpen" title="本书生成参数" width="620px">
+    <el-dialog v-model="deriveEditorOpen" title="本书生成参数" width="var(--dlg-w-md)">
       <el-form label-width="92px" v-if="deriveEdit">
         <el-form-item label="掺水量">
           <div style="display: flex; align-items: center; gap: 12px; width: 100%">
@@ -252,7 +252,7 @@
     </el-row>
 
     <!-- 会话视图：agent-IDE 式实时转录（RUNNING 任务点 [会话] 进入；断线/错过的历史见章节抽屉·档案） -->
-    <el-dialog v-model="sessionOpen" fullscreen top="0" :show-close="true"
+    <el-dialog v-model="sessionOpen" fullscreen :show-close="true"
       :title="sessionTask ? `会话 · 任务 #${sessionTask.id} ${sessionTask.novelTitle}${sessionTask.kind === 'PLAN' ? ' · 卷纲规划' : sessionTask.kind === 'OUTLINE' ? ` · 章纲 ${sessionTask.fromChapter}-${sessionTask.toChapter}` : ` · 第 ${sessionTask.fromChapter}-${sessionTask.toChapter} 章`}` : '会话'">
       <template #header>
         <div style="display:flex; align-items:center; gap:12px; padding-right: 32px">

@@ -128,7 +128,7 @@
       </DataTable>
     </el-card>
 
-    <el-dialog v-model="editOpen" title="编辑书籍信息" width="560px">
+    <el-dialog v-model="editOpen" title="编辑书籍信息" width="var(--dlg-w-sm)">
       <el-form label-width="70px">
         <el-form-item label="书名" required>
           <el-input v-model="editForm.title" maxlength="256" />
@@ -147,7 +147,7 @@
     </el-dialog>
 
     <!-- 导入书籍：粘贴正文或上传 txt/mobi/azw，按「第N章」切章入库（入库类型 = 手动导入） -->
-    <el-dialog v-model="importOpen" title="导入书籍" width="700px">
+    <el-dialog v-model="importOpen" title="导入书籍" width="var(--dlg-w-lg)">
       <el-form label-width="90px" size="small">
         <el-form-item label="书名" required>
           <el-input v-model="importForm.title" maxlength="256" placeholder="必填，全站唯一" />

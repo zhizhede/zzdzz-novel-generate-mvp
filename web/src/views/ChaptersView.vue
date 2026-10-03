@@ -195,7 +195,7 @@
     </el-dialog>
 
     <!-- Q5a：场景草稿人工编辑（生成前状态），保存即重过该场景机械门禁 -->
-    <el-dialog v-model="sceneDialog" :title="editingScene ? `编辑场景 ${editingScene.sceneNo} 草稿` : ''" width="720px" top="6vh">
+    <el-dialog v-model="sceneDialog" :title="editingScene ? `编辑场景 ${editingScene.sceneNo} 草稿` : ''" width="var(--dlg-w-lg)">
       <div class="hint" style="margin-bottom: 8px">
         保存后立即重过该场景机械门禁（通过/未过会回写场景门禁状态）；续跑时已通过场景复用此稿
       </div>
@@ -207,7 +207,7 @@
     </el-dialog>
 
     <!-- Q5b：正文人工编辑（仅待审批/已 digest）；DIGESTED 保存后回待审批、digest 重算 -->
-    <el-dialog v-model="fullDialog" :title="detail ? `编辑第${detail.chapterNo}章正文` : ''" width="860px" top="4vh">
+    <el-dialog v-model="fullDialog" :title="detail ? `编辑第${detail.chapterNo}章正文` : ''" width="var(--dlg-w-xl)">
       <div v-if="detail?.status === 'DIGESTED'" style="font-size: var(--text-xs); color: var(--warn); margin-bottom: 8px">
         本章已有事实账：保存后旧 digest 作废、章节回到待审批，重新审批时重算事实账
       </div>
@@ -220,9 +220,9 @@
     </el-dialog>
 
     <!-- 档案 tab：单次 LLM 调用详情（完整 prompt 分段 + 思考 + 输出，即「AI 当时看到/说了什么」） -->
-    <el-dialog v-model="callDialog" top="4vh" width="860px"
+    <el-dialog v-model="callDialog" width="var(--dlg-w-xl)"
       :title="callDetail ? `${NODE_LABEL[callDetail.node] || callDetail.node} · 调用 #${callDetail.id}` : ''">
-      <div v-if="callDetail" style="max-height: 72vh; overflow-y: auto">
+      <div v-if="callDetail">
         <div class="hint" style="margin-bottom: 8px">
           {{ callDetail.model }} · {{ (callDetail.totalTokens || 0).toLocaleString() }} tok（缓存命中 {{ callDetail.cachedTokens || 0 }}）·
           {{ (callDetail.latencyMs / 1000).toFixed(1) }}s<span v-if="callDetail.cost != null"> · ¥{{ callDetail.cost.toFixed(4) }}</span> · {{ fmtTime(callDetail.createTime) }}

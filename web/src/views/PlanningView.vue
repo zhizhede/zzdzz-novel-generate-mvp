@@ -163,7 +163,7 @@
     </el-tabs>
 
     <!-- AI 规划入参 -->
-    <el-dialog v-model="autoPlanOpen" title="AI 规划一卷" width="600px">
+    <el-dialog v-model="autoPlanOpen" title="AI 规划一卷" width="var(--dlg-w-md)">
       <div class="toolbar">
         <span>卷号</span>
         <el-input-number v-model="autoPlanForm.volNo" :min="1" size="small" style="width: var(--ctrl-w-sm)" />
@@ -184,7 +184,7 @@
     </el-dialog>
 
     <!-- manual 模式草稿编辑 -->
-    <el-dialog v-model="draftOpen" title="卷纲草稿（人工审核）" width="920px" top="4vh">
+    <el-dialog v-model="draftOpen" title="卷纲草稿（人工审核）" width="var(--dlg-w-xl)">
       <div class="toolbar">
         <span>卷名</span>
         <el-input v-model="draft.arc" style="width: var(--ctrl-w-2xl)" size="small" />
@@ -226,7 +226,7 @@
     </el-dialog>
 
     <!-- 章规划编辑 -->
-    <el-dialog v-model="planEditor" :title="editing && editing.id ? '编辑章规划' : '新增章规划'" width="640px">
+    <el-dialog v-model="planEditor" :title="editing && editing.id ? '编辑章规划' : '新增章规划'" width="var(--dlg-w-md)">
       <template v-if="editing">
         <div style="display: flex; gap: 10px; margin-bottom: 10px">
           <el-input-number v-model="editing.chapterNo" :min="1" size="small" :disabled="!!editing.id" />
@@ -251,7 +251,7 @@
     </el-dialog>
 
     <!-- 卷级复盘报告 -->
-    <el-dialog v-model="retroOpen" :title="retro ? `第 ${retro.vol_no} 卷复盘报告（第 ${retro.from_no}-${retro.to_no} 章）` : '卷级复盘'" width="860px" top="4vh">
+    <el-dialog v-model="retroOpen" :title="retro ? `第 ${retro.vol_no} 卷复盘报告（第 ${retro.from_no}-${retro.to_no} 章）` : '卷级复盘'" width="var(--dlg-w-xl)">
       <template v-if="retro">
         <div class="toolbar">
           <el-tag :type="retro.review?.overall === 'pass' ? 'success' : retro.review?.overall === 'critical' ? 'danger' : 'warning'">

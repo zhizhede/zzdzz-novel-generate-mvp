@@ -288,11 +288,11 @@
       </el-table-column>
     </DataTable>
 
-    <el-dialog v-model="textVisible" :title="textTitle" width="820px">
+    <el-dialog v-model="textVisible" :title="textTitle" width="var(--dlg-w-xl)">
       <div style="display: flex; justify-content: flex-end; margin-bottom: 6px">
         <el-button size="small" @click="copyText">复制</el-button>
       </div>
-      <pre style="max-height: 60vh; overflow: auto; white-space: pre-wrap; background: var(--surface-warm); padding: 10px; border-radius: 6px; font-size: var(--text-xs); line-height: 1.7">{{ textBody }}</pre>
+      <pre style="white-space: pre-wrap; background: var(--surface-warm); padding: 10px; border-radius: 6px; font-size: var(--text-xs); line-height: 1.7">{{ textBody }}</pre>
       <div class="hint" style="margin-top: 6px">
         此处只读。改大纲去「规划」页（或书籍管理 → 继续向导），改卷纲/章纲去「规划」页对应行；改完这里刷新即可看到。
       </div>

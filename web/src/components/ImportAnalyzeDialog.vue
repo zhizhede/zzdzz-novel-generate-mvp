@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visible" :title="`解析《${title || ''}》`" width="720px" :close-on-click-modal="false"
+  <el-dialog v-model="visible" :title="`解析《${title || ''}》`" width="var(--dlg-w-lg)" :close-on-click-modal="false"
              @close="stopPoll">
     <div v-if="status" style="margin-bottom: 8px; font-size: var(--text-sm)">
       <el-tag size="small" :type="STATUS_TYPE[status.status] || 'info'">{{ STATUS_TEXT[status.status] || status.status }}</el-tag>
@@ -16,40 +16,46 @@
                 :type="skippedInRun(key) ? 'info' : 'warning'">
           {{ skippedInRun(key) ? '跳过已有' : '覆盖重做' }}
         </el-tag>
-        <span :style="{ color: resultOf(key) ? colorOf(resultOf(key).status) : 'var(--muted)' }">
+        <span style="flex: 1; min-width: 0"
+              :style="{ color: resultOf(key) ? colorOf(resultOf(key).status) : 'var(--muted)' }">
           {{ resultOf(key) ? (resultOf(key).message || resultOf(key).status) : (isRunning(key) ? '进行中…' : '待执行') }}
         </span>
-        <span v-if="resultOf(key)" style="color: var(--meta); margin-left: auto">{{ Math.round(resultOf(key).elapsedMs / 1000) }}s</span>
+        <span v-if="resultOf(key)" style="color: var(--meta)">{{ Math.round(resultOf(key).elapsedMs / 1000) }}s</span>
       </div>
     </div>
 
     <!-- 空闲态：可勾选重跑（用于给已有书补资产；导入时已由导入弹窗提交过） -->
-    <el-card v-if="!busy" shadow="never" style="margin-top: 10px">
-      <div style="font-size: var(--text-sm); margin-bottom: 6px">
-        <b>再跑一次解析</b>（默认<b>不跳过</b>＝已有内容覆盖重做；只想补缺的，把该步切到「跳过已有」）
+    <section v-if="!busy" class="ia">
+      <div class="ia-head">
+        <b>再跑一次解析</b>
+        <span class="hint">默认「覆盖重做」＝已有内容重算并原地更新；只想补缺的，把该步切到「跳过已有」</span>
       </div>
-      <el-checkbox-group v-model="picked">
-        <div v-for="s in ANALYZE_STEPS" :key="s.key" style="margin-bottom: 3px">
-          <el-checkbox :label="s.key">
-            <span style="font-size: var(--text-sm)">{{ s.label }}</span>
-          </el-checkbox>
-          <template v-if="isToggleable(s.key)">
-            <el-radio-group :model-value="skipMode(s.key)" size="small" style="margin-left: 8px"
+
+      <el-checkbox-group v-model="picked" class="ia-list">
+        <div v-for="s in ANALYZE_STEPS" :key="s.key" class="ia-step">
+          <div class="ia-step-row">
+            <el-checkbox :label="s.key">
+              <span class="ia-step-name">{{ s.label }}</span>
+            </el-checkbox>
+            <el-radio-group v-if="isToggleable(s.key)" :model-value="skipMode(s.key)" size="small"
                             @update:model-value="(v) => setSkipMode(s.key, v)">
               <el-radio-button value="overwrite">覆盖重做</el-radio-button>
               <el-radio-button value="skip">跳过已有</el-radio-button>
             </el-radio-group>
-          </template>
-          <el-tag v-else size="small" type="info" effect="plain" style="margin-left: 8px">{{ existingPolicy(s.key) }}</el-tag>
-          <span class="hint" style="margin-left: 6px">{{ s.hint }}</span>
+            <el-tag v-else size="small" type="info" effect="plain">{{ existingPolicy(s.key) }}</el-tag>
+          </div>
+          <p class="ia-step-hint">{{ s.hint }}</p>
         </div>
       </el-checkbox-group>
-      <div style="margin-top: 8px">
+
+      <div class="ia-actions">
         <el-button size="small" @click="picked = allStepKeys()">全选</el-button>
         <el-button size="small" @click="picked = []">全不选</el-button>
+        <span class="hint">已选 {{ picked.length }} / {{ ANALYZE_STEPS.length }} 步</span>
+        <span class="ia-gap"></span>
         <el-button type="primary" size="small" :disabled="!picked.length" @click="start">开始解析</el-button>
       </div>
-    </el-card>
+    </section>
     <div class="hint" v-else>
       解析在后台跑（关掉这个窗口也会继续），随时回到这里或刷新页面都能看到进度；完成情况也会写进本书的解析任务行。
     </div>
@@ -182,3 +188,53 @@ watch(() => props.modelValue, (open) => {
 
 onBeforeUnmount(stopPoll)
 </script>
+
+<style scoped>
+/* 步骤列表：每一步 = 「名称 + 策略控件」一行，说明另起一行并对齐到名称。
+ * 改造前全是行内流：hint 首行从两个胶囊控件后面开始、续行却回到最左侧，
+ * 读不出这行说明属于哪一步——用户把它当成了「文字重叠」。
+ * （实测截图逐行做暗像素剖面，行间都有干净空隙，确无重叠；真问题是这个
+ *  断裂的阅读顺序。） */
+.ia-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.ia-list { display: block; }
+
+.ia-step {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-soft);
+}
+.ia-step:first-child { border-top: 0; padding-top: 0; }
+
+.ia-step-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+/* Element Plus 给 .el-checkbox 默认 margin-right:30px，在 flex 行里会与 gap 叠加 */
+.ia-step-row :deep(.el-checkbox) { margin-right: 0; }
+
+.ia-step-name { font-size: var(--text-sm); }
+
+.ia-step-hint {
+  /* 22px = 复选框宽 14px + 它与文字的间距，用于对齐到「步骤名」而不是复选框 */
+  margin: 2px 0 0 22px;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.ia-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.ia-gap { flex: 1; }
+</style>

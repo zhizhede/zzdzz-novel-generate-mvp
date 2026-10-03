@@ -370,7 +370,7 @@
         </el-drawer>
 
         <!-- 新建提示词 -->
-        <el-dialog v-model="promptCreateOpen" title="新建提示词" width="640px" append-to-body>
+        <el-dialog v-model="promptCreateOpen" title="新建提示词" width="var(--dlg-w-md)" append-to-body>
           <div style="display: flex; gap: 10px; margin-bottom: 10px">
             <el-input v-model="promptCreateForm.node" placeholder="节点（如 scene_draft）" />
             <el-input v-model="promptCreateForm.phase" placeholder="阶段（≤32 字符，如 my_rule）" />
@@ -598,7 +598,7 @@
     </el-tabs>
 
     <!-- 价目编辑 -->
-    <el-dialog v-model="priceEditor" :title="`改价：${priceForm.model}（元/百万 tokens）`" width="560px">
+    <el-dialog v-model="priceEditor" :title="`改价：${priceForm.model}（元/百万 tokens）`" width="var(--dlg-w-sm)">
       <div style="font-size: var(--text-sm); margin-bottom: 6px">空闲时段</div>
       <div class="toolbar">
         <span style="font-size: var(--text-sm)">输入命中</span>
@@ -631,7 +631,7 @@
     </el-dialog>
 
     <!-- 模型路由编辑 -->
-    <el-dialog v-model="nodeEditor" :title="nodeForm.id ? `编辑节点：${nodeForm.node}` : `新建节点路由：${nodeForm.node}`" width="560px">
+    <el-dialog v-model="nodeEditor" :title="nodeForm.id ? `编辑节点：${nodeForm.node}` : `新建节点路由：${nodeForm.node}`" width="var(--dlg-w-sm)">
       <el-input v-model="nodeForm.model" placeholder="模型名（留空 = 会话接入行的默认模型）" style="margin-bottom: 10px" />
       <div class="toolbar">
         <span style="font-size: var(--text-sm)">温度（留空=调用方默认）</span>
@@ -651,7 +651,7 @@
     </el-dialog>
 
     <!-- 模型接入编辑 -->
-    <el-dialog v-model="providerEditor" :title="providerForm.id ? `编辑接入：${providerForm.name}` : '新建接入'" width="560px">
+    <el-dialog v-model="providerEditor" :title="providerForm.id ? `编辑接入：${providerForm.name}` : '新建接入'" width="var(--dlg-w-sm)">
       <el-input v-model="providerForm.name" placeholder="名称（唯一，如：DeepSeek 会话 / MiniMax 向量）" style="margin-bottom: 10px" />
       <div class="toolbar">
         <span style="font-size: var(--text-sm); white-space: nowrap">用途</span>
@@ -682,7 +682,7 @@
     </el-dialog>
 
     <!-- 素材卡编辑 -->
-    <el-dialog v-model="cardEditor" :title="cardForm.id ? '编辑素材卡' : '新增素材卡'" width="640px">
+    <el-dialog v-model="cardEditor" :title="cardForm.id ? '编辑素材卡' : '新增素材卡'" width="var(--dlg-w-md)">
       <div class="toolbar">
         <el-select v-model="cardForm.kind" style="width: var(--ctrl-w-md)" size="small">
           <el-option v-for="(label, k) in kindLabel" :key="k" :value="k" :label="label" />
@@ -718,7 +718,7 @@
     </el-drawer>
 
     <!-- 伏笔修正 -->
-    <el-dialog v-model="foreshadowEditor" title="修正伏笔" width="560px">
+    <el-dialog v-model="foreshadowEditor" title="修正伏笔" width="var(--dlg-w-sm)">
       <template v-if="editing">
         <el-input v-model="editing.content" type="textarea" :rows="3" placeholder="伏笔内容" />
         <div style="display: flex; gap: 10px; margin-top: 10px; align-items: center">
@@ -833,7 +833,7 @@
     </el-drawer>
 
     <!-- 导入样本·资产卡纠偏/新建 -->
-    <el-dialog v-model="sampleCardEditor" :title="sampleCardForm.id ? '资产卡纠偏' : '新建资产卡'" width="640px">
+    <el-dialog v-model="sampleCardEditor" :title="sampleCardForm.id ? '资产卡纠偏' : '新建资产卡'" width="var(--dlg-w-md)">
       <div class="toolbar">
         <template v-if="sampleCardForm.id">
           <b>{{ sampleCardForm.name }}</b>

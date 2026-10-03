@@ -1,6 +1,6 @@
 <template>
   <!-- 按本书正文提指纹：草稿 → 用户确认 → 采纳（覆盖本书风格包指纹）。导入书籍与书籍管理行内共用。 -->
-  <el-dialog :model-value="modelValue" title="按本书正文提指纹" width="880px"
+  <el-dialog :model-value="modelValue" title="按本书正文提指纹" width="var(--dlg-w-xl)"
              @update:model-value="(open) => emit('update:modelValue', open)"
              @closed="emit('closed')">
     <div v-loading="loading">

@@ -144,7 +144,7 @@
     </DataTable>
 
     <!-- 指标明细：基线/容差/硬边界 + 原始 JSON（只读，改指纹请去风格包页） -->
-    <el-dialog v-model="detailVisible" :title="`指纹明细 · ${detailRow ? detailRow.name : ''}`" width="900px">
+    <el-dialog v-model="detailVisible" :title="`指纹明细 · ${detailRow ? detailRow.name : ''}`" width="var(--dlg-w-xl)">
       <div v-if="detailRow">
         <div style="font-size: var(--text-sm); color: var(--fg-2); line-height: 1.9; margin-bottom: 8px">
           <div>来源：{{ SOURCE_LABEL[detailRow.source] }}（#{{ detailRow.refId }}{{ detailRow.source === 'BOOK' ? ' · 风格包' : '' }}）

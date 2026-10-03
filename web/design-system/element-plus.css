@@ -166,6 +166,41 @@
   --el-tag-text-color: var(--tag-accent-fg);
 }
 
+/* ─── el-dialog：统一成「标题条与动作条钉住、只有内容滚动」 ──────────
+ * 为什么必须在这一层做：Element Plus 的弹窗**没有 max-height**，内容一长就
+ * 长出视口，标题与底部按钮一起被顶出屏幕外（全屏弹窗除外，它自己是
+ * overflow:auto）。各页面此前的对策是各写各的——5 个弹窗手写
+ * `top="4vh"` 把内容往前提，调用明细弹窗再套一层 `max-height:72vh` 的内滚动。
+ * 结果是同一个应用里弹窗起始位置不一致，且出现「页面滚 + 弹窗内滚」双层滚动。
+ *
+ * 这里一次性收口：起始位置统一 --dlg-top，高度上限 = 视口 - top - 56px
+ * （56 = Element Plus 底部 50px 留白 + 余量），三段用 flex 排布，只有
+ * __body 滚动。于是：
+ *   · 短弹窗高度自适应（flex 不拉伸，max-height 只是上限）
+ *   · 长弹窗标题与按钮始终可见，内容在中间滚
+ *   · 页面本身不再滚
+ *
+ * 排除 .is-fullscreen：读正文与会话转录是全屏沉浸，另有各自主容器
+ * （见 styles/app.css 的 .reader-dialog 段），不该被这套高度预算约束。
+ *
+ * 注意变量写在本选择器上而不是 :root —— Element Plus 把 --el-dialog-*
+ * 声明在 `.el-dialog` 内部，写在 :root 会被组件自身的声明盖掉（同 .el-table，
+ * 详见本文件 el-table 段的说明）。 */
+.el-dialog:not(.is-fullscreen) {
+  --el-dialog-margin-top: var(--dlg-top);
+  --el-dialog-padding-primary: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--dlg-top) - 56px);
+}
+.el-dialog:not(.is-fullscreen) > .el-dialog__header { flex: none; }
+.el-dialog:not(.is-fullscreen) > .el-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;      /* flex 子项默认 min-height:auto，不归零则不会收缩、不会滚 */
+  overflow: auto;
+}
+.el-dialog:not(.is-fullscreen) > .el-dialog__footer { flex: none; }
+
 /* ─── 焦点环：键盘可达（对应施工方案 P8）──────────────────────────
  * Element Plus 默认用 --el-color-primary 的浅色做 outline，在浅底上很淡。 */
 :root {
