@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.PromptTemplateMapper;
-import com.zzdzz.novelgen.model.dto.PromptTemplateDTO;
+import com.zzdzz.novelgen.model.entity.PromptTemplateDO;
 import com.zzdzz.novelgen.service.data.PromptTemplateDataService;
 import org.springframework.stereotype.Service;
 
@@ -11,7 +11,7 @@ import java.util.Map;
 
 /** prompt_templates 数据服务实现。 */
 @Service
-public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMapper, PromptTemplateDTO> implements PromptTemplateDataService {
+public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMapper, PromptTemplateDO> implements PromptTemplateDataService {
 
     @Override
     public int updateContent(long id, String content) {
@@ -29,12 +29,12 @@ public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMap
     }
 
     @Override
-    public List<PromptTemplateDTO> findAll() {
+    public List<PromptTemplateDO> findAll() {
         return baseMapper.findAll();
     }
 
     @Override
-    public java.util.Optional<PromptTemplateDTO> findById(long id) {
+    public java.util.Optional<PromptTemplateDO> findById(long id) {
         return java.util.Optional.ofNullable(baseMapper.findById(id));
     }
 
@@ -73,7 +73,7 @@ public class PromptTemplateDataServiceImpl extends ServiceImpl<PromptTemplateMap
     }
 
     @Override
-    public java.util.Optional<PromptTemplateDTO> findByNodeAndPhase(String node, String phase) {
+    public java.util.Optional<PromptTemplateDO> findByNodeAndPhase(String node, String phase) {
         return java.util.Optional.ofNullable(baseMapper.findByNodeAndPhase(node, phase));
     }
 

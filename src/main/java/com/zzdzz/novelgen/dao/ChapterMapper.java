@@ -1,7 +1,7 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import org.apache.ibatis.annotations.Param;
 
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 /** chapters 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/ChapterMapper.xml。 */
-public interface ChapterMapper extends BaseMapper<ChapterDTO> {
+public interface ChapterMapper extends BaseMapper<ChapterDO> {
 
     Integer maxChapterWithText(@Param("novelId") long novelId);
 
@@ -19,11 +19,17 @@ public interface ChapterMapper extends BaseMapper<ChapterDTO> {
 
     Integer maxVolumeNo(@Param("novelId") long novelId);
 
-    ChapterDTO findByNovelAndNo(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
+    ChapterDO findByNovelAndNo(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
 
-    List<ChapterDTO> listSummaries(@Param("novelId") long novelId);
+    List<ChapterDO> listSummaries(@Param("novelId") long novelId);
 
     List<ChapterDataService.ChapterTextRow> findOpeningRows(@Param("novelId") long novelId, @Param("maxChapterNo") int maxChapterNo);
+
+    /** 全书有正文的章（按章号升序）：按本书正文统计文风指纹用。 */
+    List<ChapterDataService.ChapterTextRow> listTextsByNovel(@Param("novelId") long novelId);
+
+    /** 全库规划行（书升序 + 章号升序，正文只取长度不取全文）：规划资产页读模型用。 */
+    List<ChapterDataService.ChapterPlanRow> listPlanRows(@Param("novelId") Long novelId);
 
     String findFullText(@Param("novelId") long novelId, @Param("chapterNo") int chapterNo);
 
@@ -44,6 +50,9 @@ public interface ChapterMapper extends BaseMapper<ChapterDTO> {
     int deleteScenes(@Param("chapterId") long chapterId);
 
     int deleteChapterSteps(@Param("chapterId") long chapterId);
+
+    /** 只写章纲、不动状态（给已有正文的章出纲用：不能让成品章退回「待生成」）。 */
+    int updateOutlineYaml(@Param("chapterId") long chapterId, @Param("outlineYaml") String outlineYaml);
 
     int markOutlined(@Param("chapterId") long chapterId, @Param("outlineYaml") String outlineYaml);
 

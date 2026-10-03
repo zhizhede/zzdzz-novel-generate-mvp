@@ -26,6 +26,10 @@ INSERT INTO digests (chapter_id, content_md, facts) VALUES (#{chapterId}, #{cont
 SELECT COUNT(*) FROM digests WHERE chapter_id=#{chapterId} AND is_deleted=false
     </select>
 
+    <select id="findIdByChapter" resultType="long">
+SELECT id FROM digests WHERE chapter_id=#{chapterId} AND is_deleted=false LIMIT 1
+    </select>
+
     <select id="listByNovel" resultType="com.zzdzz.novelgen.service.data.DigestDataService$DigestItem">
                 SELECT d.id, c.chapter_no AS "chapterNo", d.content_md AS "contentMd", d.facts::text AS facts, to_char(d.update_time, 'YYYY-MM-DD HH24:MI:SS') AS "updateTime"
                 FROM digests d JOIN chapters c ON c.id = d.chapter_id

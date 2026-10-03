@@ -91,8 +91,16 @@ public class GenerationQueueService {
         if (novelId == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelTitle);
         }
-        String title = novelData.getById(novelId).getTitle();
-        return submitById(novelId, title, from, to, userId, priority);
+        return submitById(novelId, requireNovelTitle(novelId), from, to, userId, priority);
+    }
+
+    /** 取书名给任务行用。全局逻辑删除后软删行不可见，getById 会返回 null——换成可读的 404，别让它变成 NPE。 */
+    private String requireNovelTitle(long novelId) {
+        var novel = novelData.getById(novelId);
+        if (novel == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "作品不存在或已删除: " + novelId);
+        }
+        return novel.getTitle();
     }
 
     /** 队列动作受理结果：已受理 / 任务不存在 / 状态不符（附实际状态，供如实报错与 detail 透出）。 */
@@ -184,7 +192,17 @@ public class GenerationQueueService {
 
     /** 章纲批量生成入队（from=to 即单章）：逐章出场景拆解，进度/事件走队列口径，工作台可见可停。 */
     public long submitOutline(long novelId, String novelTitle, int from, int to, Long userId) {
-        return enqueue(novelId, novelTitle, from, to, userId, TaskKind.OUTLINE.wire(), null, null);
+        return submitOutline(novelId, novelTitle, from, to, userId, false);
+    }
+
+    /**
+     * includeTextChapters=true（用户勾了「含已有正文的章」）：这些章不再被守卫跳过，改为**保全状态**出纲
+     * （只补章纲与场景拆解，章状态/正文/门禁报告都不动）。标志随任务 payload 落库（jsonb），执行侧据此放行。
+     */
+    public long submitOutline(long novelId, String novelTitle, int from, int to, Long userId,
+                              boolean includeTextChapters) {
+        String payload = includeTextChapters ? "{\"includeTextChapters\":true}" : null;
+        return enqueue(novelId, novelTitle, from, to, userId, TaskKind.OUTLINE.wire(), payload, null);
     }
 
     private long enqueue(long novelId, String novelTitle, int from, int to, Long userId, String kind,
@@ -442,11 +460,26 @@ public class GenerationQueueService {
         }
     }
 
+    /** 任务 payload 里读「含已有正文的章」开关（payload 为 null / 非对象 / 坏 JSON 一律当 false，保持老口径）。 */
+    static boolean includeTextChapters(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return false;
+        }
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload)
+                    .path("includeTextChapters").asBoolean(false);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /**
      * 章纲批量生成（OUTLINE 任务）：逐章复用单章 regenerateOutline（守卫内置：已有正文拒绝）。
      * 守卫失败/无规划行的章跳过不中断；LLM 异常记失败续走；支持章间硬停（在飞调用会被中断）。
+     * 任务 payload 带 {"includeTextChapters":true} 时放行已有正文的章（保全状态出纲，不动正文）。
      */
     private void runOutlineTask(GenerationTaskDataService.TaskRow task) {
+        boolean includeTextChapters = includeTextChapters(task.payload());
         int done = 0, skipped = 0, failed = 0;
         Integer interrupted = null;
         try {
@@ -459,7 +492,7 @@ public class GenerationQueueService {
                 stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.START,
                         Map.of("taskId", task.id(), "batch", true));
                 try {
-                    int scenes = pipeline.regenerateOutline(task.novelId(), no).size();
+                    int scenes = pipeline.regenerateOutline(task.novelId(), no, includeTextChapters).size();
                     done++;
                     taskDAO.updateProgress(task.id(), done, no, "第 " + no + " 章章纲完成（" + scenes + " 场景）");
                     stageLog.emit(task.novelId(), no, StageLog.Stage.OUTLINE, StageLog.Phase.DONE,
@@ -545,7 +578,7 @@ public class GenerationQueueService {
             pauseChain(novelId, "规划卷数保险丝到顶（" + st.autoVolumes() + " 卷），续跑已暂停");
             return;
         }
-        String title = novelData.getById(novelId).getTitle();
+        String title = requireNovelTitle(novelId);
         Integer next = chapterData.nextPlannedChapterNo(novelId, maxText);
         if (next != null) {
             Integer lastPlanned = chapterData.maxPlannedChapterNo(novelId);

@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.SampleCardMapper;
-import com.zzdzz.novelgen.model.dto.SampleCardDTO;
+import com.zzdzz.novelgen.model.entity.SampleCardDO;
 import com.zzdzz.novelgen.service.data.SampleCardDataService;
 import org.springframework.stereotype.Service;
 
@@ -13,12 +13,12 @@ import java.util.List;
 
 /** 导入样本结构化资产卡数据服务实现。 */
 @Service
-public class SampleCardDataServiceImpl extends ServiceImpl<SampleCardMapper, SampleCardDTO>
+public class SampleCardDataServiceImpl extends ServiceImpl<SampleCardMapper, SampleCardDO>
         implements SampleCardDataService {
 
     @Override
-    public List<SampleCardDTO> listBySample(long sampleId) {
-        return list(new QueryWrapper<SampleCardDTO>()
+    public List<SampleCardDO> listBySample(long sampleId) {
+        return list(new QueryWrapper<SampleCardDO>()
                 .eq("sample_id", sampleId)
                 .eq("is_deleted", false)
                 .orderByDesc("importance")
@@ -34,7 +34,7 @@ public class SampleCardDataServiceImpl extends ServiceImpl<SampleCardMapper, Sam
 
     @Override
     public int softDeleteBySample(long sampleId) {
-        return baseMapper.update(null, new UpdateWrapper<SampleCardDTO>()
+        return baseMapper.update(null, new UpdateWrapper<SampleCardDO>()
                 .eq("sample_id", sampleId)
                 .eq("is_deleted", false)
                 .set("is_deleted", true)
@@ -43,7 +43,7 @@ public class SampleCardDataServiceImpl extends ServiceImpl<SampleCardMapper, Sam
 
     @Override
     public void softDeleteById(long cardId) {
-        baseMapper.update(null, new UpdateWrapper<SampleCardDTO>()
+        baseMapper.update(null, new UpdateWrapper<SampleCardDO>()
                 .eq("id", cardId)
                 .eq("is_deleted", false)
                 .set("is_deleted", true)

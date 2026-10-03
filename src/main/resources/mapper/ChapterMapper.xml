@@ -2,11 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.ChapterMapper">
 
-    <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.dto.ChapterDTO">
+    <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
                 SELECT * FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted=false
     </select>
 
-    <select id="listSummaries" resultType="com.zzdzz.novelgen.model.dto.ChapterDTO">
+    <select id="listSummaries" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
                 SELECT id, novel_id, chapter_no, volume_no, arc, title, pov, outline_yaml,
                        NULL AS full_text, goal, hook, time_note, rule_refs, foreshadow_refs,
                        budget_min, budget_max, status, round, is_deleted
@@ -39,6 +39,30 @@
                   AND full_text IS NOT NULL AND full_text!=''
                 ORDER BY chapter_no
     </select>
+
+    <select id="listTextsByNovel" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
+                SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
+                WHERE novel_id=#{novelId} AND is_deleted=false
+                  AND full_text IS NOT NULL AND full_text!=''
+                ORDER BY chapter_no
+    </select>
+
+    <!-- 规划资产页：一次取齐全库规划行。正文只给长度（LENGTH 里传输），章纲要展示故原样带出 -->
+    <select id="listPlanRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterPlanRow">
+                SELECT id, novel_id AS "novelId", chapter_no AS "chapterNo", volume_no AS "volumeNo", arc, title,
+                       goal, hook, time_note AS "timeNote", outline_yaml AS "outlineYaml",
+                       COALESCE(LENGTH(outline_yaml), 0)::bigint AS "outlineChars",
+                       budget_min AS "budgetMin", budget_max AS "budgetMax", status,
+                       COALESCE(LENGTH(full_text), 0)::bigint AS "textChars",
+                       COALESCE(foreshadow_refs::text, '[]') AS "foreshadowRefs",
+                       COALESCE(rule_refs::text, '[]') AS "ruleRefs",
+                       create_time AS "createTime", update_time AS "updateTime"
+                FROM chapters
+                WHERE is_deleted = false
+                  AND (#{novelId,jdbcType=BIGINT}::bigint IS NULL OR novel_id = #{novelId})
+                ORDER BY novel_id, chapter_no
+    </select>
+
 
     <select id="findFullText" resultType="string">
                 SELECT full_text FROM chapters
@@ -83,6 +107,11 @@
     <delete id="deleteChapterSteps">
                 DELETE FROM chapter_steps WHERE chapter_id=#{chapterId}
     </delete>
+
+    <update id="updateOutlineYaml">
+                UPDATE chapters SET outline_yaml=#{outlineYaml}, update_time=NOW()
+                WHERE id=#{chapterId} AND is_deleted=false
+    </update>
 
     <update id="markOutlined">
                 UPDATE chapters SET outline_yaml=#{outlineYaml}, status='OUTLINED', update_time=NOW() WHERE id=#{chapterId}

@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.dao.MaterialCardMapper">
 
-    <resultMap id="doMap" type="com.zzdzz.novelgen.model.dto.MaterialCardDTO">
+    <resultMap id="doMap" type="com.zzdzz.novelgen.model.entity.MaterialCardDO">
         <id property="id" column="id"/>
         <result property="aliases" column="aliases"
                 typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
@@ -25,6 +25,12 @@ SELECT * FROM material_cards WHERE id=#{id} AND is_deleted=false
                 SELECT COUNT(*) FROM material_cards
                 WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND is_deleted=false
                 
+    </select>
+
+    <!-- 改名用：唯一索引 uq_material_cards_novel_kind_name 认活行的 (novel_id,kind,name)，自己除外 -->
+    <select id="existsOther" resultType="boolean">
+SELECT COUNT(*) FROM material_cards
+WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND is_deleted=false AND id &lt;&gt; #{excludeId}
     </select>
 
     <update id="softDelete">

@@ -114,10 +114,23 @@ public class EmbeddingService {
         return indexed;
     }
 
-    /** 手动回填入口（素材库按钮）：补嵌并返回总条数。 */
+    /** 手动回填入口（素材库按钮 / 解析链）：补嵌缺失项并返回本次补嵌条数。 */
     public int backfillNovel(long novelId) {
+        return backfillNovel(novelId, false);
+    }
+
+    /**
+     * overwrite=false（默认）：只补缺失（已有向量的条目不动）。
+     * overwrite=true（用户选「覆盖已有」）：先清掉本书旧向量再全量重嵌——事实账/素材卡被覆盖重算后，
+     * 旧向量对应的是**旧文本**，不刷新就会一直被 RAG 召回注入生成上下文。
+     */
+    public int backfillNovel(long novelId, boolean overwrite) {
         if (!enabled()) {
             throw new IllegalStateException("RAG 开关未开启（tuning: rag_enabled）");
+        }
+        if (overwrite) {
+            int removed = dao.deleteByNovel(novelId);
+            log.info("向量覆盖重算：先清本书旧向量 {} 条 novel={}", removed, novelId);
         }
         int before = dao.countByNovel(novelId);
         ensureNovelIndexed(novelId);

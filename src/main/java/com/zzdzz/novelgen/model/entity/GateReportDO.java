@@ -1,0 +1,28 @@
+package com.zzdzz.novelgen.model.entity;
+
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+
+/** GateReportDO。 */
+@Data
+@TableName(value = "gate_reports")
+public class GateReportDO extends BaseDO {
+    private long chapterId;
+    private Long sceneId;
+    private String gateType;
+    private int round;
+    private boolean passed;
+    private String result;
+    private java.time.OffsetDateTime createTime;
+
+
+
+
+
+
+    @Deprecated
+    public boolean passed() {
+        return isPassed();
+    }
+
+}

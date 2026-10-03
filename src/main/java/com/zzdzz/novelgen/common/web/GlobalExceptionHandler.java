@@ -47,6 +47,31 @@ public class GlobalExceptionHandler {
         return Result.fail(ErrorCode.PARAM_ERROR, "请求不合法：" + e.getMessage());
     }
 
+    /**
+     * 数据库约束冲突（唯一键/外键/非空）：原始异常文本是整段 SQL + 表结构 + 文件路径，
+     * 直接塞给前端横幅既看不懂也泄露库结构——完整堆栈只进服务端日志，界面只给一句人话。
+     */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public Result<Void> handleIntegrity(org.springframework.dao.DataIntegrityViolationException e,
+                                        HttpServletResponse resp) {
+        log.error("数据约束冲突（原始明细见下）", e);
+        resp.setStatus(ErrorCode.STATE_CONFLICT.httpStatus().value());
+        return Result.fail(ErrorCode.STATE_CONFLICT,
+                "同名记录已存在或数据违反约束——换个名字再试；反复出现请把服务端日志交给管理员");
+    }
+
+    /**
+     * 其余数据库类异常（连不上库、SQL 写错、锁超时…）：同样只给一句人话。
+     * 这类异常原文包含 JDBC URL/主机端口/驱动栈，比约束冲突更不该外泄；D 类码专指中间件。
+     */
+    @ExceptionHandler(org.springframework.dao.DataAccessException.class)
+    public Result<Void> handleDataAccess(org.springframework.dao.DataAccessException e,
+                                         HttpServletResponse resp) {
+        log.error("数据库访问失败（原始明细见下）", e);
+        resp.setStatus(ErrorCode.DB_ERROR.httpStatus().value());
+        return Result.fail(ErrorCode.DB_ERROR, "数据库暂时不可用或执行失败——请稍后重试；明细已记入服务端日志");
+    }
+
     @ExceptionHandler(Exception.class)
     public Result<Void> handleOther(Exception e, HttpServletResponse resp) {
         // SSE/长连接客户端断开后，异步响应体的迟到写失败——响应已提交，无事可做，静默即可

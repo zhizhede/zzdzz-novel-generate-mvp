@@ -1,16 +1,16 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.LlmModelPriceDTO;
+import com.zzdzz.novelgen.model.entity.LlmModelPriceDO;
 
 import java.util.List;
 
 /** llm_model_price 数据服务接口（原 LlmModelPriceDAO）。 */
-public interface LlmModelPriceDataService extends IService<LlmModelPriceDTO> {
+public interface LlmModelPriceDataService extends IService<LlmModelPriceDO> {
 
-    List<LlmModelPriceDTO> listAll();
+    List<LlmModelPriceDO> listAll();
 
-    LlmModelPriceDTO findById(long id);
+    LlmModelPriceDO findById(long id);
 
     int update(long id, java.math.BigDecimal idleInputHit, java.math.BigDecimal idleInputMiss,
                java.math.BigDecimal idleOutput, java.math.BigDecimal peakInputHit, java.math.BigDecimal peakInputMiss,

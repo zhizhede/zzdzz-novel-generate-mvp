@@ -5,9 +5,9 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.dto.NovelDTO;
-import com.zzdzz.novelgen.model.dto.PresetCorpusDTO;
-import com.zzdzz.novelgen.model.dto.StylePackDTO;
+import com.zzdzz.novelgen.model.entity.NovelDO;
+import com.zzdzz.novelgen.model.entity.PresetCorpusDO;
+import com.zzdzz.novelgen.model.entity.StylePackDO;
 import com.zzdzz.novelgen.model.vo.PresetCorpusVO;
 import com.zzdzz.novelgen.model.vo.PresetDraftVO;
 import com.zzdzz.novelgen.model.vo.PresetVO;
@@ -36,6 +36,7 @@ public class GenrePresetService {
     private final PresetCorpusDataService corpusData;
     private final StylePackDataService stylePackData;
     private final NovelDataService novelData;
+    private final com.zzdzz.novelgen.service.data.ChapterDataService chapterData;
     private final com.zzdzz.novelgen.service.data.ImportedSampleDataService sampleData;
     private final com.zzdzz.novelgen.llm.LlmPort llm;
     private final PromptTemplateService promptTemplates;
@@ -58,7 +59,7 @@ public class GenrePresetService {
             throw new BizException(ErrorCode.PARAM_ERROR, "品类名过长（≤64 字）");
         }
         String c = requireText(content, "语料正文必填");
-        PresetCorpusDTO row = new PresetCorpusDTO();
+        PresetCorpusDO row = new PresetCorpusDO();
         row.setGenre(g);
         row.setTitle(title == null || title.isBlank() ? null : title.strip());
         row.setContent(c);
@@ -70,7 +71,7 @@ public class GenrePresetService {
         if (corpusData.getById(id) == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "语料不存在: " + id);
         }
-        corpusData.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PresetCorpusDTO>()
+        corpusData.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PresetCorpusDO>()
                 .eq("id", id).set("is_deleted", true).set("delete_time", java.time.OffsetDateTime.now()));
     }
 
@@ -79,13 +80,13 @@ public class GenrePresetService {
     /** 对某品类语料提取草稿（机械指标分位带宽，规模自适应）。 */
     public PresetDraftVO extractDraft(String genre) {
         String g = requireText(genre, "品类必填");
-        List<PresetCorpusDTO> rows = corpusData.listByGenre(g);
+        List<PresetCorpusDO> rows = corpusData.listByGenre(g);
         if (rows.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "品类「" + g + "」无语料，先导入");
         }
         Map<String, List<Double>> series = new LinkedHashMap<>();
         List<Double> cjkSeries = new ArrayList<>();
-        for (PresetCorpusDTO row : rows) {
+        for (PresetCorpusDO row : rows) {
             Map<String, Object> m = GateService.computeMetrics(row.getContent());
             for (Map.Entry<String, Object> e : m.entrySet()) {
                 if (e.getKey().equals("cjk")) {
@@ -140,29 +141,19 @@ public class GenrePresetService {
     /** 分析上限：超出建议分段导入（指标是分布统计，分段分批导入同品类即可累积）。 */
     private static final int ANALYZE_MAX_CHARS = 8_000_000;
 
+    /** 上传电子书字节上限（样本导入与书籍导入共用同一上限）。 */
+    static final long MAX_EBOOK_BYTES = 64L * 1024 * 1024;
+
     /** 相似度判读阈值：≥MATCH 用现成品类，<NEW 建新品类，中间两可交用户。 */
     static final double MATCH_THRESHOLD = 0.65;
     static final double NEW_THRESHOLD = 0.45;
 
-    public SampleAnalyzeVO analyze(String sampleName, String text, String mobiBase64) {
+    public SampleAnalyzeVO analyze(String sampleName, String text, String fileBase64) {
         if (text == null || text.isBlank()) {
-            if (mobiBase64 == null || mobiBase64.isBlank()) {
-                throw new BizException(ErrorCode.PARAM_ERROR, "请提供小说正文或上传 mobi/azw 电子书");
+            if (fileBase64 == null || fileBase64.isBlank()) {
+                throw new BizException(ErrorCode.PARAM_ERROR, "请提供小说正文或上传 txt/docx/mobi 文件");
             }
-            byte[] file;
-            try {
-                file = java.util.Base64.getDecoder().decode(mobiBase64.contains(",")
-                        ? mobiBase64.substring(mobiBase64.indexOf(',') + 1)
-                        : mobiBase64);
-            } catch (IllegalArgumentException e) {
-                throw new BizException(ErrorCode.PARAM_ERROR, "电子书文件解码失败，请重新选择文件");
-            }
-            if (file.length > 64 * 1024 * 1024) {
-                throw new BizException(ErrorCode.PARAM_ERROR, "电子书文件过大（>64MB）");
-            }
-            com.zzdzz.novelgen.common.util.MobiExtractor.Extracted ex =
-                    com.zzdzz.novelgen.common.util.MobiExtractor.extract(file);
-            text = ex.text();
+            text = com.zzdzz.novelgen.common.util.DocumentTextExtractor.extractFromBase64(fileBase64, MAX_EBOOK_BYTES);
         }
         String t = requireText(text, "小说正文必填");
         if (t.length() > ANALYZE_MAX_CHARS) {
@@ -233,9 +224,9 @@ public class GenrePresetService {
         } catch (Exception e) {
             throw new IllegalStateException("指纹序列化失败", e);
         }
-        List<StylePackDTO> presets = stylePackData.listPresets();
+        List<StylePackDO> presets = stylePackData.listPresets();
         List<SampleAnalyzeVO.PresetSimilarityVO> sims = new ArrayList<>();
-        for (StylePackDTO p : presets) {
+        for (StylePackDO p : presets) {
             double score = fingerprintSimilarity(fingerprintJson, p.getFingerprint());
             sims.add(new SampleAnalyzeVO.PresetSimilarityVO(p.getId(), p.getName(), round2(score), score >= 0));
         }
@@ -272,7 +263,7 @@ public class GenrePresetService {
         if (g.length() > 64) {
             throw new BizException(ErrorCode.PARAM_ERROR, "品类名过长（≤64 字）");
         }
-        List<PresetCorpusDTO> existing = corpusData.listByGenre(g);
+        List<PresetCorpusDO> existing = corpusData.listByGenre(g);
         int chunks;
         if (!existing.isEmpty()) {
             chunks = existing.size();
@@ -290,7 +281,11 @@ public class GenrePresetService {
         long presetId = adopt(g,
                 requireText(presetName, "预设名必填"),
                 description == null || description.isBlank() ? "开书向导由导入小说创建，" + chunks + " 块语料" : description);
-        return new SamplePresetVO(presetId, stylePackData.getById(presetId).getName(), g, chunks);
+        StylePackDO justAdopted = stylePackData.getById(presetId);
+        if (justAdopted == null) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "预设刚写入却查不到（可能已被并发删除）: " + presetId);
+        }
+        return new SamplePresetVO(presetId, justAdopted.getName(), g, chunks);
     }
 
     /** 品类名唯一化：入口先限长到 60（给 ·N 后缀留位，总长恒 ≤64），占用则追加 ·2、·3……（反复分析每次都是新资产，不覆盖旧语料）。 */
@@ -313,11 +308,11 @@ public class GenrePresetService {
 
     /** 应用到书：拷贝预设的指纹/门禁/规则进该书的风格包（覆盖，前端二次确认）。 */
     public void applyToNovel(long presetId, long novelId) {
-        StylePackDTO preset = stylePackData.getById(presetId);
+        StylePackDO preset = stylePackData.getById(presetId);
         if (preset == null || !preset.isPreset()) {
             throw new BizException(ErrorCode.NOT_FOUND, "预设不存在: " + presetId);
         }
-        NovelDTO novel = novelData.getById(novelId);
+        NovelDO novel = novelData.getById(novelId);
         if (novel == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }
@@ -470,31 +465,36 @@ public class GenrePresetService {
     }
 
     /** 文风规则提炼：语料节选 → LLM 规则列表 → 写回本书风格包 rules_md（场景 system 直接采用）。
-     * 语料定位：本书 derive_config.sourceSampleId 的品类，其次风格包上直接关联的导入样本品类。 */
+     *  语料定位：①本书 derive_config.sourceSampleId 的品类语料；②风格包上直接关联的导入样本品类；
+     *  ③都没有（典型：手动导入的书）时**回落到本书自己的正文**——导入书本就自带全文，这是它唯一可用的口径
+     *  （此前这条路径直接抛错，等于「导入书永远提不出规则」）。 */
     public String extractRulesForNovel(long novelId) {
-        NovelDTO novel = novelData.getById(novelId);
+        NovelDO novel = novelData.getById(novelId);
         if (novel == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }
         String genre = resolveRulesGenre(novel);
-        if (genre == null || genre.isBlank()) {
-            throw new BizException(ErrorCode.PARAM_ERROR,
-                    "本书没有关联样本语料（开书时选参考样本或克隆预设后才有）——无法提炼文风规则");
-        }
-        List<PresetCorpusDTO> rows = corpusData.listByGenre(genre);
-        if (rows.isEmpty()) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "品类「" + genre + "」无语料，无法提炼规则");
-        }
         StringBuilder corpus = new StringBuilder();
         int budget = 16000;
-        for (PresetCorpusDTO row : rows) {
-            if (budget <= 0) break;
-            String c = row.getContent() == null ? "" : row.getContent();
-            String piece = "\n【语料块】\n" + c.substring(0, Math.min(c.length(), 3000));
-            corpus.append(piece, 0, Math.min(piece.length(), budget));
-            budget -= Math.min(piece.length(), budget);
+        if (genre != null && !genre.isBlank()) {
+            for (PresetCorpusDO row : corpusData.listByGenre(genre)) {
+                if (budget <= 0) break;
+                String c = row.getContent() == null ? "" : row.getContent();
+                String piece = "\n【语料块】\n" + c.substring(0, Math.min(c.length(), 3000));
+                corpus.append(piece, 0, Math.min(piece.length(), budget));
+                budget -= Math.min(piece.length(), budget);
+            }
         }
-        String user = promptTemplates.format(LlmNode.STYLE_RULES, "user", genre, corpus.toString());
+        String label = genre;
+        if (corpus.isEmpty()) {
+            label = "本书正文";
+            corpus.append(bookTextCorpus(novelId, budget));
+            if (corpus.isEmpty()) {
+                throw new BizException(ErrorCode.PARAM_ERROR,
+                        "本书没有关联样本语料，也没有可用于提炼的正文——先导入或生成几章再提炼规则");
+            }
+        }
+        String user = promptTemplates.format(LlmNode.STYLE_RULES, "user", label, corpus.toString());
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(LlmNode.STYLE_RULES, novelId, null,
                 List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.STYLE_RULES, "system")),
                         LlmPort.Message.user(user)), 0.3));
@@ -506,8 +506,27 @@ public class GenrePresetService {
         return rules;
     }
 
+    /** 本书正文节选（按章切块、最多 budget 字）：导入书的规则提炼语料来源（与品类语料同一个提示词口径）。 */
+    private String bookTextCorpus(long novelId, int budget) {
+        StringBuilder sb = new StringBuilder();
+        for (com.zzdzz.novelgen.service.data.ChapterDataService.ChapterTextRow row
+                : chapterData.listTextsByNovel(novelId)) {
+            if (budget <= 0) {
+                break;
+            }
+            String text = row.fullText() == null ? "" : row.fullText().strip();
+            if (text.isEmpty()) {
+                continue;
+            }
+            String piece = "\n【语料块】第" + row.chapterNo() + "章\n" + text;
+            sb.append(piece, 0, Math.min(piece.length(), budget));
+            budget -= Math.min(piece.length(), budget);
+        }
+        return sb.toString().strip();
+    }
+
     /** 本书语料品类：优先 derive_config.sourceSampleId 的样本品类；回退风格包上直接关联的导入样本。 */
-    private String resolveRulesGenre(NovelDTO novel) {
+    private String resolveRulesGenre(NovelDO novel) {
         Long sampleId = com.zzdzz.novelgen.service.DeriveSupport
                 .parse(novelData.findDeriveConfig(novel.getId())).sourceSampleId();
         if (sampleId != null) {

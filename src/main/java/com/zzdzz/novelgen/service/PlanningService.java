@@ -8,8 +8,8 @@ import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.service.data.SceneDataService;
-import com.zzdzz.novelgen.model.dto.CanonDocDTO;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.entity.CanonDocDO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.vo.ChapterSceneVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -63,42 +63,48 @@ public class PlanningService {
     // ===== 卷纲 =====
 
     public List<Map<String, Object>> volumes(long novelId) {
-        List<ChapterDTO> chapters = chapterData.listSummariesByNovel(novelId);
-        Map<Integer, List<ChapterDTO>> byVolume = new LinkedHashMap<>();
-        for (ChapterDTO c : chapters) {
-            byVolume.computeIfAbsent(c.getVolumeNo() == null ? 0 : c.getVolumeNo(), k -> new ArrayList<>()).add(c);
+        // 走带 textChars 的规划读模型：listSummaries 的 full_text 是为省流量置空的（NULL AS full_text），
+        // 拿它算 hasText 会**恒为 false**——规划页曾把有正文的章全标成「规划就绪·待生成」（真库踩过：
+        // 书 2 的 68 行里 0 行显示「正文已成」，而它有 47 章已 DIGESTED）。
+        List<ChapterDataService.ChapterPlanRow> chapters = chapterData.listPlanRowsByNovel(novelId);
+        Map<Integer, List<ChapterDataService.ChapterPlanRow>> byVolume = new LinkedHashMap<>();
+        for (ChapterDataService.ChapterPlanRow c : chapters) {
+            byVolume.computeIfAbsent(c.volumeNo() == null ? 0 : c.volumeNo(), k -> new ArrayList<>()).add(c);
         }
         List<Map<String, Object>> volumes = new ArrayList<>();
         for (var e : byVolume.entrySet()) {
-            ChapterDTO first = e.getValue().get(0);
+            ChapterDataService.ChapterPlanRow first = e.getValue().get(0);
             Map<String, Object> v = new LinkedHashMap<>();
             v.put("volNo", e.getKey());
-            v.put("arc", e.getKey() == 0 ? "未分卷" : first.getArc());
+            v.put("arc", e.getKey() == 0 ? "未分卷" : first.arc());
             v.put("chapters", e.getValue().stream().map(this::toPlanVO).toList());
             volumes.add(v);
         }
         return volumes;
     }
 
-    private Map<String, Object> toPlanVO(ChapterDTO c) {
+    private Map<String, Object> toPlanVO(ChapterDataService.ChapterPlanRow c) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("id", c.getId());
-        m.put("chapterNo", c.getChapterNo());
-        m.put("title", c.getTitle());
-        m.put("goal", c.getGoal());
-        m.put("hook", c.getHook());
-        m.put("timeNote", c.getTimeNote());
-        m.put("status", c.getStatus());
-        m.put("hasText", c.getFullText() != null && !c.getFullText().isBlank());
-        m.put("budgetMin", c.getBudgetMin());
-        m.put("budgetMax", c.getBudgetMax());
-        m.put("sceneCount", sceneData.countByChapter(c.getId()));
+        m.put("id", c.id());
+        m.put("chapterNo", c.chapterNo());
+        m.put("title", c.title());
+        m.put("goal", c.goal());
+        m.put("hook", c.hook());
+        m.put("timeNote", c.timeNote());
+        m.put("status", c.status());
+        m.put("hasText", c.textChars() > 0);
+        m.put("textChars", c.textChars());
+        m.put("hasOutline", c.outlineChars() > 0);
+        m.put("outlineChars", c.outlineChars());
+        m.put("budgetMin", c.budgetMin());
+        m.put("budgetMax", c.budgetMax());
+        m.put("sceneCount", sceneData.countByChapter(c.id()));
         return m;
     }
 
     public void updatePlan(long chapterId, Integer volNo, String arc, String title,
                            String goal, String hook, String timeNote, Integer budgetMin, Integer budgetMax) {
-        ChapterDTO ch = chapterData.findById(chapterId)
+        ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         chapterData.updatePlan(chapterId,
                 volNo != null ? volNo : ch.getVolumeNo(),
@@ -121,7 +127,7 @@ public class PlanningService {
     }
 
     public void deletePlan(long chapterId) {
-        ChapterDTO ch = chapterData.findById(chapterId)
+        ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
         if (ch.getFullText() != null && !ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + ch.getChapterNo() + " 章已有正文，禁止删除");
@@ -189,7 +195,7 @@ public class PlanningService {
 
     /** 单章卷纲重写（人工纠偏 / 管线自愈共用）：返回重写后的规划行。 */
     public Map<String, Object> replanChapter(long novelId, int chapterNo, String reason) {
-        ChapterDTO ch = volumePlanService.replanChapter(novelId, chapterNo,
+        ChapterDO ch = volumePlanService.replanChapter(novelId, chapterNo,
                 reason == null || reason.isBlank() ? "人工触发重写" : reason);
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("chapterNo", ch.getChapterNo());
@@ -224,7 +230,7 @@ public class PlanningService {
     // ===== 章纲 =====
 
     public List<OutlineService.SceneSpec> scenes(long novelId, int chapterNo) {
-        ChapterDTO ch = chapterData.find(novelId, chapterNo)
+        ChapterDO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
         return outlineSpecs(ch.getId());
     }
@@ -243,11 +249,11 @@ public class PlanningService {
 
     /** 章纲全量跨章汇总（带所属章号/章题，按章号+场景号排序）：章纲 tab 全景展示与筛选。 */
     public List<ChapterSceneVO> allScenes(long novelId) {
-        Map<Long, ChapterDTO> byId = chapterData.listSummariesByNovel(novelId).stream()
-                .collect(Collectors.toMap(ChapterDTO::getId, Function.identity()));
+        Map<Long, ChapterDO> byId = chapterData.listSummariesByNovel(novelId).stream()
+                .collect(Collectors.toMap(ChapterDO::getId, Function.identity()));
         return sceneData.listByNovel(novelId).stream()
                 .map(s -> {
-                    ChapterDTO c = byId.get(s.getChapterId());
+                    ChapterDO c = byId.get(s.getChapterId());
                     return new ChapterSceneVO(c == null ? 0 : c.getChapterNo(),
                             c == null ? "" : c.getTitle(), s.getSceneNo(), s.getGoal(),
                             toList(s.getPresent()), toList(s.getMustReveal()), toList(s.getMustNot()),

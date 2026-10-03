@@ -1,19 +1,19 @@
 package com.zzdzz.novelgen.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO;
+import com.zzdzz.novelgen.model.entity.LlmNodeConfigDO;
 import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
 /** llm_node_configs 表 MyBatis-Plus Mapper：自定义 SQL 一律在 resources/mapper/LlmNodeConfigMapper.xml。 */
-public interface LlmNodeConfigMapper extends BaseMapper<LlmNodeConfigDTO> {
+public interface LlmNodeConfigMapper extends BaseMapper<LlmNodeConfigDO> {
 
-    LlmNodeConfigDTO findEnabled(@Param("node") String node);
+    LlmNodeConfigDO findEnabled(@Param("node") String node);
 
-    List<LlmNodeConfigDTO> listAll();
+    List<LlmNodeConfigDO> listAll();
 
-    LlmNodeConfigDTO findById(@Param("id") long id);
+    LlmNodeConfigDO findById(@Param("id") long id);
 
     boolean exists(@Param("node") String node);
 

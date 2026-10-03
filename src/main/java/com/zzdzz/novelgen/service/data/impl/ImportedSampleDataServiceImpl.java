@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.ImportedSampleMapper;
-import com.zzdzz.novelgen.model.dto.ImportedSampleDTO;
+import com.zzdzz.novelgen.model.entity.ImportedSampleDO;
 import com.zzdzz.novelgen.service.data.ImportedSampleDataService;
 import org.springframework.stereotype.Service;
 
@@ -12,12 +12,12 @@ import java.util.List;
 
 /** 导入小说样本台账数据服务实现。 */
 @Service
-public class ImportedSampleDataServiceImpl extends ServiceImpl<ImportedSampleMapper, ImportedSampleDTO>
+public class ImportedSampleDataServiceImpl extends ServiceImpl<ImportedSampleMapper, ImportedSampleDO>
         implements ImportedSampleDataService {
 
     @Override
-    public List<ImportedSampleDTO> listAlive() {
-        return list(new QueryWrapper<ImportedSampleDTO>()
+    public List<ImportedSampleDO> listAlive() {
+        return list(new QueryWrapper<ImportedSampleDO>()
                 .eq("is_deleted", false)
                 .orderByDesc("id"));
     }
@@ -29,7 +29,7 @@ public class ImportedSampleDataServiceImpl extends ServiceImpl<ImportedSampleMap
 
     @Override
     public int linkPreset(String genre, long presetId) {
-        return baseMapper.update(null, new UpdateWrapper<ImportedSampleDTO>()
+        return baseMapper.update(null, new UpdateWrapper<ImportedSampleDO>()
                 .eq("genre", genre)
                 .eq("is_deleted", false)
                 .set("preset_id", presetId)

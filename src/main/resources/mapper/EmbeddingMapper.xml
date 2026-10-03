@@ -15,6 +15,12 @@
                        embedding &lt;=&gt; #{vecStr}::vector AS distance
                 FROM embeddings
                 WHERE novel_id = #{novelId} AND is_deleted = FALSE
+                  AND (
+                    (source_type = 'digest' AND EXISTS (SELECT 1 FROM digests d
+                        WHERE d.id = embeddings.source_id AND d.is_deleted = FALSE))
+                    OR (source_type = 'card' AND EXISTS (SELECT 1 FROM material_cards m
+                        WHERE m.id = embeddings.source_id AND m.is_deleted = FALSE))
+                  )
                 ORDER BY embedding &lt;=&gt; #{vecStr}::vector
                 LIMIT #{limit}
     </select>
@@ -24,7 +30,7 @@
                        NULL AS "kind", NULL AS "name"
                 FROM digests d
                 JOIN chapters c ON c.id = d.chapter_id
-                WHERE c.novel_id = #{novelId} AND d.is_deleted = FALSE
+                WHERE c.novel_id = #{novelId} AND d.is_deleted = FALSE AND c.is_deleted = FALSE
                   AND NOT EXISTS (SELECT 1 FROM embeddings e
                                   WHERE e.source_type = 'digest' AND e.source_id = d.id AND e.is_deleted = FALSE)
                 ORDER BY c.chapter_no DESC
@@ -43,4 +49,10 @@
     <select id="countByNovel" resultType="int">
                 SELECT count(*) FROM embeddings WHERE novel_id = #{novelId} AND is_deleted = FALSE
     </select>
+
+    <!-- 硬删（含软删残留）：只给「覆盖重算」用——向量是纯派生索引，清掉即由源行重建。
+         不用软删的理由：uq_embeddings_source 只管活行，软删会留下死行、每次重算多积一批。 -->
+    <delete id="deleteByNovel">
+DELETE FROM embeddings WHERE novel_id = #{novelId}
+    </delete>
 </mapper>

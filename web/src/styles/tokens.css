@@ -1,0 +1,5 @@
+/* 应用层令牌入口：转发设计系统包的令牌源。
+ * 包在 web/design-system/，此处是应用侧入口——后续项目级的样式补充
+ * 也放这一层，不直接改包内文件（包要保持可被 OpenDesign 工具读取）。
+ * 顺序要求见 main.js 与本包 USAGE.md。 */
+@import '../../design-system/tokens.css';

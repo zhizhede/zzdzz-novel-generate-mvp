@@ -6,7 +6,7 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.PromptTemplateDataService;
 import com.zzdzz.novelgen.llm.PromptCatalog;
-import com.zzdzz.novelgen.model.dto.PromptTemplateDTO;
+import com.zzdzz.novelgen.model.entity.PromptTemplateDO;
 import com.zzdzz.novelgen.model.vo.PromptDetailVO;
 import com.zzdzz.novelgen.model.vo.PromptTemplateVO;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -113,7 +113,7 @@ public class PromptTemplateService {
 
     /** 删除自定义行（软删；catalog 同步行不可删，只能重置）。 */
     public void delete(long id) {
-        PromptTemplateDTO t = require(id);
+        PromptTemplateDO t = require(id);
         if (!t.isCustom()) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "目录同步行不可删除（可编辑或重置）；如需移除请先在代码目录中移除该条");
         }
@@ -136,7 +136,7 @@ public class PromptTemplateService {
      * 自定义行直接保存（无目录对照）。{key} 拼接段与 %s format 模板均可编辑。
      */
     public PromptDetailVO updateContent(long id, String content) {
-        PromptTemplateDTO t = require(id);
+        PromptTemplateDO t = require(id);
         if (content == null || content.isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "模板内容不能为空");
         }
@@ -166,7 +166,7 @@ public class PromptTemplateService {
 
     /** 重置：清 custom、内容对齐代码目录。 */
     public PromptDetailVO reset(long id) {
-        PromptTemplateDTO t = require(id);
+        PromptTemplateDO t = require(id);
         PromptCatalog.TemplateDef def = catalogDef(t.getNode(), t.getPhase())
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "目录中不存在该节点，无法重置"));
         dao.reset(id, def.content(), md5(def.content()));
@@ -182,12 +182,12 @@ public class PromptTemplateService {
     }
 
     public PromptDetailVO detail(long id) {
-        PromptTemplateDTO t = require(id);
+        PromptTemplateDO t = require(id);
         return new PromptDetailVO(t.getId(), t.getNode(), t.getPhase(), t.getTitle(),
                 t.getContent(), t.exact(), t.getVersion(), t.custom(), t.enabled());
     }
 
-    private PromptTemplateDTO require(long id) {
+    private PromptTemplateDO require(long id) {
         return dao.findById(id).orElseThrow(() -> new NoSuchElementException("提示词不存在: " + id));
     }
 
@@ -203,7 +203,7 @@ public class PromptTemplateService {
             synchronized (this) {
                 if (cache.isEmpty() || System.currentTimeMillis() - cacheLoadedAt > CACHE_TTL_MS) {
                     Map<String, String> fresh = new HashMap<>();
-                    for (PromptTemplateDTO t : dao.findAll()) {
+                    for (PromptTemplateDO t : dao.findAll()) {
                         if (t.enabled()) fresh.put(t.getNode() + "|" + t.getPhase(), t.getContent());
                     }
                     cache.clear();

@@ -1,6 +1,6 @@
 package com.zzdzz.novelgen.llm;
 
-import com.zzdzz.novelgen.model.dto.LlmProviderDTO;
+import com.zzdzz.novelgen.model.entity.LlmProviderDO;
 import com.zzdzz.novelgen.service.data.LlmProviderDataService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -34,9 +34,9 @@ public class LlmProviderResolver {
     }
 
     public Resolved resolve(LlmRole role) {
-        List<LlmProviderDTO> enabled = providerData.listEnabled(role.wire());
+        List<LlmProviderDO> enabled = providerData.listEnabled(role.wire());
         if (!enabled.isEmpty()) {
-            LlmProviderDTO p = enabled.get(0);
+            LlmProviderDO p = enabled.get(0);
             try {
                 return new Resolved(p.getBaseUrl(), cipher.decrypt(p.getApiKeyCipher()), p.getModel(),
                         Duration.ofMillis(p.getConnectTimeoutMs() != null ? p.getConnectTimeoutMs() : props.connectTimeout().toMillis()),

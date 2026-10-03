@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.StylePackMapper;
-import com.zzdzz.novelgen.model.dto.StylePackDTO;
+import com.zzdzz.novelgen.model.entity.StylePackDO;
 import com.zzdzz.novelgen.service.data.StylePackDataService;
 import org.springframework.stereotype.Service;
 
@@ -10,7 +10,7 @@ import java.util.List;
 
 /** style_packs 数据服务实现。 */
 @Service
-public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, StylePackDTO> implements StylePackDataService {
+public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, StylePackDO> implements StylePackDataService {
 
     @Override
     public Long findIdByName(String name) {
@@ -58,8 +58,8 @@ public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, Style
     }
 
     @Override
-    public List<StylePackDTO> listPresets() {
-        return list(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<StylePackDTO>()
+    public List<StylePackDO> listPresets() {
+        return list(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<StylePackDO>()
                 .eq("is_preset", true)
                 .eq("is_deleted", false)
                 .orderByDesc("id"));
@@ -73,5 +73,21 @@ public class StylePackDataServiceImpl extends ServiceImpl<StylePackMapper, Style
     @Override
     public long insertPack(String name, String description, String rulesMd, String fingerprint, String gateConfig) {
         return baseMapper.insertPack(name, description, rulesMd, fingerprint, gateConfig);
+    }
+
+    @Override
+    public Long findReusablePackId(String name) {
+        return baseMapper.findReusablePackId(name);
+    }
+
+    @Override
+    public int reusePack(long id, String name, String description, String rulesMd, String fingerprint,
+                         String gateConfig) {
+        return baseMapper.reusePack(id, name, description, rulesMd, fingerprint, gateConfig);
+    }
+
+    @Override
+    public int softDeleteOrphanOfNovel(long novelId) {
+        return baseMapper.softDeleteOrphanOfNovel(novelId);
     }
 }

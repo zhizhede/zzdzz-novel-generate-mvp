@@ -1,32 +1,35 @@
 <template>
   <div>
-    <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 6px">
-      <h3 style="margin: 0">章节</h3>
-      <el-select v-model="novelId" style="width: 260px" @change="() => { setSelectedNovelId(novelId); loadChapters() }">
+    <PageHeader title="章节">
+      <el-select v-model="novelId" style="width: var(--ctrl-w-3xl)" @change="() => { setSelectedNovelId(novelId); loadChapters() }">
         <el-option v-for="n in novels" :key="n.id" :value="n.id" :label="n.title" />
       </el-select>
-    </div>
-    <el-table :data="chapters" border size="small" @row-click="open" style="cursor: pointer">
+    </PageHeader>
+    <DataTable :data="chapters" border size="small" @row-click="open">
       <el-table-column prop="chapterNo" label="章" width="60" />
       <el-table-column prop="title" label="标题" min-width="160" />
       <el-table-column prop="status" label="状态" width="150">
         <template #default="{ row }"><el-tag size="small" :type="STATUS_COLOR[row.status] || 'info'">{{ STATUS_TEXT[row.status] || row.status }}</el-tag></template>
       </el-table-column>
       <el-table-column prop="budgetMin" label="预算" width="100">
-        <template #default="{ row }">{{ row.budgetMin }}-{{ row.budgetMax }}</template>
+        <!-- 导入正文的章没有预算（不进生成管线）——显示 — 而不是 0-0 -->
+        <template #default="{ row }">
+          <span v-if="row.budgetMin">{{ row.budgetMin }}-{{ row.budgetMax }}</span>
+          <span class="cell-empty" v-else>—</span>
+        </template>
       </el-table-column>
-    </el-table>
+    </DataTable>
 
     <el-drawer v-model="drawer" :title="detail ? `第${detail.chapterNo}章 ${detail.title}` : ''" size="65%">
       <template v-if="detail">
         <div style="margin-bottom: 8px; display: flex; gap: 12px; align-items: center">
           <el-tag size="small">{{ detail.status }}</el-tag>
-          <span v-if="genStd" style="font-size: 12px; color: #999">
+          <span class="hint" v-if="genStd" >
             生成时评审：注水软 {{ genStd.reader_fat_ratio_block }} / 硬上限 {{ genStd.reader_fat_ratio_hard }} /
             恢复线 {{ genStd.reader_fix_len_min }} / 扩写护栏 {{ genStd.reader_fix_len_max }} / 审校下限 {{ genStd.ai_review_fix_floor }}
           </span>
-          <span v-else style="font-size: 12px; color: #c0c4cc">生成时评审标准未记录（历史章节）</span>
-          <span style="font-size: 12px; color: #999">
+          <span v-else style="font-size: var(--text-xs); color: var(--meta)">生成时评审标准未记录（历史章节）</span>
+          <span class="hint">
             LLM：{{ detail.llmTotals?.calls ?? 0 }} 次调用 / {{ detail.llmTotals?.totalTokens ?? 0 }} tokens / 平均 {{ detail.llmTotals?.avgLatencyMs ?? 0 }}ms
           </span>
           <el-button v-if="detail.status === 'PENDING_APPROVAL'" type="success" size="small" :loading="approving" @click="approve">通过审批</el-button>
@@ -54,16 +57,16 @@
           </el-tab-pane>
           <el-tab-pane :label="`场景（${detail.scenes?.length ?? 0}）`" name="scenes">
             <div v-for="s in (detail.scenes || [])" :key="s.id" style="margin-bottom: 14px">
-              <div style="font-size: 12px; color: #999; margin-bottom: 4px; display: flex; align-items: center; gap: 8px">
+              <div class="hint" style="margin-bottom: 4px; display: flex; align-items: center; gap: 8px">
                 <span style="flex: 1">场景 {{ s.sceneNo }}｜{{ s.gateStatus }}｜改写 {{ s.revisionRound ?? 0 }} 次｜目标：{{ s.goal }}</span>
                 <el-button v-if="canEditScene" size="small" text type="primary" @click="openSceneEdit(s)">编辑</el-button>
               </div>
-              <div style="white-space: pre-wrap; border-left: 3px solid #eee; padding-left: 10px">{{ s.draftText }}</div>
+              <div style="white-space: pre-wrap; border-left: 3px solid var(--border); padding-left: 10px">{{ s.draftText }}</div>
             </div>
           </el-tab-pane>
           <el-tab-pane :label="`门禁（${detail.gateReport ? (detail.gateReport.passed ? '通过' : '未过') : '无'}）`" name="gates">
-            <el-table v-if="detail.gateReport" :data="detail.gateReport.checks || []" border size="small">
-              <el-table-column prop="check" label="指标" width="200" />
+            <DataTable v-if="detail.gateReport" :data="detail.gateReport.checks || []" border size="small">
+              <el-table-column prop="check" label="指标" min-width="200" />
               <el-table-column prop="value" label="实测" width="100" />
               <el-table-column prop="baseline" label="基线" width="100" />
               <el-table-column prop="abs_max" label="天花板" width="100" />
@@ -72,36 +75,36 @@
                   <el-tag size="small" :type="row.ok ? 'success' : 'danger'">{{ row.ok ? '通过' : '未过' }}</el-tag>
                 </template>
               </el-table-column>
-            </el-table>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane :label="`审校（${reviewLabel}）`" name="review">
             <div v-if="readerReviews.length" style="margin-bottom: 18px">
               <div style="font-weight: bold; margin-bottom: 8px">读者评审（全轮次，生成时随章快照口径）</div>
               <div v-for="(r, i) in readerReviews" :key="i"
-                style="border: 1px solid #ebeef5; border-radius: 4px; padding: 10px; margin-bottom: 8px">
+                style="border: 1px solid var(--border); border-radius: 4px; padding: 10px; margin-bottom: 8px">
                 <el-tag size="small" :type="r.passed ? 'success' : 'danger'">第 {{ r.round || 1 }} 轮 · {{ r.passed ? '通过' : '未过' }}</el-tag>
-                <span style="color: #999; font-size: 12px; margin-left: 6px">{{ fmtTime(r.createTime) }}</span>
+                <span class="hint" style="margin-left: 6px">{{ fmtTime(r.createTime) }}</span>
                 <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px">
                   <el-tag v-for="q in fiveQuestions(r)" :key="q.label" size="small" effect="plain"
                     :type="q.value === 'pass' ? 'success' : 'danger'">{{ q.label }}：{{ q.value === 'pass' ? '过' : q.value }}</el-tag>
                 </div>
-                <div v-if="fatRatio(r) != null" style="font-size: 12px; color: #999; margin-top: 6px">注水比 {{ fatRatio(r) }}</div>
+                <div class="hint" v-if="fatRatio(r) != null" style="margin-top: 6px">注水比 {{ fatRatio(r) }}</div>
                 <el-button link size="small" @click="r.open = !r.open">{{ r.open ? '收起' : '展开原文' }}</el-button>
                 <pre v-if="r.open" class="call-pre">{{ prettyJson(r.result) }}</pre>
               </div>
             </div>
-            <div v-if="!detail.review" style="color: #999; font-size: 13px">
+            <div v-if="!detail.review" style="color: var(--muted); font-size: var(--text-sm)">
               尚未审校。点击上方「AI 审校」对当前正文跑一次语义审校（连续性/逻辑/错字/格式）。
             </div>
             <template v-else>
-              <div style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center">
+              <div class="toolbar">
                 <el-tag size="small" :type="VERDICT_COLOR[detail.review.verdict] || 'info'">
                   {{ VERDICT_TEXT[detail.review.verdict] || detail.review.verdict }}
                 </el-tag>
-                <span style="font-size: 12px; color: #999">{{ detail.review.createTime }}</span>
+                <span class="hint">{{ detail.review.createTime }}</span>
               </div>
-              <div style="font-size: 13px; margin-bottom: 12px">{{ detail.review.summary }}</div>
-              <el-table v-if="detail.review.issues?.length" :data="detail.review.issues" border size="small">
+              <div style="font-size: var(--text-sm); margin-bottom: 12px">{{ detail.review.summary }}</div>
+              <DataTable v-if="detail.review.issues?.length" :data="detail.review.issues" border size="small">
                 <el-table-column prop="type" label="类型" width="110" />
                 <el-table-column label="严重度" width="90">
                   <template #default="{ row }">
@@ -113,12 +116,12 @@
                 <el-table-column prop="quote" label="原句" min-width="180" />
                 <el-table-column prop="explanation" label="问题" min-width="160" />
                 <el-table-column prop="suggestion" label="建议" min-width="160" />
-              </el-table>
-              <div v-else style="color: #999; font-size: 13px">无问题条目。</div>
+              </DataTable>
+              <div v-else style="color: var(--muted); font-size: var(--text-sm)">无问题条目。</div>
             </template>
           </el-tab-pane>
           <el-tab-pane :label="`步骤（${(detail.steps || []).length}）`" name="steps">
-            <el-table :data="detail.steps || []" border size="small">
+            <DataTable :data="detail.steps || []" border size="small">
               <el-table-column prop="step" label="步骤" width="120" />
               <el-table-column prop="subKey" label="子项" width="70" />
               <el-table-column prop="attempt" label="尝试" width="60" />
@@ -129,10 +132,10 @@
               </el-table-column>
               <el-table-column prop="detail" label="明细" min-width="240" show-overflow-tooltip />
               <el-table-column prop="updateTime" label="时间" width="180" />
-            </el-table>
+            </DataTable>
           </el-tab-pane>
           <el-tab-pane label="流水" name="events">
-            <el-table v-if="events.length" :data="events" border size="small">
+            <DataTable v-if="events.length" :data="events" border size="small">
               <el-table-column type="expand">
                 <template #default="{ row }">
                   <pre class="call-pre">{{ prettyJson(parsedJson(row.payloadJson)) }}</pre>
@@ -142,7 +145,7 @@
               <el-table-column prop="phase" label="相位" width="100" />
               <el-table-column prop="payloadJson" label="内容" min-width="320" show-overflow-tooltip />
               <el-table-column prop="createTime" label="时间" width="180" />
-            </el-table>
+            </DataTable>
             <el-empty v-else description="暂无事件" :image-size="50" />
           </el-tab-pane>
           <el-tab-pane :label="`档案（${(trace?.calls || []).length} 次调用）`" name="trace">
@@ -158,12 +161,12 @@
                   <div v-if="it.kind === 'step'">
                     <b>{{ STEP_LABEL[it.step] || it.step }}</b><span v-if="it.subKey"> · 场景 {{ it.subKey }}</span>
                     <el-tag size="small" style="margin-left: 6px" :type="it.status === 'DONE' ? 'success' : it.status === 'RUNNING' ? 'warning' : 'danger'">{{ it.status }}</el-tag>
-                    <span v-if="it.attempt > 1" style="color: #999; font-size: 12px; margin-left: 4px">第 {{ it.attempt }} 次尝试</span>
-                    <div v-if="it.detail" style="font-size: 12px; color: #999; margin-top: 2px">{{ it.detail }}</div>
+                    <span class="hint" v-if="it.attempt > 1" style="margin-left: 4px">第 {{ it.attempt }} 次尝试</span>
+                    <div class="hint" v-if="it.detail" style="margin-top: 2px">{{ it.detail }}</div>
                   </div>
                   <div v-else-if="it.kind === 'call'">
                     <b>{{ NODE_LABEL[it.node] || it.node }}</b>
-                    <span style="color: #999; font-size: 12px">
+                    <span class="hint">
                       {{ (it.totalTokens || 0).toLocaleString() }} tok · {{ (it.latencyMs / 1000).toFixed(1) }}s<span v-if="it.cost != null"> · ¥{{ it.cost.toFixed(4) }}</span><span v-if="it.status === 'error'"> · 失败</span>
                     </span>
                     <el-button link type="primary" size="small" @click="openCall(it.id)">查看 prompt / 输出</el-button>
@@ -172,7 +175,7 @@
                     <b>{{ GATE_LABEL[it.gateType] || it.gateType }}</b><span v-if="it.sceneId"> · 场景级</span> · 第 {{ it.round || 1 }} 轮
                     <el-tag size="small" style="margin-left: 6px" :type="it.passed ? 'success' : 'danger'">{{ it.passed ? '通过' : '未过' }}</el-tag>
                     <el-button link size="small" @click="it.open = !it.open">{{ it.open ? '收起' : '展开明细' }}</el-button>
-                    <pre v-if="it.open" style="white-space: pre-wrap; font-size: 12px; color: #666; background: #fafafa; padding: 8px; margin-top: 6px; max-height: 300px; overflow-y: auto">{{ prettyJson(it.result) }}</pre>
+                    <pre v-if="it.open" style="white-space: pre-wrap; font-size: var(--text-xs); color: var(--fg-2); background: var(--surface-warm); padding: 8px; margin-top: 6px; max-height: 300px; overflow-y: auto">{{ prettyJson(it.result) }}</pre>
                   </div>
                 </el-timeline-item>
               </el-timeline>
@@ -184,19 +187,16 @@
       </template>
     </el-drawer>
 
-    <!-- 阅读模式：全屏沉浸 -->
-    <el-dialog v-model="reader" :title="detail ? `第${detail.chapterNo}章 ${detail.title}` : ''" fullscreen
-      style="background: #faf6ef">
-      <div style="max-width: 720px; margin: 0 auto; padding: 24px 0 60px">
-        <div v-if="detail" style="white-space: pre-wrap; font-size: 17px; line-height: 2.1;
-          font-family: 'Source Han Serif SC', 'Noto Serif SC', serif; color: #2c2c2c">{{ detail.fullText }}</div>
-        <div style="text-align: center; color: #bbb; margin-top: 32px">— 完 —</div>
-      </div>
+    <!-- 阅读模式：全屏沉浸。排版（字号/行高/版心/字体/底色）与持久化见
+         components/ReadingPane.vue；版心按全角字数用 em 表达。 -->
+    <el-dialog v-model="reader" :title="detail ? `第${detail.chapterNo}章 ${detail.title}` : ''"
+               fullscreen class="reader-dialog">
+      <ReadingPane v-if="detail" :text="detail.fullText" />
     </el-dialog>
 
     <!-- Q5a：场景草稿人工编辑（生成前状态），保存即重过该场景机械门禁 -->
-    <el-dialog v-model="sceneDialog" :title="editingScene ? `编辑场景 ${editingScene.sceneNo} 草稿` : ''" width="720px" top="6vh">
-      <div style="font-size: 12px; color: #999; margin-bottom: 8px">
+    <el-dialog v-model="sceneDialog" :title="editingScene ? `编辑场景 ${editingScene.sceneNo} 草稿` : ''" width="var(--dlg-w-lg)">
+      <div class="hint" style="margin-bottom: 8px">
         保存后立即重过该场景机械门禁（通过/未过会回写场景门禁状态）；续跑时已通过场景复用此稿
       </div>
       <el-input v-model="sceneDraft" type="textarea" :rows="16" maxlength="20000" show-word-limit />
@@ -207,11 +207,11 @@
     </el-dialog>
 
     <!-- Q5b：正文人工编辑（仅待审批/已 digest）；DIGESTED 保存后回待审批、digest 重算 -->
-    <el-dialog v-model="fullDialog" :title="detail ? `编辑第${detail.chapterNo}章正文` : ''" width="860px" top="4vh">
-      <div v-if="detail?.status === 'DIGESTED'" style="font-size: 12px; color: #e6a23c; margin-bottom: 8px">
+    <el-dialog v-model="fullDialog" :title="detail ? `编辑第${detail.chapterNo}章正文` : ''" width="var(--dlg-w-xl)">
+      <div v-if="detail?.status === 'DIGESTED'" style="font-size: var(--text-xs); color: var(--warn); margin-bottom: 8px">
         本章已有事实账：保存后旧 digest 作废、章节回到待审批，重新审批时重算事实账
       </div>
-      <div v-else style="font-size: 12px; color: #999; margin-bottom: 8px">人工修正正文，保存后停留在待审批</div>
+      <div class="hint" v-else  style="margin-bottom: 8px">人工修正正文，保存后停留在待审批</div>
       <el-input v-model="fullDraft" type="textarea" :rows="24" maxlength="60000" show-word-limit />
       <template #footer>
         <el-button @click="fullDialog = false">取消</el-button>
@@ -220,10 +220,10 @@
     </el-dialog>
 
     <!-- 档案 tab：单次 LLM 调用详情（完整 prompt 分段 + 思考 + 输出，即「AI 当时看到/说了什么」） -->
-    <el-dialog v-model="callDialog" top="4vh" width="860px"
+    <el-dialog v-model="callDialog" width="var(--dlg-w-xl)"
       :title="callDetail ? `${NODE_LABEL[callDetail.node] || callDetail.node} · 调用 #${callDetail.id}` : ''">
-      <div v-if="callDetail" style="max-height: 72vh; overflow-y: auto">
-        <div style="color: #999; font-size: 12px; margin-bottom: 8px">
+      <div v-if="callDetail">
+        <div class="hint" style="margin-bottom: 8px">
           {{ callDetail.model }} · {{ (callDetail.totalTokens || 0).toLocaleString() }} tok（缓存命中 {{ callDetail.cachedTokens || 0 }}）·
           {{ (callDetail.latencyMs / 1000).toFixed(1) }}s<span v-if="callDetail.cost != null"> · ¥{{ callDetail.cost.toFixed(4) }}</span> · {{ fmtTime(callDetail.createTime) }}
         </div>
@@ -233,13 +233,13 @@
             <pre class="call-pre">{{ m.content }}</pre>
           </el-collapse-item>
           <el-collapse-item v-if="callDetail.reasoningText" :title="`思考过程（${callDetail.reasoningText.length} 字）`">
-            <pre class="call-pre" style="color: #8a8f99">{{ callDetail.reasoningText }}</pre>
+            <pre class="call-pre cell-empty">{{ callDetail.reasoningText }}</pre>
           </el-collapse-item>
           <el-collapse-item v-if="callDetail.content" :title="`输出正文（${callDetail.content.length} 字）`">
             <pre class="call-pre">{{ callDetail.content }}</pre>
           </el-collapse-item>
           <el-collapse-item v-if="callDetail.errorMsg" title="错误信息">
-            <pre class="call-pre" style="color: #c45656">{{ callDetail.errorMsg }}</pre>
+            <pre class="call-pre" style="color: var(--danger)">{{ callDetail.errorMsg }}</pre>
           </el-collapse-item>
         </el-collapse>
       </div>
@@ -253,9 +253,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { getSelectedNovelId, setSelectedNovelId } from '../novelSelection'
 import { NODE_LABEL, GATE_LABEL, STEP_LABEL } from '../labels'
+import DataTable from '../components/DataTable.vue'
+import PageHeader from '../components/PageHeader.vue'
+import ReadingPane from '../components/ReadingPane.vue'
 
-const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', OUTLINE_APPROVED: 'success', GATE_MECHANICAL: '', GATE_AI_REVIEW: 'warning', INTERRUPTED: 'info' }
-const STATUS_TEXT = { NEW: '待生成', OUTLINED: '章纲就绪', OUTLINE_APPROVED: '章纲已批', GATE_MECHANICAL: '门禁修订中', GATE_AI_REVIEW: '审校中', REVISING: '修订中', DIGESTED: '已完成', PENDING_APPROVAL: '待审批', FAILED: '失败', INTERRUPTED: '已中断' }
+const STATUS_COLOR = { DIGESTED: 'success', APPROVED: 'success', FINAL: 'success', FAILED: 'danger', PENDING_APPROVAL: 'warning', NEW: 'info', OUTLINED: '', OUTLINE_APPROVED: 'success', GATE_MECHANICAL: '', GATE_AI_REVIEW: 'warning', INTERRUPTED: 'info' }
+const STATUS_TEXT = { NEW: '待生成', OUTLINED: '章纲就绪', OUTLINE_APPROVED: '章纲已批', GATE_MECHANICAL: '门禁修订中', GATE_AI_REVIEW: '审校中', REVISING: '修订中', DIGESTED: '已完成', FINAL: '导入正文', PENDING_APPROVAL: '待审批', FAILED: '失败', INTERRUPTED: '已中断' }
 const VERDICT_TEXT = { pass: '通过', minor: '轻微', blocker: '严重', skipped: '跳过' }
 const VERDICT_COLOR = { pass: 'success', minor: 'warning', blocker: 'danger', skipped: 'info' }
 
@@ -561,10 +564,10 @@ onMounted(async () => {
 <style scoped>
 .call-pre {
   white-space: pre-wrap;
-  font-size: 12px;
+  font-size: var(--text-xs);
   line-height: 1.8;
   font-family: inherit;
-  background: #fafafa;
+  background: var(--surface-warm);
   padding: 8px;
   margin: 4px 0;
   max-height: 360px;

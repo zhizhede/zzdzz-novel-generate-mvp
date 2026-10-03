@@ -51,6 +51,7 @@ public class LibraryController {
     private final PromptTemplateService promptService;
     private final GateService gateService;
     private final com.zzdzz.novelgen.service.GenrePresetService genrePresetService;
+    private final com.zzdzz.novelgen.service.BookFingerprintService bookFingerprintService;
 
 
     // ===== 提示词注册表（平台级只读；阶段二开放从库读取与编辑） =====
@@ -315,6 +316,20 @@ public class LibraryController {
     @PostMapping("/novels/{novelId}/style/extract-rules")
     public Result<String> extractRules(@PathVariable long novelId) {
         return Result.success(genrePresetService.extractRulesForNovel(novelId));
+    }
+
+    /** 按本书正文试提指纹（机械指标、零 LLM、不落库）：样本单元=一章，草稿交用户确认后再采纳。 */
+    @PostMapping("/novels/{novelId}/style/extract-fingerprint")
+    public Result<com.zzdzz.novelgen.model.vo.BookFingerprintDraftVO> extractFingerprint(@PathVariable long novelId) {
+        return Result.success(bookFingerprintService.draft(novelId));
+    }
+
+    /** 采纳指纹草稿：覆盖本书风格包指纹（可选同步章长带）。指纹是门禁阈值来源，故必须走「草稿→确认」。 */
+    @PostMapping("/novels/{novelId}/style/apply-fingerprint")
+    public Result<Void> applyFingerprint(@PathVariable long novelId,
+                                         @RequestBody com.zzdzz.novelgen.model.vo.FingerprintApplyVO dto) {
+        bookFingerprintService.apply(novelId, dto);
+        return Result.success();
     }
 
     @PutMapping("/novels/{novelId}/gate-config")

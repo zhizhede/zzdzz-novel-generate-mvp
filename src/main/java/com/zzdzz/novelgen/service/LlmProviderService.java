@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.llm.LlmProperties;
 import com.zzdzz.novelgen.llm.LlmRole;
 import com.zzdzz.novelgen.llm.SecretCipher;
-import com.zzdzz.novelgen.model.dto.LlmProviderDTO;
+import com.zzdzz.novelgen.model.entity.LlmProviderDO;
 import com.zzdzz.novelgen.service.data.LlmProviderDataService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,7 +61,7 @@ public class LlmProviderService {
             throw new BizException(ErrorCode.PARAM_ERROR, "API key 必填");
         }
         LlmRole roleEnum = requireRole(role);
-        LlmProviderDTO p = new LlmProviderDTO();
+        LlmProviderDO p = new LlmProviderDO();
         p.setName(name.strip());
         p.setBaseUrl(baseUrl.strip());
         p.setApiKeyCipher(cipher.encrypt(apiKey.strip()));
@@ -80,10 +80,10 @@ public class LlmProviderService {
     /** 更新：apiKey 留空 = 保留原密文（掩码口径下前端不回传明文）。 */
     public void update(long id, String name, String baseUrl, String apiKey, String model, String role,
                        Integer connectTimeoutMs, Integer readTimeoutMs, Boolean enabled, String remark) {
-        LlmProviderDTO p = require(id);
+        LlmProviderDO p = require(id);
         if (name != null && !name.isBlank()) {
             String n = name.strip();
-            LlmProviderDTO same = providerData.findByName(n);
+            LlmProviderDO same = providerData.findByName(n);
             if (same != null && same.getId() != id) {
                 throw new BizException(ErrorCode.STATE_CONFLICT, "同名接入已存在：" + n);
             }
@@ -139,7 +139,7 @@ public class LlmProviderService {
      * 独立 HTTP 不走 MiniMaxClient——被测对象就是它自己的连接要素（含未启用的行）。
      */
     public TestResult test(long id) {
-        LlmProviderDTO p = require(id);
+        LlmProviderDO p = require(id);
         String key;
         try {
             key = cipher.decrypt(p.getApiKeyCipher());
@@ -184,7 +184,7 @@ public class LlmProviderService {
     }
 
     /** 测试请求体：会话带 model（行内没配则回退 yaml 全局默认）；向量化用 MiniMax 私有协议形状。 */
-    private String testBody(LlmProviderDTO p, boolean embedding) {
+    private String testBody(LlmProviderDO p, boolean embedding) {
         String model = p.getModel() == null || p.getModel().isBlank()
                 ? (embedding ? "embo-01" : props.model())
                 : p.getModel();
@@ -195,13 +195,13 @@ public class LlmProviderService {
     }
 
     /** 单活约束（按用途）：同 role 内只留一条启用行——会话与向量化互不影响。 */
-    private void applySingleActive(LlmProviderDTO active) {
+    private void applySingleActive(LlmProviderDO active) {
         if (active.isEnabled()) {
             providerData.disableAllOthersInRole(active.getId(), active.getRole());
         }
     }
 
-    private ProviderVO toVO(LlmProviderDTO p) {
+    private ProviderVO toVO(LlmProviderDO p) {
         String masked;
         try {
             masked = mask(cipher.decrypt(p.getApiKeyCipher()));
@@ -219,8 +219,8 @@ public class LlmProviderService {
         return plain.substring(0, 3) + "******" + plain.substring(plain.length() - 4);
     }
 
-    private LlmProviderDTO require(long id) {
-        LlmProviderDTO p = providerData.findById(id);
+    private LlmProviderDO require(long id) {
+        LlmProviderDO p = providerData.findById(id);
         if (p == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "接入不存在: " + id);
         }

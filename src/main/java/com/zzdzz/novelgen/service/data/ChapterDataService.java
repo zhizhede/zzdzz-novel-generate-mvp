@@ -1,14 +1,14 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 /** chapters 数据服务接口（原 ChapterDAO）。 */
-public interface ChapterDataService extends IService<ChapterDTO> {
+public interface ChapterDataService extends IService<ChapterDO> {
 
     /** 开篇样本行（非表行）：章节号 + 该章前 3 个非空行（人类手稿审美基准，注入第一场景用）。 */
     record Opening(int chapterNo, String firstLines) {
@@ -27,12 +27,31 @@ public interface ChapterDataService extends IService<ChapterDTO> {
     record ApprovedNoDigest(long id, long novelId, int chapterNo) {
     }
 
-    Optional<ChapterDTO> find(long novelId, int chapterNo);
+    /**
+     * 规划资产页的行（全库跨书一次取齐）：规划字段 + 章纲/正文的**长度**，不取正文全文
+     * （194 章 × 约 4 千字，带上正文列表就会是近 1MB 的响应）。章纲本身要展示故原样带出。
+     */
+    record ChapterPlanRow(long id, long novelId, int chapterNo, Integer volumeNo, String arc, String title,
+                          String goal, String hook, String timeNote, String outlineYaml, long outlineChars,
+                          int budgetMin, int budgetMax, String status, long textChars, String foreshadowRefs,
+                          String ruleRefs, java.time.OffsetDateTime createTime, java.time.OffsetDateTime updateTime) {
+    }
 
-    Optional<ChapterDTO> findById(long chapterId);
+    /** 全书有正文的章（章号升序）：按本书正文统计文风指纹用（一次查询，避免逐章 N+1）。 */
+    List<ChapterTextRow> listTextsByNovel(long novelId);
+
+    /** 全库规划行（书升序 + 章号升序）：规划资产页读模型用，一次查询覆盖所有书。 */
+    List<ChapterPlanRow> listPlanRows();
+
+    /** 同上但限定本书（规划页读正文/章纲实况用：带 textChars，不拉全文）。 */
+    List<ChapterPlanRow> listPlanRowsByNovel(long novelId);
+
+    Optional<ChapterDO> find(long novelId, int chapterNo);
+
+    Optional<ChapterDO> findById(long chapterId);
 
     /** 列表页摘要：full_text 不取（DO 中置 null）。 */
-    List<ChapterDTO> listSummariesByNovel(long novelId);
+    List<ChapterDO> listSummariesByNovel(long novelId);
 
     /** 卷级复盘用：一卷各章的事实行（规划 + 实际产出）。 */
     List<VolumeFactRow> listVolumeFacts(long novelId, int volNo);
@@ -57,6 +76,9 @@ public interface ChapterDataService extends IService<ChapterDTO> {
 
     /** 章纲回填并推进状态；同时清掉旧的场景与门禁报告（外键顺序：先报告后场景）。 */
     void resetForReoutline(long chapterId, String outlineYaml);
+
+    /** 只更新章纲（状态/正文/场景都不动）——已有正文的章重出章纲时的安全写法。 */
+    void updateOutlineYaml(long chapterId, String outlineYaml);
 
     /** 人工打回清场（流 A）：删场景/门禁报告/步骤行，状态→NEW，正文与章纲清空，意见落行。 */
     void rejectReset(long chapterId, String reason);

@@ -1,18 +1,18 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.LlmNodeConfigDTO;
+import com.zzdzz.novelgen.model.entity.LlmNodeConfigDO;
 
 import java.util.List;
 
 /** llm_node_configs 数据服务接口（原 LlmNodeConfigDAO）。 */
-public interface LlmNodeConfigDataService extends IService<LlmNodeConfigDTO> {
+public interface LlmNodeConfigDataService extends IService<LlmNodeConfigDO> {
 
-    LlmNodeConfigDTO findEnabled(String node);
+    LlmNodeConfigDO findEnabled(String node);
 
-    List<LlmNodeConfigDTO> listAll();
+    List<LlmNodeConfigDO> listAll();
 
-    LlmNodeConfigDTO findById(long id);
+    LlmNodeConfigDO findById(long id);
 
     boolean exists(String node);
 

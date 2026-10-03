@@ -9,8 +9,8 @@ import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.StylePackDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
-import com.zzdzz.novelgen.model.dto.CanonDocDTO;
-import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
+import com.zzdzz.novelgen.model.entity.CanonDocDO;
+import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
@@ -51,8 +51,8 @@ public class LibraryService {
     }
 
     /** 内部校验沿用 DO。 */
-    public CanonDocDTO canonDoc(long id) {
-        CanonDocDTO doc = canonData.findById(id);
+    public CanonDocDO canonDoc(long id) {
+        CanonDocDO doc = canonData.findById(id);
         if (doc == null) throw new BizException(ErrorCode.NOT_FOUND, "正典文档不存在: " + id);
         return doc;
     }
@@ -94,20 +94,20 @@ public class LibraryService {
     public LedgerHealthVO ledgerHealth(long novelId) {
         List<DigestDataService.DigestItem> digests = digestData.listByNovel(novelId);
         int current = digests.stream().mapToInt(DigestDataService.DigestItem::chapterNo).max().orElse(0);
-        List<ForeshadowDTO> all = foreshadowData.listByNovel(novelId);
-        List<ForeshadowDTO> proposed = all.stream()
+        List<ForeshadowDO> all = foreshadowData.listByNovel(novelId);
+        List<ForeshadowDO> proposed = all.stream()
                 .filter(f -> ForeshadowStatus.PROPOSED.is(f.getStatus())).toList();
-        ForeshadowDTO oldest = proposed.stream()
+        ForeshadowDO oldest = proposed.stream()
                 .filter(f -> f.getProposedIn() != null)
-                .min(Comparator.comparingInt(ForeshadowDTO::getProposedIn)).orElse(null);
+                .min(Comparator.comparingInt(ForeshadowDO::getProposedIn)).orElse(null);
         List<String> plantOverdue = all.stream()
                 .filter(f -> ForeshadowStatus.PLANNED.is(f.getStatus())
                         && f.getPlantedIn() != null && f.getPlantedIn() < current)
-                .map(ForeshadowDTO::getCode).toList();
+                .map(ForeshadowDO::getCode).toList();
         List<String> recoverOverdue = all.stream()
                 .filter(f -> ForeshadowStatus.PLANTED.is(f.getStatus())
                         && f.getRecoveredIn() != null && f.getRecoveredIn() < current)
-                .map(ForeshadowDTO::getCode).toList();
+                .map(ForeshadowDO::getCode).toList();
         List<WorldStateDataService.StateRow> states = worldStateData.listByNovel(novelId, 1000);
         int archived = (int) all.stream().filter(f -> ForeshadowStatus.DROPPED.is(f.getStatus())).count();
         return new LedgerHealthVO(current,

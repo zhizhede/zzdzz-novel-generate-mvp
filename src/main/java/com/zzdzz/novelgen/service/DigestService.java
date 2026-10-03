@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.llm.LlmTemps;
 import com.zzdzz.novelgen.model.enums.ChapterStatus;
 import com.zzdzz.novelgen.model.enums.ForeshadowStatus;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmJson;
@@ -15,8 +16,8 @@ import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.DigestDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.WorldStateDataService;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
-import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -45,11 +46,22 @@ public class DigestService {
     private final TuningService tuning;
 
 
-    public void digest(long novelId, long chapterId, int chapterNo, String fullText) {
-        if (digestData.existsByChapter(chapterId)) {
+    /** 返回 true＝本次真的算了（新插入或覆盖更新），false＝已有事实账且本次选择跳过。 */
+    public boolean digest(long novelId, long chapterId, int chapterNo, String fullText) {
+        return digest(novelId, chapterId, chapterNo, fullText, false);
+    }
+
+    /**
+     * force=false（默认）：本章已有事实账即跳过（幂等，续跑不重复烧 LLM）。
+     * force=true（用户选「覆盖已有」）：重算并**原地更新**那一行事实账，同时按新结果重写世界状态快照；
+     * 伏笔提议按 content 去重，同义重提不会重复建账。
+     */
+    public boolean digest(long novelId, long chapterId, int chapterNo, String fullText, boolean force) {
+        Long existingId = force ? digestData.findIdByChapter(chapterId) : null;
+        if (existingId == null && digestData.existsByChapter(chapterId)) {
             log.info("第 {} 章事实账已存在，跳过", chapterNo);
             chapterData.updateStatus(chapterId, ChapterStatus.DIGESTED.wire());
-            return;
+            return false;
         }
         LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(
                 LlmNode.DIGEST, novelId, chapterId,
@@ -64,18 +76,25 @@ public class DigestService {
         // 模型偶发无视指令在摘要前加「## 事实账」标题行：入库前剥掉
         String summary = node.path("summary_md").asText("")
                 .replaceAll("(?m)^#{1,6}[^\\n]*\\n?", "").strip();
-        digestData.insert(chapterId, summary, node.path("facts").toString());
         JsonNode state = node.path("state");
+        JsonNode threads = threadsOf(node, state); // 内含「误嵌 state」的抬升 + 快照剔除，必须在 upsert 之前
+        if (existingId == null) {
+            digestData.insert(chapterId, summary, node.path("facts").toString());
+        } else {
+            digestData.updateContent(existingId, summary, node.path("facts").toString());
+            log.info("第 {} 章事实账已重算覆盖（用户选了覆盖已有）", chapterNo);
+        }
         if (state.isObject() && state.size() > 0) {
             worldStateData.upsert(novelId, chapterNo, state);
             log.info("第 {} 章世界状态快照落库", chapterNo);
         }
-        proposeThreads(novelId, chapterNo, node.path("new_threads"));
+        proposeThreads(novelId, chapterNo, threads);
         foreshadowData.markPlanted(novelId, chapterNo);
         foreshadowData.markRecovered(novelId, chapterNo);
         sweepStaleProposals(novelId, chapterNo);
         chapterData.updateStatus(chapterId, ChapterStatus.DIGESTED.wire());
         log.info("第 {} 章事实账落库（{} tokens）", chapterNo, r.usage().totalTokens());
+        return true;
     }
 
     /**
@@ -107,10 +126,10 @@ public class DigestService {
                         java.util.Map.of("time_note", ch.getTimeNote())))
                 .orElse("");
         String ledger = "";
-        List<ForeshadowDTO> existing = foreshadowData.listByNovel(novelId);
+        List<ForeshadowDO> existing = foreshadowData.listByNovel(novelId);
         if (!existing.isEmpty()) {
             StringBuilder rows = new StringBuilder();
-            for (ForeshadowDTO f : existing) {
+            for (ForeshadowDO f : existing) {
                 rows.append(f.getCode()).append('（').append(f.getStatus()).append('）').append(f.getContent()).append('\n');
             }
             ledger = promptTemplates.getSection(LlmNode.DIGEST, "ledger",
@@ -118,6 +137,26 @@ public class DigestService {
         }
         return promptTemplates.getSection(LlmNode.DIGEST, "user",
                 java.util.Map.of("time_anchor", timeAnchor, "ledger", ledger, "full_text", fullText == null ? "" : fullText));
+    }
+
+    /**
+     * 取 new_threads：正常在根层。模型偶发把它写到 state 内部（连带漏写一个收口括号——
+     * 靠 LlmJson 结构补齐才解析得出来），此时抬回根层并从 state 剔除：否则该键会随世界状态
+     * 快照注入后续章节，而伏笔提议会被静默丢掉。两种情况都逐条 warn，不闷声改语义。
+     */
+    private JsonNode threadsOf(JsonNode root, JsonNode state) {
+        if (state instanceof ObjectNode stateObj && stateObj.has("new_threads")) {
+            JsonNode nested = stateObj.get("new_threads");
+            stateObj.remove("new_threads");
+            JsonNode rootThreads = root.get("new_threads");
+            if (rootThreads == null || !rootThreads.isArray() || rootThreads.isEmpty()) {
+                log.warn("digest 输出的 new_threads 嵌在 state 内（根层缺失），已抬回根层处理：{} 条",
+                        nested.isArray() ? nested.size() : 0);
+                return nested;
+            }
+            log.warn("digest 输出的 new_threads 根层与 state 内都在，state 内副本已剔除");
+        }
+        return root.path("new_threads");
     }
 
     /** 自动提议落库：status='proposed'，等素材库人工采纳（→planned）或忽略（→dropped）。 */
@@ -153,7 +192,7 @@ public class DigestService {
 
     /** 存量回填：只产出世界状态快照，不动事实账（轻量调用，逐章触发）。 */
     public void backfillState(long novelId, int chapterNo) {
-        ChapterDTO ch = chapterData.find(novelId, chapterNo)
+        ChapterDO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
         if (ch.getFullText() == null || ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "该章无正文，无法回填状态");

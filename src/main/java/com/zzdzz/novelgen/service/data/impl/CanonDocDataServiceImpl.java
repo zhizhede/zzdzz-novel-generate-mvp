@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.CanonDocMapper;
-import com.zzdzz.novelgen.model.dto.CanonDocDTO;
+import com.zzdzz.novelgen.model.entity.CanonDocDO;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import org.springframework.stereotype.Service;
 
@@ -10,7 +10,7 @@ import java.util.List;
 
 /** canon_docs 数据服务实现。 */
 @Service
-public class CanonDocDataServiceImpl extends ServiceImpl<CanonDocMapper, CanonDocDTO> implements CanonDocDataService {
+public class CanonDocDataServiceImpl extends ServiceImpl<CanonDocMapper, CanonDocDO> implements CanonDocDataService {
 
     @Override
     public boolean exists(long novelId, String kind, String name) {
@@ -28,8 +28,13 @@ public class CanonDocDataServiceImpl extends ServiceImpl<CanonDocMapper, CanonDo
     }
 
     @Override
-    public List<CanonDocDTO> listByNovel(long novelId) {
+    public List<CanonDocDO> listByNovel(long novelId) {
         return baseMapper.listByNovel(novelId);
+    }
+
+    @Override
+    public List<CanonDocDO> listAliveByKindName(String kind, String name) {
+        return baseMapper.listAliveByKindName(kind, name);
     }
 
     @Override
@@ -43,7 +48,7 @@ public class CanonDocDataServiceImpl extends ServiceImpl<CanonDocMapper, CanonDo
     }
 
     @Override
-    public CanonDocDTO findById(long id) {
+    public CanonDocDO findById(long id) {
         return baseMapper.findById(id);
     }
 

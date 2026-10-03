@@ -5,7 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.MaterialCardDataService;
-import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
+import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 import org.springframework.stereotype.Service;
 
 import com.zzdzz.novelgen.model.vo.MaterialCardVO;
@@ -28,18 +28,18 @@ public class MaterialCardService {
 
 
     private static final Set<String> KINDS = Set.of(
-            MaterialCardDTO.KIND_CHARACTER, MaterialCardDTO.KIND_ITEM, MaterialCardDTO.KIND_LOCATION,
-            MaterialCardDTO.KIND_LANDMARK, MaterialCardDTO.KIND_PHENOMENON, MaterialCardDTO.KIND_DISASTER,
-            MaterialCardDTO.KIND_ORG, MaterialCardDTO.KIND_MISC);
+            MaterialCardDO.KIND_CHARACTER, MaterialCardDO.KIND_ITEM, MaterialCardDO.KIND_LOCATION,
+            MaterialCardDO.KIND_LANDMARK, MaterialCardDO.KIND_PHENOMENON, MaterialCardDO.KIND_DISASTER,
+            MaterialCardDO.KIND_ORG, MaterialCardDO.KIND_MISC);
 
     private static final Set<String> STATUSES = Set.of("active", "retired", "dead", "merged");
 
     /** kind → 中文标签（注入文本用）。 */
     private static final Map<String, String> KIND_LABELS = Map.of(
-            MaterialCardDTO.KIND_CHARACTER, "角色", MaterialCardDTO.KIND_ITEM, "物品",
-            MaterialCardDTO.KIND_LOCATION, "地点", MaterialCardDTO.KIND_LANDMARK, "地标",
-            MaterialCardDTO.KIND_PHENOMENON, "现象", MaterialCardDTO.KIND_DISASTER, "灾害",
-            MaterialCardDTO.KIND_ORG, "组织", MaterialCardDTO.KIND_MISC, "其他");
+            MaterialCardDO.KIND_CHARACTER, "角色", MaterialCardDO.KIND_ITEM, "物品",
+            MaterialCardDO.KIND_LOCATION, "地点", MaterialCardDO.KIND_LANDMARK, "地标",
+            MaterialCardDO.KIND_PHENOMENON, "现象", MaterialCardDO.KIND_DISASTER, "灾害",
+            MaterialCardDO.KIND_ORG, "组织", MaterialCardDO.KIND_MISC, "其他");
 
     /** 单场景匹配命中卡上限的 tuning 键（常驻卡不占额），防上下文膨胀。 */
     private static final String MAX_MATCHED_KEY = "pack_max_matched_cards";
@@ -50,7 +50,7 @@ public class MaterialCardService {
 
 
     /** 向量化文本（RAG 索引用）：类型标签 + 名 + 别名 + 摘要 + 正文。 */
-    public String embeddingText(MaterialCardDTO card) {
+    public String embeddingText(MaterialCardDO card) {
         StringBuilder sb = new StringBuilder("素材卡·")
                 .append(KIND_LABELS.getOrDefault(card.getKind(), card.getKind()))
                 .append("：").append(card.getName());
@@ -75,8 +75,8 @@ public class MaterialCardService {
     }
 
     /** 内部沿用 DO（EmbeddingService 向量化等）。 */
-    public MaterialCardDTO get(long id) {
-        MaterialCardDTO card = cardDAO.findById(id);
+    public MaterialCardDO get(long id) {
+        MaterialCardDO card = cardDAO.findById(id);
         if (card == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "素材卡不存在: " + id);
         }
@@ -95,8 +95,13 @@ public class MaterialCardService {
 
     public void update(long id, String name, List<String> aliases, String summary, String contentMd,
                        Boolean pinned, String status, Integer sourceChapter) {
-        MaterialCardDTO card = get(id);
+        MaterialCardDO card = get(id);
         validate(card.getKind(), name, status);
+        // create 一直查重、update 原先没查：把卡名改成同类型下另一张活卡的名字，会直接撞
+        // uq_material_cards_novel_kind_name（界面只看到数据库键冲突）。这里补齐，自己除外。
+        if (cardDAO.existsOther(card.getNovelId(), card.getKind(), name, id)) {
+            throw new BizException(ErrorCode.STATE_CONFLICT, "同类型下已存在同名卡: " + name);
+        }
         cardDAO.update(id, name, aliases, summary, contentMd, pinned,
                 status == null ? card.getStatus() : status, sourceChapter);
     }
@@ -129,14 +134,14 @@ public class MaterialCardService {
      * 返回 null 表示该作品无卡（调用方回退 canon 整文档）。
      */
     public String sceneBlock(long novelId, String matchText) {
-        List<MaterialCardDTO> all = cardDAO.listByNovel(novelId, null);
+        List<MaterialCardDO> all = cardDAO.listByNovel(novelId, null);
         if (all.isEmpty()) {
             return null;
         }
-        List<MaterialCardDTO> pinned = new ArrayList<>();
-        List<MaterialCardDTO> matched = new ArrayList<>();
+        List<MaterialCardDO> pinned = new ArrayList<>();
+        List<MaterialCardDO> matched = new ArrayList<>();
         String text = matchText == null ? "" : matchText;
-        for (MaterialCardDTO card : all) {
+        for (MaterialCardDO card : all) {
             if (!card.active()) {
                 continue;
             }
@@ -157,18 +162,18 @@ public class MaterialCardService {
 
     /** 规划/审校注入块：全部活跃卡（pinned 带全文，其余摘要）。返回 null 表示无卡。 */
     public String fullBlock(long novelId) {
-        List<MaterialCardDTO> all = cardDAO.listByNovel(novelId, null).stream()
-                .filter(MaterialCardDTO::active).toList();
+        List<MaterialCardDO> all = cardDAO.listByNovel(novelId, null).stream()
+                .filter(MaterialCardDO::active).toList();
         if (all.isEmpty()) {
             return null;
         }
-        List<MaterialCardDTO> pinned = all.stream().filter(MaterialCardDTO::pinned).toList();
-        List<MaterialCardDTO> rest = all.stream().filter(c -> !c.pinned()).toList();
+        List<MaterialCardDO> pinned = all.stream().filter(MaterialCardDO::pinned).toList();
+        List<MaterialCardDO> rest = all.stream().filter(c -> !c.pinned()).toList();
         return render(pinned, rest);
     }
 
     /** 别名命中：卡名或任一别名（≥2 字）作为子串出现在文本中。 */
-    private boolean hits(MaterialCardDTO card, String text) {
+    private boolean hits(MaterialCardDO card, String text) {
         if (text.isEmpty()) {
             return false;
         }
@@ -186,17 +191,17 @@ public class MaterialCardService {
     }
 
     /** 渲染：【设定卡】块，pinned 在前带全文，其余摘要；已按 kind 分组。头段文案走 material/card_block_header（落库可编辑）。 */
-    private String render(List<MaterialCardDTO> pinned, List<MaterialCardDTO> rest) {
+    private String render(List<MaterialCardDO> pinned, List<MaterialCardDO> rest) {
         StringBuilder rows = new StringBuilder();
-        Map<String, List<MaterialCardDTO>> byKind = new LinkedHashMap<>();
-        for (MaterialCardDTO c : pinned) {
+        Map<String, List<MaterialCardDO>> byKind = new LinkedHashMap<>();
+        for (MaterialCardDO c : pinned) {
             byKind.computeIfAbsent(c.getKind(), k -> new ArrayList<>()).add(c);
         }
-        for (MaterialCardDTO c : rest) {
+        for (MaterialCardDO c : rest) {
             byKind.computeIfAbsent(c.getKind(), k -> new ArrayList<>()).add(c);
         }
-        for (Map.Entry<String, List<MaterialCardDTO>> e : byKind.entrySet()) {
-            for (MaterialCardDTO c : e.getValue()) {
+        for (Map.Entry<String, List<MaterialCardDO>> e : byKind.entrySet()) {
+            for (MaterialCardDO c : e.getValue()) {
                 String label = KIND_LABELS.getOrDefault(c.getKind(), c.getKind());
                 rows.append("- ").append(c.getName()).append("（").append(label);
                 if (c.pinned()) {

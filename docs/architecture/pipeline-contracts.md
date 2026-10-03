@@ -224,4 +224,84 @@ flowchart LR
 
 ### 书籍管理契约
 
-查（GET /api/novels 含无人续跑读数）/改（PUT，书名全站唯一）/删（DELETE 软删；有活动任务拒绝；autoContinue 自动关闭+链置 OFF）/打开（设当前书→章节页）。删书相关 TODO：级联展示（书删后素材/任务在书外页签仍可见的口径）待产品定。
+查（GET /api/novels 含入库类型与无人续跑读数；查询条件 keyword/sourceType/status/approvalMode/autoContinue/minChapters/maxChapters/from/to/sort）/改（PUT，书名全站唯一）/删（DELETE 软删；有活动任务拒绝；autoContinue 自动关闭+链置 OFF）/打开（设当前书→章节页）。删书相关 TODO：级联展示（书删后素材/任务在书外页签仍可见的口径）待产品定。
+
+**入库类型（2026-09-30 增补，novels.source_type）**：`IMPORTED` 手动导入（页面上传 txt/mobi/azw 或粘贴正文；与 CLI ImportRunner 原稿导入同值）/ `DERIVED` 系统衍生（向导选了参考样本）/ `ORIGINAL` 系统纯原创（向导无样本）。写入点只有三处：`NovelService.create`（按 sampleId 判衍生/原创）、`NovelService.importBook`、`ImportRunner`（恒 IMPORTED）；读侧不猜。默认排序仍是 id 升序（该端点给全站 7 处作品下拉供数，默认序不能随书籍管理页偏好漂移），书籍管理页显式传 `sort=TIME_DESC`。
+
+**导入书籍（POST /api/novels/import）**：书名 + 文风预设（**可选**：选了就克隆其指纹/门禁/规则；不选则建空风格包、门禁回退代码/tuning 默认值，导入后按本书正文提指纹回填——但**不采纳指纹就生成时门禁跳过指纹类指标**，见 GateService fail-open）+ 正文（粘贴文本优先，否则上传文件 base64，字段 `fileBase64`）。
+
+**风格包取名与删书级联（2026-09-30 增补，修「删书后同名重导必炸」）**：`style_packs.name` 上有活名唯一约束 `uq_style_packs_name_alive ON style_packs(name) WHERE is_deleted=false`，而删书原先只软删 novels 行、把「书名·风格」包留成活着的孤儿——于是**删掉一本书再用同名重导，INSERT 必撞唯一键**，界面横幅里滚出整段 SQL 与 mapper 路径（用户实弹，书 25 黑潮号）。两条修：①**删书级联**（`StylePackMapper.softDeleteOrphanOfNovel`）——本书专属风格包若非预设且已无活书引用则一并软删，共享包（多书引用）与预设永不碰；②**开书/导入统一走 `NovelService.acquireStylePack`**，取名顺序＝同名可复用包（已软删 or 活着但无活书引用的孤儿包）**原地改写复活** → 活名空缺则新建 → 活名被在用的包/预设占着才退让改名为「书名·风格·2」（连续 50 次仍不空则报 A0006 人话），任何一步都不再抛数据库唯一键异常。边界：①`style_packs` 无 `@TableLogic`，故**软删包与恢复后的书之间的引用照旧可读**（`findFingerprintByNovel`/`findGateConfigByNovel`/`findRulesMdByNovel` 都不滤包软删），psql 恢复一本书时**建议连包一起恢复**；②删书**不级联章节**（既有口径，章节行保留以便整本恢复，代价是库里会留下「已删书仍活章」）；③活孤儿包在界面上看不见（指纹页 BOOK 来源遍历活书），只能靠复用回收，不做后台清扫。
+
+**支持的上传格式（2026-09-30 增补）**：txt/md（前端直读文本）、**docx/docm**（`DocxExtractor`：zip 内 `word/document.xml` 按 w:p/w:t 取字，w:br/w:tab 保留、修订删除与域代码跳过、空段落压缩）、mobi/azw/azw3（`MobiExtractor`，需无 DRM）。**分派按文件头不按扩展名**（拖拽来的扩展名不可信）：PK→docx、D0CF11E0→旧版 .doc（明确拒绝并提示另存为 .docx/.txt）、其余走 MOBI。前端拖拽区也必须自判类型——浏览器只在系统选择框上按 accept 过滤，不判就会把 docx 当文本读成乱码（本批实弹踩到并修）。切章规则：按**行首标题行**切，三种样式——①「第N章」（阿拉伯数字，与 ImportRunner 章文件口径一致）②「第X章」（中文数字：第一章）③「X、标题」（中文数字 + 顿号/点/冒号：一、登船），②③ 带整行 ≤30 字长度闸（防「一、他想起……」这类正文行被误判成标题）；标题行不计入正文，首章前的残余文字并入第 1 章；识别不到标题则整篇作为第 1 章并在响应 notes 里明说。原章号不是 1..N 连续时按出现顺序重排，notes 里报「已重排」。章落库状态 `FINAL`（导入正文终态，不进生成状态机，ChaptersView 显示「导入正文」）；章预算取风格包 gate_config 章长带，无带则 0（前端显示 —）。
+
+**补事实账（POST /api/novels/{id}/digest-backfill，body {recent}）**：为最新章节生成 AI 事实账——续写前情链的唯一来源。导入弹窗默认勾选补最近 3 章，但**必须与导入分成两次调用**：落库是短事务，事实账是逐章 LLM（§6 禁止事务内 LLM），也让用户先看到导入结果再决定是否花钱。逐章失败只记 note 不中断（返回 requested/digested/notes）。
+
+**按本书正文提指纹（2026-09-30 增补，A+B 两条触发时机）**：`POST /api/novels/{id}/style/extract-fingerprint` 出草稿（机械指标、零 LLM、不落库）→ `POST /api/novels/{id}/style/apply-fingerprint`（body 回传草稿的 fingerprintJson + 章长带 + syncBudgetBand）采纳。时机 A＝导入书籍弹窗勾选后自动弹草稿；时机 B＝书籍管理行内「提指纹」按钮。口径与品类语料提取**同一套数学**（同包直取 `GenrePresetService.buildBaseline/budgetBand`，样本单元＝一章），指标中文名走 `GateService.metricLabel` 单源，指标行由 `FingerprintMetricVO.parse` 统一产出（指纹页与草稿弹窗共用，前端不建第二份映射）。三条硬约束：①正文总量 <2000 汉字直接拒绝，章数 <10 记低置信、<3 记「样本过少」强提示；②指纹 JSON 由前端原样回传、后端只校验「含非空 baseline 的 JSON 对象」与章长带数值区间；③**采纳必须经草稿确认**——指纹是门禁阈值来源，覆盖它等于改这本书后续生成的宽严，且勾了同步章长带却不给数值时报错而非静默跳过。副作用：覆盖本书 `style_packs.fingerprint`（可选把章长带合并进本书 `gate_config`，其余键不动）；恢复路径＝素材库「应用到本书」覆盖回预设口径。
+
+**已知交汇（实弹踩到，故意不改门禁）**：`dialogue_end_punct_ratio` 在场景级/章级都有硬下限 0.5（既有反 AI 腔规则，见 GateService）。若本书自身就低于该线（如「夜班守则」风格基线 0.09），或全书对白句末普遍无标点导致该指标被全零剔除，采纳本书自己的指纹后**该指标仍按 0.5 判**——草稿 notes 会在两种情况下都明确告知。
+
+## 六、软删 × 唯一键 × 召回：四条口径（2026-09-30 增补，全库排查后固化）
+
+新写删除/插入/召回相关代码时按这四条判断，别只照抄某张表的具体做法。
+
+1. **条件唯一索引的语义**：本项目唯一约束基本都是 `UNIQUE (...) WHERE is_deleted = FALSE`（V1 起的口径），**软删行不进索引**。所以「先把旧行软删、再插同样 key 的新行」是安全的；会撞键的只有两类：①**该删没删、活着占 key 的残留行**（典型：删父行时没管子行——style_packs 的孤儿包就是删书不删包，同名重导必炸）②**编辑改名撞上在用的活行**（`material_cards` 的 update 曾漏查重，create 却有）。
+2. **删父行要么级联、要么让子行可复用**：删书→级联软删专属风格包（非预设且无其他活书引用才删）；同名重来→复用**活着的**同名孤儿包，而不是硬 INSERT（`NovelService.acquireStylePack`：查「无活书引用的活包」→原地改写复用，查不到再插新行）。**2026-10-03 口径收紧：软删包不再被复用/复活**——`StylePackMapper.findReusablePackId` 加了 `sp.is_deleted = FALSE`、`reusePack` 带 `AND is_deleted = FALSE`；同名重导会**新建一行**，被软删的那行留作历史（软删行不占活名，条件唯一索引放行）。改名/编辑类更新要查重且**排除自己**（`existsOther`）。
+3. **「删除要传播到读路径」**：任何召回/注入类读取都必须按**源行存活**过滤，不能只看自己的 is_deleted——RAG 曾只滤 `embeddings.is_deleted`，导致软删的素材卡/事实账的向量仍被召回注入生成（删了卡系统照它写，界面看不出原因）。已改为 `EXISTS (源行 is_deleted = FALSE)`，digest 连 `chapters.is_deleted` 一起看。选查询期过滤而非删向量，是为了把库里已存在的陈旧行一并挡掉。
+4. **「先查没有→再插入」要么原子、要么撞键后复用**：已用 `ON CONFLICT ... WHERE is_deleted = FALSE DO UPDATE` 的表（world_states / volume_reviews / embeddings）；解析任务走「撞键后复用」（捕 `DataIntegrityViolationException` 父类 + 以能否重查到该行判真假并发，不依赖 Spring 把 23505 翻成哪个子类）。**不要把唯一键冲突直接抛给用户**——数据库类异常（`DataAccessException` 及子类）一律在 `GlobalExceptionHandler` 换成人话，明细只进服务端日志（原文含 SQL、表结构与 JDBC 主机端口）。
+
+## 七、规划资产读侧契约：大纲 / 卷纲 / 章纲（2026-09-30 增补）
+
+**三层各自的落库位置（改读侧先看这张表，别再造第二份）**：
+
+| 层 | 落库位置 | 谁写 | 触发入口 |
+|---|---|---|---|
+| 大纲 | `canon_docs`（kind=`misc`, name=`大纲`）一本书一行 | `PlanningService.saveStory` / 向导大纲落库 | `POST /api/novels/{id}/outline-draft`（AI 大纲异步，节点 `derive_outline`）；也可人工在「规划」页写 |
+| 卷纲 | `chapters` 规划行（`volume_no`/`arc`/`budget_min`/`budget_max` 逐章一行，一卷多行）＋ 卷复盘 `volume_reviews`（`report` JSON：review.drifts[]/summary/overall） | `VolumePlanService.adopt`（先软删 fromNo 起旧规划行→插新行→伏笔采纳建账） | `POST /planning/volume/auto-plan`（同步）/ `-async`（异步）；manual 模式下先出草稿再 `POST /volume/adopt` |
+| 章纲 | `chapters.outline_yaml`（一章一份 YAML，含场景拆解） | 生成管线 chapter outline 节点（`LlmNode.OUTLINE`）；批量走 `POST /planning/outline/batch`；单章重生成 `POST /chapters/{no}/outline/regenerate` | 生成任务提交时逐章产出；或规划页章纲批量任务 |
+
+**读侧唯一入口**：`GET /api/plan-assets`（`PlanAssetService`）——三层共用一条宽读模型 + `level` 判别，页面 `/plans`（侧栏「规划资产」）。口径与约束：
+1. **只读聚合**：只做读模型拼装与筛选排序，不写库、不动规划与生成口径；正文**只带长度不带全文**（194 章 × 约 4 千字，带全文就是近 1MB 响应），章纲与原样带出（约 1.2KB/章）。
+2. **缺口清单是主线**：没有大纲的活书、没有章纲的卷/章**也出行**并标 `hasOutline=false`——导入书籍（`IMPORTED`）本来就没有这三样，正是这一页要暴露的东西：导入书只有正文（`status=FINAL`），要接着写必须先补大纲/卷纲/章纲。
+3. **与层级无关的条件在不适用的层上不生效**（大纲层不判章状态/正文，卷层用章号区间**相交**判定，「未分卷」用 `volumeNo=0` 表达）——语义由 `PlanAssetService.matches/comparator` 纯函数锁定，改动必须同步单测。
+4. **软删书的残留章行不进列表**（按活书过滤），与文风指纹页同一口径。
+5. **「有没有正文」按实况判，不看投影**（2026-10-03 修）：规划行读模型走 `ChapterDataService.listPlanRows(novelId)`（带 `LENGTH(full_text)`，返回 `ChapterPlanRow.textChars`），`PlanningService.toPlanVO` 由它算 `hasText/textChars`（章纲侧同法算 `hasOutline/outlineChars`）。**别用 `listSummaries` 的 `full_text` 判有无正文**——那个投影为省流量把正文置 `NULL`（`NULL AS full_text`），会让 `hasText` 恒为 false，把有正文的章全标成「规划就绪·待生成」（真库脚印：书 2 有 47 章 `DIGESTED`，规划页 0 行显示「正文已成」）。
+
+## 八、导入书籍「解析链」契约（2026-09-30 增补）
+
+**一句话**：导入只落库（快、无 LLM）；「把这本书**已经有的东西**用 LLM 抽出来」是**用户勾选的可选链**，默认全勾，串行跑在后台，逐步落库。
+
+**只解析，不规划（2026-10-03 用户定调）**：本链**不产生新章、不规划续写卷**——导入书的解析不该顺手规划出一卷续写（真库踩过：跑一次解析，书里凭空多出「第 18–27 章」10 行规划行，用户问「原文一共就 17 章哪来的 18–27」）。原 `VOLUME_PLAN`（规划下一卷）与旧 `CHAPTER_OUTLINES`（把新规划卷入生成队列）两步已从 `ImportAnalyzeStep` 枚举移除；**要规划去规划页**（「AI 规划下一卷」/卷纲与章纲页签）。历史任务行里遗留的这两个步键在进度读回时被忽略（有单测钉住）。
+
+**章纲在链里是「反推」不是「规划」**：`DERIVE_CHAPTER_OUTLINES` 读**已有正文**，把成稿章按实际分场拆成场景（事后描述）——这正是用户要的「解析出章纲」。与规划页的章纲（写之前按目标/钩子拆场景、给未写的章用）是两套口径，故**用新键**，不复用旧 `CHAPTER_OUTLINES` 的键（历史行会因此被正确忽略）。
+
+**七步（顺序＝依赖顺序，勾选不改顺序）**：
+
+| 步 | 产出与落库位置 | 复用哪套口径 |
+|---|---|---|
+| DIGESTS | 事实账 `digests` + 世界状态 `world_states` + 伏笔提议 `foreshadows(PROPOSED)`；取末尾 ≤20 章，默认**覆盖重做**已有事实账的章（原地更新同一行），选跳过则只补缺 | `NovelService.backfillDigests` → `DigestService`（`LlmNode.DIGEST`） |
+| OUTLINE | 全书大纲 → `canon_docs(misc/大纲)` | 复用 `LlmNode.SAMPLE_OUTLINE` 提示词（**不新造第二份提示词**） |
+| CARDS | 设定层素材卡 → `material_cards`（默认**覆盖更新同类同名卡**并保留人工 `pinned/status`，选跳过则保留已有） | 新节点 `LlmNode.BOOK_CARDS`（从「章节结构+事实账」抽卡，不是逐章 SAMPLE_CHAPTER） |
+| WORLD | 世界观文档 → `canon_docs(world/世界观)` | 复用 `LlmNode.SAMPLE_WORLD` 提示词（输入＝章节摘要块 + 已抽出的素材卡块，故排在 CARDS 之后） |
+| RULES | 文风规则 → 本书风格包 `rules_md` | `LlmNode.STYLE_RULES`；语料优先话题材语料，**没有则回落到本书正文**（导入书只有正文） |
+| EMBEDDINGS | 事实账/素材卡向量 → `embeddings`（RAG 召回前置）；默认**先硬删本书旧向量再全量重嵌**（旧向量对应旧文本，不刷会被一直召回），选跳过只补缺 | `EmbeddingService.backfillNovel`（走 embedding 模型，与会话 LLM 分开接入） |
+| DERIVE_CHAPTER_OUTLINES | 已有正文章的章纲与场景拆解 → `chapters.outline_yaml` + `chapter_scenes` | 新节点 `LlmNode.BOOK_CHAPTER_OUTLINE`（输入＝本章正文，输出同一套 scenes JSON）；**走 `OutlineService` 的「保全状态」写路径**——只写章纲与场景，章状态/正文/门禁报告都不动。取**前 ≤30 章**（章号升序；单章几十秒不做无上限全跑，超出的在步骤消息里明说），默认覆盖重写、选跳过则只补没有章纲的章 |
+
+**运行形态与硬约束**：
+1. **任务行 `import_analyze_tasks`（V36）**：一本活书一行活跃任务（`uq_import_analyze_task_alive`），重复提交＝重置同一行；两个 JSONB 列（`steps`/`done_steps`）走 XML 显式 `::jsonb`，`INSERT ... RETURNING id` 走 `<select resultType="long">`。
+2. **全局单线程 runner**（与样本深度解析同构）：一本一本地跑，瓶颈在 LLM；**每步跑完立即落 `done_steps`**（断点事实，前端进度与刷新后状态都靠它），关页面/重启进程都不会「看起来没跑」。
+3. **逐步 fail-open**：某步失败只记该步 `FAILED` 并继续下一步，链终态＝「有失败步则 FAILED，否则 DONE」；`SKIPPED` 用于前置不满足（DIGESTS 无章节、章纲反推无带正文的章）。章纲反推的**单章**失败也只记数不中断，不把整步判死。
+4. **提交在事务外**：导入是短事务，解析链入队在 `NovelController` 里于 `importBook` 返回后提交——否则 runner 线程读不到未提交的章行。
+5. **API 语义**：`analyzeSteps` 不传/空＝**不解析**（纯接口建书不会默默烧一轮 LLM）；界面默认全勾。`analyzeSkipExistingSteps`＝这些步对「已有内容」选**跳过**（不传/空＝不跳过＝覆盖重做）；只有同时被勾选的步才谈得上跳过。`GET /api/novels/{id}/import-analyze` 无任务时返回 null。
+6. **幂等口径各不相同，必须按步记清**（「跳过已有」开关对**四步**有效）：①DIGESTS 默认**原地重算**已有事实账的章，跳过则只补缺；②CARDS 默认**更新同类同名卡**（保留人工 `pinned/status`），跳过则保留已有；③EMBEDDINGS 默认**硬删本书旧向量后全量重嵌**，跳过只补缺；④DERIVE_CHAPTER_OUTLINES 默认**重写已有章纲**（`sceneData.replaceAll` 换掉该章场景行），跳过则只补没有章纲的章；⑤OUTLINE/WORLD/RULES **覆盖**同名文档（口径固定、开关无效）。**整链可安全重跑**：不产生重复行（digests 原地更新、canon 覆盖同名、cards 按名覆盖、embeddings 先删后插、场景按章整体替换）。
+7. **历史注（卷纲曾在本链里，已移除）**：2026-09-30–10-03 期间本链含 `VOLUME_PLAN`（按「已有正文最末章+1」规划下一卷）与 `CHAPTER_OUTLINES`（给那卷出纲）。它们的「原地重规划同一卷号，别写成最大卷号+1」那条口径现在归 **`VolumePlanService.adopt`**（规划页/无人续跑链仍按它走），与本链无关。
+
+## 九、digest 输出契约：字段归位 + 容错解析边界（2026-09-30 增补）
+
+**一句话**：`new_threads` 归**根层**，`state` 只含 `state_spec` 那五个键；模型走神把二者混在一起时，**解析层补齐结构、语义层把字段抬回原位并显性告警**，绝不让提议静默消失。
+
+1. **根层键**：`summary_md` / `facts` / `state` / `new_threads`。`state` 内部只许 `time` / `locations` / `possessions` / `new_promises` / `unresolved`（`state_spec` 提示词即此五键）——世界状态快照会**原文注入后续章节上下文**，塞进去的越界键就是上下文污染（真库曾出现 1 行：书 5 第 1 章快照带 `new_threads`）。
+2. **容错解析（`LlmJson.read`）**：截首个 `{` 到末个 `}` → 原样 → 修字符串内裸引号 → **补齐漏写的收口括号**（`closeUnclosed`，按未闭合栈逆序补 `}`/`]`）。**不救**两种情况：字符串未收口（典型 `max_tokens` 截断，半截事实账必须显性失败）与括号种类对不上（结构错乱，不猜）。
+3. **语义纠正（`DigestService.threadsOf`）**：`state` 内出现 `new_threads` 时抬回根层处理并**从快照剔除**；根层与 `state` 内都有则以根层为准、剔除副本；两种情况都 `warn`。
+4. **为什么不能只在解析层修**：畸形有两支——①「误嵌 + 漏收口」→ 老代码整章解析失败（fail-open 记「n/m 章」，事实账/状态/提议全丢）；②「只误嵌、语法合法」→ **解析得过，提议静默丢失且零报错**。②更阴，真库已留下脚印（书 5 第 1 章，2 条提议被吃，2026-09-30 已按快照原文回填 F10/F11）。
+5. **诊断口径**：这类问题**先取 `llm_call_log` 的 `response_json->'choices'->0->'message'->>'content'` 原文**逐字节看（`finish_reason` 能排除截断），别用被日志截断过的错误文案下结论；`closeUnclosed` 单独能救回的行 = 该类的精确指纹（全库回放命中 digest 5 行 + sample_chapter 1 行）。
+6. **已知边界**：无法区分「模型漏收口」与「截断恰好落在干净边界」，二者现在都补——真正区分要靠 provider 的 `finish_reason`，`LlmPort.ChatResult` 目前不带该字段，留作后续。

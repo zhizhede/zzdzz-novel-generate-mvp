@@ -1,7 +1,8 @@
 package com.zzdzz.novelgen.runner;
 
 import lombok.extern.slf4j.Slf4j;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.enums.NovelSourceType;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
@@ -89,7 +90,8 @@ public class ImportRunner implements ApplicationRunner {
         long packId = importBookStylePack(cfg);
         Long exist = novelData.findIdByTitle(title);
         long novelId = exist != null ? exist
-                : novelData.insert(userId, title, (String) cfg.get("description"), packId, "auto", "active");
+                : novelData.insert(userId, title, (String) cfg.get("description"), packId, "auto", "active",
+                        NovelSourceType.IMPORTED.wire());
         if (exist == null) {
             log.info("书目导入：新作品 {} (novelId={})", title, novelId);
         }
@@ -129,11 +131,11 @@ public class ImportRunner implements ApplicationRunner {
                     .forEach(f -> importExistingChapter(novelId, f));
         }
         int recent = cfg.get("digest_recent") instanceof Number n ? n.intValue() : 3;
-        List<ChapterDTO> all = chapterData.listSummariesByNovel(novelId);
+        List<ChapterDO> all = chapterData.listSummariesByNovel(novelId);
         // 从最新章往回数，只为有正文的 recent 章补事实账（卷纲规划行没有正文，跳过）
         int done = 0;
         for (int i = all.size() - 1; i >= 0 && done < recent; i--) {
-            ChapterDTO full = chapterData.find(novelId, all.get(i).getChapterNo()).orElse(null);
+            ChapterDO full = chapterData.find(novelId, all.get(i).getChapterNo()).orElse(null);
             if (full == null || full.getFullText() == null) continue;
             digestService.digest(novelId, full.getId(), full.getChapterNo(), full.getFullText());
             done++;
@@ -154,7 +156,7 @@ public class ImportRunner implements ApplicationRunner {
                 if (s.matches("第\\d章\\s*\\S+.*")) { title = s.replaceFirst("第\\d章\\s*", ""); break; }
             }
             chapterData.insertPlan(novelId, no, null, null, title, null, null, null, "[]", "[]", 0, 0);
-            ChapterDTO ch = chapterData.find(novelId, no).orElseThrow();
+            ChapterDO ch = chapterData.find(novelId, no).orElseThrow();
             chapterData.saveFullText(ch.getId(), content);
             chapterData.updateStatus(ch.getId(), "FINAL");
             log.info("现成正文入库：第 {} 章 {}", no, title);
@@ -201,7 +203,8 @@ public class ImportRunner implements ApplicationRunner {
         Long exist = novelData.findIdByTitle("夜班守则");
         if (exist != null) return exist;
         return novelData.insert(userId, "夜班守则",
-                "规则怪谈：便利店夜班与不对劲的守则（管线测试作）", packId, "auto", "active");
+                "规则怪谈：便利店夜班与不对劲的守则（管线测试作）", packId, "auto", "active",
+                NovelSourceType.IMPORTED.wire());
     }
 
     private void importCanonDocs(long novelId) throws Exception {

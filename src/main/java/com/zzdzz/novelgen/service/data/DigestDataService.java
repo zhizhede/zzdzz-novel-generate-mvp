@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.DigestDTO;
+import com.zzdzz.novelgen.model.entity.DigestDO;
 
 import java.util.List;
 
 /** digests 数据服务接口（原 DigestDAO）。 */
-public interface DigestDataService extends IService<DigestDTO> {
+public interface DigestDataService extends IService<DigestDO> {
 
     /** 素材库行：带章号（内部模型，非表行）。 */
     record DigestItem(long id, int chapterNo, String contentMd, String facts, String updateTime) {
@@ -22,6 +22,9 @@ public interface DigestDataService extends IService<DigestDTO> {
     int insert(long chapterId, String contentMd, String factsJson);
 
     boolean existsByChapter(long chapterId);
+
+    /** 本章事实账行 id（无则 null）——「覆盖重做」时原地更新，而不是插出第二行。 */
+    Long findIdByChapter(long chapterId);
 
     /** 事后否决（流 A 扩展）：按章清除事实账/摘要行，重生成末尾 digest 步骤重建。 */
     int deleteByChapter(long chapterId);

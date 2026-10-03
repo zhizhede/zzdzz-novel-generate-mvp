@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "od-design-system-project/v1",
+  "id": "novelgen",
+  "name": "小说生成平台（novelgen）",
+  "category": "Writing & Publishing",
+  "description": "数据密集的 AI 小说写作运维台设计系统：羊皮纸底、墨蓝单一彩色、中文衬线承担层级。由 OpenDesign 的 kami 基座改造而来，为中文长文阅读补排版参数、为状态标签密集界面重设语义色。",
+  "source": {
+    "type": "bundled",
+    "origin": "本项目自有包，派生自 OpenDesign design-systems/kami（Apache-2.0）；改造说明见 DESIGN.md §8"
+  },
+  "files": {
+    "design": "DESIGN.md",
+    "tokens": "tokens.css"
+  },
+  "usage": "USAGE.md"
+}

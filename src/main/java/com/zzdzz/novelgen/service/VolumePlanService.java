@@ -19,8 +19,8 @@ import com.zzdzz.novelgen.service.data.SamplePlotNodeDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.dto.ChapterDTO;
-import com.zzdzz.novelgen.model.dto.ForeshadowDTO;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
+import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -422,7 +422,7 @@ public class VolumePlanService {
         List<String> warnings = new ArrayList<>();
         List<String> adopted = new ArrayList<>();
         tx.executeWithoutResult(status -> {
-            for (ChapterDTO c : chapterData.listSummariesByNovel(novelId)) {
+            for (ChapterDO c : chapterData.listSummariesByNovel(novelId)) {
                 if (c.getChapterNo() >= fromNo) {
                     if (c.getFullText() != null && !c.getFullText().isBlank()) {
                         throw new BizException(ErrorCode.PARAM_ERROR,
@@ -463,7 +463,7 @@ public class VolumePlanService {
         boolean hasContent = ref.content() != null && !ref.content().isBlank();
         String action = "recover".equals(ref.action()) ? "回收" : "埋设";
         if (hasCode) {
-            ForeshadowDTO f = foreshadowData.findByCode(novelId, ref.code());
+            ForeshadowDO f = foreshadowData.findByCode(novelId, ref.code());
             if (f != null) {
                 if (ForeshadowStatus.PROPOSED.is(f.getStatus())) {
                     foreshadowData.promoteProposal(f.getId(), chapterNo);
@@ -489,7 +489,7 @@ public class VolumePlanService {
     private String createForeshadow(long novelId, String wantedCode, String content, int chapterNo,
                                     List<String> adopted) {
         if (foreshadowData.contentExists(novelId, content)) {
-            for (ForeshadowDTO f : foreshadowData.listByNovel(novelId)) {
+            for (ForeshadowDO f : foreshadowData.listByNovel(novelId)) {
                 if (f.getContent().equals(content)) return f.getCode();
             }
         }
@@ -532,8 +532,8 @@ public class VolumePlanService {
     // ===== 单章卷纲重写（失败自愈 / 人工纠偏共用） =====
 
     /** 换一条可行路径重写该章 title/goal/hook/time_note（预算沿用），并重置章纲待重出。 */
-    public ChapterDTO replanChapter(long novelId, int chapterNo, String failureReason) {
-        ChapterDTO ch = chapterData.find(novelId, chapterNo)
+    public ChapterDO replanChapter(long novelId, int chapterNo, String failureReason) {
+        ChapterDO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
         if (ch.getFullText() != null && !ch.getFullText().isBlank()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "第 " + chapterNo + " 章已有正文，禁止重写其卷纲");

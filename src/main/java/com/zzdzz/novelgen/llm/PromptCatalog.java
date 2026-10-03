@@ -482,6 +482,48 @@ public final class PromptCatalog {
                 %s
                 """),
 
+        // ===== 导入书籍·解析链：素材卡提取（大纲/世界观复用上面的 SAMPLE_OUTLINE/SAMPLE_WORLD，避免双源漂移） =====
+        new TemplateDef(LlmNode.BOOK_CARDS, "system", "书籍素材卡提取系统提示", true,
+                "你是小说设定档案员。读章节结构与剧情摘要，抽出这本书的设定层素材卡；"
+                        + "只输出一个 JSON 对象，字符串值内部禁止英文双引号，引用一律用「」。"),
+
+        new TemplateDef(LlmNode.BOOK_CARDS, "user", "书籍素材卡提取（章节摘要→设定卡）", true, """
+                任务：读下面这本书的章节结构与剧情摘要，抽出它的**设定层素材卡**，输出 JSON：
+                {"cards":[{"name":"规范名","kind":"character|item|location|org|phenomenon|landmark|disaster|misc",
+                  "aliases":["别名"],"summary":"一句话身份或用途（≤40 字）",
+                  "content":"书中的关键设定、当前状态、与其他卡的关系（100-300 字）",
+                  "pinned":true,"sourceChapter":首次出现的章号}]}
+                要求：①只抽摘要里真实出现过的实体，按重要性取前 %s 张（人物优先，含关键物品/地点/组织/现象/地标/灾害）；
+                ②同一实体只出一行、别名并入 aliases；③pinned 只给贯穿全书的常驻设定（主角、核心设定），不超过 6 张；
+                ④kind 只能用给定英文枚举；⑤sourceChapter 给首次出现的章号，不确定就给 null。
+
+                【书：%s】
+
+                【章节结构与摘要】
+                %s
+                """),
+
+        // 解析链的章纲步：**从已有正文反推**（不是写之前的规划）——导入书成稿章要的是「这章实际怎么分场」的事后拆解。
+        new TemplateDef(LlmNode.BOOK_CHAPTER_OUTLINE, "system", "章纲反推（已有正文→场景拆解）系统提示", true,
+                "你是小说结构分析师。给你一章已成稿的正文，你要把它**实际**分成的场景拆出来。"
+                        + "只输出合法 JSON，不要任何解释或 markdown 代码块。"
+                        + "字符串值内部禁止英文双引号，引用一律用「」。"),
+
+        new TemplateDef(LlmNode.BOOK_CHAPTER_OUTLINE, "user", "章纲反推（已有正文→场景拆解）", true, """
+                任务：把第 %d 章《%s》的**已有正文**（约 %d 字）按实际分场拆解出来。
+                要求：
+                - 只描述这一章**实际写了什么**，不得新增原文没有的情节、人物或设定；
+                - 按原文的场面/时空转换切成 2-3 个场景，合起来覆盖全章（场景之间不重叠，也不漏掉章末）；
+                - words 填该场景在原文里大约占的字数（各场景相加接近全章字数）；
+                - must_not 一律给空数组 []——这是事后拆解，「禁止写什么」在此没有对象。
+
+                【本章正文】
+                %s
+
+                只输出 JSON，格式：
+                {"scenes":[{"no":1,"goal":"本场景实际完成了什么","present":["实际出场的人物/物件"],"must_reveal":["本场景实际让读者知道的信息"],"must_not":[],"words":900}]}
+                """),
+
         new TemplateDef(LlmNode.SAMPLE_MERGE, "system", "实体名归并判定系统提示", true,
                 "你是数据清洗员：判断实体列表里哪些行指的是同一个实体；只输出一个 JSON 对象，字符串值内部禁止英文双引号。"),
 

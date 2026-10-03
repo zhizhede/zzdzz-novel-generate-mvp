@@ -1,6 +1,11 @@
 import { createApp } from 'vue'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
+// 品牌样式：必须在 Element Plus 自带样式之后引入，否则默认值会盖回品牌值。
+// 令牌源、映射层与完整设计契约见 web/design-system/DESIGN.md。
+import './styles/tokens.css'
+import './styles/element-plus.css'
+import './styles/app.css'
 import { ElMessage } from 'element-plus'
 import App from './App.vue'
 import router from './router'

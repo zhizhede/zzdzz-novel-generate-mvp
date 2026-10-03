@@ -1,12 +1,12 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.StylePackDTO;
+import com.zzdzz.novelgen.model.entity.StylePackDO;
 
 import java.util.List;
 
 /** style_packs 数据服务接口（原 StylePackDAO）。 */
-public interface StylePackDataService extends IService<StylePackDTO> {
+public interface StylePackDataService extends IService<StylePackDO> {
 
     Long findIdByName(String name);
 
@@ -30,11 +30,20 @@ public interface StylePackDataService extends IService<StylePackDTO> {
     String findGateConfigById(long id);
 
     /** 预设列表。 */
-    java.util.List<StylePackDTO> listPresets();
+    java.util.List<StylePackDO> listPresets();
 
     /** 预设落库（is_preset=TRUE），返回 id。 */
     long insertPreset(String name, String description, String rulesMd, String fingerprint, String gateConfig);
 
     /** 开书克隆：复制预设为书的私有风格包（is_preset=FALSE），返回 id。 */
     long insertPack(String name, String description, String rulesMd, String fingerprint, String gateConfig);
+
+    /** 同名可复用包（非预设；已软删或无活书引用的孤儿包），无则 null。 */
+    Long findReusablePackId(String name);
+
+    /** 复用包：整包字段原地改写并复活（清软删标记）。 */
+    int reusePack(long id, String name, String description, String rulesMd, String fingerprint, String gateConfig);
+
+    /** 删书级联：本书专属风格包若无其他活书引用则一并软删。 */
+    int softDeleteOrphanOfNovel(long novelId);
 }

@@ -9,11 +9,11 @@ import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
-import com.zzdzz.novelgen.model.dto.ImportedSampleDTO;
-import com.zzdzz.novelgen.model.dto.PresetCorpusDTO;
-import com.zzdzz.novelgen.model.dto.SampleCardDTO;
-import com.zzdzz.novelgen.model.dto.SampleParseTaskDTO;
-import com.zzdzz.novelgen.model.dto.SamplePlotNodeDTO;
+import com.zzdzz.novelgen.model.entity.ImportedSampleDO;
+import com.zzdzz.novelgen.model.entity.PresetCorpusDO;
+import com.zzdzz.novelgen.model.entity.SampleCardDO;
+import com.zzdzz.novelgen.model.entity.SampleParseTaskDO;
+import com.zzdzz.novelgen.model.entity.SamplePlotNodeDO;
 import com.zzdzz.novelgen.model.vo.SampleAssetsVO;
 import com.zzdzz.novelgen.model.vo.SampleCardVO;
 import com.zzdzz.novelgen.model.vo.SampleParamsVO;
@@ -98,7 +98,7 @@ public class SampleParseService {
     public long submitParse(long sampleId, String mode) {
         String m = requireMode(mode);
         requireSample(sampleId);
-        SampleParseTaskDTO alive = taskData.findAliveBySample(sampleId);
+        SampleParseTaskDO alive = taskData.findAliveBySample(sampleId);
         if (alive != null && (alive.getStatus().equals("QUEUED") || alive.getStatus().equals("RUNNING"))) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "该样本解析进行中（" + alive.getStatus() + "），请等待完成");
         }
@@ -112,7 +112,7 @@ public class SampleParseService {
     /** 断点续跑：FAILED/INTERRUPTED 任务从缺口续（已析章跳过）。 */
     public long resumeParse(long sampleId) {
         requireSample(sampleId);
-        SampleParseTaskDTO alive = taskData.findAliveBySample(sampleId);
+        SampleParseTaskDO alive = taskData.findAliveBySample(sampleId);
         if (alive == null || !(alive.getStatus().equals("FAILED") || alive.getStatus().equals("INTERRUPTED"))) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "无可续跑的解析任务（当前状态：" + (alive == null ? "无任务" : alive.getStatus()) + "）");
@@ -127,7 +127,7 @@ public class SampleParseService {
     }
 
     /** 解析任务状态（含资产计数，前端进度条与按钮态）。 */
-    public SampleParseTaskDTO parseStatus(long sampleId) {
+    public SampleParseTaskDO parseStatus(long sampleId) {
         return taskData.findAliveBySample(sampleId);
     }
 
@@ -203,11 +203,11 @@ public class SampleParseService {
     }
 
     /** 由语料块重组原文：title 形如 书名·块N，按 N 数字序拼接；不匹配时若品类块数与台账一致则按 id 序兜底。 */
-    String reconstructText(ImportedSampleDTO sample) {
-        List<PresetCorpusDTO> rows = corpusData.listByGenre(sample.getGenre());
+    String reconstructText(ImportedSampleDO sample) {
+        List<PresetCorpusDO> rows = corpusData.listByGenre(sample.getGenre());
         String prefix = sample.getTitle() + "·块";
-        List<PresetCorpusDTO> matched = new ArrayList<>();
-        for (PresetCorpusDTO row : rows) {
+        List<PresetCorpusDO> matched = new ArrayList<>();
+        for (PresetCorpusDO row : rows) {
             if (row.getTitle() == null) {
                 continue;
             }
@@ -228,7 +228,7 @@ public class SampleParseService {
         }
         matched.sort(Comparator.comparingInt(SampleParseService::blockNo));
         StringBuilder sb = new StringBuilder();
-        for (PresetCorpusDTO row : matched) {
+        for (PresetCorpusDO row : matched) {
             if (sb.length() > 0) {
                 sb.append('\n');
             }
@@ -237,7 +237,7 @@ public class SampleParseService {
         return sb.toString();
     }
 
-    private static int blockNo(PresetCorpusDTO row) {
+    private static int blockNo(PresetCorpusDO row) {
         Matcher m = BLOCK_NO.matcher(row.getTitle() == null ? "" : row.getTitle().strip());
         return m.find() ? Integer.parseInt(m.group(1)) : 0;
     }
@@ -256,7 +256,7 @@ public class SampleParseService {
     }
 
     private void runParse(long taskId, long sampleId, String mode) {
-        ImportedSampleDTO sample = sampleData.getById(sampleId);
+        ImportedSampleDO sample = sampleData.getById(sampleId);
         if (sample == null) {
             taskData.finish(taskId, "FAILED", "", "样本不存在");
             return;
@@ -429,7 +429,7 @@ public class SampleParseService {
     /** 跨章实体归并：纯函数聚合（同名/别名相并）→ LLM 补判模糊组 → 落卡（重建式：先软删旧卡）。 */
     int mergeEntities(long sampleId, Set<Integer> parsedSeqs, int parsedCount) {
         Map<String, MergedEntity> byKey = new LinkedHashMap<>();
-        for (SamplePlotNodeDTO node : plotData.listBySample(sampleId)) {
+        for (SamplePlotNodeDO node : plotData.listBySample(sampleId)) {
             if (!node.getLevel().equals("chapter") || !parsedSeqs.contains(node.getSeq())) {
                 continue;
             }
@@ -562,7 +562,7 @@ public class SampleParseService {
             List<ChapterSeg> segs = e.getValue();
             StringBuilder sb = new StringBuilder();
             for (ChapterSeg seg : segs) {
-                SamplePlotNodeDTO node = plotData.findBySeq(sampleId, "chapter", seg.seq());
+                SamplePlotNodeDO node = plotData.findBySeq(sampleId, "chapter", seg.seq());
                 if (node != null) {
                     sb.append("第").append(seg.seq()).append("章 ").append(node.getTitle()).append("：")
                             .append(node.getSummary()).append('\n');
@@ -601,16 +601,16 @@ public class SampleParseService {
     }
 
     /** 全书大纲合成：卷级结构优先，无卷行则抽样章摘要（头 20 + 尾 20 + 中间隔 10）+ 主要角色卡。 */
-    void synthesizeOutline(long sampleId, ImportedSampleDTO sample, List<ChapterSeg> chapters,
+    void synthesizeOutline(long sampleId, ImportedSampleDO sample, List<ChapterSeg> chapters,
                            int limit, boolean fast, int parsedCount) {
-        List<SamplePlotNodeDTO> volumes = plotData.listBySample(sampleId).stream()
+        List<SamplePlotNodeDO> volumes = plotData.listBySample(sampleId).stream()
                 .filter(n -> n.getLevel().equals("volume")).toList();
         StringBuilder volBlock = new StringBuilder();
-        for (SamplePlotNodeDTO v : volumes) {
+        for (SamplePlotNodeDO v : volumes) {
             volBlock.append(v.getTitle()).append("：").append(v.getSummary()).append('\n');
         }
         if (volBlock.isEmpty()) {
-            for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+            for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
                 if (n.getLevel().equals("chapter") && n.getSeq() <= limit
                         && (n.getSeq() <= 20 || n.getSeq() > limit - 20 || n.getSeq() % 10 == 0)) {
                     volBlock.append(n.getTitle()).append("：").append(n.getSummary()).append('\n');
@@ -618,7 +618,7 @@ public class SampleParseService {
             }
         }
         StringBuilder cardBlock = new StringBuilder();
-        for (SampleCardDTO c : cardData.listBySample(sampleId)) {
+        for (SampleCardDO c : cardData.listBySample(sampleId)) {
             if (c.getKind().equals("character") && cardBlock.length() < 6000) {
                 cardBlock.append(c.getName()).append("：").append(c.getSummary()).append('\n');
             }
@@ -657,20 +657,20 @@ public class SampleParseService {
     /** 世界观文档：卷级结构 + 设定类卡 → markdown 落 kind=world 卡（每样本一行）。 */
     void synthesizeWorld(long sampleId, boolean fast) {
         StringBuilder volBlock = new StringBuilder();
-        for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+        for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
             if (n.getLevel().equals("volume")) {
                 volBlock.append(n.getTitle()).append("：").append(n.getSummary()).append('\n');
             }
         }
         if (volBlock.isEmpty()) {
-            for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+            for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
                 if (n.getLevel().equals("chapter") && (n.getSeq() <= 15 || n.getSeq() % 10 == 0)) {
                     volBlock.append(n.getTitle()).append("：").append(n.getSummary()).append('\n');
                 }
             }
         }
         StringBuilder cardBlock = new StringBuilder();
-        for (SampleCardDTO c : cardData.listBySample(sampleId)) {
+        for (SampleCardDO c : cardData.listBySample(sampleId)) {
             if (!c.getKind().equals("character") && !c.getKind().equals("world")
                     && cardBlock.length() < 8000) {
                 cardBlock.append(c.getKind()).append("·").append(c.getName()).append("：")
@@ -691,7 +691,7 @@ public class SampleParseService {
         if (fast) {
             world = "> 注：快速档抽样合成，完整世界观请升级完整解析。\n\n" + world;
         }
-        for (SampleCardDTO c : cardData.listBySample(sampleId)) {
+        for (SampleCardDO c : cardData.listBySample(sampleId)) {
             if (c.getKind().equals("world")) {
                 cardData.softDeleteById(c.getId());
             }
@@ -701,16 +701,16 @@ public class SampleParseService {
 
     /** 类型/特征标签提取：书级大纲 + 主要角色卡 → LLM 打标（5-15 个）→ 写回 imported_samples.tags。 */
     public List<String> extractTags(long sampleId) {
-        ImportedSampleDTO sample = requireSample(sampleId);
+        ImportedSampleDO sample = requireSample(sampleId);
         StringBuilder material = new StringBuilder();
-        for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+        for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
             if (n.getLevel().equals("book") && n.getSummary() != null) {
                 material.append(n.getSummary());
                 break;
             }
         }
         int characters = 0;
-        for (SampleCardDTO c : cardData.listBySample(sampleId)) {
+        for (SampleCardDO c : cardData.listBySample(sampleId)) {
             if (c.getKind().equals("character") && c.getImportance() != null && c.getImportance() >= 2
                     && material.length() < 9000) {
                 material.append('\n').append(c.getName()).append("：").append(truncate(c.getSummary(), 60));
@@ -746,10 +746,10 @@ public class SampleParseService {
     /** 重启善后：RUNNING 的解析任务标 INTERRUPTED（前端可「继续解析」断点续跑）。 */
     @EventListener(ApplicationReadyEvent.class)
     public void recoverInterrupted() {
-        List<SampleParseTaskDTO> running = taskData.list(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<SampleParseTaskDTO>()
+        List<SampleParseTaskDO> running = taskData.list(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<SampleParseTaskDO>()
                 .eq("status", "RUNNING")
                 .eq("is_deleted", false));
-        for (SampleParseTaskDTO t : running) {
+        for (SampleParseTaskDO t : running) {
             if (taskData.casStatus(t.getId(), "RUNNING", "INTERRUPTED") > 0) {
                 taskData.finish(t.getId(), "INTERRUPTED", "", "后端重启中断，可继续解析断点续跑");
                 log.warn("样本解析任务 {}（sampleId={}）重启置 INTERRUPTED", t.getId(), t.getSampleId());
@@ -761,11 +761,11 @@ public class SampleParseService {
 
     /** 「AI 帮我定」：依据样本结构画像推荐衍生参数（掺水量/POV/节奏/章数；预算带取文风分析的章长带）。 */
     public SampleParamsVO recommendParams(long sampleId) {
-        ImportedSampleDTO sample = requireSample(sampleId);
+        ImportedSampleDO sample = requireSample(sampleId);
         StringBuilder profile = new StringBuilder();
         profile.append("体量：约 ").append(Math.round(sample.getTotalChars() / 10000.0)).append(" 万字");
         int chapterCount = 0;
-        for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+        for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
             if (n.getLevel().equals("book")) {
                 profile.append("；大纲骨架：\n").append(truncate(n.getSummary(), 2000));
             } else if (n.getLevel().equals("chapter")) {
@@ -778,7 +778,7 @@ public class SampleParseService {
                     .append(" 万字/章）");
         }
         profile.append("\n主要角色：");
-        for (SampleCardDTO c : cardData.listBySample(sampleId)) {
+        for (SampleCardDO c : cardData.listBySample(sampleId)) {
             if (c.getKind().equals("character") && c.getImportance() != null && c.getImportance() >= 3
                     && profile.length() < 8000) {
                 profile.append(c.getName()).append("（").append(truncate(c.getSummary(), 60)).append("）");
@@ -837,7 +837,7 @@ public class SampleParseService {
     public SampleParseStatusVO status(long sampleId) {
         int chapters = 0;
         int volumes = 0;
-        for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+        for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
             if (n.getLevel().equals("chapter")) {
                 chapters++;
             } else if (n.getLevel().equals("volume")) {
@@ -850,11 +850,11 @@ public class SampleParseService {
 
     /** 解析资产总览（剧情树 + 卡）。 */
     public SampleAssetsVO assets(long sampleId) {
-        ImportedSampleDTO sample = requireSample(sampleId);
+        ImportedSampleDO sample = requireSample(sampleId);
         SamplePlotVO book = null;
         List<SamplePlotVO> volumes = new ArrayList<>();
         List<SamplePlotVO> chapters = new ArrayList<>();
-        for (SamplePlotNodeDTO n : plotData.listBySample(sampleId)) {
+        for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
             switch (n.getLevel()) {
                 case "book" -> book = SamplePlotVO.from(n, mapper);
                 case "volume" -> volumes.add(SamplePlotVO.from(n, mapper));
@@ -870,14 +870,14 @@ public class SampleParseService {
 
     /** 卡人工纠偏（摘要/正文/重要度；重要度 1-3）。 */
     public void updateCard(long cardId, String summary, String contentMd, Integer importance) {
-        SampleCardDTO card = cardData.getById(cardId);
-        if (card == null || Boolean.TRUE.equals(card.getIsDeleted())) {
+        SampleCardDO card = cardData.getById(cardId);
+        if (card == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "样本资产卡不存在: " + cardId);
         }
         if (importance != null && (importance < 1 || importance > 3)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "重要度必须 1-3");
         }
-        cardData.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SampleCardDTO>()
+        cardData.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SampleCardDO>()
                 .eq("id", cardId)
                 .set("summary", summary == null ? card.getSummary() : summary)
                 .set("content_md", contentMd == null ? card.getContentMd() : contentMd)
@@ -956,8 +956,8 @@ public class SampleParseService {
         }
     }
 
-    private ImportedSampleDTO requireSample(long sampleId) {
-        ImportedSampleDTO sample = sampleData.getById(sampleId);
+    private ImportedSampleDO requireSample(long sampleId) {
+        ImportedSampleDO sample = sampleData.getById(sampleId);
         if (sample == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "导入样本不存在: " + sampleId);
         }

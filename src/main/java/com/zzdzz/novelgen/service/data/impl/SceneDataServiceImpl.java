@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.SceneMapper;
-import com.zzdzz.novelgen.model.dto.SceneDTO;
+import com.zzdzz.novelgen.model.entity.SceneDO;
 import com.zzdzz.novelgen.service.data.SceneDataService;
 import org.springframework.stereotype.Service;
 
@@ -10,7 +10,7 @@ import java.util.List;
 
 /** chapter_scenes 数据服务实现。 */
 @Service
-public class SceneDataServiceImpl extends ServiceImpl<SceneMapper, SceneDTO> implements SceneDataService {
+public class SceneDataServiceImpl extends ServiceImpl<SceneMapper, SceneDO> implements SceneDataService {
 
     @Override
     public int countByChapter(long chapterId) {
@@ -18,12 +18,12 @@ public class SceneDataServiceImpl extends ServiceImpl<SceneMapper, SceneDTO> imp
     }
 
     @Override
-    public List<SceneDTO> findByChapter(long chapterId) {
+    public List<SceneDO> findByChapter(long chapterId) {
         return baseMapper.findByChapter(chapterId);
     }
 
     @Override
-    public List<SceneDTO> listByNovel(long novelId) {
+    public List<SceneDO> listByNovel(long novelId) {
         return baseMapper.listByNovel(novelId);
     }
 

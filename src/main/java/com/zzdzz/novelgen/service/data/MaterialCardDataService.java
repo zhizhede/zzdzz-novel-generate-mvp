@@ -1,18 +1,21 @@
 package com.zzdzz.novelgen.service.data;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.zzdzz.novelgen.model.dto.MaterialCardDTO;
+import com.zzdzz.novelgen.model.entity.MaterialCardDO;
 
 import java.util.List;
 
 /** material_cards 数据服务接口（原 MaterialCardDAO）。 */
-public interface MaterialCardDataService extends IService<MaterialCardDTO> {
+public interface MaterialCardDataService extends IService<MaterialCardDO> {
 
-    List<MaterialCardDTO> listByNovel(long novelId, String kind);
+    List<MaterialCardDO> listByNovel(long novelId, String kind);
 
-    MaterialCardDTO findById(long id);
+    MaterialCardDO findById(long id);
 
     boolean exists(long novelId, String kind, String name);
+
+    /** 除自己以外是否还有同名活卡（改名撞键前置校验）。 */
+    boolean existsOther(long novelId, String kind, String name, long excludeId);
 
     int softDelete(long id);
 

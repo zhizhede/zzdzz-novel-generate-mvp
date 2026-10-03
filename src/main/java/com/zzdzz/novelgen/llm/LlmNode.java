@@ -40,5 +40,9 @@ public final class LlmNode {
     public static final String DERIVE_ORIGINALITY = "derive_originality"; // 衍生大纲·原书复刻评审（判复刻→重写）
     public static final String STYLE_RULES = "style_rules";         // 文风规则提炼（写回风格包 rules_md）
 
+    // ===== 导入书籍·解析链（把样本资产化那套 LLM 能力接到书上；大纲/世界观复用 SAMPLE_OUTLINE/SAMPLE_WORLD） =====
+    public static final String BOOK_CARDS = "book_cards";           // 从本书正文摘要抽设定层素材卡（写 material_cards）
+    public static final String BOOK_CHAPTER_OUTLINE = "book_chapter_outline"; // 从**已有正文**反推章纲（场景拆解）
+
     private LlmNode() {}
 }
