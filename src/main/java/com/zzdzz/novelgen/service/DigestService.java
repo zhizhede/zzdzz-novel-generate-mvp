@@ -42,6 +42,7 @@ public class DigestService {
     private final ForeshadowDataService foreshadowData;
     private final ChapterDataService chapterData;
     private final WorldStateDataService worldStateData;
+    private final CharacterStateService characterState;
     private final PromptTemplateService promptTemplates;
     private final TuningService tuning;
 
@@ -87,6 +88,12 @@ public class DigestService {
         if (state.isObject() && state.size() > 0) {
             worldStateData.upsert(novelId, chapterNo, state);
             log.info("第 {} 章世界状态快照落库", chapterNo);
+            // 同一份快照投影成人物状态账（V39）：jsonb 只能整块读，账做成表才能按人查、跨章核对
+            try {
+                characterState.project(novelId, chapterNo, state);
+            } catch (Exception e) {
+                log.warn("第 {} 章人物状态账投影失败（不影响 digest 结果，核对会缺这章）：{}", chapterNo, e.getMessage());
+            }
         }
         proposeThreads(novelId, chapterNo, threads);
         foreshadowData.markPlanted(novelId, chapterNo);

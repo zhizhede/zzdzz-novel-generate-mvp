@@ -57,6 +57,7 @@ public class ChapterPipelineService {
     private final SceneService sceneService;
     private final GateService gateService;
     private final DigestService digestService;
+    private final CharacterStateService characterState;
     private final ReviewService reviewService;
     private final VolumePlanService volumePlanService;
     private final LlmPort llm;
@@ -250,6 +251,7 @@ public class ChapterPipelineService {
             throw e;
         }
         stageLog.emit(novelId, chapterNo, DIGEST, DONE, Map.of());
+        auditCharacterState(novelId, ch); // 本章账已落库，此刻核对才有得比（只报不拦）
         stageLog.emit(novelId, chapterNo, CHAPTER, DONE, Map.of("chars", fullText.length()));
         return ChapterOutcome.DONE;
     }
@@ -907,6 +909,26 @@ public class ChapterPipelineService {
             return new ReviewStepResult(fullText, ChapterOutcome.REVIEW_BLOCKED);
         }
         return new ReviewStepResult(fullText, ChapterOutcome.DONE);
+    }
+
+    /**
+     * 出稿后人物账核对（digest 之后跑，此刻本章的账才存在）：账内自洽性——某角色已记死亡/离场，
+     * 更靠后的章却又给他记了位置或随身物品。**只报不拦**，结论进事件流水供人工复核，不改变章节去向。
+     * <p>只上报{@code backChapter == 本章}的发现：同一处矛盾只在它被写进来的那一章报一次，不逐章刷屏。
+     */
+    private void auditCharacterState(long novelId, ChapterDO ch) {
+        try {
+            List<CharacterStateService.Finding> findings = characterState.audit(novelId).stream()
+                    .filter(f -> f.backChapter() == ch.getChapterNo())
+                    .toList();
+            if (findings.isEmpty()) return;
+            stageLog.emit(novelId, ch.getChapterNo(), REVIEW, VERDICT,
+                    Map.of("audit", "character_state",
+                            "findings", findings.stream()
+                                    .map(f -> f.kind() + "：" + f.name() + "（" + f.detail() + "）").toList()));
+        } catch (Exception e) {
+            log.warn("第 {} 章人物账核对失败（不影响生成，跳过本轮核对）：{}", ch.getChapterNo(), e.getMessage());
+        }
     }
 
     /** 终检关结果：最终采用的正文 + 是否过检 + 走了哪条处置（KEEP/ROLLBACK/REVISE）+ 是否被用户终止。包内可见同 {@link #recheckAfterReview}。 */

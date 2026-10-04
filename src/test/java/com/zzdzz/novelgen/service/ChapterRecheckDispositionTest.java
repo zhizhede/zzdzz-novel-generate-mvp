@@ -61,7 +61,7 @@ class ChapterRecheckDispositionTest {
                 novelData, chapterData,
                 mock(SceneDataService.class), mock(ChapterStepDataService.class), mock(DigestDataService.class),
                 mock(OutlineService.class), mock(ContextPackerService.class), mock(SceneService.class),
-                gateService, mock(DigestService.class), mock(ReviewService.class),
+                gateService, mock(DigestService.class), mock(CharacterStateService.class), mock(ReviewService.class),
                 mock(VolumePlanService.class), llm, mock(StageLog.class),
                 tuning, mock(PromptTemplateService.class), new ObjectMapper());
         chapter = new ChapterDO();

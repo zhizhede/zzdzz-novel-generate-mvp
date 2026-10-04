@@ -12,6 +12,7 @@ import com.zzdzz.novelgen.model.vo.MaterialCardVO;
 import com.zzdzz.novelgen.model.vo.PromptDetailVO;
 import com.zzdzz.novelgen.model.vo.PromptTemplateVO;
 import com.zzdzz.novelgen.model.vo.TuningVO;
+import com.zzdzz.novelgen.service.CharacterStateService;
 import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.GateService;
 import com.zzdzz.novelgen.service.LibraryService;
@@ -42,6 +43,7 @@ import java.util.Map;
 public class LibraryController {
 
     private final LibraryService libraryService;
+    private final CharacterStateService characterState;
     private final DigestService digestService;
     private final MaterialCardService cardService;
     private final LlmNodeConfigService nodeConfigService;
@@ -365,6 +367,30 @@ public class LibraryController {
     public Result<List<WorldStateDataService.StateRow>> worldStates(@PathVariable long novelId,
                                                             @RequestParam(defaultValue = "50") int limit) {
         return Result.success(libraryService.listWorldStates(novelId, limit));
+    }
+
+    /**
+     * 人物状态账（V39）：不传 chapterNo 看全书（按章升序），传了看那一章。
+     * 表为空时自动从 world_states 回填一次——查看与核对都不该要求先手动建账。
+     */
+    @GetMapping("/novels/{novelId}/character-states")
+    public Result<List<com.zzdzz.novelgen.model.entity.CharacterStateDO>> characterStates(
+            @PathVariable long novelId, @RequestParam(required = false) Integer chapterNo) {
+        return Result.success(chapterNo == null
+                ? characterState.byNovel(novelId)
+                : characterState.byChapter(novelId, chapterNo));
+    }
+
+    /** 人物账核对（出稿后校验器的手动入口）：账内自洽性——死亡/离场之后又被记成在场，只报不拦。 */
+    @GetMapping("/novels/{novelId}/character-states/audit")
+    public Result<List<CharacterStateService.Finding>> characterStateAudit(@PathVariable long novelId) {
+        return Result.success(characterState.audit(novelId));
+    }
+
+    /** 存量书补账：把 world_states 已有快照逐章投影成人物账（幂等）。 */
+    @PostMapping("/novels/{novelId}/character-states/backfill")
+    public Result<Integer> characterStateBackfill(@PathVariable long novelId) {
+        return Result.success(characterState.backfill(novelId));
     }
 
     /** 人工纠偏某章快照：body.state 为 JSON 字符串。 */

@@ -55,7 +55,7 @@ class ChapterRejectSemanticsTest {
                 novelData, chapterData,
                 mock(SceneDataService.class), mock(ChapterStepDataService.class), digestData,
                 mock(OutlineService.class), mock(ContextPackerService.class), mock(SceneService.class),
-                mock(GateService.class), mock(DigestService.class), mock(ReviewService.class),
+                mock(GateService.class), mock(DigestService.class), mock(CharacterStateService.class), mock(ReviewService.class),
                 mock(VolumePlanService.class), mock(LlmPort.class), mock(StageLog.class),
                 mock(TuningService.class), mock(PromptTemplateService.class), new ObjectMapper());
     }

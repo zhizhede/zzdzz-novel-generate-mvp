@@ -47,7 +47,8 @@ class DigestServiceTest {
         chapterData = mock(ChapterDataService.class);
         worldStateData = mock(WorldStateDataService.class);
         service = new DigestService(llm, new LlmJson(null, null), digestData, foreshadowData,
-                chapterData, worldStateData, mock(PromptTemplateService.class), mock(TuningService.class));
+                chapterData, worldStateData, mock(CharacterStateService.class),
+                mock(PromptTemplateService.class), mock(TuningService.class));
         // Mockito 对 String 返回型默认给 null：不显式打桩的话 insertProposal 的编码位是 null，
         // anyString() 匹配不上（同族坑：Long 返回型默认 0）
         when(foreshadowData.nextCode(anyLong())).thenReturn("F001");
