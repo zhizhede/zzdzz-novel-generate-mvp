@@ -111,7 +111,7 @@
         <el-table-column label="创建时间" width="150">
           <template #default="{ row }">{{ (row.createTime || '').toString().replace('T', ' ').slice(0, 16) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="300">
+        <el-table-column label="操作" width="340">
           <template #default="{ row }">
             <el-button size="small" type="primary" link @click="openBook(row)">打开</el-button>
             <el-button v-if="row.status === 'draft'" size="small" type="warning" link
@@ -119,6 +119,7 @@
             <el-button size="small" link @click="openEdit(row)">编辑</el-button>
             <el-button size="small" link @click="openFingerprint(row)">提指纹</el-button>
             <el-button size="small" link @click="openAnalyze(row)">解析</el-button>
+            <el-button size="small" link :loading="exportingId === row.id" @click="exportBook(row)">导出</el-button>
             <el-button size="small" type="danger" link @click="delBook(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -270,6 +271,8 @@ const editForm = ref({})
 const saving = ref(false)
 const dateRange = ref(null)
 const highlightNovelId = ref(null)
+/** 正在导出的书 id（按钮 loading 用；同一次只可能点一本）。 */
+const exportingId = ref(null)
 const filters = reactive({
   keyword: '', sourceType: 'ALL', status: 'ALL', approvalMode: 'ALL',
   autoContinue: 'ALL', minChapters: null, maxChapters: null, sort: 'TIME_DESC'
@@ -345,6 +348,40 @@ function openBook(row) {
 function openEdit(row) {
   editForm.value = { id: row.id, title: row.title, description: row.description || '' }
   editOpen.value = true
+}
+
+/**
+ * 导出全书正文 txt：走原始 fetch 取二进制（api.js 的封装只认 JSON）。
+ * 失败时后端仍回 Result JSON（如「本书还没有正文可导出」），所以按 content-type 分流，
+ * 别把错误 JSON 当 txt 存下来——那会得到一个打不开的「文件」。
+ */
+async function exportBook(row) {
+  exportingId.value = row.id
+  try {
+    const resp = await fetch(`/api/novels/${row.id}/export`, { credentials: 'same-origin' })
+    if (!resp.ok || !(resp.headers.get('content-type') || '').includes('text/plain')) {
+      let msg = `导出失败（HTTP ${resp.status}）`
+      try {
+        const j = await resp.json()
+        if (j && j.message) msg = j.message
+      } catch (e) { /* 不是 JSON 就用默认文案 */ }
+      ElMessage.error(msg)
+      return
+    }
+    const url = URL.createObjectURL(await resp.blob())
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${row.title}.txt`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`已导出《${row.title}》`)
+  } catch (e) {
+    ElMessage.error(e.message || '导出失败')
+  } finally {
+    exportingId.value = null
+  }
 }
 
 async function saveEdit() {
