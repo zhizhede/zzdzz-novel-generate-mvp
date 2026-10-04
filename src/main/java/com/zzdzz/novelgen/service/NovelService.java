@@ -25,6 +25,7 @@ import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.llm.LlmTemps;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.service.data.CanonDocDataService;
+import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.ImportedSampleDataService;
 import com.zzdzz.novelgen.service.data.MaterialCardDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
@@ -940,6 +941,49 @@ public class NovelService {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }
         return novel;
+    }
+
+    /** 全书导出：书名 + 拼好的正文（有正文的章按章号升序）。 */
+    public record ExportText(String title, String content, int chapters, int chars) {
+    }
+
+    /**
+     * 导出全书正文 txt：只装有正文的章，按章号升序，每章「第N章 [标题]」独立一行 + 空行 + 正文 + 空行。
+     *
+     * <p>刻意**不加书名/简介抬头**：抬头会被「按行首标题切章」的导入器当成第 1 章的正文，
+     * 导出稿要能直接再导入回来（书名已经在文件名里）。
+     */
+    public ExportText exportText(long novelId) {
+        NovelDO novel = requireNovel(novelId);
+        List<ChapterDataService.ChapterTextRow> rows = chapterData.listTextsByNovel(novelId);
+        if (rows.isEmpty()) {
+            throw new BizException(ErrorCode.STATE_CONFLICT,
+                    "《" + novel.getTitle() + "》还没有正文可导出——先在「规划」页或工作台生成章节");
+        }
+        StringBuilder sb = new StringBuilder();
+        int chars = 0;
+        for (ChapterDataService.ChapterTextRow r : rows) {
+            String heading = chapterHeading(r);
+            sb.append(heading).append('\n').append('\n');
+            String body = r.fullText() == null ? "" : r.fullText().strip();
+            sb.append(body).append('\n').append('\n');
+            chars += body.length();
+        }
+        return new ExportText(novel.getTitle(), sb.toString(), rows.size(), chars);
+    }
+
+    /** 标题本身已是个章题（第3章 / 第一章 归墟）就不再套一层，免得拼出「第3章 第3章 归墟」。 */
+    private static final java.util.regex.Pattern TITLE_IS_HEADING =
+            java.util.regex.Pattern.compile("^第\\s*(?:\\d+|[一二三四五六七八九十百零两]+)\\s*章.*");
+
+    /** 章题行：title 已自带章序号就原样用（导入书的 title 往往就是原行首标题）。 */
+    static String chapterHeading(ChapterDataService.ChapterTextRow r) {
+        String base = "第" + r.chapterNo() + "章";
+        String title = r.title() == null ? "" : r.title().strip();
+        if (title.isEmpty() || TITLE_IS_HEADING.matcher(title).matches()) {
+            return title.isEmpty() ? base : title;
+        }
+        return base + " " + title;
     }
 
     /** 衍生配置全量（含 sourceSampleId 回显、类型标签、开书模式与迁移换名源）。 */

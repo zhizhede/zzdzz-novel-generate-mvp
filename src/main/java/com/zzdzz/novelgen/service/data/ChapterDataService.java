@@ -14,8 +14,8 @@ public interface ChapterDataService extends IService<ChapterDO> {
     record Opening(int chapterNo, String firstLines) {
     }
 
-    /** 章文本行（开场相似度/对话密度统计用）。 */
-    record ChapterTextRow(int chapterNo, String fullText) {
+    /** 章文本行（开场相似度/对话密度统计、全书导出用）。title 可为 NULL——迁移/换皮建的书不伪造章题。 */
+    record ChapterTextRow(int chapterNo, String title, String fullText) {
     }
 
     /** 卷级复盘的事实行（规划 + 实际产出）。 */

@@ -57,7 +57,7 @@ class BookFingerprintServiceTest {
     }
 
     private static ChapterDataService.ChapterTextRow row(int no, String text) {
-        return new ChapterDataService.ChapterTextRow(no, text);
+        return new ChapterDataService.ChapterTextRow(no, null, text);
     }
 
     @Test

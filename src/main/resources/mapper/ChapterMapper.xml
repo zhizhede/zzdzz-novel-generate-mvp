@@ -41,7 +41,7 @@
     </select>
 
     <select id="listTextsByNovel" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
-                SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
+                SELECT chapter_no AS "chapterNo", title, full_text AS "fullText" FROM chapters
                 WHERE novel_id=#{novelId}
                   AND full_text IS NOT NULL AND full_text!=''
                 ORDER BY chapter_no

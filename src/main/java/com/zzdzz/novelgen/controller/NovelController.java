@@ -11,6 +11,9 @@ import com.zzdzz.novelgen.service.DeriveSupport;
 import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.NovelService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +23,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /** 作品列表、开书与审批模式切换（auto 直过 / manual 人工）。 */
@@ -163,6 +168,20 @@ public class NovelController {
     public Result<com.zzdzz.novelgen.service.NovelService.DeriveConfigFullVO> updateDeriveConfig(
             @PathVariable long id, @RequestBody NovelCreateDTO vo) {
         return Result.success(novelService.updateDeriveConfig(id, vo.deriveConfig()));
+    }
+
+    /**
+     * 导出全书正文 txt（书籍管理页「导出」）：只装有正文的章，按章号升序，每章「第N章 [标题]」独立成行。
+     * 不加书名抬头，导出稿可直接再导入；文件名用书名走 RFC 5987（中文不乱码）。
+     */
+    @GetMapping("/{id}/export")
+    public ResponseEntity<byte[]> export(@PathVariable long id) {
+        NovelService.ExportText e = novelService.exportText(id);
+        String filename = URLEncoder.encode(e.title() + ".txt", StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
+                .contentType(new MediaType("text", "plain", StandardCharsets.UTF_8))
+                .body(e.content().getBytes(StandardCharsets.UTF_8));
     }
 
     public record NovelUpdateVO(String title, String description) {
