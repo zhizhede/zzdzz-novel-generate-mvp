@@ -37,6 +37,7 @@ class DigestServiceTest {
     private ForeshadowDataService foreshadowData;
     private ChapterDataService chapterData;
     private WorldStateDataService worldStateData;
+    private CharacterStateService characterState;
     private DigestService service;
 
     @BeforeEach
@@ -46,8 +47,9 @@ class DigestServiceTest {
         foreshadowData = mock(ForeshadowDataService.class);
         chapterData = mock(ChapterDataService.class);
         worldStateData = mock(WorldStateDataService.class);
+        characterState = mock(CharacterStateService.class);
         service = new DigestService(llm, new LlmJson(null, null), digestData, foreshadowData,
-                chapterData, worldStateData, mock(CharacterStateService.class),
+                chapterData, worldStateData, characterState,
                 mock(PromptTemplateService.class), mock(TuningService.class));
         // Mockito 对 String 返回型默认给 null：不显式打桩的话 insertProposal 的编码位是 null，
         // anyString() 匹配不上（同族坑：Long 返回型默认 0）
@@ -115,6 +117,31 @@ class DigestServiceTest {
         ArgumentCaptor<String> contents = ArgumentCaptor.forClass(String.class);
         verify(foreshadowData).insertProposal(eq(9L), anyString(), contents.capture(), eq(3));
         assertThat(contents.getValue()).isEqualTo("正主：根层那条");
+    }
+
+    /** 人物账（V39）投影钩子：快照落库后必须把同一份状态交给 CharacterStateService 投影。 */
+    @Test
+    void projectsCharacterStateFromTheSameSnapshot() throws Exception {
+        llmReturns(fixture());
+
+        service.digest(9L, 301L, 3, "本章正文");
+
+        ArgumentCaptor<JsonNode> state = ArgumentCaptor.forClass(JsonNode.class);
+        verify(characterState).project(eq(9L), eq(3), state.capture());
+        assertThat(state.getValue().path("new_threads").isMissingNode()).isTrue(); // 抬升后的快照才投影
+    }
+
+    /** 投影失败不许连累 digest（账缺这一章，下次回填或重投影补上）。 */
+    @Test
+    void projectFailureDoesNotBreakDigest() throws Exception {
+        llmReturns(fixture());
+        org.mockito.Mockito.doThrow(new IllegalStateException("投影炸了"))
+                .when(characterState).project(anyLong(), org.mockito.ArgumentMatchers.anyInt(), any());
+
+        boolean computed = service.digest(9L, 301L, 3, "本章正文");
+
+        assertThat(computed).isTrue();
+        verify(chapterData).updateStatus(301L, ChapterStatus.DIGESTED.wire());
     }
 
     @Test
