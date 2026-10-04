@@ -73,9 +73,17 @@ public class ContextPackerService {
             sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_tags",
                     java.util.Map.of("tags", String.join("、", cfg.tags()))));
         }
-        // 衍生差异红线（书 10 实证：克隆的原书主角卡 pinned 注入后，卷规划复述了原书剧情）
+        // 衍生差异红线（书 10 实证：克隆的原书主角卡 pinned 注入后，卷规划复述了原书剧情）。
+        // 剧情迁移模式注入相反口径的「迁移段」：红线命令「禁止复述原书情节、主角必须原创」，
+        // 迁移要的正是照章纲复现——两段同注会让模型无所适从，故二选一。
         if (!sceneOnly && cfg.sourceSampleId() != null) {
-            sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_redline", java.util.Map.of()));
+            if (cfg.migrate()) {
+                sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_migrate",
+                        java.util.Map.of("povCharacter",
+                                java.util.Objects.requireNonNullElse(cfg.povCharacter(), "本书主角"))));
+            } else {
+                sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_redline", java.util.Map.of()));
+            }
         }
         return sb.toString();
     }

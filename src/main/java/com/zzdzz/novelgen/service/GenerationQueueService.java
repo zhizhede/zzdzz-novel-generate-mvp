@@ -176,6 +176,7 @@ public class GenerationQueueService {
     /** ⑤ 任务化：卷纲自动规划入队（原同步 2-10 分钟 HTTP）。 */
     public long submitPlan(long novelId, String novelTitle, int volNo, int from, Integer to,
                            String seedOutline, Long userId) {
+        assertMigratedNotOverwritten(novelId, from);
         String payload;
         try {
             Map<String, Object> m = new java.util.LinkedHashMap<>();
@@ -188,6 +189,23 @@ public class GenerationQueueService {
             payload = null;
         }
         return enqueue(novelId, novelTitle, from, to == null ? from : to, userId, TaskKind.PLAN.wire(), payload, null);
+    }
+
+    /**
+     * 剧情迁移守卫：迁入的章自带章纲（那就是迁移来的剧情），卷规划会从 from 起**整卷删掉重写**，
+     * 等于把迁移结果抹掉。在入队口（花钱之前）就拒绝，adopt 侧还有第二道同条件兜底。
+     */
+    private void assertMigratedNotOverwritten(long novelId, int from) {
+        if (!DeriveSupport.parse(novelData.findDeriveConfig(novelId)).migrate()) {
+            return;
+        }
+        for (com.zzdzz.novelgen.model.entity.ChapterDO c : chapterData.listSummariesByNovel(novelId)) {
+            if (c.getChapterNo() >= from && c.getOutlineYaml() != null && !c.getOutlineYaml().isBlank()) {
+                throw new BizException(ErrorCode.STATE_CONFLICT,
+                        "第 " + c.getChapterNo() + " 章是「剧情迁移」迁入的剧情（已带章纲），卷规划会把它整卷抹掉——"
+                                + "迁移书请直接入队生成；确需重规划请先删除该卷，或改成原创衍生模式");
+            }
+        }
     }
 
     /** 章纲批量生成入队（from=to 即单章）：逐章出场景拆解，进度/事件走队列口径，工作台可见可停。 */

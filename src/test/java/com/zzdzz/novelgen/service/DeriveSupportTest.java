@@ -68,4 +68,33 @@ class DeriveSupportTest {
         assertThat(DeriveSupport.densityHint(50)).contains("均衡");
         assertThat(DeriveSupport.densityHint(10)).contains("拉满");
     }
+
+    @Test
+    void modeDefaultsToOriginalAndOnlyMigrateIsOptIn() {
+        // 缺省/未知/坏 JSON 一律按原创衍生（防复刻防线不因坏配置被静默关掉）
+        assertThat(DeriveSupport.parse(null).migrate()).isFalse();
+        assertThat(DeriveSupport.parse("{bad json").migrate()).isFalse();
+        assertThat(DeriveSupport.parse("{\"mode\":\"WHATEVER\"}").migrate()).isFalse();
+        assertThat(DeriveSupport.parse("{\"mode\":\"\"}").migrate()).isFalse();
+        assertThat(DeriveSupport.parse("{\"mode\":\"ORIGINAL\"}").migrate()).isFalse();
+        // MIGRATE 大小写与空白宽容
+        assertThat(DeriveSupport.parse("{\"mode\":\"MIGRATE\"}").migrate()).isTrue();
+        assertThat(DeriveSupport.parse("{\"mode\":\" migrate \"}").migrate()).isTrue();
+        assertThat(DeriveSupport.normalizeMode(null)).isEqualTo(DeriveSupport.MODE_ORIGINAL);
+        assertThat(DeriveSupport.normalizeMode("Migrate")).isEqualTo(DeriveSupport.MODE_MIGRATE);
+    }
+
+    @Test
+    void reskinIsMigrateLikeButFlaggedSeparately() {
+        DeriveSupport.Cfg r = DeriveSupport.parse("{\"mode\":\"RESKIN\"}");
+        // 换皮同样是「按样本剧情走」：防复刻三闸与自愈换目标都要退让（migrate() 为真）
+        assertThat(r.migrate()).isTrue();
+        assertThat(r.reskin()).isTrue();
+        DeriveSupport.Cfg m = DeriveSupport.parse("{\"mode\":\"MIGRATE\"}");
+        assertThat(m.migrate()).isTrue();
+        assertThat(m.reskin()).isFalse();
+        assertThat(DeriveSupport.parse("{\"mode\":\"ORIGINAL\"}").reskin()).isFalse();
+        assertThat(DeriveSupport.parse(null).reskin()).isFalse();
+        assertThat(DeriveSupport.normalizeMode(" reskin ")).isEqualTo(DeriveSupport.MODE_RESKIN);
+    }
 }

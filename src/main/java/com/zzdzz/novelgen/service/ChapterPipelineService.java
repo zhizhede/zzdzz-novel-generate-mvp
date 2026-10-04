@@ -153,6 +153,14 @@ public class ChapterPipelineService {
             }
         }
         if (outcome != ChapterOutcome.FAILED) return outcome;
+        // 剧情迁移书：不换目标。replanChapter 会 resetForReoutline（删掉迁入的场景与章纲）让 AI 重编，
+        // 等于把这一章的迁移剧情换成 AI 现编——「换一条写法」正是迁移要避免的事。失败就交人工。
+        if (isMigrate(novelId)) {
+            stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
+                    Map.of("message", "剧情迁移章：不换目标（迁入剧情固定），保留原章纲转人工"));
+            log.warn("第 {} 章重试仍败；本书为剧情迁移模式，跳过 replan（迁入剧情不换），转人工", chapterNo);
+            return outcome;
+        }
         String reason = failureReason(novelId, chapterNo);
         stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
                 Map.of("message", "重试仍败，重写卷纲目标后再试", "reason", reason));
@@ -878,9 +886,15 @@ public class ChapterPipelineService {
     private ChapterOutcome reviewBlockedDisposition(long novelId, int chapterNo, String approvalMode,
                                                     BooleanSupplier stopCheck, int attempt) {
         // 无人续跑的书按书覆盖为自动换目标重写（tuning 是平台级默认，derive_config.autoContinue 是书级口径）
-        boolean autoBook = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).autoContinueOn();
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        boolean autoBook = cfg.autoContinueOn();
         boolean replanAllowed = autoBook
                 || tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
+        // 剧情迁移书同样不换目标（理由见 runChapterWithHeal）：审校硬伤转人工，别把迁入剧情换成现编。
+        if (cfg.migrate()) {
+            log.warn("第 {} 章审校复审仍 BLOCKER；本书为剧情迁移模式，跳过自动换目标，转人工", chapterNo);
+            return markReviewPending(novelId, chapterNo);
+        }
         if (!replanAllowed || stopCheck.getAsBoolean()) {
             return markReviewPending(novelId, chapterNo);
         }
@@ -901,6 +915,11 @@ public class ChapterPipelineService {
         stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of("reason", "review_blocker"));
         log.warn("第 {} 章审校硬伤未清，转人工审批", chapterNo);
         return ChapterOutcome.PENDING;
+    }
+
+    /** 本书是否剧情迁移模式（derive_config.mode=MIGRATE）：迁移书的章纲是迁入的剧情，一律不换目标。 */
+    private boolean isMigrate(long novelId) {
+        return DeriveSupport.parse(novelData.findDeriveConfig(novelId)).migrate();
     }
 
     /** replan 前清正文：replanChapter 守卫拒绝带正文的章（既有梯子在拼章后失败走 replan 会撞守卫的潜伏坑）。 */

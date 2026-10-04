@@ -70,7 +70,8 @@ class NovelServiceStylePackTest {
                 mock(CanonDocDataService.class), taskData,
                 mock(com.zzdzz.novelgen.service.data.EmbeddingDataService.class),
                 mock(LlmPort.class), mock(LlmJson.class),
-                new PromptTemplateService(promptDao), new ObjectMapper());
+                new PromptTemplateService(promptDao), new ObjectMapper(),
+                mock(OutlineService.class));
     }
 
     private static StylePackDO preset(long id, String name) {

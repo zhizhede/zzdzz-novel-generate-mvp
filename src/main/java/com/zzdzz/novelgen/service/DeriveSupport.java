@@ -10,13 +10,33 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  */
 public final class DeriveSupport {
 
+    /**
+     * 开书模式：ORIGINAL=原创衍生（默认，走防复刻三道闸：人物卡不克隆、激活拦骨架、复刻审校）；
+     * MIGRATE=剧情迁移（沿用样本世界观/人物/逐章剧情，不做原创性审校）；
+     * RESKIN=剧情换皮（保留样本**剧情骨架**，人名/场景/职业/实体/结局执行者全部随机重造）。
+     */
+    public static final String MODE_ORIGINAL = "ORIGINAL";
+    public static final String MODE_MIGRATE = "MIGRATE";
+    public static final String MODE_RESKIN = "RESKIN";
+
     /** 解析后的衍生配置（全部可空=未设置，消费方各自取默认）。 */
     public record Cfg(Integer water, String pov, String povCharacter, String pacingNote,
                       Integer chaptersPerVolume, Integer targetChapters, Boolean autoContinue,
-                      Integer priority, Long sourceSampleId, java.util.List<String> tags) {
+                      Integer priority, Long sourceSampleId, java.util.List<String> tags, String mode,
+                      String protagonistFrom) {
 
         public boolean autoContinueOn() {
             return Boolean.TRUE.equals(autoContinue);
+        }
+
+        /** 是否「按样本剧情走」的模式（原样迁移或换皮迁移）。防复刻三闸与自愈换目标在这些模式下都要退让。 */
+        public boolean migrate() {
+            return MODE_MIGRATE.equals(mode) || MODE_RESKIN.equals(mode);
+        }
+
+        /** 是否剧情换皮模式：结构照搬、外衣全随机，需要跑 derive_reskin 任务。 */
+        public boolean reskin() {
+            return MODE_RESKIN.equals(mode);
         }
     }
 
@@ -28,7 +48,7 @@ public final class DeriveSupport {
     /** 坏 JSON/空值容忍：解析失败返回全空配置。 */
     public static Cfg parse(String json) {
         if (json == null || json.isBlank()) {
-            return new Cfg(null, null, null, null, null, null, null, null, null, null);
+            return new Cfg(null, null, null, null, null, null, null, null, null, null, null, null);
         }
         try {
             JsonNode n = MAPPER.readTree(json);
@@ -47,10 +67,27 @@ public final class DeriveSupport {
                     n.path("autoContinue").isBoolean() ? n.path("autoContinue").asBoolean() : null,
                     intOrNull(n.path("priority")),
                     n.path("sourceSampleId").canConvertToLong() ? n.path("sourceSampleId").asLong() : null,
-                    tags);
+                    tags,
+                    normalizeMode(textOrNull(n.path("mode"))),
+                    textOrNull(n.path("protagonistFrom")));
         } catch (Exception e) {
-            return new Cfg(null, null, null, null, null, null, null, null, null, null);
+            return new Cfg(null, null, null, null, null, null, null, null, null, null, null, null);
         }
+    }
+
+    /** mode 归一化：认 MIGRATE / RESKIN（大小写/空白宽容），其余（含 null/未知值）一律 ORIGINAL。 */
+    public static String normalizeMode(String mode) {
+        if (mode == null) {
+            return MODE_ORIGINAL;
+        }
+        String m = mode.strip();
+        if (MODE_MIGRATE.equalsIgnoreCase(m)) {
+            return MODE_MIGRATE;
+        }
+        if (MODE_RESKIN.equalsIgnoreCase(m)) {
+            return MODE_RESKIN;
+        }
+        return MODE_ORIGINAL;
     }
 
     /**

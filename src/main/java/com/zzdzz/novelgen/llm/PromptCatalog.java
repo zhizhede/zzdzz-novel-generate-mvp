@@ -563,6 +563,15 @@ public final class PromptCatalog {
                 - 只沿用其世界观规则、力量体系与类型套路。
                 """),
 
+        // MIGRATE（剧情迁移）与上面的红线段互斥注入：红线命令「禁止复述原书情节、主角必须原创」，
+        // 迁移书要的恰好相反（按迁入章纲逐章走）。两段同注会让模型无所适从，故由 ContextPackerService 二选一。
+        new TemplateDef(LlmNode.SCENE_DRAFT, "derive_migrate", "衍生段·剧情迁移口径（MIGRATE 注入，替代差异红线）", false, """
+                【剧情迁移（最高优先级）】本书按样本剧情逐章迁移生成，不是原创改写：
+                - 严格按本章章纲与场景拆解推进：事件、顺序、结果都照章纲走，不得另编情节或改动走向；
+                - 章纲里出现的人名就是本书的定名（主角为「{povCharacter}」），**不要改名、不要另起同名角色**；
+                - 允许在场景内部细化动作、对白、感官与心理，但不得新增改变走向的事件。
+                """),
+
         // 文风指纹量化目标（GateService.fingerprintGuidance 按书生成；有指纹才注入——第一稿就朝门禁及格线写）
         new TemplateDef(LlmNode.SCENE_DRAFT, "fingerprint_targets", "写作段·文风指纹量化目标（与机械门禁同口径）", false, """
                 【文风指纹指标（机械门禁逐条硬判，超限直接打回重写——写作时同步自查）】
