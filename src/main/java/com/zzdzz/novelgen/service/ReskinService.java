@@ -54,6 +54,8 @@ public class ReskinService {
     private final LlmJson llmJson;
     private final OutlineService outlineService;
     private final ObjectMapper mapper;
+    /** 换皮后补全设定层素材卡（地点/物品/组织/现象）——只建人物卡会让设定注入形同虚设。 */
+    private final BookAssetExtractService bookAssets;
 
     /** 换皮设定在 canon 里的落库位置（一本书一份，重跑覆盖）。 */
     public static final String SKIN_KIND = "misc";
@@ -64,8 +66,8 @@ public class ReskinService {
             "原章未标注，请从原章摘要与节拍里的时间线索判断（如「多年后」「冬去春来」「孩子已能走路」）；"
                     + "推不出来就照剧情推进估一个量级并写明依据，严禁默认按「紧接上一章」处理";
 
-    /** 换皮结果：换了多少章、多少节拍。 */
-    public record ReskinResult(int chapters, int beats) {
+    /** 换皮结果：换了多少章、多少节拍、补了多少张设定卡。 */
+    public record ReskinResult(int chapters, int beats, int cards) {
     }
 
     /**
@@ -145,8 +147,22 @@ public class ReskinService {
             }
             done++;
         }
-        log.info("剧情换皮完成：novelId={} 换皮 {} 章 / {} 个场景", novelId, done, beats);
-        return new ReskinResult(done, beats);
+        // ③ 补全设定层素材卡：只靠换皮设定的人名表，本书只有人物卡，地点/器物/组织/现象一律无卡，
+        // 「场景按 pinned + 别名命中注入」就形同虚设（实跑书 56 六张卡全是 character、aliases 全空，
+        // 正文随之漂出无来历的器物与前后不一的部位名）。这里复用样本资产化那条链路，从已换成新外衣的
+        // 章行目标/钩子（无 digest 时 chapterDigestBlock 回退用 goal/hook）抽全套设定卡。
+        // 只补不炸：卡不全顶多是注入弱一点，不该让整批换皮判失败，故 fail-open 只留日志。
+        // 只加 created：updated 命中的必然是上面 bindCharacters 刚落的那几张，already 计过一遍
+        int cardTotal = cards;
+        try {
+            BookAssetExtractService.CardWriteResult w = bookAssets.extractCards(novelId, true);
+            cardTotal = cards + w.created();
+            log.info("剧情换皮·设定卡补全：novelId={} 新增 {} 张、覆盖 {} 张", novelId, w.created(), w.updated());
+        } catch (Exception e) {
+            log.warn("剧情换皮·设定卡补全失败（不影响换皮结果，设定注入会偏弱）：novelId={} {}", novelId, e.getMessage());
+        }
+        log.info("剧情换皮完成：novelId={} 换皮 {} 章 / {} 个场景 / {} 张卡", novelId, done, beats, cardTotal);
+        return new ReskinResult(done, beats, cardTotal);
     }
 
     /** ① 定新外衣：题材/世界/主角/命名风格 + 新全书大纲。传入样本摘要供「别撞车」比对。 */

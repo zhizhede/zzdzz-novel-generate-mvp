@@ -237,8 +237,11 @@ flowchart LR
 | 克隆样本资产 | **一概不克隆**（素材卡/世界观/大纲都是旧外衣）；只按样本建章行结构，且**不预物化场景** |
 | 换皮设定 | `derive_reskin/skin`（温度 1.0，随机种子入提示词）：题材/世界/主角/配角风格 + **人物名表 characters** + **新全书大纲**；落 `canon_docs(misc/换皮设定)` 留档，新大纲/世界观写 canon。**全书共用一套**，先定再逐章用。characters 落成 `material_cards(kind=character)`，并回填 `derive_config.povCharacter`（用户已指定则不动）——否则场景提示词的视角人物还是「未指定」，模型会自由发挥人名 |
 | 逐章换皮 | `derive_reskin/chapter`：节拍数量/顺序/功能与**结局形状**一比一保留，人名地名组织名职业器物生物全换；写回 `chapters.goal/hook` 并复用 `OutlineService.materializeScenes` 物化场景 |
-| 执行方式 | `TaskKind.RESKIN` 队列任务（`kind` 无 CHECK 约束，无需迁移），建书**事务提交后**入队；逐章 fail-fast |
+| **设定卡补全**（收尾第三步） | 逐章换皮跑完后调 `BookAssetExtractService.extractCards(novelId, **overwrite=true**)`，从已换成新外衣的章行目标/钩子（有 digest 时用 digest）抽**全套 kind** 设定卡：地点/物品/组织/现象/地标/灾害，并填 `aliases`。**必须 overwrite**：换皮设定只给得出人物卡，不覆盖则已有人物卡的别名永远补不上。**fail-open**：补卡失败只 warn，不连累换皮结果 |
+| 执行方式 | `TaskKind.RESKIN` 队列任务（`kind` 无 CHECK 约束，无需迁移），建书**事务提交后**入队；逐章 fail-fast（补卡步例外，见上） |
 | `protagonistFrom` | 不适用（人名由换皮设定生成） |
+
+- **为什么必须有「设定卡补全」这一步**（2026-10-04 晚增补）：素材卡是设定层的注入来源（场景按 `pinned` + 别名命中注入）。换皮设定里的 `characters` 只覆盖人物，实跑书 56 因此只有 6 张卡且**全是 character、aliases 全空**——地点/器物/组织/现象一律无卡，注入形同虚设，正文随之漂出「无来历的铜片」「同一件衣服前后两个名字」。补全后同一本书是 **40 张卡覆盖 6 类**（地点 6 / 物品 8 / 组织 5 / 现象 9 / 灾害 1 / 人物 11），32 张带别名——「纹服」的别名里直接记着「纹衣」，一个卡位就收掉了术语不一致。
 
 验收（2026-10-04 实弹，悉达多 3 章探针、已清）：建书即自动入队 → DONE「3 章 / 18 场景」，4 次调用 21,254 tokens；古印度宗教 → 科幻轨道打捞，悉达多 → 周衡、乔文达 → 宋砚、沙门 → 零压行者、吠陀 → 《轨道律》，而第 1 章仍是同样 5 拍同序同功能。
 - **验收（2026-10-03 实弹，悉达多样本 3 章探针、已清）**：9 张卡（含 4 张人物卡）、3 章章行（卷号/卷名/goal/hook 全来自样本）、18 个场景预物化、activate 放行；跑第 1 章得 `llm_call_log` **无 `outline` 节点**、6 次 scene_draft + 3 次 scene_revise → 成稿 2929 字 DIGESTED，记忆四层（digest/world_state/foreshadow/embedding）均有真实行。

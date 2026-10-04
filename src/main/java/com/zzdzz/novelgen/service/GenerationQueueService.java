@@ -578,7 +578,8 @@ public class GenerationQueueService {
             ReskinService.ReskinResult r = reskinService.run(task.novelId(), task.fromChapter(), task.toChapter(),
                     // 进度按「已完成的章数」上报：第 no 章刚跑完 → no - from + 1（此前写成 no - from，末章恒少 1）
                     (no, msg) -> taskDAO.updateProgress(task.id(), no - task.fromChapter() + 1, no, msg));
-            String summary = "换皮完成：" + r.chapters() + " 章 / " + r.beats() + " 个场景（换皮设定见素材库·正典「换皮设定」）";
+            String summary = "换皮完成：" + r.chapters() + " 章 / " + r.beats() + " 个场景 / "
+                    + r.cards() + " 张设定卡（换皮设定见素材库·正典「换皮设定」）";
             taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), summary);
             emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
                     StageLog.Phase.DONE, summary);
