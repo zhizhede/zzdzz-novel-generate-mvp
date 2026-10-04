@@ -56,10 +56,16 @@ public interface ChapterMapper extends BaseMapper<ChapterDO> {
 
     int markOutlined(@Param("chapterId") long chapterId, @Param("outlineYaml") String outlineYaml);
 
-    /** 人工打回清场（流 A）：状态→NEW、清正文/章纲/轮次、落打回意见；调用方先删场景与门禁报告。 */
+    /** 打回章纲清场（流 A）：状态→NEW、清正文/章纲/轮次、落打回意见；调用方先删场景与门禁报告。 */
     int markRejected(@Param("chapterId") long chapterId, @Param("reason") String reason);
 
-    /** 打回意见消费后清零（章纲提示词注入成功后调用）。 */
+    /** 打回正文清场（流 A）：状态→NEW、清正文/轮次、落打回意见，**保留 outline_yaml**；调用方先重置场景草稿与门禁报告。 */
+    int markTextRejected(@Param("chapterId") long chapterId, @Param("reason") String reason);
+
+    /** 清场景草稿与门禁状态、保留场景蓝图（goal/人物/字数预算）——打回正文后按同一套场景重写。 */
+    int resetSceneDrafts(@Param("chapterId") long chapterId);
+
+    /** 打回意见消费后清零（章纲/场景提示词注入成功后调用）。 */
     int clearRejectReason(@Param("chapterId") long chapterId);
 
     int updatePlan(@Param("chapterId") long chapterId, @Param("volumeNo") Integer volumeNo, @Param("arc") String arc,

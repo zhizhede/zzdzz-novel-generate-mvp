@@ -421,7 +421,7 @@ public class ContextPackerService {
         String user = promptTemplates.format(LlmNode.SCENE_DRAFT, "user", chapterNo, spec.sceneNo(), ch.getTitle(), spec.goal(),
                 spec.present(), spec.mustReveal(), spec.mustNot(), spec.words(),
                 simileRedline,
-                deriveSection(novelId),
+                deriveSection(novelId) + rejectNote(ch),
                 craft,
                 world(novelId),
                 charactersForScene(novelId, matchText),
@@ -432,5 +432,21 @@ public class ContextPackerService {
                 prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，无上一章后果）" : prevBrief,
                 prevSceneText == null ? (prevTail == null ? "（无）" : prevTail) : prevSceneText);
         return new Pack(system, user);
+    }
+
+    /**
+     * 人工打回意见（打回正文时章纲与场景蓝图保留，没有章纲步可注入意见，改从场景侧下发）。
+     * 长度护栏与章纲侧同键同口径（reject_reason_max_len）；意见由管线在场景步走完后清零。
+     */
+    private String rejectNote(ChapterDO ch) {
+        String reason = ch.getRejectReason();
+        if (reason == null || reason.isBlank()) return "";
+        int maxLen = tuning.i("reject_reason_max_len", TuningDefaults.REJECT_REASON_MAX_LEN);
+        String trimmed = reason.strip();
+        if (trimmed.length() > maxLen) {
+            trimmed = trimmed.substring(0, maxLen) + "…（意见超长已截断）";
+        }
+        return promptTemplates.getSection(LlmNode.SCENE_DRAFT, "reject_note",
+                java.util.Map.of("reason", trimmed));
     }
 }

@@ -369,7 +369,10 @@ public class ChapterPipelineService {
     /** 打回目标：队列层据此重新入队。 */
     public record RejectTarget(long novelId, String novelTitle, int chapterNo) {}
 
-    /** 终稿打回：仅 PENDING_APPROVAL 可打回；清场落意见重排队，意见注入下次章纲。 */
+    /**
+     * 终稿打回：仅 PENDING_APPROVAL 可打回。**打回的是正文，不是规划**——章纲与场景蓝图保留、只清场景草稿，
+     * 重跑按同一套场景重写正文（剧情迁移/换皮迁入的剧情靠这条保住）。要换整套规划请走 {@link #rejectOutline}。
+     */
     public RejectTarget reject(long chapterId, String reason) {
         ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
@@ -377,10 +380,10 @@ public class ChapterPipelineService {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "章 " + chapterId + " 状态为 " + ch.getStatus() + "，仅待审批章可打回");
         }
-        chapterData.rejectReset(chapterId, reason);
+        chapterData.resetForTextReject(chapterId, reason);
         stageLog.emit(ch.getNovelId(), ch.getChapterNo(), APPROVE, REJECTED,
-                Map.of("reason", truncate(reason), "flow", "final_reject"));
-        log.info("第 {} 章被人工打回：{}", ch.getChapterNo(), truncate(reason));
+                Map.of("reason", truncate(reason), "flow", "final_reject", "keepOutline", true));
+        log.info("第 {} 章正文被人工打回（章纲与场景保留）：{}", ch.getChapterNo(), truncate(reason));
         return new RejectTarget(ch.getNovelId(), novelTitle(ch.getNovelId()), ch.getChapterNo());
     }
 
@@ -392,7 +395,7 @@ public class ChapterPipelineService {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "章 " + chapterId + " 状态为 " + ch.getStatus() + "，仅待批章纲可打回");
         }
-        chapterData.rejectReset(chapterId, reason);
+        chapterData.resetForOutlineReject(chapterId, reason);
         stageLog.emit(ch.getNovelId(), ch.getChapterNo(), OUTLINE, REJECTED,
                 Map.of("reason", truncate(reason), "flow", "outline_reject"));
         log.info("第 {} 章章纲被人工打回：{}", ch.getChapterNo(), truncate(reason));
@@ -454,7 +457,8 @@ public class ChapterPipelineService {
     }
 
     /** 事后否决（流 A 扩展，依赖 digest 解耦）：DIGESTED 章打回；清除本章事实账（摘要+facts），
-     * 重生成末尾 digest 步骤重建。世界状态快照不删（重算 upsert 覆盖）；伏笔 flips 保留（后续章可能引用）。 */
+     * 重生成末尾 digest 步骤重建。世界状态快照不删（重算 upsert 覆盖）；伏笔 flips 保留（后续章可能引用）。
+     * 与 {@link #reject} 同口径：打回的是正文，章纲与场景蓝图保留（迁入剧情不被抹掉）。 */
     public RejectTarget veto(long chapterId, String reason) {
         ChapterDO ch = chapterData.findById(chapterId)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterId));
@@ -463,10 +467,10 @@ public class ChapterPipelineService {
                     "章 " + chapterId + " 状态为 " + ch.getStatus() + "，仅已 digest 章可否决");
         }
         digestData.deleteByChapter(chapterId);
-        chapterData.rejectReset(chapterId, reason);
+        chapterData.resetForTextReject(chapterId, reason);
         stageLog.emit(ch.getNovelId(), ch.getChapterNo(), DIGEST, REJECTED,
-                Map.of("reason", truncate(reason), "flow", "veto"));
-        log.info("第 {} 章被人工否决（digest 已清除，重算待重生成）：{}", ch.getChapterNo(), truncate(reason));
+                Map.of("reason", truncate(reason), "flow", "veto", "keepOutline", true));
+        log.info("第 {} 章被人工否决（digest 已清除，章纲保留待重写）：{}", ch.getChapterNo(), truncate(reason));
         return new RejectTarget(ch.getNovelId(), novelTitle(ch.getNovelId()), ch.getChapterNo());
     }
 
@@ -757,6 +761,11 @@ public class ChapterPipelineService {
                     Map.of("reason", "场景通过 " + passedScenes + "/" + specs.size()));
             chapterData.updateStatus(ch.getId(), ChapterStatus.FAILED.wire());
             return ChapterOutcome.FAILED;
+        }
+        // 打回正文的意见已随本次场景重写下发（见 ContextPackerService#rejectNote），消费清零；
+        // 失败分支不清，重试时继续带着意见写。
+        if (ch.getRejectReason() != null && !ch.getRejectReason().isBlank()) {
+            chapterData.clearRejectReason(ch.getId());
         }
         return ChapterOutcome.DONE;
     }

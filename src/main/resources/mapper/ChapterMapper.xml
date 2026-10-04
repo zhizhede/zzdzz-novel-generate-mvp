@@ -122,6 +122,17 @@
                 WHERE id=#{chapterId}
     </update>
 
+    <update id="markTextRejected">
+                UPDATE chapters SET status='NEW', full_text=NULL, round=0,
+                       reject_reason=#{reason}, update_time=NOW()
+                WHERE id=#{chapterId}
+    </update>
+
+    <update id="resetSceneDrafts">
+                UPDATE chapter_scenes SET draft_text=NULL, gate_status='PENDING', revision_round=0, update_time=NOW()
+                WHERE chapter_id=#{chapterId}
+    </update>
+
     <update id="clearRejectReason">
                 UPDATE chapters SET reject_reason=NULL, update_time=NOW() WHERE id=#{chapterId}
     </update>

@@ -89,8 +89,12 @@ public interface ChapterDataService extends IService<ChapterDO> {
     /** 只更新章纲（状态/正文/场景都不动）——已有正文的章重出章纲时的安全写法。 */
     void updateOutlineYaml(long chapterId, String outlineYaml);
 
-    /** 人工打回清场（流 A）：删场景/门禁报告/步骤行，状态→NEW，正文与章纲清空，意见落行。 */
-    void rejectReset(long chapterId, String reason);
+    /** 打回正文清场（流 A）：删门禁报告/步骤行、清场景草稿，状态→NEW、正文清空；**章纲与场景蓝图保留**，
+     * 重跑按同一套规划重写正文（剧情迁移/换皮迁入的剧情不被抹掉）。 */
+    void resetForTextReject(long chapterId, String reason);
+
+    /** 打回章纲清场（流 A）：删场景/门禁报告/步骤行，状态→NEW，正文与章纲一并清空（换一套规划重出）。 */
+    void resetForOutlineReject(long chapterId, String reason);
 
     /** 打回意见消费后清零（章纲提示词注入成功后调用）。 */
     void clearRejectReason(long chapterId);

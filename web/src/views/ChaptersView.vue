@@ -439,14 +439,16 @@ async function rerunChapter() {
   }
 }
 
-/** 流 A：打回（PENDING_APPROVAL）——意见注入下次章纲重写。 */
+/** 流 A：打回（PENDING_APPROVAL）——打回的是正文，章纲与场景蓝图保留，重跑按同一套规划重写。 */
 async function rejectChapter() {
   try {
-    const { value } = await ElMessageBox.prompt('打回意见将注入下次章纲重写，清空现有场景与正文', '打回本章', {
-      inputPlaceholder: '例如：结尾钩子不对，前两场景可以保留',
-      inputPattern: /\S/,
-      inputErrorMessage: '打回意见不能为空',
-    })
+    const { value } = await ElMessageBox.prompt(
+      '打回后本章按原章纲与场景重写正文（规划保留，换整套规划请用「打回章纲」）；意见随重写下发',
+      '打回本章', {
+        inputPlaceholder: '例如：结尾钩子不对，前两场景可以保留',
+        inputPattern: /\S/,
+        inputErrorMessage: '打回意见不能为空',
+      })
     await api.post(`/api/chapters/${detail.value.id}/reject`, { reason: value })
     ElMessage.success('已打回并重新入队，意见将在重写时生效')
     detail.value = await api.get(`/api/chapters/${detail.value.id}`)
@@ -461,10 +463,12 @@ async function outlineDecision(action) {
   try {
     let reason = null
     if (action === 'REJECT') {
-      const r = await ElMessageBox.prompt('打回意见将注入下次章纲重写', '打回章纲', {
-        inputPattern: /\S/,
-        inputErrorMessage: '打回意见不能为空',
-      })
+      const r = await ElMessageBox.prompt(
+        '打回章纲会清掉本章现有章节规划与场景，按意见重新规划（正文也会一并作废）',
+        '打回章纲', {
+          inputPattern: /\S/,
+          inputErrorMessage: '打回意见不能为空',
+        })
       reason = r.value
     }
     await api.post(`/api/chapters/${detail.value.id}/outline-decision`, { action, reason })
@@ -476,13 +480,13 @@ async function outlineDecision(action) {
   }
 }
 
-/** 流 A 扩展·事后否决：DIGESTED 章打回，清除本章事实账，重生成后 digest 重算。 */
+/** 流 A 扩展·事后否决：DIGESTED 章打回，清除本章事实账，重写后 digest 重算（章纲与场景同样保留）。 */
 async function vetoChapter() {
   try {
     await ElMessageBox.confirm(
-      '否决将清除本章事实账/正文/场景并重新生成；重算后 digest 覆盖原行。继续？',
+      '否决将清除本章事实账与正文，按原章纲重写；重写后 digest 覆盖原行。继续？',
       '事后否决', { type: 'warning', confirmButtonText: '否决重写' })
-    const { value } = await ElMessageBox.prompt('否决意见将注入下次章纲重写', '否决意见', {
+    const { value } = await ElMessageBox.prompt('否决意见将随本章正文重写下发', '否决意见', {
       inputPattern: /\S/, inputErrorMessage: '否决意见不能为空' })
     await api.post(`/api/chapters/${detail.value.id}/veto`, { reason: value })
     ElMessage.success('已否决并重新入队，digest 将在重写完成后重算')

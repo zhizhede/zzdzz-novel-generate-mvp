@@ -142,6 +142,13 @@ public final class PromptCatalog {
                 "{scene_user}\n\n【你上一稿】\n{draft}\n\n【门禁意见（只改被点名的问题，保持其余原样）】\n{gate_feedback}\n\n只输出修订后的完整正文。"),
 
         // ===== 场景工艺段（写法约束，注入 scene user 的 craft 槽位） =====
+        new TemplateDef(LlmNode.SCENE_DRAFT, "reject_note", "人工打回意见（打回正文后场景侧重写用，注入 scene user 的衍生段槽位）", false, """
+                【人工打回意见（本章上一版正文被人工打回，重写必须正面解决）】
+                {reason}
+                - 人工意见点到的写法、场面或人物处理一律照改，优先级高于「保持其余原样」的惯性。
+                - 但本章场景目标与既定情节走向不变（打回的是正文，不是规划）；意见与场景目标冲突时，以「同一个情节换一种写法」化解。
+                """),
+
         new TemplateDef(LlmNode.SCENE_DRAFT, "opening_redlines", "本章开篇红线（第一场景注入）", false, """
                 【本章开篇红线（本章第一个场景，逐条硬性执行）】
                 - 必须紧接上一章结尾的情境：同一时间、同一地点、同一组在场人物；读者读完前 3 行就能定位「这章接在哪之后」。
