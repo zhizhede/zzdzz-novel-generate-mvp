@@ -33,8 +33,8 @@ class MaterialCardServiceTest {
     @BeforeEach
     void setUp() {
         cardDAO = mock(MaterialCardDataService.class);
-        service = new MaterialCardService(cardDAO, mock(TuningService.class),
-                mock(PromptTemplateService.class));
+        service = new MaterialCardService(cardDAO, mock(EntityAliasService.class),
+                mock(TuningService.class), mock(PromptTemplateService.class));
     }
 
     private MaterialCardDO card() {

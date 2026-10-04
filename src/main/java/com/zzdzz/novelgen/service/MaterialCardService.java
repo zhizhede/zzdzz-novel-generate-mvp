@@ -45,6 +45,7 @@ public class MaterialCardService {
     private static final String MAX_MATCHED_KEY = "pack_max_matched_cards";
 
     private final MaterialCardDataService cardDAO;
+    private final EntityAliasService aliasService;
     private final TuningService tuning;
     private final PromptTemplateService promptTemplates;
 
@@ -91,6 +92,7 @@ public class MaterialCardService {
         }
         cardDAO.insert(novelId, kind, name, aliases, summary, contentMd,
                 pinned != null && pinned, status == null ? "active" : status, sourceChapter);
+        rebuildAliases(novelId); // 别名索引是派生索引：卡一变就整书重建（一本书几十张卡，代价可忽略）
     }
 
     public void update(long id, String name, List<String> aliases, String summary, String contentMd,
@@ -104,11 +106,22 @@ public class MaterialCardService {
         }
         cardDAO.update(id, name, aliases, summary, contentMd, pinned,
                 status == null ? card.getStatus() : status, sourceChapter);
+        rebuildAliases(card.getNovelId());
     }
 
     public void delete(long id) {
-        get(id);
+        MaterialCardDO card = get(id);
         cardDAO.delete(id);
+        rebuildAliases(card.getNovelId());
+    }
+
+    /** 别名索引重建：派生索引不该让卡的写路径失败（索引坏了下次写卡或手动端点会再建）。 */
+    private void rebuildAliases(long novelId) {
+        try {
+            aliasService.rebuild(novelId);
+        } catch (Exception e) {
+            log.warn("别名索引重建失败（不影响卡本身，反查会用到旧索引）：novelId={} {}", novelId, e.getMessage());
+        }
     }
 
     private void validate(String kind, String name, String status) {

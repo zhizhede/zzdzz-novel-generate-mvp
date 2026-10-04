@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.dao.EntityAliasMapper">
+
+    <delete id="deleteByNovel">
+                DELETE FROM entity_aliases WHERE novel_id=#{novelId}
+    </delete>
+
+    <select id="insertRow" resultType="int">
+                INSERT INTO entity_aliases (novel_id, card_id, alias, card_name, card_kind, is_primary)
+                VALUES (#{novelId}, #{cardId}, #{alias}, #{cardName}, #{cardKind}, #{primary})
+                ON CONFLICT (novel_id, alias) WHERE is_deleted = FALSE
+                DO UPDATE SET card_id = EXCLUDED.card_id, card_name = EXCLUDED.card_name,
+                              card_kind = EXCLUDED.card_kind, is_primary = EXCLUDED.is_primary,
+                              update_time = now()
+                RETURNING 1
+    </select>
+
+    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.EntityAliasDO">
+                SELECT id, novel_id AS "novelId", card_id AS "cardId", alias, card_name AS "cardName",
+                       card_kind AS "cardKind", is_primary AS "isPrimary",
+                       create_time AS "createTime", update_time AS "updateTime"
+                FROM entity_aliases
+                WHERE novel_id=#{novelId}
+                ORDER BY card_kind, card_name, is_primary DESC, alias
+    </select>
+
+    <select id="findByAlias" resultType="com.zzdzz.novelgen.model.entity.EntityAliasDO">
+                SELECT id, novel_id AS "novelId", card_id AS "cardId", alias, card_name AS "cardName",
+                       card_kind AS "cardKind", is_primary AS "isPrimary",
+                       create_time AS "createTime", update_time AS "updateTime"
+                FROM entity_aliases
+                WHERE novel_id=#{novelId} AND alias=#{alias}
+                LIMIT 1
+    </select>
+</mapper>

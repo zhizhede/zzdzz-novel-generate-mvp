@@ -39,9 +39,11 @@ class CharacterStateServiceTest {
     void setUp() {
         stateData = mock(CharacterStateDataService.class);
         worldStateData = mock(WorldStateDataService.class);
+        EntityAliasService aliasService = mock(EntityAliasService.class);
+        when(aliasService.index(anyLong())).thenReturn(java.util.Map.of());
         service = new CharacterStateService(stateData, worldStateData,
                 mock(com.zzdzz.novelgen.service.data.ChapterDataService.class),
-                mock(OutlineService.class), M);
+                mock(OutlineService.class), aliasService, M);
     }
 
     private static JsonNode fixture(String name) throws Exception {
@@ -74,10 +76,11 @@ class CharacterStateServiceTest {
     void projectsRealSnapshotIntoRows() throws Exception {
         JsonNode state = fixture("world_state_book56_ch9.json");
 
-        List<CharacterStateDataService.Row> rows = CharacterStateService.rowsOf(9, state);
+        List<CharacterStateDataService.Row> rows = CharacterStateService.rowsOf(9, state, java.util.Map.of());
 
         assertThat(rows).extracting(CharacterStateDataService.Row::name)
-                .containsExactlyInAnyOrder("沈砚", "苏眠", "陶渡", "孩子（沈砚之子，名沈砚）");
+                // 带括号注释的名字被去括号（索引为空时也去）：「孩子（沈砚之子，名沈砚）」→「孩子」
+                .containsExactlyInAnyOrder("沈砚", "苏眠", "陶渡", "孩子");
         var shenYan = rows.stream().filter(r -> r.name().equals("沈砚")).findFirst().orElseThrow();
         assertThat(shenYan.location()).isEqualTo("峡上索缆栈桥桩座旁");
         assertThat(shenYan.possessions()).contains("空白灯牌").contains("缆台");
@@ -89,8 +92,8 @@ class CharacterStateServiceTest {
     /** 空快照不造行（不该往账里写空名字）。 */
     @Test
     void skipsEmptyState() {
-        assertThat(CharacterStateService.rowsOf(1, M.createObjectNode())).isEmpty();
-        assertThat(CharacterStateService.rowsOf(1, null)).isEmpty();
+        assertThat(CharacterStateService.rowsOf(1, M.createObjectNode(), java.util.Map.of())).isEmpty();
+        assertThat(CharacterStateService.rowsOf(1, null, java.util.Map.of())).isEmpty();
     }
 
     /** 整章账重写：先删后插（digest 重算不留第二份账）。 */

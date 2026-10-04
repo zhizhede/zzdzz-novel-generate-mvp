@@ -13,6 +13,7 @@ import com.zzdzz.novelgen.model.vo.PromptDetailVO;
 import com.zzdzz.novelgen.model.vo.PromptTemplateVO;
 import com.zzdzz.novelgen.model.vo.TuningVO;
 import com.zzdzz.novelgen.service.CharacterStateService;
+import com.zzdzz.novelgen.service.EntityAliasService;
 import com.zzdzz.novelgen.service.DigestService;
 import com.zzdzz.novelgen.service.GateService;
 import com.zzdzz.novelgen.service.LibraryService;
@@ -44,6 +45,7 @@ public class LibraryController {
 
     private final LibraryService libraryService;
     private final CharacterStateService characterState;
+    private final EntityAliasService aliasService;
     private final DigestService digestService;
     private final MaterialCardService cardService;
     private final LlmNodeConfigService nodeConfigService;
@@ -385,6 +387,25 @@ public class LibraryController {
     @GetMapping("/novels/{novelId}/character-states/audit")
     public Result<List<CharacterStateService.Finding>> characterStateAudit(@PathVariable long novelId) {
         return Result.success(characterState.audit(novelId));
+    }
+
+    /** 别名索引（V40）：本书所有可反查的名字 → 所属素材卡。表为空时自动从素材卡重建。 */
+    @GetMapping("/novels/{novelId}/aliases")
+    public Result<List<com.zzdzz.novelgen.model.entity.EntityAliasDO>> aliases(@PathVariable long novelId) {
+        return Result.success(aliasService.list(novelId));
+    }
+
+    /** 别名反查：这个名字（卡名或别名）是谁——返回所属卡名/卡类型，未命中返回 null。 */
+    @GetMapping("/novels/{novelId}/aliases/resolve")
+    public Result<com.zzdzz.novelgen.model.entity.EntityAliasDO> resolveAlias(@PathVariable long novelId,
+                                                                             @RequestParam String name) {
+        return Result.success(aliasService.resolve(novelId, name));
+    }
+
+    /** 手动重建别名索引（卡写路径已自动重建，这里给批量导入/修复用）。 */
+    @PostMapping("/novels/{novelId}/aliases/rebuild")
+    public Result<Integer> rebuildAliases(@PathVariable long novelId) {
+        return Result.success(aliasService.rebuild(novelId));
     }
 
     /** 存量书补账：把 world_states 已有快照逐章投影成人物账（幂等）。 */

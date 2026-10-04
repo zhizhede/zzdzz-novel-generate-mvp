@@ -51,6 +51,7 @@ public class CharacterStateService {
     private final WorldStateDataService worldStateData;
     private final ChapterDataService chapterData;
     private final OutlineService outlineService;
+    private final EntityAliasService aliasService;
     private final com.fasterxml.jackson.databind.ObjectMapper mapper;
 
     /**
@@ -64,7 +65,7 @@ public class CharacterStateService {
 
     /** digest 落库时调用：把该章快照投影成人物账（整章先删后插，重算不留第二份）。 */
     public void project(long novelId, int chapterNo, JsonNode state) {
-        List<CharacterStateDataService.Row> rows = rowsOf(chapterNo, state);
+        List<CharacterStateDataService.Row> rows = rowsOf(chapterNo, state, aliasService.index(novelId));
         if (rows.isEmpty()) {
             stateData.replaceChapter(novelId, chapterNo, List.of());
             return;
@@ -81,7 +82,7 @@ public class CharacterStateService {
         for (var s : states) {
             try {
                 JsonNode state = mapper.readTree(s.stateJson());
-                List<CharacterStateDataService.Row> rs = rowsOf(s.chapterNo(), state);
+                List<CharacterStateDataService.Row> rs = rowsOf(s.chapterNo(), state, aliasService.index(novelId));
                 stateData.replaceChapter(novelId, s.chapterNo(), rs);
                 chapters++;
                 rows += rs.size();
@@ -93,8 +94,12 @@ public class CharacterStateService {
         return rows;
     }
 
-    /** 快照 → 账行：locations 的键 ∪ possessions 的键，按名字合并成一行。 */
-    static List<CharacterStateDataService.Row> rowsOf(int chapterNo, JsonNode state) {
+    /**
+     * 快照 → 账行：locations 的键 ∪ possessions 的键，按名字合并成一行。
+     * {@code aliasIndex} 是「别名 → 卡名」表（可为空）：同一角色的别名与卡名归一成一行，
+     * 不然「老陆」与「陆朴」会各占一行、正文提及也对不上。
+     */
+    static List<CharacterStateDataService.Row> rowsOf(int chapterNo, JsonNode state, Map<String, String> aliasIndex) {
         Map<String, JsonNode> possessions = new LinkedHashMap<>();
         JsonNode poss = state == null ? null : state.path("possessions");
         if (poss != null && poss.isObject()) {
@@ -108,9 +113,14 @@ public class CharacterStateService {
         names.addAll(possessions.keySet());
 
         List<CharacterStateDataService.Row> rows = new ArrayList<>();
+        Set<String> used = new LinkedHashSet<>();
         for (String name : names) {
             String clean = name == null ? "" : name.strip();
             if (clean.isEmpty()) continue;
+            clean = canonical(clean, aliasIndex);
+            if (!used.add(clean)) {
+                continue; // 两个键归一到同一个人（如「老陆」与「陆朴」）：只写一行，位置取先出现的那条
+            }
             if (clean.length() > MAX_NAME_LEN) {
                 log.warn("人物状态账投影：第 {} 章出现超长「名字」（{} 字，疑似模型把整句当键），跳过", chapterNo, clean.length());
                 continue;
@@ -124,6 +134,18 @@ public class CharacterStateService {
             rows.add(new CharacterStateDataService.Row(clean, location, pj));
         }
         return rows;
+    }
+
+    /** 名字归一化：别名/带括号注释的键都归到卡名；索引为空（无卡的书）时只去括号。 */
+    static String canonical(String name, Map<String, String> aliasIndex) {
+        if (aliasIndex == null || aliasIndex.isEmpty()) {
+            return EntityAliasService.stripTrailingParen(name);
+        }
+        String hit = aliasIndex.get(name);
+        if (hit != null) return hit;
+        String stripped = EntityAliasService.stripTrailingParen(name);
+        hit = aliasIndex.get(stripped);
+        return hit != null ? hit : stripped;
     }
 
     private static String text(JsonNode n) {
