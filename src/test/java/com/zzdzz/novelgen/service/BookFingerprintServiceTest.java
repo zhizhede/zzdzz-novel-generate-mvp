@@ -56,8 +56,8 @@ class BookFingerprintServiceTest {
         service = new BookFingerprintService(chapterData, stylePackData, novelData, new ObjectMapper());
     }
 
-    private static ChapterDataService.ChapterTextRow row(int no, String text) {
-        return new ChapterDataService.ChapterTextRow(no, null, text);
+    private static ChapterDataService.ChapterTextWithTitleRow row(int no, String text) {
+        return new ChapterDataService.ChapterTextWithTitleRow(no, null, text);
     }
 
     @Test

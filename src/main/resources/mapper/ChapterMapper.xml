@@ -40,7 +40,7 @@
                 ORDER BY chapter_no
     </select>
 
-    <select id="listTextsByNovel" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
+    <select id="listTextsByNovel" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextWithTitleRow">
                 SELECT chapter_no AS "chapterNo", title, full_text AS "fullText" FROM chapters
                 WHERE novel_id=#{novelId}
                   AND full_text IS NOT NULL AND full_text!=''

@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  */
 class NovelServiceExportTest {
 
-    private static ChapterDataService.ChapterTextRow row(int no, String title) {
-        return new ChapterDataService.ChapterTextRow(no, title, "正文");
+    private static ChapterDataService.ChapterTextWithTitleRow row(int no, String title) {
+        return new ChapterDataService.ChapterTextWithTitleRow(no, title, "正文");
     }
 
     @Test

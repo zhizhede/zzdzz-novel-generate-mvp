@@ -145,7 +145,7 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO
     }
 
     @Override
-    public List<ChapterTextRow> listTextsByNovel(long novelId) {
+    public List<ChapterTextWithTitleRow> listTextsByNovel(long novelId) {
         return baseMapper.listTextsByNovel(novelId);
     }
 

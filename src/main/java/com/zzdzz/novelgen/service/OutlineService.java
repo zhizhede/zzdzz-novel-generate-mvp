@@ -113,8 +113,8 @@ public class OutlineService {
      * overwrite=false 时已有章纲的章跳过（人工/上一轮写过的优先）；单章失败只记数不中断（逐步 fail-open 同款口径）。
      */
     public DeriveResult deriveChapterOutlines(long novelId, boolean overwrite, int cap) {
-        List<ChapterDataService.ChapterTextRow> texts = chapterData.listTextsByNovel(novelId);
-        List<ChapterDataService.ChapterTextRow> picked = outlineCandidates(texts, cap);
+        List<ChapterDataService.ChapterTextWithTitleRow> texts = chapterData.listTextsByNovel(novelId);
+        List<ChapterDataService.ChapterTextWithTitleRow> picked = outlineCandidates(texts, cap);
         if (picked.isEmpty()) {
             return new DeriveResult(0, 0, 0, 0, texts.size());
         }
@@ -125,7 +125,7 @@ public class OutlineService {
         int derived = 0;
         int skipped = 0;
         int failed = 0;
-        for (ChapterDataService.ChapterTextRow t : picked) {
+        for (ChapterDataService.ChapterTextWithTitleRow t : picked) {
             if (!overwrite && existing.getOrDefault(t.chapterNo(), 0L) > 0) {
                 skipped++;
                 continue;
@@ -144,14 +144,14 @@ public class OutlineService {
     }
 
     /** 反推候选：有正文的章按章号升序取前 cap 章（纯函数，便于单测；空正文/非正数 cap 一律空）。 */
-    static List<ChapterDataService.ChapterTextRow> outlineCandidates(
-            List<ChapterDataService.ChapterTextRow> texts, int cap) {
+    static List<ChapterDataService.ChapterTextWithTitleRow> outlineCandidates(
+            List<ChapterDataService.ChapterTextWithTitleRow> texts, int cap) {
         if (texts == null || texts.isEmpty() || cap <= 0) {
             return List.of();
         }
         return texts.stream()
                 .filter(t -> t.fullText() != null && !t.fullText().isBlank())
-                .sorted(Comparator.comparingInt(ChapterDataService.ChapterTextRow::chapterNo))
+                .sorted(Comparator.comparingInt(ChapterDataService.ChapterTextWithTitleRow::chapterNo))
                 .limit(cap)
                 .toList();
     }

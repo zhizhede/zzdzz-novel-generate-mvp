@@ -955,14 +955,14 @@ public class NovelService {
      */
     public ExportText exportText(long novelId) {
         NovelDO novel = requireNovel(novelId);
-        List<ChapterDataService.ChapterTextRow> rows = chapterData.listTextsByNovel(novelId);
+        List<ChapterDataService.ChapterTextWithTitleRow> rows = chapterData.listTextsByNovel(novelId);
         if (rows.isEmpty()) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "《" + novel.getTitle() + "》还没有正文可导出——先在「规划」页或工作台生成章节");
         }
         StringBuilder sb = new StringBuilder();
         int chars = 0;
-        for (ChapterDataService.ChapterTextRow r : rows) {
+        for (ChapterDataService.ChapterTextWithTitleRow r : rows) {
             String heading = chapterHeading(r);
             sb.append(heading).append('\n').append('\n');
             String body = r.fullText() == null ? "" : r.fullText().strip();
@@ -977,7 +977,7 @@ public class NovelService {
             java.util.regex.Pattern.compile("^第\\s*(?:\\d+|[一二三四五六七八九十百零两]+)\\s*章.*");
 
     /** 章题行：title 已自带章序号就原样用（导入书的 title 往往就是原行首标题）。 */
-    static String chapterHeading(ChapterDataService.ChapterTextRow r) {
+    static String chapterHeading(ChapterDataService.ChapterTextWithTitleRow r) {
         String base = "第" + r.chapterNo() + "章";
         String title = r.title() == null ? "" : r.title().strip();
         if (title.isEmpty() || TITLE_IS_HEADING.matcher(title).matches()) {

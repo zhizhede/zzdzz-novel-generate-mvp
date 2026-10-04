@@ -47,7 +47,7 @@ public class BookFingerprintService {
     /** 按本书正文试提指纹（草稿，不落库）。 */
     public BookFingerprintDraftVO draft(long novelId) {
         NovelDO novel = requireNovel(novelId);
-        List<ChapterDataService.ChapterTextRow> rows = chapterData.listTextsByNovel(novelId);
+        List<ChapterDataService.ChapterTextWithTitleRow> rows = chapterData.listTextsByNovel(novelId);
         if (rows.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_ERROR,
                     "这本书还没有正文——导入正文或生成章节后才能按本书正文提指纹");
@@ -56,7 +56,7 @@ public class BookFingerprintService {
         List<Double> cjkSeries = new ArrayList<>();
         long totalChars = 0;
         int used = 0;
-        for (ChapterDataService.ChapterTextRow row : rows) {
+        for (ChapterDataService.ChapterTextWithTitleRow row : rows) {
             Map<String, Object> metrics = GateService.computeMetrics(row.fullText());
             for (Map.Entry<String, Object> e : metrics.entrySet()) {
                 if (e.getKey().equals("cjk")) {

@@ -14,8 +14,17 @@ public interface ChapterDataService extends IService<ChapterDO> {
     record Opening(int chapterNo, String firstLines) {
     }
 
-    /** 章文本行（开场相似度/对话密度统计、全书导出用）。title 可为 NULL——迁移/换皮建的书不伪造章题。 */
-    record ChapterTextRow(int chapterNo, String title, String fullText) {
+    /** 章文本行（开场相似度/对话密度统计用）：只含章号与正文，视图里不投影 title。 */
+    record ChapterTextRow(int chapterNo, String fullText) {
+    }
+
+    /**
+     * 带章题的章文本行（全书导出用）。title 可为 NULL——迁移/换皮建的书不伪造章题。
+     * 与 {@link ChapterTextRow} **刻意分成两个类型**：MyBatis 的构造器自动映射要求结果集含全部组件，
+     * 共用一个 record 时「加字段」会让那些没投影该列的查询在**运行期**炸（2026-10-05 实弹踩过：
+     * 导出加的 title 让 findOpeningRows/findDialogueRows 直接抛 ExecutorException，整条生成链挂掉）。
+     */
+    record ChapterTextWithTitleRow(int chapterNo, String title, String fullText) {
     }
 
     /** 卷级复盘的事实行（规划 + 实际产出）。 */
@@ -37,8 +46,8 @@ public interface ChapterDataService extends IService<ChapterDO> {
                           String ruleRefs, java.time.OffsetDateTime createTime, java.time.OffsetDateTime updateTime) {
     }
 
-    /** 全书有正文的章（章号升序）：按本书正文统计文风指纹用（一次查询，避免逐章 N+1）。 */
-    List<ChapterTextRow> listTextsByNovel(long novelId);
+    /** 全书有正文的章（章号升序）：按本书正文统计文风指纹 + 全书导出用（一次查询，避免逐章 N+1）。 */
+    List<ChapterTextWithTitleRow> listTextsByNovel(long novelId);
 
     /** 全库规划行（书升序 + 章号升序）：规划资产页读模型用，一次查询覆盖所有书。 */
     List<ChapterPlanRow> listPlanRows();

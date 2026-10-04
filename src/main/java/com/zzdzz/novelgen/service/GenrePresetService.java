@@ -508,7 +508,7 @@ public class GenrePresetService {
     /** 本书正文节选（按章切块、最多 budget 字）：导入书的规则提炼语料来源（与品类语料同一个提示词口径）。 */
     private String bookTextCorpus(long novelId, int budget) {
         StringBuilder sb = new StringBuilder();
-        for (com.zzdzz.novelgen.service.data.ChapterDataService.ChapterTextRow row
+        for (com.zzdzz.novelgen.service.data.ChapterDataService.ChapterTextWithTitleRow row
                 : chapterData.listTextsByNovel(novelId)) {
             if (budget <= 0) {
                 break;
