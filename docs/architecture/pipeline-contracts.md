@@ -398,3 +398,21 @@ flowchart LR
    `stopCheck` 命中时报告与正文保持当前采用稿并交回 INTERRUPTED。
 4. **默认值的理由**：修正是内容问题、漂移是风格问题，为治风格把内容硬伤改回来是亏的（故不默认 ROLLBACK）；
    REVISE 要多花一次 LLM 调用，不该对所有书默认开。三档都留开关，按书调。
+
+### 10.3 去复沓修订：取优不取新
+
+**一句话**：读者评审「通过但复沓清单超阈值」会触发一轮去复沓重写，这一轮**只有复沓清单确实更短、且复审没判 BLOCKER**
+才被采纳，否则保留原稿——原先是无条件采纳，等于把「治复沓反而治坏」的稿子直接发货。
+
+1. **判据（`ReviewService.repeatFixBetter`，纯函数）**：复审 `verdict != blocker` **且** `r2.repeat.size() < r1.repeat.size()`。
+   等长不算更好（治复沓没见效就别动稿）；复审判 BLOCKER 一律不采纳（换过去等于把章直接拖进处置流程）。
+2. **解析失败不算零复沓**：复审解析失败时 `readerOnce` fail-open 返回一个没有 `repeat` 数组的空节点，
+   而 `path("repeat").size()` 恰好是 0——直接比大小会把「治坏的稿」判成完美。故缺 `repeat` 数组一律判「不更好」。
+3. **老代码的第二个坑**：`return new Outcome(polished, r2.verdict, false, …)` 里 `blocked` 是硬编码 `false`——
+   复审判 BLOCKER 也返回「没阻塞」，管线照常过稿。新分支两处都按实际 verdict 走。
+4. **未采纳时的留痕**：记 `READER/REJECTED{reason:"repeat_fix_not_better", before, after, verdict}` 事件 +
+   warn 日志；第二轮 reader_review 报告**保留**（它记录的是「这一版修订稿得了多少分」，是历史快照，
+   不是「当前成品实况」——机械门禁报告那条「最新=实况」的约定只约束机械报告，因为 `failureSummary` 会被程序读走）。
+5. **实测口径（书 56，2026-10-04/05 两轮评审的 `gate_reports.result` 原文）**：四次触发里三次没变好——
+   441（3→8）、442（6→6）、456（3→6 且复审判 blocker），全被老代码采纳；只有 457（4→3）是真变好。
+   这四对真实输出已固化成测试夹具（`src/test/resources/fixtures/reader_review_*.json`），由单测回放判据。

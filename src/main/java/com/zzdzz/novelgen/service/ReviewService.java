@@ -95,7 +95,18 @@ public class ReviewService {
                 String polished = readerFix(novelId, ch, fullText, r1);
                 if (polished != null) {
                     JsonNode r2 = readerOnce(novelId, ch, polished, 2, onDelta);
-                    return new Outcome(polished, r2.path("verdict").asText("pass"), false, readerIssueLines(r2));
+                    // 取优不取新：只有新版复沓清单确实更短、且复审没判 BLOCKER 才换稿。
+                    // 原先无条件采纳修订稿——治复沓的那一轮可能把稿子治坏（复沓没少、钩子反而掉了），照样发货。
+                    if (repeatFixBetter(r1, r2)) {
+                        return new Outcome(polished, r2.path("verdict").asText("pass"), false, readerIssueLines(r2));
+                    }
+                    log.warn("第 {} 章去复沓修订未取优（复沓 {} → {}，复审 {}），保留原稿",
+                            ch.getChapterNo(), repeat.size(), r2.path("repeat").size(),
+                            r2.path("verdict").asText("pass"));
+                    stageLog.emit(novelId, ch.getChapterNo(), StageLog.Stage.READER, StageLog.Phase.REJECTED,
+                            Map.of("reason", "repeat_fix_not_better", "before", repeat.size(),
+                                    "after", r2.path("repeat").size(), "verdict", r2.path("verdict").asText("pass")));
+                    return new Outcome(null, r1.path("verdict").asText("pass"), false, readerIssueLines(r1));
                 }
             }
             return new Outcome(null, r1.path("verdict").asText("pass"), false, readerIssueLines(r1));
@@ -114,6 +125,24 @@ public class ReviewService {
 
     public Outcome readerReviewAndFix(long novelId, ChapterDO ch, String fullText) {
         return readerReviewAndFix(novelId, ch, fullText, null);
+    }
+
+    /**
+     * 去复沓修订的取优判据（纯函数，便于单测）：新版**复沓清单确实更短**且复审没判 BLOCKER 才算更好。
+     * <p>
+     * 复审解析失败时拿不到 {@code repeat} 数组——此处一律判「不更好」保留原稿：解析失败不该被当成
+     * 「零复沓」（fail-open 的空节点 path().size() 恰好是 0，会把治坏的稿子判成完美）。
+     */
+    static boolean repeatFixBetter(JsonNode before, JsonNode after) {
+        if ("blocker".equals(after.path("verdict").asText())) {
+            return false;
+        }
+        JsonNode a = after.path("repeat");
+        JsonNode b = before.path("repeat");
+        if (!a.isArray() || !b.isArray()) {
+            return false;
+        }
+        return a.size() < b.size();
     }
 
     /** 单轮读者评审：解析失败重试 1 次，仍失败 fail-open 落 skipped 报告。onDelta 非空时思考流转发。 */
