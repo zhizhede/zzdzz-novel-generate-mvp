@@ -89,7 +89,8 @@ public class ReviewService {
             // 治不好也不阻塞（照常通过并落报告），避免把可用的稿子卡在人工。
             JsonNode repeat = r1.path("repeat");
             int minRepeat = (int) perNovel(novelId, "reader_repeat_fix_min", TuningDefaults.READER_REPEAT_FIX_MIN);
-            if (repeat.isArray() && repeat.size() >= minRepeat) {
+            // <=0＝关闭去复沓修订（原先 0 会让 size()>=0 恒真，等于「每章都治」——开关写 0 反而最激进）
+            if (repeat.isArray() && minRepeat > 0 && repeat.size() >= minRepeat) {
                 log.warn("第 {} 章读者评审通过但复沓清单 {} 条（阈值 {}），执行一轮去复沓修订",
                         ch.getChapterNo(), repeat.size(), minRepeat);
                 String polished = readerFix(novelId, ch, fullText, r1);
@@ -171,7 +172,8 @@ public class ReviewService {
                         }
                         return n;
                     }, 2, onDelta);
-            node = downgradeFatOnly(ch, node, fatHard);
+            int structuralBlock = (int) perNovel(novelId, "reader_structural_block", TuningDefaults.READER_STRUCTURAL_BLOCK);
+            node = downgradeFatOnly(ch, node, fatHard, structuralBlock > 0);
             gateReportData.insert(ch.getId(), null, GateType.READER_REVIEW.wire(), round,
                     !"blocker".equals(node.path("verdict").asText()), node);
             log.info("第 {} 章读者评审 round={}：{}（fat_ratio={}）", ch.getChapterNo(), round,
@@ -188,19 +190,38 @@ public class ReviewService {
         }
     }
 
-    /** 连贯性优先（本书标准）：四个结构性维度全过、仅 fat_ratio 超软阈值时降级为 pass；超硬上限仍拦。 */
-    private JsonNode downgradeFatOnly(ChapterDO ch, JsonNode node, double fatHard) {
+    /**
+     * 读者评审的「只报不拦」降级（产品定调类开关）：
+     * <ul>
+     *   <li>仅 {@code fat_ratio} 超软阈值、结构性四问全过 → 一直降级为 pass（连贯性优先，本书既有标准）；</li>
+     *   <li>{@code reader_structural_block=0} 时，结构性四问（hook/stakes/continuity/consequence）也降级为报告项——
+     *       这三问靠模型主观判断（第三类问题：判据不可靠），要不要据此拦章是产品定调，交用户定；</li>
+     *   <li>{@code fat_ratio} 超**硬上限**任何口径下都拦（那不是口径问题，是注水）。</li>
+     * </ul>
+     */
+    private JsonNode downgradeFatOnly(ChapterDO ch, JsonNode node, double fatHard, boolean structuralBlock) {
         if (!"blocker".equals(node.path("verdict").asText()) || !(node instanceof com.fasterxml.jackson.databind.node.ObjectNode obj)) {
             return node;
         }
         boolean structuralFail = List.of("hook", "stakes", "continuity", "consequence").stream()
                 .anyMatch(k -> "fail".equals(node.path(k).asText()));
         double fat = node.path("fat_ratio").asDouble(0);
-        if (structuralFail || fat > fatHard) {
+        if (fat > fatHard) {
             return node;
         }
+        if (structuralFail && structuralBlock) {
+            return node;
+        }
+        if (structuralFail) {
+            log.warn("第 {} 章读者评审结构性四问未过，但 reader_structural_block=0（只报不拦），降级为 pass", ch.getChapterNo());
+            // verdict 必须真的改成 pass：调用方（readerReviewAndFix / 报告 passed 位）只读 verdict，
+            // 只写 note 不动 verdict = 降级从未生效（既有 fat 降级就是这么写的，真库 5 条本应降级的报告里
+            // 没有一条带上 raw_verdict 标记，说明那条路一次都没真正走通）
+            return obj.put("verdict", "pass").put("raw_verdict", "blocker")
+                    .put("note", "结构性四问未过，但 reader_structural_block=0（判据主观，只报不拦），降级为 pass");
+        }
         log.info("第 {} 章仅注水比超标（{}），结构性四问全过，按本书标准不拦（硬上限 {}）", ch.getChapterNo(), fat, fatHard);
-        return obj.put("raw_verdict", "blocker")
+        return obj.put("verdict", "pass").put("raw_verdict", "blocker")
                 .put("note", "仅 fat_ratio 超软阈值，四问全过且未超硬上限 " + fatHard + "，连贯性优先降级为 pass");
     }
 

@@ -34,6 +34,7 @@ class ReviewRepeatFixTest {
 
     private LlmPort llmPort;
     private LlmJson llmJson;
+    private GateService gateService;
     private ReviewService service;
     private ChapterDO chapter;
 
@@ -41,7 +42,7 @@ class ReviewRepeatFixTest {
     void setUp() {
         llmPort = mock(LlmPort.class);
         llmJson = mock(LlmJson.class);
-        GateService gateService = mock(GateService.class);
+        gateService = mock(GateService.class);
         service = new ReviewService(llmPort, llmJson, mock(ContextPackerService.class),
                 mock(GateReportDataService.class), mock(ChapterDataService.class), M,
                 mock(TuningService.class), mock(PromptTemplateService.class), gateService, mock(StageLog.class));
@@ -58,6 +59,12 @@ class ReviewRepeatFixTest {
         when(gateService.configValue(eq(NOVEL_ID), eq("reader_fix_len_min"), anyDouble())).thenReturn(0.75);
         when(gateService.configValue(eq(NOVEL_ID), eq("reader_fat_ratio_block"), anyDouble())).thenReturn(0.33);
         when(gateService.configValue(eq(NOVEL_ID), eq("reader_fat_ratio_hard"), anyDouble())).thenReturn(0.5);
+        when(gateService.configValue(eq(NOVEL_ID), eq("reader_structural_block"), anyDouble())).thenReturn(1.0);
+    }
+
+    /** 评审 JSON：verdict + 复沓清单条数（ObjectNode，便于在用例里补字段）。 */
+    private static com.fasterxml.jackson.databind.node.ObjectNode reviewNode(String verdict, int repeats) {
+        return (com.fasterxml.jackson.databind.node.ObjectNode) review(verdict, repeats);
     }
 
     /** 评审 JSON：verdict + 复沓清单条数。 */
@@ -116,10 +123,12 @@ class ReviewRepeatFixTest {
         assertThat(outcome.revised()).isNull();
     }
 
-    /** 复沓虽变少但复审判 BLOCKER → 不换（换过去等于把章直接拖进处置流程）。 */
+    /** 复沓虽变少但复审结构性四问未过（真 BLOCKER）→ 不换（换过去等于把章直接拖进处置流程）。 */
     @Test
     void keepsOriginalWhenRecheckVerdictIsBlocker() {
-        reviewsReturn(review("pass", 4), review("blocker", 1));
+        var r2 = reviewNode("blocker", 1);
+        r2.put("continuity", "fail"); // 结构性硬伤才算真 BLOCKER：只有 fat 超标的 blocker 会被降级成 pass
+        reviewsReturn(review("pass", 4), r2);
         polishReturns(POLISHED);
 
         var outcome = service.readerReviewAndFix(NOVEL_ID, chapter, ORIGINAL, null);
@@ -153,12 +162,80 @@ class ReviewRepeatFixTest {
         assertThat(outcome.verdict()).isEqualTo("pass");
     }
 
+    /** 复沓阈值写 0 ＝关闭该修订（原先 0 反向生效：size()>=0 恒真 ⇒ 每章都治）。 */
+    @Test
+    void repeatFixMinZeroDisablesTheRepair() {
+        when(gateService.configValue(eq(NOVEL_ID), eq("reader_repeat_fix_min"), anyDouble())).thenReturn(0.0);
+        reviewsReturn(review("pass", 9), review("pass", 9));
+
+        var outcome = service.readerReviewAndFix(NOVEL_ID, chapter, ORIGINAL, null);
+
+        assertThat(outcome.revised()).isNull();
+        assertThat(outcome.verdict()).isEqualTo("pass");
+    }
+
+    /** reader_structural_block=0：结构性四问未过也只报不拦（报报告，不阻塞过稿）。 */
+    @Test
+    void structuralFailIsReportedNotBlockedWhenSwitchOff() {
+        when(gateService.configValue(eq(NOVEL_ID), eq("reader_structural_block"), anyDouble())).thenReturn(0.0);
+        var r1 = reviewNode("blocker", 0);
+        r1.put("hook", "fail");
+        reviewsReturn(r1, r1);
+
+        var outcome = service.readerReviewAndFix(NOVEL_ID, chapter, ORIGINAL, null);
+
+        assertThat(outcome.verdict()).isEqualTo("pass");
+        assertThat(outcome.blocked()).isFalse();
+    }
+
+    /** 默认（开关=1）：结构性四问未过仍拦——回退到老行为不该被这条开关默默改掉。 */
+    @Test
+    void structuralFailStillBlocksByDefault() {
+        var r1 = reviewNode("blocker", 0);
+        r1.put("hook", "fail");
+        reviewsReturn(r1, r1);
+        polishReturns(POLISHED); // 走得进 BLOCKER 重写轮
+
+        var outcome = service.readerReviewAndFix(NOVEL_ID, chapter, ORIGINAL, null);
+
+        assertThat(outcome.blocked()).isTrue();
+    }
+
+    /** 注水超硬上限：任何口径下都拦，不受结构性开关影响。 */
+    @Test
+    void fatHardCapStillBlocksRegardlessOfSwitches() {
+        when(gateService.configValue(eq(NOVEL_ID), eq("reader_structural_block"), anyDouble())).thenReturn(0.0);
+        var r1 = reviewNode("blocker", 0);
+        r1.put("fat_ratio", 0.9);
+        reviewsReturn(r1, r1);
+        polishReturns(POLISHED);
+
+        var outcome = service.readerReviewAndFix(NOVEL_ID, chapter, ORIGINAL, null);
+
+        assertThat(outcome.blocked()).isTrue();
+    }
+
+    /** 仅注水比超软阈值、四问全过 → 真的降级为 pass（原先只写 note 不改 verdict，等于从未生效）。 */
+    @Test
+    void fatOnlyDowngradeActuallyFlipsVerdict() {
+        var r1 = reviewNode("blocker", 0);
+        r1.put("fat_ratio", 0.4);
+        reviewsReturn(r1, r1);
+
+        var outcome = service.readerReviewAndFix(NOVEL_ID, chapter, ORIGINAL, null);
+
+        assertThat(outcome.verdict()).isEqualTo("pass");
+        assertThat(outcome.blocked()).isFalse();
+    }
+
     /** 取优判据本身（纯函数）：缺 repeat 数组、复审判 BLOCKER 等情况一律「不更好」。 */
     @Test
     void betterJudgementIsConservative() {
         assertThat(ReviewService.repeatFixBetter(review("pass", 5), review("pass", 4))).isTrue();
         assertThat(ReviewService.repeatFixBetter(review("pass", 5), review("pass", 5))).isFalse();
-        assertThat(ReviewService.repeatFixBetter(review("pass", 5), review("blocker", 1))).isFalse();
+        var structuralBlocker = reviewNode("blocker", 1);
+        structuralBlocker.put("hook", "fail");
+        assertThat(ReviewService.repeatFixBetter(review("pass", 5), structuralBlocker)).isFalse();
         assertThat(ReviewService.repeatFixBetter(review("pass", 5), M.createObjectNode())).isFalse();
         assertThat(ReviewService.repeatFixBetter(M.createObjectNode(), review("pass", 1))).isFalse();
         assertThat(ReviewService.repeatFixBetter(

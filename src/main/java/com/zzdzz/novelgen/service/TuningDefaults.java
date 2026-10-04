@@ -18,8 +18,10 @@ public final class TuningDefaults {
     public static final double READER_FIX_LEN_MIN = 0.75;
     public static final double READER_FIX_LEN_MAX = 1.15;
     public static final double AI_REVIEW_FIX_FLOOR = 0.60;
-    /** 读者评审「复沓清单」触发去复沓修订的最低条数（评审通过也治；治不好不阻塞，照常落报告）。 */
+    /** 读者评审「复沓清单」触发去复沓修订的最低条数（评审通过也治；治不好不阻塞，照常落报告）。**≤0＝关闭**。 */
     public static final int READER_REPEAT_FIX_MIN = 3;
+    /** 读者评审结构性四问（hook/stakes/continuity/consequence）未过时是否拦章：1=拦（默认）；0=只报不拦。 */
+    public static final int READER_STRUCTURAL_BLOCK = 1;
     // 读者评审阈值（连贯性优先口径：fat 降为报告项）
     public static final double READER_FAT_RATIO_BLOCK = 0.33;
     public static final double READER_FAT_RATIO_HARD = 0.50;
