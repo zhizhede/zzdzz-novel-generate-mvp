@@ -1,11 +1,14 @@
 package com.zzdzz.novelgen.controller;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.common.web.AuthInterceptor;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.ApprovalModeDTO;
 import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.NovelVO;
+import com.zzdzz.novelgen.service.DeriveSupport;
+import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.NovelService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -23,11 +26,13 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/novels")
 @RequiredArgsConstructor
+@Slf4j
 public class NovelController {
 
     private final NovelService novelService;
     private final com.zzdzz.novelgen.service.OutlineDraftService outlineDraftService;
     private final com.zzdzz.novelgen.service.ImportAnalyzeService importAnalyzeService;
+    private final GenerationQueueService queueService;
 
 
     @GetMapping
@@ -81,11 +86,26 @@ public class NovelController {
     public record DigestBackfillBody(Integer recent) {
     }
 
-    /** 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选样本资产克隆与衍生配置（P2）。 */
+    /**
+     * 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选样本资产克隆与衍生配置（P2）。
+     * 剧情换皮（mode=RESKIN）在此**事务提交后**提交换皮任务：换皮要逐章调 LLM，不能挂在建书请求里跑，
+     * 也不能在事务内入队（worker 读到的是未提交的章行）。
+     */
     @PostMapping
     public Result<NovelVO> create(@RequestBody NovelCreateDTO dto, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
-        return Result.success(novelService.create(dto, userId));
+        NovelVO vo = novelService.create(dto, userId);
+        if (dto != null && dto.sampleId() != null && dto.deriveConfig() != null
+                && DeriveSupport.MODE_RESKIN.equals(DeriveSupport.normalizeMode(dto.deriveConfig().mode()))) {
+            int chapters = novelService.migratedChapterCount(vo.id());
+            if (chapters > 0) {
+                long taskId = queueService.submitReskin(vo.id(), vo.title(), 1, chapters, userId);
+                log.info("剧情换皮任务已入队：novelId={} taskId={} 章数={}", vo.id(), taskId, chapters);
+            } else {
+                log.warn("剧情换皮：本书没有迁入章行（样本无章级剧情？），未入队 novelId={}", vo.id());
+            }
+        }
+        return Result.success(vo);
     }
 
     @PutMapping("/{id}/approval-mode")

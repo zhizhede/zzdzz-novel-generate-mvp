@@ -53,6 +53,8 @@ public class GenerationQueueService {
     private final TuningService tuning;
     private final LlmCallLogDataService llmCallLogData;
     private final VolumeReviewService volumeReviewService;
+    /** 剧情换皮（RESKIN）任务的实际执行体。 */
+    private final ReskinService reskinService;
 
     /** 运行中取消请求（taskId 集合），worker 在步骤/场景边界检查。 */
     private final Set<Long> cancelRequested = ConcurrentHashMap.newKeySet();
@@ -363,6 +365,17 @@ public class GenerationQueueService {
             return;
         }
 
+        // 剧情换皮：定新外衣 + 逐章换皮（工作台可见进度）
+        if (TaskKind.RESKIN.is(task.kind())) {
+            try {
+                runReskinTask(task);
+            } finally {
+                taskThreads.remove(task.id());
+                Thread.interrupted();
+            }
+            return;
+        }
+
         int total = task.toChapter() - task.fromChapter() + 1;
         int passed = pipeline.runChapters(task.novelId(), task.novelTitle(),
                 task.fromChapter(), task.toChapter(), new ChapterPipelineService.ProgressSink() {
@@ -553,7 +566,40 @@ public class GenerationQueueService {
         }
     }
 
-    // ===== P3 书级无人续跑闭环 =====    /** CHAPTERS 任务 DONE 后的续跑判定。 */
+    /**
+     * 剧情换皮（RESKIN）任务：先定全书新外衣（题材/世界/主角/大纲），再逐章把样本节拍换成新外衣。
+     * 逐章 fail-fast——换皮设定定了却只换一半，留下的书前后外衣不一致，比整批失败更难收拾。
+     */
+    private void runReskinTask(GenerationTaskDataService.TaskRow task) {
+        taskDAO.updateProgress(task.id(), 0, task.fromChapter(), "换皮：先生成全书换皮设定");
+        stageLog.emit(task.novelId(), task.fromChapter(), StageLog.Stage.OUTLINE, StageLog.Phase.START,
+                Map.of("taskId", task.id(), "reskin", true));
+        try {
+            ReskinService.ReskinResult r = reskinService.run(task.novelId(), task.fromChapter(), task.toChapter(),
+                    // 进度按「已完成的章数」上报：第 no 章刚跑完 → no - from + 1（此前写成 no - from，末章恒少 1）
+                    (no, msg) -> taskDAO.updateProgress(task.id(), no - task.fromChapter() + 1, no, msg));
+            String summary = "换皮完成：" + r.chapters() + " 章 / " + r.beats() + " 个场景（换皮设定见素材库·正典「换皮设定」）";
+            taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), summary);
+            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                    StageLog.Phase.DONE, summary);
+            log.info("换皮任务 #{} 完成：{}", task.id(), summary);
+        } catch (Exception e) {
+            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "换皮失败：" + e.getMessage());
+            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                    StageLog.Phase.STOPPED, "换皮失败：" + e.getMessage());
+            log.error("换皮任务 #{} 异常：{}", task.id(), e.getMessage(), e);
+        }
+    }
+
+    /** 剧情换皮入队（建书时提交；秒回任务 id，进度见工作台队列）。 */
+    public long submitReskin(long novelId, String novelTitle, int from, Integer to, Long userId) {
+        return enqueue(novelId, novelTitle, from, to == null ? from : to, userId,
+                TaskKind.RESKIN.wire(), null, null);
+    }
+
+    // ===== P3 书级无人续跑闭环 =====
+
+    /** CHAPTERS 任务 DONE 后的续跑判定。 */
     private void autoContinueAfterChapters(GenerationTaskDataService.TaskRow task) {
         try {
             continueChain(task.novelId(), "上批生成完成");
