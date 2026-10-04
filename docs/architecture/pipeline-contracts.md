@@ -182,7 +182,7 @@ flowchart LR
     D --> E[实体归并+sample_merge] --> F[卷汇总/全书大纲/世界观/标签]
 ```
 
-验收口径：①语料与资产全部落库（preset_corpus/imported_samples/sample_plot_nodes/sample_cards），删除仅软删；②FAST→FULL 升级与重启恢复不重析已析章（UNIQUE(sample,level,seq)）；③解析失败留缺口可续跑，不产生半截资产展示；④mobi/azw3 无 DRM 可提取，DRM/HUFF 人话拒绝。
+验收口径：①语料与资产全部落库（preset_corpus/imported_samples/sample_plot_nodes/sample_cards），删除为物理删除（2026-10-03 前为软删，已下线）；②FAST→FULL 升级与重启恢复不重析已析章（UNIQUE(sample,level,seq)）；③解析失败留缺口可续跑，不产生半截资产展示；④mobi/azw3 无 DRM 可提取，DRM/HUFF 人话拒绝。
 
 ### 流 D：衍生开书与草稿态
 
@@ -207,6 +207,56 @@ flowchart LR
 - **大纲原创性把关（derive_originality 节点）**：sampleId 存在且样本已有书级剧情骨架时，大纲生成后自动评审——对照样本骨架+原书人物名（★2+ 人物卡），判复刻（主角同一/换名对应物/主线同序同构/桥段搬用）→ 带原因重写（derive_outline/rewrite 段）≤2 轮 → 仍复刻 → 任务 FAILED，消息含可行动建议；评审调用本身故障时 fail-open 放行但必留 log.warn。llm_call_log node=derive_originality 可回放。
 - **骨架大纲激活门禁**：canon 大纲仍是样本剧情骨架原文（"> 由样本《" 开头）时 `POST /{id}/activate` 拒绝——防"骨架直通下游"（大纲=原书时章纲/正文全链复刻）。
 - **卷规划审校复刻判据**：sourceSampleId 存在时审校 user 注入 derive_no_copy 段（含样本骨架），复刻样本剧情=BLOCKER，与既有"贴合克隆世界"口径并行。
+
+**剧情迁移模式契约（2026-10-03 增补，`derive_config.mode`＝MIGRATE；用户定调「最重要的就是剧情批量迁移」）**：
+
+两套口径由 `DeriveSupport.MODE_ORIGINAL`（默认）与 `MODE_MIGRATE` 分流，**缺省/未知/坏 JSON 一律按 ORIGINAL**（防复刻防线不因坏配置被静默关掉）。
+
+| 环节 | ORIGINAL（原创衍生） | MIGRATE（剧情迁移） |
+|---|---|---|
+| 人物卡 | 不克隆（防衍生变复述） | **克隆**（迁移即沿用原书人物） |
+| 骨架大纲 | 加「> 由样本《》待改写」标注 | 原样作本书大纲，不标注 |
+| activate 骨架门禁 | 拦截（未改写不许激活） | 放行 |
+| derive_originality 复刻审校 | 跑，判复刻重写≤2 轮，仍复刻 FAILED | **不跑** |
+| 章级剧情 | 不迁（剧情必须原创） | 样本 `sample_plot_nodes`(level=chapter) → 本书章行 `goal`（章概要）+ `hook`（末条 beat outcome）+ `arc`；**beats → 场景拆解预物化**（`outline_yaml` + `chapter_scenes`） |
+| 生成管线章纲步 | AI 生成（`LlmNode.OUTLINE`） | **跳过**（`ChapterPipelineService.outlineStep` 见场景已存在即 DONE），迁移剧情成为该章唯一方向约束 |
+
+- **章数上限**：`targetChapters` 即迁移上限（样本更长只迁前 N 章，更短全迁）；每卷章数按 `chaptersPerVolume` 切。
+- **场景字数**：章预算下限按 beats 条数摊分（300–1500 字/场夹紧）——不摊分会一章写出五倍篇幅直接撞机械门禁。
+- **卷规划守卫**：迁移书按「AI 规划一卷」会从 from 起**整卷删掉重写**（`VolumePlanService.adopt`），等于抹掉迁移结果。两道拦截：入队口 `GenerationQueueService.assertMigratedNotOverwritten`（花钱之前，STATE_CONFLICT）+ adopt 内同条件兜底。迁移书的正路是**直接入队生成**，不走卷规划。
+- **提示词二选一（同日补，实跑暴露）**：`ContextPackerService.deriveSection` 里，选样本时原本固定注入 `derive_redline`（「禁止复述原书情节、主角必须原创」）——**这与迁移完全对立**。现按模式二选一：ORIGINAL 注入 `derive_redline`，MIGRATE 注入新的 `derive_migrate`（按章纲推进、章纲里的样本主角名统一按 `{povCharacter}` 写、配角沿用原名）。
+- **自愈梯子不换目标（同日补，实跑暴露）**：`replanChapter` 内部 `resetForReoutline` 会删场景并清章纲，随后 AI 重编——实跑第 1 章就是这样丢掉整章迁移剧情的（5 个迁移场景全 PASSED、成稿 2996 字 → replan → 场景清零、AI 重出 3 场）。现 `ChapterPipelineService` 两处 replan 调用点（失败梯子 / 审校 BLOCKER 自动重写）在 MIGRATE 书上一律早退，失败与硬伤转人工。
+- **迁移换主角名＝显式字段，禁止自动推断**：`derive_config.protagonistFrom`（样本里的原书主角名）→ 迁入的章纲/goal/hook/beats 里全部替换为 `povCharacter`；留空则不换。**不做自动推断**——样本深度解析未必给主角建卡（悉达多样本 ★2+ 只有乔文达/迦摩罗等配角），按「出现最多」猜会把配角名静默改掉（v1 实测把「乔文达」当成了主角）。换名是纯文本替换（`NovelService.renameProtagonist`），只换指定名字，配角原样保留。
+
+**剧情换皮模式（RESKIN，2026-10-04 增补；用户定调「剧情复刻但其它全部随机重新生成」）**：
+
+`mode` 三值：`ORIGINAL` / `MIGRATE`（原样迁移，连外衣一起搬）/ `RESKIN`（换皮）。`migrate()` 对 MIGRATE/RESKIN 同时为真（上表所有「按样本剧情走」的退让自动继承），`reskin()` 只对 RESKIN 为真。用户对照例：`马力去商船打工→遇船长→船长要捕海怪→找船员与赞助商→人齐→整船被海关全灭` ⇒ `林枫去便利店打工→遇店长→店长说闹鬼→邀他猎魔→用人脉凑齐人→最后被鬼怪全灭`。
+
+| 环节 | RESKIN 口径 |
+|---|---|
+| 克隆样本资产 | **一概不克隆**（素材卡/世界观/大纲都是旧外衣）；只按样本建章行结构，且**不预物化场景** |
+| 换皮设定 | `derive_reskin/skin`（温度 1.0，随机种子入提示词）：题材/世界/主角/配角风格 + **人物名表 characters** + **新全书大纲**；落 `canon_docs(misc/换皮设定)` 留档，新大纲/世界观写 canon。**全书共用一套**，先定再逐章用。characters 落成 `material_cards(kind=character)`，并回填 `derive_config.povCharacter`（用户已指定则不动）——否则场景提示词的视角人物还是「未指定」，模型会自由发挥人名 |
+| 逐章换皮 | `derive_reskin/chapter`：节拍数量/顺序/功能与**结局形状**一比一保留，人名地名组织名职业器物生物全换；写回 `chapters.goal/hook` 并复用 `OutlineService.materializeScenes` 物化场景 |
+| **设定卡补全**（收尾第三步） | 逐章换皮跑完后调 `BookAssetExtractService.extractCards(novelId, **overwrite=true**)`，从已换成新外衣的章行目标/钩子（有 digest 时用 digest）抽**全套 kind** 设定卡：地点/物品/组织/现象/地标/灾害，并填 `aliases`。**必须 overwrite**：换皮设定只给得出人物卡，不覆盖则已有人物卡的别名永远补不上。**fail-open**：补卡失败只 warn，不连累换皮结果 |
+| 执行方式 | `TaskKind.RESKIN` 队列任务（`kind` 无 CHECK 约束，无需迁移），建书**事务提交后**入队；逐章 fail-fast（补卡步例外，见上） |
+| `protagonistFrom` | 不适用（人名由换皮设定生成） |
+
+- **为什么必须有「设定卡补全」这一步**（2026-10-04 晚增补）：素材卡是设定层的注入来源（场景按 `pinned` + 别名命中注入）。换皮设定里的 `characters` 只覆盖人物，实跑书 56 因此只有 6 张卡且**全是 character、aliases 全空**——地点/器物/组织/现象一律无卡，注入形同虚设，正文随之漂出「无来历的铜片」「同一件衣服前后两个名字」。补全后同一本书是 **40 张卡覆盖 6 类**（地点 6 / 物品 8 / 组织 5 / 现象 9 / 灾害 1 / 人物 11），32 张带别名——「纹服」的别名里直接记着「纹衣」，一个卡位就收掉了术语不一致。
+
+验收（2026-10-04 实弹，悉达多 3 章探针、已清）：建书即自动入队 → DONE「3 章 / 18 场景」，4 次调用 21,254 tokens；古印度宗教 → 科幻轨道打捞，悉达多 → 周衡、乔文达 → 宋砚、沙门 → 零压行者、吠陀 → 《轨道律》，而第 1 章仍是同样 5 拍同序同功能。
+- **验收（2026-10-03 实弹，悉达多样本 3 章探针、已清）**：9 张卡（含 4 张人物卡）、3 章章行（卷号/卷名/goal/hook 全来自样本）、18 个场景预物化、activate 放行；跑第 1 章得 `llm_call_log` **无 `outline` 节点**、6 次 scene_draft + 3 次 scene_revise → 成稿 2929 字 DIGESTED，记忆四层（digest/world_state/foreshadow/embedding）均有真实行。
+- **合规口径（不藏）**：本模式产出与样本剧情高度一致，属**实质性相似**范畴；向导文案已明写「请在授权范围内使用」，平台侧不提供自动规避查重的任何能力。
+
+**「时间跨度」契约（2026-10-04 晚增补；书 56 跑满 13 章后暴露，两条都已修）**：
+
+时间线是迁移类书的头号事故源：样本跨几十年，衍生书若把岁月压平，年龄/子嗣/伤病/技艺会全线对不上，而**审校器与场景写手各自都「自洽」**，只有把三层对齐才看得出问题。
+
+- **世界状态的 `time` 只许来自正文明确写出的时间线索**（`PromptCatalog` 的 `digest/state_spec`）：正文只写局部时长（如「这半月掉的肉」说的是身体变化、「等了半个时辰」说的是单场等待）时**严禁反推总历时**；无线索就沿用上一章的时间表述、只补正文支持的推进量，拿不准一律保守。
+  实跑教训：第 3 章被判 BLOCKER（正文「三年前出城」vs 基准「过峡后约半月」），核到源头是**换皮设定与大纲都写「三年间」、ch2 正文也写「三年」，唯独 digest 抽出的 `world_states.state->>'time'` 是「半月」**——审校器拿错基准判了正确正文。改口径后的实弹证据：第 4 章的世界状态直接写成「正文未给出明确日期推进，仅有『走了不知多久』等局部模糊时长」。
+- **换皮章必须写 `chapters.time_note`**：`derive_reskin/chapter` 输出结构含 `time_note`（并要求「原章跨几年新章也跨几年，严禁把岁月压成次日」），`ReskinService.rewriteChapter` 落库。`time_note` 是 digest 时间锚点段（`time_anchor`）的**唯一来源**，缺它则世界状态的 `time` 全靠抽。
+  实跑教训：换皮书 56 的 `time_note` 全是 NULL，第 9 章的换皮设定把「偕幼子朝觐／苏眠之死／父子因缘」压进一章、正文写出的孩子已会喊爹，而大纲里这孩子要到最后才出生——BLOCKER 两轮修不掉，按设计转人工。
+- **`AI_REVIEW_REVISE` 的两块基准有优先级**：`【事实基准】` 里「上一章结束时的事实状态」是时间/位置/物品的账，时间口径一律以它为准；其下的「上一章发生了什么」只是情节梗概，跨度与账冲突时不得据它改正文。
+- **提示词参数个数由测试钉死**（`ReskinPromptArityTest`）：`PromptTemplateService.formatSafe` 是 fail-open 的，`%s` 个数与调用点实参不匹配会**静默回退代码模板且不报错**——「库内编辑过的版本被悄悄忽略」正是这族漂移的隐蔽点。
 
 ### 流 C：无人续跑链
 
@@ -241,6 +291,8 @@ flowchart LR
 **已知交汇（实弹踩到，故意不改门禁）**：`dialogue_end_punct_ratio` 在场景级/章级都有硬下限 0.5（既有反 AI 腔规则，见 GateService）。若本书自身就低于该线（如「夜班守则」风格基线 0.09），或全书对白句末普遍无标点导致该指标被全零剔除，采纳本书自己的指纹后**该指标仍按 0.5 判**——草稿 notes 会在两种情况下都明确告知。
 
 ## 六、软删 × 唯一键 × 召回：四条口径（2026-09-30 增补，全库排查后固化）
+
+> **【2026-10-03 软删机制整体下线，本节按「删除＝真删」重读】**：删除不再是打 `is_deleted` 标记，而是物理 `DELETE`；条件唯一索引的 `WHERE is_deleted = FALSE` 谓词恒为真、等同普通唯一索引（列与索引保留当死列/死谓词）。因此下面提到「软删行不进索引 / 软删包不再被复用」等表述，历史背景读作「已删除的行不存在」即可；`is_deleted` 在代码里只剩 3 处 `ON CONFLICT` 谓词（必须保留）。删父行现已由 V37 外键 `ON DELETE CASCADE` 保证。详见 `docs/code-standards.md §0 流水 1 / §8.6`。
 
 新写删除/插入/召回相关代码时按这四条判断，别只照抄某张表的具体做法。
 

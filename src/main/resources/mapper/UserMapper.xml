@@ -4,13 +4,13 @@
 
     <select id="findAliveByUsername" resultType="com.zzdzz.novelgen.model.entity.UserDO">
 
-                SELECT id, username, password_hash, role, is_deleted
-                FROM users WHERE username=#{username} AND is_deleted=false
+                SELECT id, username, password_hash, role
+                FROM users WHERE username=#{username}
                 
     </select>
 
     <select id="findIdByUsername" resultType="long">
-SELECT id FROM users WHERE username=#{username} AND is_deleted=false
+SELECT id FROM users WHERE username=#{username}
     </select>
 
     <select id="insert" resultType="long">

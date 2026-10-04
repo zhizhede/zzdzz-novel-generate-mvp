@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-/** 章节步骤状态数据服务实现。Wrapper 用字符串列名并显式 `.eq("is_deleted", false)`——实体不带软删字段，过滤必须自己带。 */
+/** 章节步骤状态数据服务实现。 */
 @Service
 public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, ChapterStepDO>
         implements ChapterStepDataService {
@@ -18,7 +18,7 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
     private QueryWrapper<ChapterStepDO> whereChapter(long chapterId) {
         return new QueryWrapper<ChapterStepDO>()
                 .eq("chapter_id", chapterId)
-                .eq("is_deleted", false);
+                ;
     }
 
     @Override
@@ -77,7 +77,6 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
                 .eq("novel_id", novelId)
                 .eq("chapter_no", chapterNo)
                 .eq("status", StepStatus.RUNNING.wire())
-                .eq("is_deleted", false)
                 .orderByDesc("id")
                 .last("LIMIT 1"), false));
     }
@@ -87,7 +86,6 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
         update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<ChapterStepDO>()
                 .eq("chapter_id", chapterId)
                 .eq("status", StepStatus.RUNNING.wire())
-                .eq("is_deleted", false)
                 .set("status", "INTERRUPTED")
                 .set("detail", "{\"reason\": \"用户终止（硬中断）\"}")
                 .set("update_time", java.time.LocalDateTime.now()));

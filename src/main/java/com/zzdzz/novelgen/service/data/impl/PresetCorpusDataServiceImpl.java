@@ -18,13 +18,12 @@ public class PresetCorpusDataServiceImpl extends ServiceImpl<PresetCorpusMapper,
     public List<PresetCorpusDO> listByGenre(String genre) {
         return list(new QueryWrapper<PresetCorpusDO>()
                 .eq("genre", genre)
-                .eq("is_deleted", false)
                 .orderByAsc("id"));
     }
 
     @Override
     public List<GenreSummary> genreSummaries() {
-        return list(new QueryWrapper<PresetCorpusDO>().eq("is_deleted", false)).stream()
+        return list(new QueryWrapper<PresetCorpusDO>()).stream()
                 .collect(java.util.stream.Collectors.groupingBy(PresetCorpusDO::getGenre))
                 .entrySet().stream()
                 .map(e -> new GenreSummary(e.getKey(), e.getValue().size(),

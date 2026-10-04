@@ -40,7 +40,7 @@ public interface PromptTemplateDataService extends IService<PromptTemplateDO> {
     /** 新建自定义行（custom=true），返回 id。 */
     long insertCustom(String node, String phase, String title, String content);
 
-    /** 自定义行软删。 */
-    int softDeleteById(long id);
+    /** 删除自定义行（物理删除）。 */
+    int deleteCustom(long id);
 
 }

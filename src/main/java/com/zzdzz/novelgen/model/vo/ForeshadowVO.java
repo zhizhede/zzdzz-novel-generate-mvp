@@ -2,7 +2,7 @@ package com.zzdzz.novelgen.model.vo;
 
 import com.zzdzz.novelgen.model.entity.ForeshadowDO;
 
-/** 伏笔台账行：软删除内部字段不出 API。 */
+/** 伏笔台账行。 */
 public record ForeshadowVO(Long id, long novelId, String code, String content,
                            Integer plantedIn, Integer recoveredIn, Integer proposedIn, String status) {
 

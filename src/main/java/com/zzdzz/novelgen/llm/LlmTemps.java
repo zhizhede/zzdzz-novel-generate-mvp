@@ -11,6 +11,8 @@ public final class LlmTemps {
     public static final double DERIVE_OUTLINE = 0.8;
     /** 衍生大纲·原书复刻评审（判定） */
     public static final double DERIVE_ORIGINALITY = 0.2;
+    /** 剧情换皮（创作型，要高随机度：同一份样本每次跑出不同外衣） */
+    public static final double DERIVE_RESKIN = 1.0;
     /** 场景门禁重写 */
     public static final double SCENE_REVISE = 0.8;
     /** 章级修订 */

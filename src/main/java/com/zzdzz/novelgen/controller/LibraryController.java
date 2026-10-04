@@ -90,7 +90,7 @@ public class LibraryController {
         return Result.success(promptService.create(dto.node(), dto.phase(), dto.title(), dto.content()));
     }
 
-    /** 删除自定义模板/段（软删；目录同步行不可删）。 */
+    /** 删除自定义模板/段（物理删除；目录同步行不可删）。 */
     @DeleteMapping("/prompts/{id}")
     public Result<Void> deletePrompt(@PathVariable long id) {
         promptService.delete(id);

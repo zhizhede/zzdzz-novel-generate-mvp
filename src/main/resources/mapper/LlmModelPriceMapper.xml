@@ -3,17 +3,17 @@
 <mapper namespace="com.zzdzz.novelgen.dao.LlmModelPriceMapper">
 
     <select id="listAll" resultType="com.zzdzz.novelgen.model.entity.LlmModelPriceDO">
-SELECT * FROM llm_model_price WHERE is_deleted=false ORDER BY id
+SELECT * FROM llm_model_price  ORDER BY id
     </select>
 
     <select id="findById" resultType="com.zzdzz.novelgen.model.entity.LlmModelPriceDO">
-SELECT * FROM llm_model_price WHERE id=#{id} AND is_deleted=false
+SELECT * FROM llm_model_price WHERE id=#{id}
     </select>
     <update id="update">
                 UPDATE llm_model_price SET idle_input_hit=#{idleInputHit}, idle_input_miss=#{idleInputMiss},
                        idle_output=#{idleOutput}, peak_input_hit=#{peakInputHit}, peak_input_miss=#{peakInputMiss},
                        peak_output=#{peakOutput}, peak_start_hour=#{peakStartHour}, peak_end_hour=#{peakEndHour},
                        remark=#{remark}, update_time=NOW()
-                WHERE id=#{id} AND is_deleted=false
+                WHERE id=#{id}
     </update>
 </mapper>

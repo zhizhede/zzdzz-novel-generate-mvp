@@ -11,19 +11,19 @@
 
     <select id="findLatestBefore" resultType="string">
                 SELECT state::text FROM world_states
-                WHERE novel_id=#{novelId} AND chapter_no &lt; #{beforeChapter} AND is_deleted = FALSE
+                WHERE novel_id=#{novelId} AND chapter_no &lt; #{beforeChapter}
                 ORDER BY chapter_no DESC LIMIT 1
     </select>
 
     <select id="listByNovel" resultType="com.zzdzz.novelgen.service.data.WorldStateDataService$StateRow">
                 SELECT chapter_no AS "chapterNo", state::text AS "stateJson", to_char(update_time, 'YYYY-MM-DD HH24:MI:SS') AS "updateTime" FROM world_states
-                WHERE novel_id=#{novelId} AND is_deleted = FALSE
+                WHERE novel_id=#{novelId}
                 ORDER BY chapter_no DESC LIMIT #{limit}
     </select>
 
     <update id="updateByChapter">
                 UPDATE world_states SET state = #{stateJson}::jsonb, update_time = now()
-                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND is_deleted = FALSE
+                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
     </update>
 
     <insert id="insertRaw">

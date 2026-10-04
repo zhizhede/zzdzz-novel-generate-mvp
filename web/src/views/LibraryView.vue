@@ -338,12 +338,6 @@
           <el-table-column label="更新时间" width="150">
             <template #default="{ row }">{{ fmtTime(row.updateTime) }}</template>
           </el-table-column>
-          <el-table-column v-if="showPromptDelete" label="删" width="60">
-            <template #default="{ row }">
-              <el-button v-if="row.custom" size="small" type="danger" link
-                         @click.stop="deletePrompt(row)">删</el-button>
-            </template>
-          </el-table-column>
         </DataTable>
 
         <el-drawer v-model="promptOpen" :title="promptDetail ? promptDetail.node + ' · ' + promptDetail.phase : '提示词'" size="55%">
@@ -1234,7 +1228,6 @@ const filteredPrompts = computed(() => {
 const promptCreateOpen = ref(false)
 const promptCreateForm = ref({ node: '', phase: '', title: '', content: '' })
 const promptCreating = ref(false)
-const showPromptDelete = ref(false)
 
 function openPromptCreate() {
   promptCreateForm.value = { node: '', phase: '', title: '', content: '' }
@@ -1266,17 +1259,6 @@ async function createPrompt() {
     ElMessage.error(e.message)
   } finally {
     promptCreating.value = false
-  }
-}
-
-async function deletePrompt(row) {
-  try {
-    await ElMessageBox.confirm(`删除提示词「${row.node}/${row.phase}」？（软删，可数据库恢复）`, '删除', { type: 'warning' })
-    await api.delete(`/api/prompts/${row.id}`)
-    ElMessage.success('已删除')
-    prompts.value = await api.get('/api/prompts')
-  } catch (e) {
-    if (e !== 'cancel') ElMessage.error(e.message)
   }
 }
 
@@ -1464,7 +1446,7 @@ async function testProvider(row) {
 
 async function delProvider(row) {
   try {
-    await ElMessageBox.confirm(`删除接入「${row.name}」？（软删，可 psql 恢复）`, '删除确认', { type: 'warning' })
+    await ElMessageBox.confirm(`删除接入「${row.name}」？（不可恢复，该接入的加密 key 一并删除）`, '删除确认', { type: 'warning' })
   } catch (e) {
     return
   }
@@ -1643,7 +1625,7 @@ async function createCanon() {
 
 async function removeCanon(row) {
   try {
-    await ElMessageBox.confirm(`删除「${row.name}」？（软删除，可恢复）`, '确认', { type: 'warning' })
+    await ElMessageBox.confirm(`删除「${row.name}」？（不可恢复）`, '确认', { type: 'warning' })
     await api.delete(`/api/canon/${row.id}`)
     await loadAll()
   } catch (e) {

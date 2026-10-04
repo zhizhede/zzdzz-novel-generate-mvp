@@ -1,13 +1,19 @@
 package com.zzdzz.novelgen.controller;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import com.zzdzz.novelgen.common.web.AuthInterceptor;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.ApprovalModeDTO;
 import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.NovelVO;
+import com.zzdzz.novelgen.service.DeriveSupport;
+import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.NovelService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,17 +23,21 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /** 作品列表、开书与审批模式切换（auto 直过 / manual 人工）。 */
 @RestController
 @RequestMapping("/api/novels")
 @RequiredArgsConstructor
+@Slf4j
 public class NovelController {
 
     private final NovelService novelService;
     private final com.zzdzz.novelgen.service.OutlineDraftService outlineDraftService;
     private final com.zzdzz.novelgen.service.ImportAnalyzeService importAnalyzeService;
+    private final GenerationQueueService queueService;
 
 
     @GetMapping
@@ -81,11 +91,26 @@ public class NovelController {
     public record DigestBackfillBody(Integer recent) {
     }
 
-    /** 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选样本资产克隆与衍生配置（P2）。 */
+    /**
+     * 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选样本资产克隆与衍生配置（P2）。
+     * 剧情换皮（mode=RESKIN）在此**事务提交后**提交换皮任务：换皮要逐章调 LLM，不能挂在建书请求里跑，
+     * 也不能在事务内入队（worker 读到的是未提交的章行）。
+     */
     @PostMapping
     public Result<NovelVO> create(@RequestBody NovelCreateDTO dto, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
-        return Result.success(novelService.create(dto, userId));
+        NovelVO vo = novelService.create(dto, userId);
+        if (dto != null && dto.sampleId() != null && dto.deriveConfig() != null
+                && DeriveSupport.MODE_RESKIN.equals(DeriveSupport.normalizeMode(dto.deriveConfig().mode()))) {
+            int chapters = novelService.migratedChapterCount(vo.id());
+            if (chapters > 0) {
+                long taskId = queueService.submitReskin(vo.id(), vo.title(), 1, chapters, userId);
+                log.info("剧情换皮任务已入队：novelId={} taskId={} 章数={}", vo.id(), taskId, chapters);
+            } else {
+                log.warn("剧情换皮：本书没有迁入章行（样本无章级剧情？），未入队 novelId={}", vo.id());
+            }
+        }
+        return Result.success(vo);
     }
 
     @PutMapping("/{id}/approval-mode")
@@ -125,7 +150,7 @@ public class NovelController {
         return Result.success();
     }
 
-    /** 删除书籍（软删）。有排队/运行中任务时拒绝；无人续跑自动关闭。 */
+    /** 删除书籍（物理删除，章节等关联数据随外键级联清走）。有排队/运行中任务时拒绝；无人续跑自动关闭。 */
     @DeleteMapping("/{id}")
     public Result<Void> deleteNovel(@PathVariable long id) {
         novelService.deleteNovel(id);
@@ -143,6 +168,20 @@ public class NovelController {
     public Result<com.zzdzz.novelgen.service.NovelService.DeriveConfigFullVO> updateDeriveConfig(
             @PathVariable long id, @RequestBody NovelCreateDTO vo) {
         return Result.success(novelService.updateDeriveConfig(id, vo.deriveConfig()));
+    }
+
+    /**
+     * 导出全书正文 txt（书籍管理页「导出」）：只装有正文的章，按章号升序，每章「第N章 [标题]」独立成行。
+     * 不加书名抬头，导出稿可直接再导入；文件名用书名走 RFC 5987（中文不乱码）。
+     */
+    @GetMapping("/{id}/export")
+    public ResponseEntity<byte[]> export(@PathVariable long id) {
+        NovelService.ExportText e = novelService.exportText(id);
+        String filename = URLEncoder.encode(e.title() + ".txt", StandardCharsets.UTF_8).replace("+", "%20");
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
+                .contentType(new MediaType("text", "plain", StandardCharsets.UTF_8))
+                .body(e.content().getBytes(StandardCharsets.UTF_8));
     }
 
     public record NovelUpdateVO(String title, String description) {

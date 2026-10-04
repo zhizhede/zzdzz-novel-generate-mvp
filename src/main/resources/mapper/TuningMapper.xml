@@ -12,11 +12,11 @@
     <select id="findAll" resultMap="doMap">
 
                 SELECT id, tkey, tvalue, description FROM tuning
-                WHERE is_deleted = FALSE ORDER BY tkey
+                 ORDER BY tkey
 
     </select>
 
     <update id="updateValue">
-UPDATE tuning SET tvalue=#{value}, update_time=NOW() WHERE tkey=#{key} AND is_deleted=FALSE
+UPDATE tuning SET tvalue=#{value}, update_time=NOW() WHERE tkey=#{key}
     </update>
 </mapper>

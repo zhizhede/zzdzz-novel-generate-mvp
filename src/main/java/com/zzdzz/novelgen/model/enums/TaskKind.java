@@ -4,7 +4,9 @@ package com.zzdzz.novelgen.model.enums;
 public enum TaskKind {
     CHAPTERS("CHAPTERS"),
     PLAN("PLAN"),
-    OUTLINE("OUTLINE");
+    OUTLINE("OUTLINE"),
+    /** 剧情换皮（RESKIN）：保留样本剧情骨架，把世界观/大纲与逐章章纲全部换成本书新外衣。 */
+    RESKIN("RESKIN");
 
     private final String wire;
 

@@ -42,8 +42,7 @@ public class OutlineService {
 
     public ChapterDO loadChapter(long novelId, int chapterNo) {
         return chapterData.find(novelId, chapterNo)
-                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
-    }
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));    }
 
     public void generate(long novelId, ChapterDO ch, String world, String characters,
                          List<String> directives, List<String> digests, String prevTail,
@@ -180,6 +179,27 @@ public class OutlineService {
         }
         sceneData.replaceAll(chapterId, goals, present, reveal, not, words);
         log.info("章纲落库: scenes={} 保全状态={}", scenes.size(), preserveChapterState);
+    }
+
+    /**
+     * 剧情迁移：把**预建的场景拆解**直接物化（不经 LLM），与章纲生成共用同一落库写路径
+     * （写 outline_yaml + 物化 chapter_scenes）。管线步骤 1 见场景已存在即跳过 AI 章纲，
+     * 于是迁移来的剧情成为该章的唯一方向约束。
+     *
+     * @param preserveChapterState true=只换章纲，不动章状态/正文/门禁报告（已有正文的章）
+     */
+    public void materializeScenes(long chapterId, List<SceneSpec> specs, boolean preserveChapterState) {
+        var arr = mapper.createArrayNode();
+        for (SceneSpec s : specs) {
+            var o = arr.addObject();
+            o.put("no", s.sceneNo());
+            o.put("goal", s.goal() == null ? "" : s.goal());
+            o.set("present", mapper.valueToTree(s.present() == null ? List.of() : s.present()));
+            o.set("must_reveal", mapper.valueToTree(s.mustReveal() == null ? List.of() : s.mustReveal()));
+            o.set("must_not", mapper.valueToTree(s.mustNot() == null ? List.of() : s.mustNot()));
+            o.put("words", s.words());
+        }
+        materialize(chapterId, arr, preserveChapterState);
     }
 
     public List<SceneSpec> loadSpecs(long chapterId) {

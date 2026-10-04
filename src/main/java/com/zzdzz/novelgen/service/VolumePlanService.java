@@ -416,11 +416,14 @@ public class VolumePlanService {
 
     // ===== 落库与伏笔采纳 =====
 
-    /** 落库：软删 fromNo 起旧规划行（前置校验保证无正文）→ 插入新行 → 伏笔采纳/建账 → 卷简报存 canon。 */
+    /** 落库：删除 fromNo 起旧规划行（前置校验保证无正文）→ 插入新行 → 伏笔采纳/建账 → 卷简报存 canon。 */
     private AdoptResult adopt(long novelId, int volNo, PlanDraft draft) {
         int fromNo = draft.rows().get(0).chapterNo();
         List<String> warnings = new ArrayList<>();
         List<String> adopted = new ArrayList<>();
+        // 剧情迁移书：迁入的章自带章纲（就是迁移来的剧情），即使还没正文也不许被卷规划覆盖——
+        // 覆盖＝把迁移的剧情连同场景一起抹掉换成 AI 新编的卷纲，用户以为在"规划"其实在销毁迁移结果。
+        boolean migrate = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).migrate();
         tx.executeWithoutResult(status -> {
             for (ChapterDO c : chapterData.listSummariesByNovel(novelId)) {
                 if (c.getChapterNo() >= fromNo) {
@@ -428,7 +431,12 @@ public class VolumePlanService {
                         throw new BizException(ErrorCode.PARAM_ERROR,
                                 "第 " + c.getChapterNo() + " 章已有正文，禁止覆盖其规划行");
                     }
-                    chapterData.softDeletePlan(c.getId());
+                    if (migrate && c.getOutlineYaml() != null && !c.getOutlineYaml().isBlank()) {
+                        throw new BizException(ErrorCode.STATE_CONFLICT,
+                                "第 " + c.getChapterNo() + " 章是「剧情迁移」迁入的剧情（已带章纲），卷规划会把它整卷抹掉——"
+                                        + "迁移书请直接入队生成；确需重规划请先删除该卷，或改成原创衍生模式");
+                    }
+                    chapterData.deletePlan(c.getId());
                 }
             }
             // 先逐章解析伏笔引用（可能自动建账），再插规划行——refs 写最终编码，下游指令查询才有据

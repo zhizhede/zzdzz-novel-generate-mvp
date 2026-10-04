@@ -48,6 +48,6 @@ public interface NovelDataService extends IService<NovelDO> {
     /** 编辑书名/简介（改名唯一性在 service 校验）。 */
     int updateProfile(long novelId, String title, String description);
 
-    /** 软删书籍（is_deleted=true；关联数据保留可恢复）。 */
-    int softDelete(long novelId);
+    /** 物理删除书籍；章节/场景/事实账等关联数据由外键 ON DELETE CASCADE 一并删除（V37）。 */
+    int delete(long novelId);
 }

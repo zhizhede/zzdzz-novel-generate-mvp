@@ -121,7 +121,7 @@ public class LlmNodeConfigService {
 
     public void delete(long id) {
         require(id);
-        configDAO.softDelete(id);
+        configDAO.delete(id);
     }
 
     private LlmNodeConfigDO require(long id) {

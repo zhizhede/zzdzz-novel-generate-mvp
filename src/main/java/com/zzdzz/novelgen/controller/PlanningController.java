@@ -38,7 +38,7 @@ public class PlanningController {
     private final NovelDataService novelData;
     private final RetroProposalDataService proposalData;
 
-    /** 取书名给入队用。全局逻辑删除后软删行不可见，getById 会返回 null——换成可读的 404，别让它变成 NPE。 */
+    /** 取书名给入队用。行已物理删除时 getById 返回 null——换成可读的 404，别让它变成 NPE。 */
     private String requireTitle(long novelId) {
         var novel = novelData.getById(novelId);
         if (novel == null) {

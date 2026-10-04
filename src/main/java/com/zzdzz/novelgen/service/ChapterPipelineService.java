@@ -153,6 +153,14 @@ public class ChapterPipelineService {
             }
         }
         if (outcome != ChapterOutcome.FAILED) return outcome;
+        // 剧情迁移书：不换目标。replanChapter 会 resetForReoutline（删掉迁入的场景与章纲）让 AI 重编，
+        // 等于把这一章的迁移剧情换成 AI 现编——「换一条写法」正是迁移要避免的事。失败就交人工。
+        if (isMigrate(novelId)) {
+            stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
+                    Map.of("message", "剧情迁移章：不换目标（迁入剧情固定），保留原章纲转人工"));
+            log.warn("第 {} 章重试仍败；本书为剧情迁移模式，跳过 replan（迁入剧情不换），转人工", chapterNo);
+            return outcome;
+        }
         String reason = failureReason(novelId, chapterNo);
         stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
                 Map.of("message", "重试仍败，重写卷纲目标后再试", "reason", reason));
@@ -491,14 +499,32 @@ public class ChapterPipelineService {
                 return t;
             });
 
+    /**
+     * 章题行的形态判据：整行就是一个章题才成立——「第N章」/「第 N 章」/「第N章 标题」/「第N章：标题」，
+     * 标题最多 12 字且不含句读。放宽到「行首是第N章」会误剥真正的正文（如「第三章的门在右边」），
+     * 故要求章序号之后要么结束、要么由空格/冒号引出短标题。
+     */
+    private static final java.util.regex.Pattern CHAPTER_HEADING = java.util.regex.Pattern.compile(
+            "^第\\s*(?:\\d+|[一二三四五六七八九十百零两]+)\\s*章[。.!！?？]?$"
+                    + "|^第\\s*(?:\\d+|[一二三四五六七八九十百零两]+)\\s*章(?:\\s*[:：]\\s*|\\s+)"
+                    + "[^。！？；，、：\\s]{1,12}[。.!！?？]?$");
+
     /** 模型偶发把章题当正文首行（无 # 前缀，cleanDraft 剥不掉）：拼章与修订后各剥一次。 */
     static String stripTitleLine(String fullText, String title) {
-        if (fullText == null || fullText.isBlank() || title == null || title.isBlank()) {
+        if (fullText == null || fullText.isBlank()) {
             return fullText;
         }
         String[] parts = fullText.split("\n", 2);
-        String first = parts[0].strip();
-        if (first.equals(title) || first.replaceAll("[。．.!！?？]", "").equals(title)) {
+        String first = parts[0].replace('\u3000', ' ').strip();
+        if (title != null && !title.isBlank()
+                && (first.equals(title) || first.replaceAll("[。．.!！?？]", "").equals(title))) {
+            return parts.length > 1 ? parts[1].strip() : "";
+        }
+        // 兜底：迁移/换皮建的章行 title 恒为 NULL——样本章题是「第N章（无标题）」，
+        // cleanNodeTitle 刻意归一成 null 不伪造，于是上面那条等值匹配对这类书是死代码，
+        // 模型写在正文首行的「第3章」会一路进成品（书 56 第 3/4/12 章、书 57 第 3 章实证）。
+        // 章题行没有叙事功能（生成提示词本就要求首行是全新句子），按形态剥掉即可，无需知道 title。
+        if (first.length() <= 20 && CHAPTER_HEADING.matcher(first).matches()) {
             return parts.length > 1 ? parts[1].strip() : "";
         }
         return fullText;
@@ -878,9 +904,15 @@ public class ChapterPipelineService {
     private ChapterOutcome reviewBlockedDisposition(long novelId, int chapterNo, String approvalMode,
                                                     BooleanSupplier stopCheck, int attempt) {
         // 无人续跑的书按书覆盖为自动换目标重写（tuning 是平台级默认，derive_config.autoContinue 是书级口径）
-        boolean autoBook = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).autoContinueOn();
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        boolean autoBook = cfg.autoContinueOn();
         boolean replanAllowed = autoBook
                 || tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
+        // 剧情迁移书同样不换目标（理由见 runChapterWithHeal）：审校硬伤转人工，别把迁入剧情换成现编。
+        if (cfg.migrate()) {
+            log.warn("第 {} 章审校复审仍 BLOCKER；本书为剧情迁移模式，跳过自动换目标，转人工", chapterNo);
+            return markReviewPending(novelId, chapterNo);
+        }
         if (!replanAllowed || stopCheck.getAsBoolean()) {
             return markReviewPending(novelId, chapterNo);
         }
@@ -901,6 +933,11 @@ public class ChapterPipelineService {
         stageLog.emit(novelId, chapterNo, APPROVE, PENDING, Map.of("reason", "review_blocker"));
         log.warn("第 {} 章审校硬伤未清，转人工审批", chapterNo);
         return ChapterOutcome.PENDING;
+    }
+
+    /** 本书是否剧情迁移模式（derive_config.mode=MIGRATE）：迁移书的章纲是迁入的剧情，一律不换目标。 */
+    private boolean isMigrate(long novelId) {
+        return DeriveSupport.parse(novelData.findDeriveConfig(novelId)).migrate();
     }
 
     /** replan 前清正文：replanChapter 守卫拒绝带正文的章（既有梯子在拼章后失败走 replan 会撞守卫的潜伏坑）。 */

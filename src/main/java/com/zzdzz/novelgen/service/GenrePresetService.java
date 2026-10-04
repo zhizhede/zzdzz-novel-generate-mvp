@@ -71,8 +71,7 @@ public class GenrePresetService {
         if (corpusData.getById(id) == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "语料不存在: " + id);
         }
-        corpusData.update(new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<PresetCorpusDO>()
-                .eq("id", id).set("is_deleted", true).set("delete_time", java.time.OffsetDateTime.now()));
+        corpusData.removeById(id);
     }
 
     // ===== 提取与预设 =====

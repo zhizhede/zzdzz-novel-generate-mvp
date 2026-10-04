@@ -111,13 +111,13 @@ public class PromptTemplateService {
         return detail(id);
     }
 
-    /** 删除自定义行（软删；catalog 同步行不可删，只能重置）。 */
+    /** 删除自定义行（物理删除；catalog 同步行不可删，只能重置）。 */
     public void delete(long id) {
         PromptTemplateDO t = require(id);
         if (!t.isCustom()) {
             throw new BizException(ErrorCode.STATE_CONFLICT, "目录同步行不可删除（可编辑或重置）；如需移除请先在代码目录中移除该条");
         }
-        dao.softDeleteById(id);
+        dao.deleteCustom(id);
         cacheLoadedAt = 0;
     }
 

@@ -13,7 +13,7 @@
         <el-button size="small" type="primary" @click="resumeDraft">继续这份草稿</el-button>
         <el-button size="small" type="danger" plain @click="discardDraft(draftBook)">废弃草稿</el-button>
         <el-button size="small" @click="ignoreDraft">不管它，直接开新书</el-button>
-        <span class="hint" style="margin-left: 8px">废弃为软删，之后仍可在数据库恢复</span>
+        <span class="hint" style="margin-left: 8px">废弃即物理删除，不可恢复</span>
       </el-alert>
 
       <el-steps :active="wizardStep" finish-status="success" simple style="margin-bottom: 20px">
@@ -132,6 +132,29 @@
             本书每章字数带（期望字数，来自预设「{{ chosenPresetName || '所选预设' }}」）：约 <b>{{ presetBand[0] }}–{{ presetBand[1] }}</b> 字/章，
             之后可在素材库·风格包调整
           </div>
+          <el-form-item label="开书模式">
+            <div style="width: 100%">
+              <el-radio-group v-model="wizardForm.derive.mode">
+                <el-radio-button value="ORIGINAL">原创衍生</el-radio-button>
+                <el-radio-button value="MIGRATE">剧情迁移</el-radio-button>
+                <el-radio-button value="RESKIN">剧情换皮</el-radio-button>
+              </el-radio-group>
+              <div class="hint" style="line-height: 1.7; margin-top: 4px">
+                <template v-if="wizardForm.derive.mode === 'RESKIN'">
+                  <b>剧情换皮</b>：只搬样本的<b>剧情骨架</b>（谁想做什么 / 遇到谁 / 对方提出什么 / 怎么凑人 / 结果如何），
+                  人名、场景、职业、组织、器物、结局执行者<b>全部随机重造</b>，每次开书换一套新外衣。
+                  建书后会自动入队一个「换皮」任务（逐章调 AI，十几分钟），<b>等它跑完再启动生成</b>。
+                </template>
+                <template v-else-if="wizardForm.derive.mode === 'MIGRATE'">
+                  <b>剧情迁移</b>：克隆样本人物 + 逐章剧情（章级剧情节点写成本书章纲，生成按样本剧情逐章推进），
+                  <b>不做原创性审校</b>。产出与样本剧情高度一致，请在授权范围内使用。
+                </template>
+                <template v-else>
+                  <b>原创衍生</b>：沿用样本世界观与文风，剧情必须原创——大纲会过复刻审校，人物卡不克隆。
+                </template>
+              </div>
+            </div>
+          </el-form-item>
           <el-form-item label="参考样本">
             <el-select v-model="wizardForm.sampleId" clearable placeholder="选择导入小说（可不选）" style="width: 100%">
               <el-option v-for="s in wizardSamples" :key="s.id" :value="s.id" :label="s.title">
@@ -139,13 +162,19 @@
                 <span class="hint" style="float: right">{{ (s.totalChars / 10000).toFixed(0) }} 万字</span>
               </el-option>
             </el-select>
-            <div v-if="wizardForm.sampleId" style="display: flex; gap: 12px; font-size: var(--text-sm); margin-top: 4px">
-              <el-checkbox v-model="wizardForm.cloneAssets.cards">设定卡（地点/物品/组织/现象；不含原书人物——新书写新人物）</el-checkbox>
+            <div v-if="wizardForm.sampleId && !isReskin" style="display: flex; gap: 12px; font-size: var(--text-sm); margin-top: 4px; flex-wrap: wrap">
+              <el-checkbox v-model="wizardForm.cloneAssets.cards">
+                {{ isMigrate ? '人物与设定卡（含原书人物）' : '设定卡（地点/物品/组织/现象；不含原书人物——新书写新人物）' }}
+              </el-checkbox>
               <el-checkbox v-model="wizardForm.cloneAssets.world">世界观</el-checkbox>
-              <el-checkbox v-model="wizardForm.cloneAssets.plotOutline">剧情骨架预填大纲（慎用：大纲会贴近原书剧情，规划出的卷纲也会像原书；衍生新书建议改用「AI 生成大纲」）</el-checkbox>
+              <el-checkbox v-model="wizardForm.cloneAssets.plotOutline" :disabled="isMigrate">
+                <template v-if="isMigrate">迁移样本逐章剧情（章级剧情 → 本书章纲）</template>
+                <template v-else>剧情骨架预填大纲（大纲贴近原书剧情；要逐章复现请改用「剧情迁移」）</template>
+              </el-checkbox>
             </div>
             <div class="hint" style="line-height: 1.7">
               克隆的是样本深度解析出的资产（素材库 → 导入小说 → 深度解析）；未解析的样本克隆不到东西，先去解析。
+              <template v-if="isMigrate">剧情迁移需要样本已深度解析出<b>章级剧情</b>，否则迁不出剧情。</template>
             </div>
             <el-alert v-if="selectedSample && !selectedSample.presetId" type="warning" :closable="false"
                       :title="`样本「${selectedSample.title}」还没有提取文风预设（开书下拉里选不到它）`"
@@ -189,7 +218,15 @@
               <el-option value="多视角轮换" label="多视角轮换" />
             </el-select>
             <el-input v-if="wizardForm.derive.pov !== '多视角轮换'" v-model="wizardForm.derive.povCharacter"
-                      placeholder="主视角人物名（可选）" style="width: var(--ctrl-w-2xl); margin-left: 8px" />
+                      :placeholder="isMigrate ? '本书主角名（如：林峰）' : '主视角人物名（可选）'"
+                      style="width: var(--ctrl-w-2xl); margin-left: 8px" />
+            <el-input v-if="isMigrate && !isReskin" v-model="wizardForm.derive.protagonistFrom"
+                      placeholder="样本原书主角名（如：悉达多；留空＝不改名）"
+                      style="width: var(--ctrl-w-2xl); margin-left: 8px" />
+            <div v-if="isMigrate && !isReskin" class="hint" style="margin-top: 4px">
+              迁移换名：迁入章纲里「样本原书主角名」会被<b>确定性替换</b>成「本书主角名」（不靠模型自觉，也<b>不做自动推断</b>——
+              样本未必给主角建卡，猜错会把配角名一起改掉）。留空则沿用样本原名。
+            </div>
           </el-form-item>
           <el-form-item label="节奏">
             <el-input-number v-model="wizardForm.derive.chaptersPerVolume" :min="3" :max="30" size="small" />
@@ -252,6 +289,17 @@
               <div v-if="wizardForm.derive.autoContinue">
                 本书已开「无人续跑」：回工作台点「启动续跑」即可写到总目标章数为止——卷尽自动规划下卷、自动续批；中途出硬伤会暂停等你处理。
               </div>
+              <template v-else-if="isReskin">
+                <div>① 本书结构已按样本建好，<b>「换皮」任务已自动入队</b>（逐章调 AI 造新外衣 + 新世界观/大纲，
+                  十几分钟）——去工作台看队列，等它 DONE</div>
+                <div>② 换皮跑完再去工作台设连跑范围（第 1 章起）、点「启动生成」；<b>别点「AI 规划一卷」</b>（会抹掉换皮结果）</div>
+                <div style="color: var(--muted)">换皮设定会落在素材库·正典「换皮设定」，可复查；不想要这套外衣就删了书重开一本</div>
+              </template>
+              <template v-else-if="isMigrate">
+                <div>① 样本剧情已迁入本书：<b>逐章章纲（场景拆解）与卷归属已就位，不需要「AI 规划一卷」</b>——
+                  别去点它，那会把迁入的剧情整卷抹掉（系统已拦，会报错）</div>
+                <div>② 直接去工作台设连跑范围（第 1 章起），点「启动生成」→ 生成会按样本剧情逐章推进</div>
+              </template>
               <template v-else>
                 <div>① 到「<router-link to="/planning">规划</router-link>」页确认/补写大纲，点「AI 规划一卷」生成首卷卷纲（2-10 分钟）</div>
                 <div>② 回工作台设好连跑范围（默认从第 1 章起），点「启动生成」</div>
@@ -260,7 +308,7 @@
               <div style="color: var(--muted)">所有生成参数已按本向导的设定落库；之后想改，到工作台点「本书生成参数」随时可改。</div>
             </div>
             <div style="display: flex; gap: 10px; justify-content: center">
-              <el-button type="primary" @click="wizardDone">开始规划 →</el-button>
+              <el-button type="primary" @click="wizardDone">{{ isMigrate ? '去工作台 →' : '开始规划 →' }}</el-button>
               <el-button @click="router.push('/')">去工作台</el-button>
             </div>
           </template>
@@ -283,7 +331,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
@@ -303,7 +351,20 @@ const wizardForm = ref({
   title: '', description: '', presetId: null, outline: '',
   sampleId: null,
   cloneAssets: { cards: true, world: true, plotOutline: false },
-  derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
+  derive: { mode: 'ORIGINAL', water: 50, pov: '第三人称限知', povCharacter: '', protagonistFrom: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
+})
+/** 剧情迁移模式：克隆人物与逐章剧情，跳过原创性审校（与后端 DeriveSupport.MODE_MIGRATE 同名）。 */
+const isMigrate = computed(() => ['MIGRATE', 'RESKIN'].includes(wizardForm.value.derive.mode))
+/** 剧情换皮：只搬结构，外衣（含人名）由换皮任务重造——克隆勾选与换名输入都不适用。 */
+const isReskin = computed(() => wizardForm.value.derive.mode === 'RESKIN')
+// 切换模式时同步克隆勾选项：迁移=全开（剧情骨架是迁移本体，不允许关）；原创=回到默认（剧情骨架默认关）
+watch(isMigrate, (mig) => {
+  if (!wizardForm.value.sampleId) return
+  if (mig) {
+    wizardForm.value.cloneAssets = { cards: true, world: true, plotOutline: true }
+  } else {
+    wizardForm.value.cloneAssets.plotOutline = false
+  }
 })
 const wizardSamples = ref([])
 const paramsDeciding = ref(false)
@@ -344,7 +405,7 @@ function resetWizardState() {
     title: '', description: '', presetId: presets.value.length ? presets.value[0].id : null, outline: '',
     sampleId: null,
     cloneAssets: { cards: true, world: true, plotOutline: false },
-    derive: { water: 50, pov: '第三人称限知', povCharacter: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
+    derive: { mode: 'ORIGINAL', water: 50, pov: '第三人称限知', povCharacter: '', protagonistFrom: '', pacingNote: '', chaptersPerVolume: 10, targetChapters: 300, autoContinue: false, priority: 1, tags: [] }
   }
   presetMode.value = 'select'
   sampleForm.value = { name: '', text: '', fileBase64: '' }
@@ -428,12 +489,12 @@ async function resumeDraft() {
   }
 }
 
-/** 废弃草稿书（软删）：向导内直接了断，不用绕书籍管理页。若废弃的正是当前接续的书，重置向导回到第一步。 */
+/** 废弃草稿书（物理删除）：向导内直接了断，不用绕书籍管理页。若废弃的正是当前接续的书，重置向导回到第一步。 */
 async function discardDraft(b) {
   if (!b) return
   try {
     await ElMessageBox.confirm(
-      `将废弃草稿书《${b.title}》（ID ${b.id}）：书籍管理页不再显示（软删，数据库可恢复）。确定废弃？`,
+      `将废弃草稿书《${b.title}》（ID ${b.id}）：该书及其关联数据将被删除，不可恢复。确定废弃？`,
       '废弃草稿', { type: 'warning', confirmButtonText: '废弃', cancelButtonText: '先留着' })
   } catch { return }
   try {
@@ -571,13 +632,16 @@ function buildOutlinePayload() {
     draft: createdNovelId.value ? undefined : true,
     cloneAssets: f.sampleId ? { ...f.cloneAssets } : undefined,
     deriveConfig: {
+      mode: f.derive.mode,
       water: f.derive.water,
       pov: f.derive.pov,
       povCharacter: f.derive.povCharacter.trim() || undefined,
       pacingNote: f.derive.pacingNote.trim() || undefined,
       chaptersPerVolume: f.derive.chaptersPerVolume,
       targetChapters: f.derive.targetChapters,
+      autoContinue: f.derive.autoContinue,
       priority: f.derive.priority,
+      protagonistFrom: f.derive.protagonistFrom ? f.derive.protagonistFrom.trim() : undefined,
       tags: (f.derive.tags || []).length ? f.derive.tags : undefined
     }
   }
@@ -680,9 +744,9 @@ async function finalizeDraft() {
   }
 }
 
-/** 向导收尾：落到规划页，接上「AI 规划一卷」那一步。 */
+/** 向导收尾：原创衍生落到规划页接「AI 规划一卷」；剧情迁移剧情已迁入，直接去工作台入队生成。 */
 function wizardDone() {
-  router.push('/planning')
+  router.push(isMigrate.value ? '/' : '/planning')
 }
 
 onMounted(initWizard)

@@ -138,7 +138,7 @@ public class StyleFingerprintService {
     }
 
     /**
-     * 书籍风格包行：只收仍存活书籍的包（软删书的孤儿包不进列表）。
+     * 书籍风格包行：只收仍被书籍引用的包（已删书留下的孤儿包不进列表）。
      * 品类与源样本经 derive_config.sourceSampleId 回链；语料规模/章长预算留空——书籍没有「提取语料」这一读数。
      */
     private List<StyleFingerprintVO> bookRows(Map<Long, ImportedSampleDO> sampleById, Map<String, long[]> genreScale) {

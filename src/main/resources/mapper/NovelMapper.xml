@@ -4,13 +4,13 @@
 
     <select id="listAlive" resultType="com.zzdzz.novelgen.model.entity.NovelDO">
 
-                SELECT id, user_id, title, description, style_pack_id, approval_mode, status, source_type, create_time, is_deleted
-                FROM novels WHERE is_deleted=false ORDER BY id
+                SELECT id, user_id, title, description, style_pack_id, approval_mode, status, source_type, create_time
+                FROM novels  ORDER BY id
                 
     </select>
 
     <select id="findIdByTitle" resultType="long">
-SELECT id FROM novels WHERE title=#{title} AND is_deleted=false
+SELECT id FROM novels WHERE title=#{title}
     </select>
 
     <select id="insert" resultType="long">
@@ -23,7 +23,7 @@ SELECT approval_mode FROM novels WHERE id=#{novelId}
     </select>
 
     <update id="updateApprovalMode">
-UPDATE novels SET approval_mode=#{mode}, update_time=NOW() WHERE id=#{novelId} AND is_deleted=false
+UPDATE novels SET approval_mode=#{mode}, update_time=NOW() WHERE id=#{novelId}
     </update>
 
     <select id="findPlanMode" resultType="string">
@@ -31,32 +31,32 @@ SELECT plan_mode FROM novels WHERE id=#{novelId}
     </select>
 
     <update id="updatePlanMode">
-UPDATE novels SET plan_mode=#{mode}, update_time=NOW() WHERE id=#{novelId} AND is_deleted=false
+UPDATE novels SET plan_mode=#{mode}, update_time=NOW() WHERE id=#{novelId}
     </update>
 
     <select id="chapterCount" resultType="int">
-SELECT COUNT(*) FROM chapters WHERE novel_id=#{novelId} AND is_deleted=false
+SELECT COUNT(*) FROM chapters WHERE novel_id=#{novelId}
     </select>
 
     <select id="findDeriveConfig" resultType="string">
-SELECT derive_config::text FROM novels WHERE id=#{novelId} AND is_deleted=false
+SELECT derive_config::text FROM novels WHERE id=#{novelId}
     </select>
 
     <update id="updateDeriveConfig">
-UPDATE novels SET derive_config=#{deriveConfigJson}::jsonb, update_time=NOW() WHERE id=#{novelId} AND is_deleted=false
+UPDATE novels SET derive_config=#{deriveConfigJson}::jsonb, update_time=NOW() WHERE id=#{novelId}
     </update>
 
     <select id="findAutoState" resultType="com.zzdzz.novelgen.service.data.NovelDataService$AutoStateRow">
 SELECT auto_state AS "autoState", auto_message AS "autoMessage", auto_volumes AS "autoVolumes"
-FROM novels WHERE id=#{novelId} AND is_deleted=false
+FROM novels WHERE id=#{novelId}
     </select>
 
     <update id="updateAutoState">
 UPDATE novels SET auto_state=#{state}, auto_message=#{message}, update_time=NOW()
-WHERE id=#{novelId} AND is_deleted=false
+WHERE id=#{novelId}
     </update>
 
     <update id="bumpAutoVolumes">
-UPDATE novels SET auto_volumes = auto_volumes + 1, update_time=NOW() WHERE id=#{novelId} AND is_deleted=false
+UPDATE novels SET auto_volumes = auto_volumes + 1, update_time=NOW() WHERE id=#{novelId}
     </update>
 </mapper>

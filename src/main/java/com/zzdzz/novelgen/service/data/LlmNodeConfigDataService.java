@@ -16,7 +16,7 @@ public interface LlmNodeConfigDataService extends IService<LlmNodeConfigDO> {
 
     boolean exists(String node);
 
-    int softDelete(long id);
+    int delete(long id);
 
     long insert(String node, String model, Double temperature, Integer maxTokens,
                 String extraJson, boolean enabled, String remark);

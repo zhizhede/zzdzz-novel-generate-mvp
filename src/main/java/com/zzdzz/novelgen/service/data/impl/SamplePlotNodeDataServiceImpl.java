@@ -1,14 +1,12 @@
 package com.zzdzz.novelgen.service.data.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zzdzz.novelgen.dao.SamplePlotNodeMapper;
 import com.zzdzz.novelgen.model.entity.SamplePlotNodeDO;
 import com.zzdzz.novelgen.service.data.SamplePlotNodeDataService;
 import org.springframework.stereotype.Service;
 
-import java.time.OffsetDateTime;
 import java.util.List;
 
 /** 导入样本剧情结构树数据服务实现。 */
@@ -20,7 +18,6 @@ public class SamplePlotNodeDataServiceImpl extends ServiceImpl<SamplePlotNodeMap
     public List<SamplePlotNodeDO> listBySample(long sampleId) {
         return list(new QueryWrapper<SamplePlotNodeDO>()
                 .eq("sample_id", sampleId)
-                .eq("is_deleted", false)
                 .orderByAsc("level")
                 .orderByAsc("seq"));
     }
@@ -31,7 +28,6 @@ public class SamplePlotNodeDataServiceImpl extends ServiceImpl<SamplePlotNodeMap
                 .eq("sample_id", sampleId)
                 .eq("level", level)
                 .eq("seq", seq)
-                .eq("is_deleted", false)
                 .last("LIMIT 1"));
     }
 
@@ -42,12 +38,9 @@ public class SamplePlotNodeDataServiceImpl extends ServiceImpl<SamplePlotNodeMap
     }
 
     @Override
-    public int softDeleteByLevel(long sampleId, String level) {
-        return baseMapper.update(null, new UpdateWrapper<SamplePlotNodeDO>()
+    public int deleteByLevel(long sampleId, String level) {
+        return baseMapper.delete(new QueryWrapper<SamplePlotNodeDO>()
                 .eq("sample_id", sampleId)
-                .eq("level", level)
-                .eq("is_deleted", false)
-                .set("is_deleted", true)
-                .set("delete_time", OffsetDateTime.now()));
+                .eq("level", level));
     }
 }

@@ -113,8 +113,8 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO
     }
 
     @Override
-    public void softDeletePlan(long chapterId) {
-        baseMapper.softDeletePlan(chapterId);
+    public void deletePlan(long chapterId) {
+        baseMapper.deletePlan(chapterId);
     }
 
     @Override

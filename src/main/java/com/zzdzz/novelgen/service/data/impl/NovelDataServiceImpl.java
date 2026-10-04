@@ -32,7 +32,6 @@ public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDO> impl
         return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDO>()
                 .eq("id", novelId)
                 .eq("status", "draft")
-                .eq("is_deleted", false)
                 .set("status", "active"));
     }
 
@@ -92,17 +91,12 @@ public class NovelDataServiceImpl extends ServiceImpl<NovelMapper, NovelDO> impl
     public int updateProfile(long novelId, String title, String description) {
         return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDO>()
                 .eq("id", novelId)
-                .eq("is_deleted", false)
                 .set("title", title)
                 .set("description", description == null ? "" : description));
     }
 
     @Override
-    public int softDelete(long novelId) {
-        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<NovelDO>()
-                .eq("id", novelId)
-                .eq("is_deleted", false)
-                .set("is_deleted", true)
-                .set("delete_time", java.time.OffsetDateTime.now()));
+    public int delete(long novelId) {
+        return baseMapper.deleteById(novelId);
     }
 }

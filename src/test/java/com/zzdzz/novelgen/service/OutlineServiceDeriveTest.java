@@ -16,10 +16,10 @@ class OutlineServiceDeriveTest {
     @Test
     void picksChaptersWithTextInChapterOrderUpToCap() {
         List<ChapterTextRow> texts = List.of(
-                new ChapterTextRow(3, "第三章正文"),
-                new ChapterTextRow(1, "第一章正文"),
-                new ChapterTextRow(2, "  "),          // 空白正文：不算候选
-                new ChapterTextRow(5, null));          // 无正文：不算候选
+                new ChapterTextRow(3, null, "第三章正文"),
+                new ChapterTextRow(1, null, "第一章正文"),
+                new ChapterTextRow(2, null, "  "),          // 空白正文：不算候选
+                new ChapterTextRow(5, null, null));          // 无正文：不算候选
 
         assertThat(OutlineService.outlineCandidates(texts, 30))
                 .extracting(ChapterTextRow::chapterNo).containsExactly(1, 3);
@@ -31,7 +31,7 @@ class OutlineServiceDeriveTest {
     void emptyWhenNothingToDerive() {
         assertThat(OutlineService.outlineCandidates(List.of(), 30)).isEmpty();
         assertThat(OutlineService.outlineCandidates(null, 30)).isEmpty();
-        assertThat(OutlineService.outlineCandidates(List.of(new ChapterTextRow(1, "正文")), 0)).isEmpty();
-        assertThat(OutlineService.outlineCandidates(List.of(new ChapterTextRow(1, "正文")), -1)).isEmpty();
+        assertThat(OutlineService.outlineCandidates(List.of(new ChapterTextRow(1, null, "正文")), 0)).isEmpty();
+        assertThat(OutlineService.outlineCandidates(List.of(new ChapterTextRow(1, null, "正文")), -1)).isEmpty();
     }
 }

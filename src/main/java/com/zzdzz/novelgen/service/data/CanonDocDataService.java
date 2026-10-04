@@ -27,5 +27,5 @@ public interface CanonDocDataService extends IService<CanonDocDO> {
 
     int updateContent(long id, String content);
 
-    int softDelete(long id);
+    int delete(long id);
 }

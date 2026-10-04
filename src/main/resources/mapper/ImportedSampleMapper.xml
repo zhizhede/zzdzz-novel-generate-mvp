@@ -10,6 +10,6 @@ RETURNING id
 
     <update id="updateTags">
 UPDATE imported_samples SET tags=#{tagsJson}::jsonb, update_time=NOW()
-WHERE id=#{sampleId} AND is_deleted=false
+WHERE id=#{sampleId}
     </update>
 </mapper>

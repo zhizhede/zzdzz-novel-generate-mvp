@@ -14,8 +14,8 @@ public interface ChapterDataService extends IService<ChapterDO> {
     record Opening(int chapterNo, String firstLines) {
     }
 
-    /** 章文本行（开场相似度/对话密度统计用）。 */
-    record ChapterTextRow(int chapterNo, String fullText) {
+    /** 章文本行（开场相似度/对话密度统计、全书导出用）。title 可为 NULL——迁移/换皮建的书不伪造章题。 */
+    record ChapterTextRow(int chapterNo, String title, String fullText) {
     }
 
     /** 卷级复盘的事实行（规划 + 实际产出）。 */
@@ -90,8 +90,8 @@ public interface ChapterDataService extends IService<ChapterDO> {
     void updatePlan(long chapterId, Integer volumeNo, String arc, String title,
                     String goal, String hook, String timeNote, int budgetMin, int budgetMax);
 
-    /** 仅未动笔的规划行可删（软删）。 */
-    void softDeletePlan(long chapterId);
+    /** 仅未动笔的规划行可删（物理删除）。 */
+    void deletePlan(long chapterId);
 
     void updateStatus(long chapterId, String status);
 
