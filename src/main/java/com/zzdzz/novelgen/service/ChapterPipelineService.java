@@ -499,14 +499,32 @@ public class ChapterPipelineService {
                 return t;
             });
 
+    /**
+     * 章题行的形态判据：整行就是一个章题才成立——「第N章」/「第 N 章」/「第N章 标题」/「第N章：标题」，
+     * 标题最多 12 字且不含句读。放宽到「行首是第N章」会误剥真正的正文（如「第三章的门在右边」），
+     * 故要求章序号之后要么结束、要么由空格/冒号引出短标题。
+     */
+    private static final java.util.regex.Pattern CHAPTER_HEADING = java.util.regex.Pattern.compile(
+            "^第\\s*(?:\\d+|[一二三四五六七八九十百零两]+)\\s*章[。.!！?？]?$"
+                    + "|^第\\s*(?:\\d+|[一二三四五六七八九十百零两]+)\\s*章(?:\\s*[:：]\\s*|\\s+)"
+                    + "[^。！？；，、：\\s]{1,12}[。.!！?？]?$");
+
     /** 模型偶发把章题当正文首行（无 # 前缀，cleanDraft 剥不掉）：拼章与修订后各剥一次。 */
     static String stripTitleLine(String fullText, String title) {
-        if (fullText == null || fullText.isBlank() || title == null || title.isBlank()) {
+        if (fullText == null || fullText.isBlank()) {
             return fullText;
         }
         String[] parts = fullText.split("\n", 2);
-        String first = parts[0].strip();
-        if (first.equals(title) || first.replaceAll("[。．.!！?？]", "").equals(title)) {
+        String first = parts[0].replace('\u3000', ' ').strip();
+        if (title != null && !title.isBlank()
+                && (first.equals(title) || first.replaceAll("[。．.!！?？]", "").equals(title))) {
+            return parts.length > 1 ? parts[1].strip() : "";
+        }
+        // 兜底：迁移/换皮建的章行 title 恒为 NULL——样本章题是「第N章（无标题）」，
+        // cleanNodeTitle 刻意归一成 null 不伪造，于是上面那条等值匹配对这类书是死代码，
+        // 模型写在正文首行的「第3章」会一路进成品（书 56 第 3/4/12 章、书 57 第 3 章实证）。
+        // 章题行没有叙事功能（生成提示词本就要求首行是全新句子），按形态剥掉即可，无需知道 title。
+        if (first.length() <= 20 && CHAPTER_HEADING.matcher(first).matches()) {
             return parts.length > 1 ? parts[1].strip() : "";
         }
         return fullText;
