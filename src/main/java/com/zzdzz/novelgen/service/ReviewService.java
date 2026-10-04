@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * AI 语义审校闭环：机械门禁之后的连续性/逻辑/错字审校。
@@ -82,6 +83,21 @@ public class ReviewService {
     public Outcome readerReviewAndFix(long novelId, ChapterDO ch, String fullText, LlmPort.StreamDelta onDelta) {
         JsonNode r1 = readerOnce(novelId, ch, fullText, 1, onDelta);
         if (!"blocker".equals(r1.path("verdict").asText())) {
+            // 复沓硬闸（2026-10-04）：各维度都过、但同一句/近似句反复（评审第 6 问的 repeat 清单）超阈值时，
+            // 也治一轮。此前 repeat 只在判 BLOCKER 时才被 readerFix 消费，于是「过稿但通篇复沓」无处置——
+            // 实跑迁移书「回来×12 / 进去×6 / 出来×8」、换皮书「冷光三次近重复」都是这么漏过去的。
+            // 治不好也不阻塞（照常通过并落报告），避免把可用的稿子卡在人工。
+            JsonNode repeat = r1.path("repeat");
+            int minRepeat = (int) perNovel(novelId, "reader_repeat_fix_min", TuningDefaults.READER_REPEAT_FIX_MIN);
+            if (repeat.isArray() && repeat.size() >= minRepeat) {
+                log.warn("第 {} 章读者评审通过但复沓清单 {} 条（阈值 {}），执行一轮去复沓修订",
+                        ch.getChapterNo(), repeat.size(), minRepeat);
+                String polished = readerFix(novelId, ch, fullText, r1);
+                if (polished != null) {
+                    JsonNode r2 = readerOnce(novelId, ch, polished, 2, onDelta);
+                    return new Outcome(polished, r2.path("verdict").asText("pass"), false, readerIssueLines(r2));
+                }
+            }
             return new Outcome(null, r1.path("verdict").asText("pass"), false, readerIssueLines(r1));
         }
         log.warn("第 {} 章读者评审判 BLOCKER（hook={} stakes={} continuity={} consequence={} fat_ratio={}），重写一轮",
@@ -314,6 +330,11 @@ public class ReviewService {
         for (JsonNode i : node.path("issues")) {
             out.add("意见：" + i.asText());
         }
+        // 复沓清单也要出现在报告/UI 里：它是「过稿但读起来重复」的唯一证据，
+        // 此前只进过 readerFix 的重写提示词，报告里看不到（实跑复盘时只能靠人肉数词频）。
+        for (JsonNode r : node.path("repeat")) {
+            out.add("复沓：" + r.asText());
+        }
         return out;
     }
 
@@ -333,6 +354,27 @@ public class ReviewService {
                         "full_text", text == null ? "" : text));
     }
 
+    /**
+     * 改稿用「事实基准」：世界状态快照（时间/位置/随身物品/新承诺/未解）+ 上一章后果 + 本章章纲。
+     *
+     * <p>为什么必须给修订轮：审校轮本来就拿这些（{@code userPrompt} 里有 world_state/prev_tail/digests），
+     * 所以它能判出「陆朴说同行三年、可实际只走了半月」；但修订轮此前只拿到 BLOCKER 条目 + 全文，
+     * 只能就句子改句子——同一处矛盾的其他表述改不干净，下一轮又报一条新的（实跑第 3 章两轮都栽在这）。
+     * 把基准一并给下去，改稿才有「以谁为准」的依据。
+     */
+    private String factBaseline(long novelId, ChapterDO ch) {
+        StringBuilder sb = new StringBuilder();
+        String ws = packer.worldState(novelId, ch.getChapterNo());
+        sb.append("· 上一章结束时的事实状态：\n").append(ws == null ? "（无快照）" : ws).append('\n');
+        String prevBrief = packer.prevChapterBrief(novelId, ch.getChapterNo());
+        sb.append("· 上一章发生了什么：")
+                .append(prevBrief == null || prevBrief.isBlank() ? "（本章是第一章）" : prevBrief).append('\n');
+        sb.append("· 本章的目标与钩子：目标=")
+                .append(Objects.toString(ch.getGoal(), "（无）")).append("；钩子=")
+                .append(Objects.toString(ch.getHook(), "（无）")).append('\n');
+        return sb.toString().strip();
+    }
+
     /** 带问题清单的修订轮：外科手术式，只修 BLOCKER 条目；修订稿异常时保留原文（返回 null）。 */
     private String reviseForIssues(long novelId, ChapterDO ch, String fullText, JsonNode review) {
         StringBuilder fb = new StringBuilder();
@@ -346,7 +388,8 @@ public class ReviewService {
         if (fb.isEmpty()) {
             fb.append("- 审校判定存在硬伤但未给出条目，请通读自查时间线、称呼与错别字。\n");
         }
-        String user = promptTemplates.format(LlmNode.AI_REVIEW_REVISE, "user", ch.getChapterNo(), fb, ch.getChapterNo(), fullText);
+        String user = promptTemplates.format(LlmNode.AI_REVIEW_REVISE, "user", ch.getChapterNo(), fb,
+                factBaseline(novelId, ch), ch.getChapterNo(), fullText);
         LlmPort.ChatResult r = llmPort.chat(new LlmPort.ChatRequest(
                 LlmNode.AI_REVIEW_REVISE, novelId, ch.getId(),
                 List.of(LlmPort.Message.system(promptTemplates.get(LlmNode.AI_REVIEW_REVISE, "system")),
