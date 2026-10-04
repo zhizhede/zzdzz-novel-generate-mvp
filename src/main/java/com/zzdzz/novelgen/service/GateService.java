@@ -60,6 +60,24 @@ public class GateService {
     @SuppressWarnings("unchecked")
     public GateVerdict checkChapter(long novelId, long chapterId, int chapterNo, String text,
                                 int budgetMin, int budgetMax) {
+        GateVerdict verdict = evaluateChapter(novelId, chapterNo, text, budgetMin, budgetMax);
+        Map<String, Object> metrics = computeMetrics(text);
+        int words = ((Number) metrics.get("cjk")).intValue();
+        List<String> hits = bannedPhrases(gateConfig(novelId)).stream().filter(text::contains).toList();
+        gateReportData.insert(chapterId, null, GateType.MECHANICAL.wire(), 0, verdict.passed(),
+                Map.of("chapter_no", chapterNo, "words", words,
+                        "banned_hits", hits, "checks", verdict.checks()));
+        return verdict;
+    }
+
+    /**
+     * 只判定、不落报告：成品终检关要在多个候选稿之间比较（回退稿/再修订稿），
+     * 给没被采用的候选稿留一行门禁报告会污染「最新报告 = 成品实况」这条既有约定；
+     * 比较完由调用方对**最终采用的正文**调一次 {@link #checkChapter} 落报告。
+     */
+    @SuppressWarnings("unchecked")
+    public GateVerdict evaluateChapter(long novelId, int chapterNo, String text,
+                                       int budgetMin, int budgetMax) {
         Map<String, Object> base = fingerprint(novelId);
         Map<String, Object> metrics = computeMetrics(text);
         List<GateCheck> checks = new ArrayList<>();
@@ -92,9 +110,6 @@ public class GateService {
         checks.add(check("banned_phrases", hits.size(), 0, 0, hits.isEmpty()));
 
         boolean passed = checks.stream().allMatch(GateCheck::ok);
-        gateReportData.insert(chapterId, null, GateType.MECHANICAL.wire(), 0, passed,
-                Map.of("chapter_no", chapterNo, "words", words,
-                        "banned_hits", hits, "checks", checks));
         return new GateVerdict(passed, checks);
     }
 
@@ -264,6 +279,14 @@ public class GateService {
             }
         }
         return fallback;
+    }
+
+    /** 书级字符串门禁参数（如 gate_recheck_action）：gate_config 有值即用，否则返回 fallback（调用方传平台 tuning 值）。 */
+    public String configText(long novelId, String key, String fallback) {
+        Object v = gateConfig(novelId).get(key);
+        if (v == null) return fallback;
+        String s = String.valueOf(v).trim();
+        return s.isEmpty() ? fallback : s;
     }
 
     /** 有效评审标准五项（gate_config > tuning > 代码默认），工作台/风格包调参面板回显用。 */

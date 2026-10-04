@@ -877,21 +877,25 @@ public class ChapterPipelineService {
             if (thinkRelay != null) thinkRelay.close();
         }
         if (outcome.revised() != null) {
+            String beforeReview = fullText;
             fullText = outcome.revised();
             chapterData.saveFullText(ch.getId(), fullText);
             stageLog.emit(novelId, ch.getChapterNo(), REVISE, isReader ? READER_FIX : REVIEW_FIX,
                     Map.of("chars", fullText.length()));
-            // 修订后机械复检：评审改写绕过章级门禁（第 3 章实测 行均长 17.97→21.50 出带无人知）。
-            // 只复检留痕（新报告 + 事件），不自动再改——内容修订优先级高于指纹，避免改写循环。
-            boolean onSpec = gateService.checkChapter(novelId, ch.getId(), ch.getChapterNo(), fullText,
-                    ch.getBudgetMin(), ch.getBudgetMax()).passed();
-            if (!onSpec) {
-                log.warn("第 {} 章{}修订后指纹漂移（机械复检未过，报告见 gate_reports；成品保留修订稿）",
-                        ch.getChapterNo(), stage.label());
+            // 成品终检关：评审改写绕过章级门禁（第 3 章实测 行均长 17.97→21.50 出带无人知）。
+            // 处置策略走 gate_recheck_action（书级 gate_config > 平台 tuning > 代码默认 KEEP=放行并标记）。
+            Recheck recheck = recheckAfterReview(novelId, ch, beforeReview, fullText, isReader, stopCheck);
+            if (recheck.interrupted()) {
+                return new ReviewStepResult(fullText, interrupt(novelId, ch, stepName, null));
+            }
+            fullText = recheck.fullText();
+            if (!recheck.passed()) {
+                log.warn("第 {} 章{}修订后指纹漂移（机械复检未过，处置 {}，报告见 gate_reports）",
+                        ch.getChapterNo(), stage.label(), recheck.action());
             }
             stageLog.emit(novelId, ch.getChapterNo(), CHAPTER_GATE, NONE,
-                    Map.of("passed", onSpec, "recheck", true,
-                            "reason", onSpec ? "" : String.valueOf(gateService.failedChecksText(ch.getId()))));
+                    Map.of("passed", recheck.passed(), "recheck", true, "action", recheck.action(),
+                            "reason", recheck.passed() ? "" : String.valueOf(gateService.failedChecksText(ch.getId()))));
         }
         stepData.finish(stepId, StepStatus.DONE.wire(), json(Map.of("verdict", outcome.verdict(), "blocked", outcome.blocked())));
         List<String> issues = outcome.issues().size() > 5 ? outcome.issues().subList(0, 5) : outcome.issues();
@@ -903,6 +907,101 @@ public class ChapterPipelineService {
             return new ReviewStepResult(fullText, ChapterOutcome.REVIEW_BLOCKED);
         }
         return new ReviewStepResult(fullText, ChapterOutcome.DONE);
+    }
+
+    /** 终检关结果：最终采用的正文 + 是否过检 + 走了哪条处置（KEEP/ROLLBACK/REVISE）+ 是否被用户终止。包内可见同 {@link #recheckAfterReview}。 */
+    record Recheck(String fullText, boolean passed, String action, boolean interrupted) {
+    }
+
+    /**
+     * 成品终检关：评审修订后的正文统一重过章级机械门禁，未过时按 {@code gate_recheck_action} 处置——
+     * KEEP（默认，原行为）放行并标记；ROLLBACK 回退到修订前那版（前提：它自己过得了门禁）；
+     * REVISE 拿机械失败清单再修订 N 轮（{@code gate_recheck_revise_rounds}，过了才换稿）。
+     * <p>
+     * 候选稿用 {@link GateService#evaluateChapter}（只判定不落报告）比较，最后对**采用的正文**落一次报告——
+     * 「最新报告 = 成品实况」是档案页与自愈取因的既有约定，不能给没被采用的候选稿留报告行。
+     * 但喂给修订提示词的失败清单取自最新报告，故每轮修订前先对当前稿落一次报告。
+     * <p>包内可见：单测直接打这条分支（走 runChapters 起一整条管线只为测这一步不值当）。
+     */
+    Recheck recheckAfterReview(long novelId, ChapterDO ch, String before, String after,
+                                       boolean isReader, BooleanSupplier stopCheck) {
+        String stageLabel = isReader ? "读者评审" : "AI 审校";
+        if (passesChapter(novelId, ch, after)) {
+            reportMechanical(novelId, ch, after);
+            return new Recheck(after, true, "KEEP", false);
+        }
+        String action = gateService.configText(novelId, "gate_recheck_action",
+                        tuning.s("gate_recheck_action", TuningDefaults.GATE_RECHECK_ACTION))
+                .toUpperCase(java.util.Locale.ROOT);
+        reportMechanical(novelId, ch, after); // 失败清单进报告，供 ROLLBACK 判定与 REVISE 提示词取因
+        String reported = after;
+        String adopted = after;
+        boolean passed = false;
+        String taken = "KEEP";
+        if ("ROLLBACK".equals(action)) {
+            if (before != null && !before.isBlank() && passesChapter(novelId, ch, before)) {
+                adopted = before;
+                passed = true;
+                taken = "ROLLBACK";
+                chapterData.saveFullText(ch.getId(), adopted);
+                log.info("第 {} 章{}修订后机械未过，按 ROLLBACK 回退到修订前正文（{} 字符）",
+                        ch.getChapterNo(), stageLabel, adopted.length());
+            } else {
+                log.warn("第 {} 章 ROLLBACK 不成立（修订前那版也过不了机械门禁），按放行并标记处理", ch.getChapterNo());
+            }
+        } else if ("REVISE".equals(action)) {
+            int rounds = Math.max(0, tuning.i("gate_recheck_revise_rounds", TuningDefaults.GATE_RECHECK_REVISE_ROUNDS));
+            double lenMin = tuning.d("chapter_revise_len_min", TuningDefaults.CHAPTER_REVISE_LEN_MIN);
+            double lenMax = tuning.d("chapter_revise_len_max", TuningDefaults.CHAPTER_REVISE_LEN_MAX);
+            for (int round = 1; round <= rounds; round++) {
+                if (stopCheck.getAsBoolean()) {
+                    if (!java.util.Objects.equals(reported, adopted)) reportMechanical(novelId, ch, adopted);
+                    return new Recheck(adopted, passed, taken, true);
+                }
+                log.warn("第 {} 章{}修订后机械未过，按 REVISE 再修订（第 {}/{} 轮）", ch.getChapterNo(), stageLabel, round, rounds);
+                stageLog.emit(novelId, ch.getChapterNo(), REVISE, START, Map.of("round", round, "recheck", true));
+                SceneChunkRelay relay = streamLongText() ? new SceneChunkRelay(novelId, ch.getChapterNo(), 0) : null;
+                String again;
+                try {
+                    if (relay != null) relay.reset();
+                    again = reviseChapter(novelId, ch, adopted, relay);
+                } finally {
+                    if (relay != null) relay.close();
+                }
+                if (again == null || again.length() < adopted.length() * lenMin
+                        || again.length() > adopted.length() * lenMax) {
+                    log.error("第 {} 章终检关再修订稿长度异常（{} 字符），弃用本轮", ch.getChapterNo(),
+                            again == null ? 0 : again.length());
+                    stageLog.emit(novelId, ch.getChapterNo(), REVISE, REJECTED, Map.of("round", round, "recheck", true));
+                    continue;
+                }
+                String candidate = stripTitleLine(again, ch.getTitle());
+                if (passesChapter(novelId, ch, candidate)) {
+                    adopted = candidate;
+                    passed = true;
+                    taken = "REVISE";
+                    chapterData.saveFullText(ch.getId(), adopted);
+                    stageLog.emit(novelId, ch.getChapterNo(), REVISE, DONE,
+                            Map.of("round", round, "chars", adopted.length(), "recheck", true));
+                    break;
+                }
+                reportMechanical(novelId, ch, candidate); // 下一轮的失败清单以本轮候选稿为准
+                reported = candidate;
+            }
+        }
+        // 最新报告必须对应采用的正文（档案页与自愈取因都读最新一条）
+        if (!java.util.Objects.equals(reported, adopted)) reportMechanical(novelId, ch, adopted);
+        return new Recheck(adopted, passed, taken, false);
+    }
+
+    /** 只判定不落报告（候选稿比较用）。 */
+    private boolean passesChapter(long novelId, ChapterDO ch, String text) {
+        return gateService.evaluateChapter(novelId, ch.getChapterNo(), text, ch.getBudgetMin(), ch.getBudgetMax()).passed();
+    }
+
+    /** 章级机械门禁判定并落报告（最新报告 = 当前采用正文的实况）。 */
+    private void reportMechanical(long novelId, ChapterDO ch, String text) {
+        gateService.checkChapter(novelId, ch.getId(), ch.getChapterNo(), text, ch.getBudgetMin(), ch.getBudgetMax());
     }
 
     /**

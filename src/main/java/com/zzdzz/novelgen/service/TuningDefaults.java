@@ -41,6 +41,9 @@ public final class TuningDefaults {
     public static final int TASK_AUTO_RETRY_TIMES = 1;
     // 审校复审仍 BLOCKER 的处置：0=转人工（默认）；1=自动清正文换目标重写一轮，仍不过才转人工
     public static final int REVIEW_BLOCKER_REPLAN = 0;
+    // 评审修订后机械复检未过的处置：KEEP=放行并标记（默认，原行为）/ ROLLBACK=回退到修订前 / REVISE=再修订
+    public static final String GATE_RECHECK_ACTION = "KEEP";
+    public static final int GATE_RECHECK_REVISE_ROUNDS = 1;
     public static final double RAG_MAX_DISTANCE = 0.55;
     // 导入小说深度解析：逐章 LLM 并发度；快速档抽样章数
     public static final int SAMPLE_PARSE_PARALLEL = 4;

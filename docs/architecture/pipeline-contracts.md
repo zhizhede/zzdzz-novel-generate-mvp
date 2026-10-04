@@ -357,3 +357,44 @@ flowchart LR
 4. **为什么不能只在解析层修**：畸形有两支——①「误嵌 + 漏收口」→ 老代码整章解析失败（fail-open 记「n/m 章」，事实账/状态/提议全丢）；②「只误嵌、语法合法」→ **解析得过，提议静默丢失且零报错**。②更阴，真库已留下脚印（书 5 第 1 章，2 条提议被吃，2026-09-30 已按快照原文回填 F10/F11）。
 5. **诊断口径**：这类问题**先取 `llm_call_log` 的 `response_json->'choices'->0->'message'->>'content'` 原文**逐字节看（`finish_reason` 能排除截断），别用被日志截断过的错误文案下结论；`closeUnclosed` 单独能救回的行 = 该类的精确指纹（全库回放命中 digest 5 行 + sample_chapter 1 行）。
 6. **已知边界**：无法区分「模型漏收口」与「截断恰好落在干净边界」，二者现在都补——真正区分要靠 provider 的 `finish_reason`，`LlmPort.ChatResult` 目前不带该字段，留作后续。
+
+## 十、打回语义二分 + 成品终检关（2026-10-05 增补）
+
+### 10.1 三个「打回」入口 → 两条清场路径
+
+**一句话**：打回正文不许动规划。剧情迁移/换皮的章，场景表就是迁入剧情的载体（样本 beats 摊成的场景蓝图），
+一删就得让 AI 重新编——迁移剧情会被换成 AI 现编（书 56 第 3 章 7 拍被重编成 3 场的直接原因）。
+
+| 入口 | 端点 | 清场路径（`ChapterDataService`） | 结果 |
+| --- | --- | --- | --- |
+| 终稿打回 | `POST /api/chapters/{id}/reject`（PENDING_APPROVAL） | `resetForTextReject` | 删门禁报告/步骤行；**场景行与 goal/人物/字数预算全留**、只清 draft_text 与 gate_status；状态→NEW、清正文、落意见；**outline_yaml 不动** |
+| 事后否决 | `POST /api/chapters/{id}/veto`（DIGESTED） | 同上（多一步删本章 digest） | 同上 |
+| 打回章纲 | `POST /api/chapters/{id}/outline-decision` action=REJECT（OUTLINED） | `resetForOutlineReject` | 连场景一起删、清 outline_yaml——**换一套规划**才走这条 |
+
+1. **重置场景草稿而不是删行**：场景步本来就是「`PASSED` 才复用」，重置成 `PENDING`（`draft_text=NULL`、`round=0`）后
+   同一套蓝图会被原样重写，既不产生重复规划、也不留旧正文（留 `PASSED` 会让重跑产出与打回前一模一样的稿）。
+2. **意见要有地方去**：打回正文保留了章纲 ⇒ 章纲步被跳过 ⇒ 原先挂在章纲提示词（`outline/reject_suffix`）上的打回意见
+   会**静默丢失用户意见**。故新增提示词段 `scene_draft/reject_note`（落库可编辑），由 `ContextPackerService#rejectNote`
+   在 `packScene` 里注入（复用衍生段槽位，改的是槽位内容不是模板元数，不碰场景模板的参数个数）；
+   长度护栏与章纲侧同键 `reject_reason_max_len`；**场景步走完后清零**（失败不清，重试继续带着意见写）。
+3. **打回意见是「同一个情节换一种写法」**：段文案明说场景目标与情节走向不变，避免模型为执行意见而改掉迁入剧情。
+4. **manual 模式下的既有语义不变**：打回后状态回 `NEW`，manual 书仍会停在章纲批准卡点（此时章纲就是保留的那一份），
+   批准后才进场景重写——正好是「先确认规划、再重写正文」。
+
+### 10.2 成品终检关：评审修订后统一重过机械门禁
+
+**一句话**：读者评审 / AI 审校的「带清单修订」是重写一遍正文，会绕开章级机械门禁（第 3 章实测 行均长 17.97→21.50），
+所以修订稿必须再判一次；判定未过时**按配置处置**，默认仍是「放行并标记」（内容修订优先级高于指纹，避免改写循环）。
+
+1. **判定与留痕分离**：`GateService.evaluateChapter`（只判定不落报告）用于比较候选稿；
+   `checkChapter` = `evaluateChapter` + 落报告。**最新一条门禁报告必须对应最终采用的正文**——档案页与自愈取因
+   （`failureReason` → replan）都读最新一条，给没被采用的候选稿留报告行会让自愈拿着别人的失败清单去换目标。
+   同理，喂给修订提示词的失败清单取自最新报告，故每轮修订前先对当前稿落一次报告。
+2. **开关三档**（`gate_recheck_action`，书级 `style_packs.gate_config` > 平台 `tuning` > 代码默认，V38 种子）：
+   - `KEEP`（**默认**）放行并标记：保留评审修订稿，落一份失败报告 + `CHAPTER_GATE{recheck:true, action:"KEEP"}` 事件；
+   - `ROLLBACK` 回退：仅当**修订前那版自己过得了机械门禁**才回退（否则记警告并按 KEEP 处理），回退后正文落库 + 报告都指向回退稿；
+   - `REVISE` 再修订：拿机械失败清单再修订 `gate_recheck_revise_rounds` 轮（默认 1），**过了才换稿**，没过仍用评审修订稿。
+3. **终止与长度**：再修订走与章级修订同一套长度护栏（`chapter_revise_len_min/max`，相对当前稿），异常的候选稿直接弃用本轮；
+   `stopCheck` 命中时报告与正文保持当前采用稿并交回 INTERRUPTED。
+4. **默认值的理由**：修正是内容问题、漂移是风格问题，为治风格把内容硬伤改回来是亏的（故不默认 ROLLBACK）；
+   REVISE 要多花一次 LLM 调用，不该对所有书默认开。三档都留开关，按书调。

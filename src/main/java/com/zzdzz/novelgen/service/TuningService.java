@@ -39,6 +39,12 @@ public class TuningService {
         return parse(key, fallback, Integer::parseInt);
     }
 
+    /** 字符串型开关（如 gate_recheck_action=KEEP/ROLLBACK/REVISE）：空值/缺行回退默认。 */
+    public String s(String key, String fallback) {
+        String v = get(key);
+        return v == null || v.isBlank() ? fallback : v.trim();
+    }
+
     private <T> T parse(String key, T fallback, Function<String, T> parser) {
         String v = get(key);
         if (v == null) return fallback;
