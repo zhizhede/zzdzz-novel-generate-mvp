@@ -86,4 +86,24 @@ class SampleParseServiceTest {
     void splitBySizeShortTextSinglePart() {
         assertThat(SampleParseService.splitBySize("短文本", 10000)).containsExactly("短文本");
     }
+
+    /**
+     * 首个章标题之前的文本（书名/作者/整理者免责声明）并入首章，不单独成章——否则整本章号后移一位，
+     * 迁移出来的新书第 1 章目标就是那段声明（书 58 第 1 章实弹踩到，与 NovelService 同口径）。
+     */
+    @Test
+    void preambleMergesIntoFirstChapterInsteadOfBecomingOne() {
+        String body = "大量正文".repeat(600) + "\n";
+        String text = "===oasis整理文件，同行禁转本文档只用作读者试读欣赏！===\n"
+                + "第1章 开端\n" + body
+                + "第2章 续\n" + body
+                + "第3章 结尾\n" + body;
+        List<SampleParseService.ChapterSeg> segs = SampleParseService.splitChapters(text);
+
+        assertThat(segs).hasSize(3);
+        assertThat(segs.get(0).title()).isEqualTo("第1章 开端");
+        assertThat(segs.get(0).text()).startsWith("===oasis").contains("大量正文");
+        assertThat(segs.get(1).title()).isEqualTo("第2章 续");
+        assertThat(segs.get(1).text()).doesNotContain("oasis");
+    }
 }

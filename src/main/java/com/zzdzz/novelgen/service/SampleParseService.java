@@ -137,6 +137,11 @@ public class SampleParseService {
     /**
      * 整本原文按章标题行切段：识别 第N章/回 与 序章/楔子等特殊章；第N卷/部/集 行只作卷界标。
      * 章标记覆盖不足（章 &lt;3 或覆盖字数 &lt;40%）时回退伪章（~3200 字一段，同切块口径）。
+     *
+     * <p>**首个章标题之前的文本（书名/作者/整理者免责声明）不是一章，并入首章**——与
+     * {@link NovelService#splitChapters} 同口径（那条路有 `preambleMergesIntoFirstChapter` 测试钉着）。
+     * 2026-10-05 实弹踩到：盗版 txt 首行的整理者声明被当成「第1章（无标题）」，整本源书的章号因此后移一位，
+     * 迁出来的新书第 1 章目标写的正是那段声明（`targetChapters=5` 只能迁到 4 章真剧情）。
      */
     static List<ChapterSeg> splitChapters(String text) {
         List<ChapterSeg> chapters = new ArrayList<>();
@@ -144,7 +149,9 @@ public class SampleParseService {
         int volumeCount = 0;
         int chapterVolume = 0;
         StringBuilder cur = new StringBuilder();
+        StringBuilder preamble = new StringBuilder();
         String curTitle = null;
+        boolean sawHeading = false;
         for (String raw : text.split("\n")) {
             String line = raw.strip();
             if (line.isEmpty()) {
@@ -159,9 +166,14 @@ public class SampleParseService {
                     || SPECIAL_CHAPTER_LINE.matcher(line).matches();
             if (isChapter && line.length() <= 70) {
                 if (cur.length() > 0) {
-                    chapters.add(new ChapterSeg(chapters.size() + 1, curTitle, cur.toString(), chapterVolume, false));
+                    if (sawHeading) {
+                        chapters.add(new ChapterSeg(chapters.size() + 1, curTitle, cur.toString(), chapterVolume, false));
+                    } else {
+                        preamble.append(cur); // 首个标题之前＝前言，稍后挂到首章头上
+                    }
                     cur.setLength(0);
                 }
+                sawHeading = true;
                 curTitle = line;
                 // 章的卷号以章开始时的卷界为准（章内容跨过卷标记不改属卷）
                 chapterVolume = volumeSeq;
@@ -174,6 +186,11 @@ public class SampleParseService {
         }
         if (cur.length() > 0) {
             chapters.add(new ChapterSeg(chapters.size() + 1, curTitle, cur.toString(), chapterVolume, false));
+        }
+        if (preamble.length() > 0 && !chapters.isEmpty()) {
+            ChapterSeg first = chapters.get(0);
+            chapters.set(0, new ChapterSeg(first.seq(), first.title(),
+                    preamble.toString().strip() + "\n\n" + first.text(), first.volumeSeq(), first.pseudo()));
         }
         if (chapters.isEmpty()) {
             return List.of();
