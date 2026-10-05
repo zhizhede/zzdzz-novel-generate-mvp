@@ -3,7 +3,7 @@
 <mapper namespace="com.zzdzz.novelgen.dao.CanonDocMapper">
 
     <select id="exists" resultType="boolean">
-SELECT COUNT(*) FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name}
+SELECT EXISTS (SELECT 1 FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name})
     </select>
 
     <update id="insert">

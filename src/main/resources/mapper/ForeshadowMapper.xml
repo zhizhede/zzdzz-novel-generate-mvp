@@ -10,7 +10,7 @@
     </select>
 
     <select id="exists" resultType="boolean">
-SELECT COUNT(*) FROM foreshadows WHERE novel_id=#{novelId} AND code=#{code}
+SELECT EXISTS (SELECT 1 FROM foreshadows WHERE novel_id=#{novelId} AND code=#{code})
     </select>
 
     <update id="insert">
@@ -46,7 +46,7 @@ INSERT INTO foreshadows (novel_id, code, content, planted_in, recovered_in) VALU
     </update>
 
     <select id="contentExists" resultType="boolean">
-SELECT COUNT(*) FROM foreshadows WHERE novel_id=#{novelId} AND content=#{content}
+SELECT EXISTS (SELECT 1 FROM foreshadows WHERE novel_id=#{novelId} AND content=#{content})
     </select>
 
     <select id="nextCode" resultType="string">

@@ -23,7 +23,7 @@ INSERT INTO digests (chapter_id, content_md, facts) VALUES (#{chapterId}, #{cont
     </update>
 
     <select id="existsByChapter" resultType="boolean">
-SELECT COUNT(*) FROM digests WHERE chapter_id=#{chapterId}
+SELECT EXISTS (SELECT 1 FROM digests WHERE chapter_id=#{chapterId})
     </select>
 
     <select id="findIdByChapter" resultType="long">

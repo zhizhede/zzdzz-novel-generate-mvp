@@ -17,7 +17,7 @@ SELECT * FROM llm_node_config WHERE id=#{id}
     </select>
 
     <select id="exists" resultType="boolean">
-SELECT COUNT(*) FROM llm_node_config WHERE node=#{node}
+SELECT EXISTS (SELECT 1 FROM llm_node_config WHERE node=#{node})
     </select>
 
     <delete id="delete">

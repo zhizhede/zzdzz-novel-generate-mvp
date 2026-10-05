@@ -20,17 +20,18 @@
 SELECT * FROM material_cards WHERE id=#{id}
     </select>
 
+    <!-- 存在性一律 SELECT EXISTS：COUNT(*) 配 resultType=boolean 只在计数 0/1 时侥幸能读，≥2 直接报 Cannot cast to boolean -->
     <select id="exists" resultType="boolean">
 
-                SELECT COUNT(*) FROM material_cards
-                WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name}
+                SELECT EXISTS (SELECT 1 FROM material_cards
+                WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name})
                 
     </select>
 
     <!-- 改名用：唯一索引 uq_material_cards_novel_kind_name 认活行的 (novel_id,kind,name)，自己除外 -->
     <select id="existsOther" resultType="boolean">
-SELECT COUNT(*) FROM material_cards
-WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND id &lt;&gt; #{excludeId}
+SELECT EXISTS (SELECT 1 FROM material_cards
+WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} AND id &lt;&gt; #{excludeId})
     </select>
 
     <delete id="delete">
@@ -38,7 +39,7 @@ DELETE FROM material_cards WHERE id=#{id}
     </delete>
 
     <select id="hasCards" resultType="boolean">
-SELECT COUNT(*) FROM material_cards WHERE novel_id=#{novelId}
+SELECT EXISTS (SELECT 1 FROM material_cards WHERE novel_id=#{novelId})
     </select>
     <insert id="insert">
                 INSERT INTO material_cards (novel_id, kind, name, aliases, summary, content_md, pinned, status, source_chapter)
