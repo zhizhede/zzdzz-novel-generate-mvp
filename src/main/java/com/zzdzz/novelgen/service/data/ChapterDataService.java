@@ -96,6 +96,10 @@ public interface ChapterDataService extends IService<ChapterDO> {
      * 重跑按同一套规划重写正文（剧情迁移/换皮迁入的剧情不被抹掉）。 */
     void resetForTextReject(long chapterId, String reason);
 
+    /** 保剧情重写清场（审校自愈第一档，2026-10-07）：只清场景草稿+正文、状态→NEW——
+     * **与打回的区别：保留 gate_reports/chapter_steps（审计链不断）**，章纲与场景蓝图同样保留。 */
+    void resetForAutoRewrite(long chapterId);
+
     /** 打回章纲清场（流 A）：删场景/门禁报告/步骤行，状态→NEW，正文与章纲一并清空（换一套规划重出）。 */
     void resetForOutlineReject(long chapterId, String reason);
 

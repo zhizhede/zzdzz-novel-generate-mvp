@@ -107,6 +107,14 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO
     }
 
     @Override
+    public void resetForAutoRewrite(long chapterId) {
+        // 刻意不动 gate_reports/chapter_steps：自愈历史要留档供复盘（打回清场那条才删）
+        baseMapper.resetSceneDrafts(chapterId);
+        baseMapper.saveFullText(chapterId, null);
+        baseMapper.updateStatus(chapterId, "NEW");
+    }
+
+    @Override
     public void resetForOutlineReject(long chapterId, String reason) {
         baseMapper.deleteGateReports(chapterId);
         baseMapper.deleteScenes(chapterId);

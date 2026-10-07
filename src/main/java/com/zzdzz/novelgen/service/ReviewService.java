@@ -56,20 +56,31 @@ public class ReviewService {
         }
     }
 
-    /** 管线闭环：审校 → BLOCKER 则带清单修订一轮 → 复审。onDelta 非空时思考流实时转发。 */
+    /** 管线闭环：审校 → BLOCKER 带清单修订 → 复审，最多 ai_review_rounds 轮（默认 3，含首审）。
+     * 2026-10-07 自动自愈：原 2 轮下「第 2 轮才冒出的新问题」（首轮 minor 未修、次轮升级 blocker）
+     * 直接耗尽预算转人工——加到 3 轮并让修订轮连 minor 一起修（见 reviseForIssues），堵死升级洞。
+     * onDelta 非空时思考流实时转发。 */
     public Outcome reviewAndFix(long novelId, ChapterDO ch, String fullText, LlmPort.StreamDelta onDelta) {
-        JsonNode r1 = reviewOnce(novelId, ch, fullText, 1, onDelta);
-        String verdict = r1.path("verdict").asText("skipped");
-        if (!"blocker".equals(verdict)) {
-            return new Outcome(null, verdict, false, aiIssueLines(r1));
+        int maxRounds = (int) perNovel(novelId, "ai_review_rounds", TuningDefaults.AI_REVIEW_ROUNDS);
+        if (maxRounds < 2) {
+            maxRounds = 2;
         }
-        log.warn("第 {} 章审校判 BLOCKER（{} 条），带清单修订一轮", ch.getChapterNo(),
-                r1.path("issues").size());
-        String revised = reviseForIssues(novelId, ch, fullText, r1);
-        JsonNode r2 = reviewOnce(novelId, ch, revised != null ? revised : fullText, 2, onDelta);
-        String v2 = r2.path("verdict").asText("skipped");
-        boolean blocked = "blocker".equals(v2);
-        return new Outcome(revised, blocked ? "blocker" : v2, blocked, aiIssueLines(r2));
+        String text = fullText;
+        JsonNode r = reviewOnce(novelId, ch, text, 1, onDelta);
+        for (int round = 2; round <= maxRounds && "blocker".equals(r.path("verdict").asText()); round++) {
+            log.warn("第 {} 章审校 round {} 判 BLOCKER（{} 条），带清单修订（第 {}/{} 轮）",
+                    ch.getChapterNo(), round - 1, r.path("issues").size(), round - 1, maxRounds - 1);
+            String revised = reviseForIssues(novelId, ch, text, r);
+            if (revised != null) {
+                text = revised;
+            }
+            // 修订稿异常（长度护栏拒稿）也继续复审：与旧行为一致——复审对原稿再看一眼，
+            // 轮数有界不会死循环；复审通过就过，仍 BLOCKER 则继续下一轮或终态
+            r = reviewOnce(novelId, ch, text, round, onDelta);
+        }
+        String verdict = r.path("verdict").asText("skipped");
+        boolean blocked = "blocker".equals(verdict);
+        return new Outcome(text.equals(fullText) ? null : text, verdict, blocked, aiIssueLines(r));
     }
 
     public Outcome reviewAndFix(long novelId, ChapterDO ch, String fullText) {
@@ -453,15 +464,20 @@ public class ReviewService {
         return sb.toString().strip();
     }
 
-    /** 带问题清单的修订轮：外科手术式，只修 BLOCKER 条目；修订稿异常时保留原文（返回 null）。 */
+    /** 带问题清单的修订轮：blocker 与 minor 一并修（2026-10-07——原先只修 blocker，首轮 minor
+     * 原样留到次轮升级成 blocker 时已无修订预算，是转人工的结构性漏洞）；修订稿异常时保留原文（返回 null）。 */
     private String reviseForIssues(long novelId, ChapterDO ch, String fullText, JsonNode review) {
         StringBuilder fb = new StringBuilder();
         for (JsonNode i : review.path("issues")) {
-            if (!"blocker".equals(i.path("severity").asText("blocker"))) continue;
-            fb.append("- [").append(i.path("type").asText()).append("] 原句：")
-                    .append(i.path("quote").asText()).append("；问题：")
-                    .append(i.path("explanation").asText()).append("；建议：")
-                    .append(i.path("suggestion").asText()).append('\n');
+            boolean blocker = "blocker".equals(i.path("severity").asText("blocker"));
+            fb.append("- [").append(i.path("type").asText()).append(blocker ? "" : "·次要")
+                    .append("] 原句：").append(i.path("quote").asText())
+                    .append("；问题：").append(i.path("explanation").asText())
+                    .append("；建议：").append(i.path("suggestion").asText());
+            if (!blocker) {
+                fb.append("（次要问题：一并修复，但以最小改动为先）");
+            }
+            fb.append('\n');
         }
         if (fb.isEmpty()) {
             fb.append("- 审校判定存在硬伤但未给出条目，请通读自查时间线、称呼与错别字。\n");

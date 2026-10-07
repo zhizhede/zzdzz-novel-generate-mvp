@@ -43,6 +43,15 @@ public final class TuningDefaults {
     public static final int TASK_AUTO_RETRY_TIMES = 1;
     // 审校复审仍 BLOCKER 的处置：0=转人工（默认）；1=自动清正文换目标重写一轮，仍不过才转人工
     public static final int REVIEW_BLOCKER_REPLAN = 0;
+    // AI 审校轮数（含首审；blocker 期间每轮带清单修订→复审）。2026-10-07 自动自愈闭环从 2 提到 3——
+    // 「第 2 轮才冒出的新问题」是转人工主因（minor 首轮不修、次轮升级成 blocker 就没预算了）
+    public static final int AI_REVIEW_ROUNDS = 3;
+    // 审校 BLOCKER 后的保剧情重写（清正文+场景草稿，章纲/场景蓝图保留——换皮与迁移剧情不毁）：
+    // 0=关；1=开（auto 模式第一档自愈，全模式可用，含迁移/换皮）
+    public static final int REVIEW_REWRITE = 1;
+    // 自愈穷尽仍 BLOCKER 的终态（仅 auto 审批模式生效；manual 永远转人工）：
+    // 1=自动放行出厂（stage 事件标 auto_accepted 供离线抽检，2026-10-07 用户定调「别转人工」）；0=转人工
+    public static final int REVIEW_AUTO_ACCEPT = 1;
     // 评审修订后机械复检未过的处置：KEEP=放行并标记（默认，原行为）/ ROLLBACK=回退到修订前 / REVISE=再修订
     public static final String GATE_RECHECK_ACTION = "KEEP";
     public static final int GATE_RECHECK_REVISE_ROUNDS = 1;

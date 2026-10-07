@@ -1027,32 +1027,94 @@ public class ChapterPipelineService {
     }
 
     /**
-     * 审校硬伤处置（量产阶段二·无人值守闭环收口）：默认转人工（现状不变）；
-     * {@code review_blocker_replan}=1 时自动「清正文 + 换目标重写」一轮——重写后仍 BLOCKER 才转人工。
-     * 审校意见已随 VERDICT/DONE 事件实时可见，replan 原因喂给卷纲重写 Agent。
+     * 审校硬伤处置（2026-10-07 自动自愈闭环三档，用户定调「auto 模式别转人工、目标99%自动优质出厂」）：
+     * manual 审批模式永远转人工（作者必须看到硬伤）；auto 模式顺序走三档，各档内 attemptChapter
+     * 同步重跑、结果直接返回——**不递归回本方法，天然有界不会死循环**：
+     * <ol>
+     *   <li>档1 保剧情重写（review_rewrite=1 默认开，全模式含迁移/换皮）：清正文+场景草稿、
+     *       章纲与场景蓝图保留（换皮/迁入剧情不毁）→ 整章重跑</li>
+     *   <li>档2 换目标重写（review_blocker_replan / 无人续跑书；迁移换皮禁用——replan 会毁迁入剧情）→ 整章重跑</li>
+     *   <li>档3 终态：review_auto_accept=1（默认）自动放行出厂、事件标 auto_accepted 供离线抽检；=0 转人工</li>
+     * </ol>
+     * 审校意见已随 VERDICT/DONE 事件实时可见。
      */
-    private ChapterOutcome reviewBlockedDisposition(long novelId, int chapterNo, String approvalMode,
-                                                    BooleanSupplier stopCheck, int attempt) {
-        // 无人续跑的书按书覆盖为自动换目标重写（tuning 是平台级默认，derive_config.autoContinue 是书级口径）
+    ChapterOutcome reviewBlockedDisposition(long novelId, int chapterNo, String approvalMode,
+                                            BooleanSupplier stopCheck, int attempt) {
+        // manual 模式钉死转人工：此前该判断缺失，autoContinue 书在 manual 模式下会被换目标（语义错位）
+        if (PlanMode.MANUAL.is(approvalMode) || stopCheck.getAsBoolean()) {
+            return markReviewPending(novelId, chapterNo);
+        }
+        ChapterDO ch = chapterData.find(novelId, chapterNo)
+                .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
         DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
-        boolean autoBook = cfg.autoContinueOn();
-        boolean replanAllowed = autoBook
-                || tuning.i("review_blocker_replan", TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0;
-        // 剧情迁移书同样不换目标（理由见 runChapterWithHeal）：审校硬伤转人工，别把迁入剧情换成现编。
-        if (cfg.migrate()) {
-            log.warn("第 {} 章审校复审仍 BLOCKER；本书为剧情迁移模式，跳过自动换目标，转人工", chapterNo);
-            return markReviewPending(novelId, chapterNo);
+
+        // ── 档1：保剧情重写（auto 全模式第一档，含迁移/换皮——只清草稿正文，蓝图不动） ──
+        if (remedySwitch(novelId, "review_rewrite", TuningDefaults.REVIEW_REWRITE) > 0) {
+            log.warn("第 {} 章审校硬伤自愈档1：保剧情重写（清正文与场景草稿，章纲场景蓝图保留）", chapterNo);
+            stageLog.emit(novelId, chapterNo, HEAL, RETRY,
+                    Map.of("action", "review_rewrite", "reason", "审校多轮未过，保剧情重写"));
+            chapterData.resetForAutoRewrite(ch.getId());
+            ChapterOutcome redone = attemptChapter(novelId, chapterNo, approvalMode, attempt + 1, stopCheck);
+            if (redone != ChapterOutcome.REVIEW_BLOCKED) {
+                return redone;
+            }
+            if (stopCheck.getAsBoolean()) {
+                return markReviewPending(novelId, chapterNo);
+            }
         }
-        if (!replanAllowed || stopCheck.getAsBoolean()) {
-            return markReviewPending(novelId, chapterNo);
+
+        // ── 档2：换目标重写（原 review_blocker_replan 机制；迁移换皮依旧禁用） ──
+        boolean replanAllowed = !cfg.migrate()
+                && (cfg.autoContinueOn() || remedySwitch(novelId, "review_blocker_replan",
+                        TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0);
+        if (replanAllowed) {
+            log.warn("第 {} 章审校硬伤自愈档2：换目标重写一轮（review_blocker_replan）", chapterNo);
+            stageLog.emit(novelId, chapterNo, HEAL, CHAPTER_REPLAN,
+                    Map.of("reason", "审校复审仍 BLOCKER，自动换目标重写"));
+            clearFullTextForReplan(novelId, chapterNo);
+            volumePlanService.replanChapter(novelId, chapterNo, "审校复审仍 BLOCKER（意见见事件流水），换一条写法");
+            ChapterOutcome redone = attemptChapter(novelId, chapterNo, approvalMode, attempt + 1, stopCheck);
+            if (redone != ChapterOutcome.REVIEW_BLOCKED) {
+                return redone;
+            }
+            if (stopCheck.getAsBoolean()) {
+                return markReviewPending(novelId, chapterNo);
+            }
         }
-        log.warn("第 {} 章审校复审仍 BLOCKER，按策略自动换目标重写一轮（review_blocker_replan）", chapterNo);
-        stageLog.emit(novelId, chapterNo, HEAL, CHAPTER_REPLAN,
-                Map.of("reason", "审校复审仍 BLOCKER，自动换目标重写"));
-        clearFullTextForReplan(novelId, chapterNo);
-        volumePlanService.replanChapter(novelId, chapterNo, "审校复审仍 BLOCKER（意见见事件流水），换一条写法");
-        ChapterOutcome redone = attemptChapter(novelId, chapterNo, approvalMode, attempt + 1, stopCheck);
-        return redone == ChapterOutcome.REVIEW_BLOCKED ? markReviewPending(novelId, chapterNo) : redone;
+
+        // ── 档3：终态 ──
+        if (remedySwitch(novelId, "review_auto_accept", TuningDefaults.REVIEW_AUTO_ACCEPT) > 0) {
+            return markAutoAccepted(novelId, ch);
+        }
+        return markReviewPending(novelId, chapterNo);
+    }
+
+    /** 自愈开关读法：书级 gate_config 覆盖 > 平台 tuning > 代码默认（与 perNovel 同口径）。 */
+    private int remedySwitch(long novelId, String key, int def) {
+        return (int) gateService.configValue(novelId, key, tuning.i(key, def));
+    }
+
+    /** 档3 自动放行（仅经 reviewBlockedDisposition 到达=已确认 auto 模式）：正文取已存的最新修订稿，
+     *  走既有 approve（PENDING→DIGESTED 占位 + digest，失败自动回退）；digest 失败回退转人工——
+     *  不硬发没有事实账的章。事件标 auto_accepted 供离线抽检（99% 口径的统计口径）。 */
+    private ChapterOutcome markAutoAccepted(long novelId, ChapterDO ch) {
+        if (ch.getFullText() == null || ch.getFullText().isBlank()) {
+            return markReviewPending(novelId, ch.getChapterNo());
+        }
+        log.warn("第 {} 章自愈穷尽仍 BLOCKER，按 review_auto_accept 自动放行出厂（待抽检）", ch.getChapterNo());
+        stageLog.emit(novelId, ch.getChapterNo(), APPROVE, DONE,
+                Map.of("auto_accepted", true, "reason", "审校多轮未过且自愈穷尽，自动放行（离线抽检）"));
+        try {
+            // approve 守卫要求 PENDING_APPROVAL（审校 BLOCKER 章当前在 GATE_AI_REVIEW），先转态再复用
+            chapterData.updateStatus(ch.getId(), ChapterStatus.PENDING_APPROVAL.wire());
+            approve(ch.getId());
+            return ChapterOutcome.DONE;
+        } catch (Exception e) {
+            log.warn("第 {} 章自动放行后 digest 失败，回退转人工：{}", ch.getChapterNo(), e.getMessage());
+            stageLog.emit(novelId, ch.getChapterNo(), APPROVE, FAILED,
+                    Map.of("reason", "auto_accept_digest_failed", "message", String.valueOf(e.getMessage())));
+            return ChapterOutcome.PENDING;
+        }
     }
 
     /** 审校硬伤转人工：章转待审批，等 [审批]/[打回]。 */
