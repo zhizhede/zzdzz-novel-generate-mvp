@@ -13,7 +13,11 @@ class GateMetricsTest {
     void emptyTextYieldsZeroCjkOnly() {
         Map<String, Object> m = GateService.computeMetrics("   \n  \n");
         assertThat(m.get("cjk")).isEqualTo(0);
-        assertThat(m.size()).isEqualTo(1); // 空文本只有 cjk 键，无除零指标
+        // 2026-10-07 契约翻转：空/零中文文本返回**全量键零值**而不是残缺 map——
+        // 旧「只有 cjk 键」曾让 checkScene 取 dialogue_end_punct_ratio 时 NPE 炸章
+        //（供应商风控拒答 60 字符英文实弹，见 GateZeroCjkMetricsTest）。
+        Map<String, Object> normal = GateService.computeMetrics("他推开门。外面下雨。");
+        assertThat(m.keySet()).containsExactlyInAnyOrderElementsOf(normal.keySet());
     }
 
     @Test

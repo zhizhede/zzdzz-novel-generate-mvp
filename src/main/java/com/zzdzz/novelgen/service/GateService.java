@@ -621,7 +621,27 @@ public class GateService {
         List<String> nonEmpty = new ArrayList<>();
         for (String l : lines) if (!l.strip().isEmpty()) nonEmpty.add(l.strip());
         int cjk = (int) CN.matcher(text).results().count();
-        if (cjk == 0 || nonEmpty.isEmpty()) return Map.of("cjk", 0);
+        if (cjk == 0 || nonEmpty.isEmpty()) {
+            // 零中文/空文本（模型拒答、供应商风控英文回执、乱码）：返回**全量键的零值**而不是残缺 map——
+            // 消费方按正常键集取值（checkScene 取 dialogue_end_punct_ratio 等），残缺 map 会 NPE 炸掉整章
+            //（2026-10-07 实弹：MiniMax 内容审核拒答 60 字符英文 → 门禁 NPE → 章 FAILED）。
+            // 零值语义 = 最差稿：长度/对白指标全不过 → 走既有的「门禁不过带意见重写」自愈，而不是崩。
+            Map<String, Object> zero = new LinkedHashMap<>();
+            zero.put("cjk", 0);
+            zero.put("line_avg_len", 0);
+            zero.put("dialogue_density_per1k", 0);
+            zero.put("dunhao_per1k", 0);
+            zero.put("dash_per1k", 0);
+            zero.put("ellipsis_per1k", 0);
+            zero.put("exclam_per1k", 0);
+            zero.put("digit_per1k", 0);
+            zero.put("tic_laizhe_per1k", 0);
+            zero.put("tic_shunbian_per1k", 0);
+            zero.put("tic_haiyou_per1k", 0);
+            zero.put("dialogue_end_punct_ratio", 0);
+            zero.put("simile_per1k", 0);
+            return zero;
+        }
         double per1k = 1000.0 / cjk;
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("cjk", cjk);
