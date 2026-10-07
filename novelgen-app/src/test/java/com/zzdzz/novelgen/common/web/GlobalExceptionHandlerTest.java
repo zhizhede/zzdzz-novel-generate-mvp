@@ -20,7 +20,7 @@ class GlobalExceptionHandlerTest {
         return new DuplicateKeyException("""
                 ### Error querying database.  Cause: org.postgresql.util.PSQLException: ERROR: duplicate key value \
                 violates unique constraint "uq_style_packs_name_alive"
-                详细: Key (name)=(黑潮号·风格) already exists.
+                详细: Key (name)=(导入书C·风格) already exists.
                 ### The error may exist in file [.../target/classes/mapper/StylePackMapper.xml]
                 ### SQL: INSERT INTO style_packs (name, description, rules_md, fingerprint, gate_config) \
                 VALUES (?, ?, ?, ?::jsonb, ?::jsonb) RETURNING id""");

@@ -61,12 +61,12 @@ class NovelServiceMigrateTest {
 
     @Test
     void renameProtagonistOnlyWhenBothSidesUsable() {
-        String t = "悉达多与乔文达同修，悉达多问。";
-        assertThat(NovelService.renameProtagonist(t, "悉达多", "林峰")).isEqualTo("林峰与乔文达同修，林峰问。");
+        String t = "源主角与源配角甲同修，源主角问。";
+        assertThat(NovelService.renameProtagonist(t, "源主角", "林峰")).isEqualTo("林峰与源配角甲同修，林峰问。");
         // 未指定原书主角名（protagonistFrom 空）/ 未设主视角 / 同名 → 原样返回，绝不乱改配角名
         assertThat(NovelService.renameProtagonist(t, null, "林峰")).isEqualTo(t);
-        assertThat(NovelService.renameProtagonist(t, "悉达多", "")).isEqualTo(t);
-        assertThat(NovelService.renameProtagonist(t, "悉达多", "悉达多")).isEqualTo(t);
-        assertThat(NovelService.renameProtagonist(null, "悉达多", "林峰")).isNull();
+        assertThat(NovelService.renameProtagonist(t, "源主角", "")).isEqualTo(t);
+        assertThat(NovelService.renameProtagonist(t, "源主角", "源主角")).isEqualTo(t);
+        assertThat(NovelService.renameProtagonist(null, "源主角", "林峰")).isNull();
     }
 }

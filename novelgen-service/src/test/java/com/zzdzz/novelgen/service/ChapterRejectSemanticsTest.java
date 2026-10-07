@@ -49,7 +49,7 @@ class ChapterRejectSemanticsTest {
         chapterData = mock(ChapterDataService.class);
         digestData = mock(DigestDataService.class);
         NovelDO novel = new NovelDO();
-        novel.setTitle("换皮测试·环带问真");
+        novel.setTitle("系统测试书甲");
         when(novelData.getById(NOVEL_ID)).thenReturn(novel);
         service = new ChapterPipelineService(
                 novelData, chapterData,

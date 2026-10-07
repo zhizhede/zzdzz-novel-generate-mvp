@@ -644,7 +644,7 @@ public class NovelService {
         boolean cloneOutline = !reskin && (flags == null || flags.plotOutline() == null || flags.plotOutline());
         // 迁移换主角名：**由用户显式指定**样本里的原书主角名（derive_config.protagonistFrom），
         // 克隆产物的文本里全部换成本书主视角名。刻意不做自动推断——样本深度解析未必给主角建卡
-        // （悉达多样本只有乔文达/迦摩罗等配角卡），按「出现最多」猜会把配角名静默改掉（实跑踩过）。
+        // （源主角样本只有源配角甲/源配角乙等配角卡），按「出现最多」猜会把配角名静默改掉（实跑踩过）。
         // 换皮模式不需要这个：外衣连同人名全部由换皮任务重造。
         String lead = !migrate || reskin || derive == null || derive.protagonistFrom() == null
                 ? null : derive.protagonistFrom().strip();
@@ -1072,7 +1072,7 @@ public class NovelService {
         return outline;
     }
 
-    // ===== 衍生大纲原创性把关（书 9/10/11 悉达多换名复刻实证）=====
+    // ===== 衍生大纲原创性把关（书 9/10/11 源主角换名复刻实证）=====
 
     /** 复刻判定后自动重写轮数上限（初始生成 + ≤N 轮重写，轮满仍复刻即失败）。 */
     private static final int ORIGINALITY_REWRITE_ROUNDS = 2;

@@ -221,7 +221,7 @@
                       :placeholder="isMigrate ? '本书主角名（如：林峰）' : '主视角人物名（可选）'"
                       style="width: var(--ctrl-w-2xl); margin-left: 8px" />
             <el-input v-if="isMigrate && !isReskin" v-model="wizardForm.derive.protagonistFrom"
-                      placeholder="样本原书主角名（如：悉达多；留空＝不改名）"
+                      placeholder="样本原书主角名（如：源主角；留空＝不改名）"
                       style="width: var(--ctrl-w-2xl); margin-left: 8px" />
             <div v-if="isMigrate && !isReskin" class="hint" style="margin-top: 4px">
               迁移换名：迁入章纲里「样本原书主角名」会被<b>确定性替换</b>成「本书主角名」（不靠模型自觉，也<b>不做自动推断</b>——

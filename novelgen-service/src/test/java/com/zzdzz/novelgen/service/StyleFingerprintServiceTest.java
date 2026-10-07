@@ -23,7 +23,7 @@ class StyleFingerprintServiceTest {
                 metricCount != null, List.of(), null, List.of(), List.of(), tags);
     }
 
-    private static final StyleFingerprintVO SAMPLE = row("SAMPLE", 7, "悉达多", "悉达多", 8, 38771L, false,
+    private static final StyleFingerprintVO SAMPLE = row("SAMPLE", 7, "源主角", "源主角", 8, 38771L, false,
             "2026-09-24", List.of("哲思小说", "轮回主题"));
     private static final StyleFingerprintVO BOOK = row("BOOK", 18, "草稿落库验证书", null, 8, null, null,
             "2026-09-20", List.of());
@@ -50,16 +50,16 @@ class StyleFingerprintServiceTest {
     void sourceAndGenreAreExact() {
         assertThat(StyleFingerprintService.matches(SAMPLE, query("sample", null, null, null, null, null, null, null, null))).isTrue();
         assertThat(StyleFingerprintService.matches(SAMPLE, query("BOOK", null, null, null, null, null, null, null, null))).isFalse();
-        assertThat(StyleFingerprintService.matches(SAMPLE, query(null, null, "悉达多", null, null, null, null, null, null))).isTrue();
-        assertThat(StyleFingerprintService.matches(SAMPLE, query(null, null, "悉达", null, null, null, null, null, null))).isFalse();
+        assertThat(StyleFingerprintService.matches(SAMPLE, query(null, null, "源主角", null, null, null, null, null, null))).isTrue();
+        assertThat(StyleFingerprintService.matches(SAMPLE, query(null, null, "源主", null, null, null, null, null, null))).isFalse();
     }
 
     @Test
     void keywordHitsNameGenreAndTags() {
-        assertThat(StyleFingerprintService.matches(SAMPLE, query(null, "悉达", null, null, null, null, null, null, null))).isTrue();
+        assertThat(StyleFingerprintService.matches(SAMPLE, query(null, "源主", null, null, null, null, null, null, null))).isTrue();
         assertThat(StyleFingerprintService.matches(SAMPLE, query(null, "轮回", null, null, null, null, null, null, null))).isTrue();
-        assertThat(StyleFingerprintService.matches(SAMPLE, query(null, "克苏鲁", null, null, null, null, null, null, null))).isFalse();
-        assertThat(StyleFingerprintService.matches(BOOK, query(null, "悉达多", null, null, null, null, null, null, null))).isFalse();
+        assertThat(StyleFingerprintService.matches(SAMPLE, query(null, "深海系", null, null, null, null, null, null, null))).isFalse();
+        assertThat(StyleFingerprintService.matches(BOOK, query(null, "源主角", null, null, null, null, null, null, null))).isFalse();
     }
 
     @Test
@@ -101,13 +101,13 @@ class StyleFingerprintServiceTest {
         assertThat(rows.stream().sorted(StyleFingerprintService.comparator("TIME_DESC")).toList())
                 .containsExactly(SAMPLE, BOOK);
         assertThat(rows.stream().sorted(StyleFingerprintService.comparator("NAME_ASC")).map(StyleFingerprintVO::name).toList())
-                .containsExactly("悉达多", "草稿落库验证书");
+                .containsExactly("源主角", "草稿落库验证书");
     }
 
     @Test
     void unknownSortFallsBackToTimeDesc() {
         OffsetDateTime newest = OffsetDateTime.of(2026, 9, 29, 0, 0, 0, 0, ZoneOffset.ofHours(8));
-        StyleFingerprintVO fresh = new StyleFingerprintVO("PRESET", 28, "黑潮号·文风v1", null, "黑潮号", null,
+        StyleFingerprintVO fresh = new StyleFingerprintVO("PRESET", 28, "导入书C·文风v1", null, "导入书C", null,
                 null, null, 9, null, null, null, null, null, null, null, null, null, newest, null, true, List.of(),
                 null, List.of(), List.of(), List.of());
         assertThat(List.of(SAMPLE, fresh).stream().sorted(StyleFingerprintService.comparator("nonsense")).toList())

@@ -38,7 +38,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 风格包取名/复用/删书级联基线（2026-09-30 用户实弹：删掉「黑潮号」后用同名重导，
+ * 风格包取名/复用/删书级联基线（2026-09-30 用户实弹：删掉「导入书C」后用同名重导，
  * 撞 style_packs 活名唯一约束 uq_style_packs_name_alive，界面横幅里滚出整段 SQL）。
  * 语义锁定：同名残留包一律复用，不再 INSERT；真被活包占着才退让改名；删书级联回收专属包。
  */
@@ -109,12 +109,12 @@ class NovelServiceStylePackTest {
         when(stylePackData.getById(1L)).thenReturn(preset(1L, "品类预设"));
         when(stylePackData.insertPack(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(42L);
-        when(novelData.insert(anyLong(), eq("夜班守则2"), anyString(), eq(42L), anyString(), anyString(), anyString()))
+        when(novelData.insert(anyLong(), eq("导入书B2"), anyString(), eq(42L), anyString(), anyString(), anyString()))
                 .thenReturn(7L);
-        when(novelData.getById(7L)).thenReturn(novel(7L, "夜班守则2"));
+        when(novelData.getById(7L)).thenReturn(novel(7L, "导入书B2"));
 
-        assertThat(service.create(createVo("夜班守则2"), 1L).id()).isEqualTo(7L);
-        verify(stylePackData).insertPack(eq("夜班守则2·风格"), anyString(), anyString(), anyString(), any());
+        assertThat(service.create(createVo("导入书B2"), 1L).id()).isEqualTo(7L);
+        verify(stylePackData).insertPack(eq("导入书B2·风格"), anyString(), anyString(), anyString(), any());
         verify(stylePackData, never()).reusePack(anyLong(), anyString(), anyString(), anyString(), any(), any());
     }
 
@@ -122,15 +122,15 @@ class NovelServiceStylePackTest {
     void reusesOrphanPackOfDeletedBookInsteadOfInserting() {
         ChapterDO chapter = new ChapterDO();
         chapter.setId(900L);
-        when(stylePackData.findReusablePackId("黑潮号·风格")).thenReturn(36L);
-        when(novelData.insert(anyLong(), eq("黑潮号"), anyString(), eq(36L), anyString(), anyString(), anyString()))
+        when(stylePackData.findReusablePackId("导入书C·风格")).thenReturn(36L);
+        when(novelData.insert(anyLong(), eq("导入书C"), anyString(), eq(36L), anyString(), anyString(), anyString()))
                 .thenReturn(25L);
         when(chapterData.find(25L, 1)).thenReturn(Optional.of(chapter));
 
-        NovelService.NovelImportResultVO result = service.importBook(importVo("黑潮号", "只剩一行的正文。"), 1L);
+        NovelService.NovelImportResultVO result = service.importBook(importVo("导入书C", "只剩一行的正文。"), 1L);
         assertThat(result.chapterCount()).isEqualTo(1);
         assertThat(result.pendingFingerprint()).isTrue();
-        verify(stylePackData).reusePack(eq(36L), eq("黑潮号·风格"), anyString(), eq(""), isNull(), isNull());
+        verify(stylePackData).reusePack(eq(36L), eq("导入书C·风格"), anyString(), eq(""), isNull(), isNull());
         verify(stylePackData, never()).insertPack(anyString(), anyString(), anyString(), any(), any());
     }
 
@@ -163,7 +163,7 @@ class NovelServiceStylePackTest {
 
     @Test
     void deletingBookAlsoFreesItsExclusivePack() {
-        NovelDO book = novel(25L, "黑潮号");
+        NovelDO book = novel(25L, "导入书C");
         book.setStylePackId(77L);
         when(novelData.getById(25L)).thenReturn(book);
         when(taskData.existsActiveForNovel(25L)).thenReturn(false);
@@ -177,7 +177,7 @@ class NovelServiceStylePackTest {
 
     @Test
     void nothingIsTouchedWhenDeletionIsRefused() {
-        when(novelData.getById(25L)).thenReturn(novel(25L, "黑潮号"));
+        when(novelData.getById(25L)).thenReturn(novel(25L, "导入书C"));
         when(taskData.existsActiveForNovel(25L)).thenReturn(true);
 
         assertThatThrownBy(() -> service.deleteNovel(25L)).isInstanceOf(BizException.class);

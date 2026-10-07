@@ -21,7 +21,7 @@ public class AutoRunRunner implements ApplicationRunner {
     private final int to;
 
     public AutoRunRunner(ChapterPipelineService pipeline,
-                         @Value("${pipeline.novel:夜班守则}") String novelTitle,
+                         @Value("${pipeline.novel:导入书B}") String novelTitle,
                          @Value("${pipeline.from:1}") int from,
                          @Value("${pipeline.to:2}") int to) {
         this.pipeline = pipeline;

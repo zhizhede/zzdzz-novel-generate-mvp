@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # 用法：python style_baseline.py [语料目录] [输出json] [语料标签]
 # 目录模式下递归收集全部 .md/.txt，剔除 # 标题行；缺省保持手搓语料行为
 CORPUS_DIR = ROOT / "docs" / "novels" / "手搓" / "人类、法师、地下城（暂定）"
-OUT = ROOT / "novel" / "夜班守则" / "style-metrics.json"
+OUT = ROOT / "novel" / "导入书B" / "style-metrics.json"
 
 PROSE_FILES = [
     CORPUS_DIR / "第一卷/第一章/第一章-手搓.md",

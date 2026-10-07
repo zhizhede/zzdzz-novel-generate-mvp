@@ -395,7 +395,7 @@ public class ContextPackerService {
         for (int i = Math.max(0, digests.size() - 3); i < digests.size(); i++) ctx.add(digests.get(i));
 
         // 场景 system = 本书规则正文（规则提炼/人工编辑）；量化口径唯一来源是本书指纹目标（下），
-        // 不再叠加全局兜底画像（夜班守则口径曾污染所有无规则书，与指纹目标互相矛盾）
+        // 不再叠加全局兜底画像（导入书B口径曾污染所有无规则书，与指纹目标互相矛盾）
         String rules = styleRules(novelId);
         String system = rules == null ? "" : rules;
         // 指纹量化目标随提示词下发（提示词环节对齐门禁口径——第一稿就朝及格线写，而不是被门禁打回后试错）

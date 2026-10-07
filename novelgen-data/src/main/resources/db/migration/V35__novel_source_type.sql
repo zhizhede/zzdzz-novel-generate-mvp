@@ -14,7 +14,7 @@ WHERE source_type IS NULL;
 -- 证据：style_packs 1/2（手搓风/漱石猫风）由同一次 CLI 导入创建，且这两本是当时唯一的作品行；
 -- 本次同步已让 ImportRunner 直接写 IMPORTED，故仅需修正这两条历史行。
 UPDATE novels SET source_type = 'IMPORTED'
-WHERE source_type = 'ORIGINAL' AND title IN ('夜班守则', '黑猫今天也在观察人类');
+WHERE source_type = 'ORIGINAL' AND title IN ('导入书B', '导入书A');
 
 ALTER TABLE novels ALTER COLUMN source_type SET DEFAULT 'ORIGINAL';
 ALTER TABLE novels ALTER COLUMN source_type SET NOT NULL;

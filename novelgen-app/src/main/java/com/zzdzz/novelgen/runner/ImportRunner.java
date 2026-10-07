@@ -32,7 +32,7 @@ import java.util.stream.Stream;
  * 两种模式：
  * - 书目模式：novelDir/book.yaml 存在时，按其配置导入（title/style_pack/rules_md_file/existing_dir/digest_recent），
  *   并把 existing/ 下「第N章.md」作为现成正文入库（APPROVED），为最近 digest_recent 章补事实账。
- * - 遗留模式：无 book.yaml 时保持夜班守则/手搓风的原导入行为。
+ * - 遗留模式：无 book.yaml 时保持导入书B/手搓风的原导入行为。
  */
 @Component
 @ConditionalOnProperty(name = "import.enabled", havingValue = "true")
@@ -56,7 +56,7 @@ public class ImportRunner implements ApplicationRunner {
                         NovelDataService novelData, CanonDocDataService canonData,
                         ForeshadowDataService foreshadowData, ChapterDataService chapterData,
                         DigestService digestService, ObjectMapper mapper,
-                        @Value("${novelgen.novel-dir:novel/夜班守则}") String novelDir,
+                        @Value("${novelgen.novel-dir:novel/导入书B}") String novelDir,
                         @Value("${novelgen.style-dir:docs/style}") String styleDir) {
         this.userData = userData;
         this.stylePackData = stylePackData;
@@ -165,7 +165,7 @@ public class ImportRunner implements ApplicationRunner {
         }
     }
 
-    // ===== 遗留模式（夜班守则 / 手搓风） =====
+    // ===== 遗留模式（导入书B / 手搓风） =====
 
     private void importLegacy(long userId) throws Exception {
         long packId = importStylePack();
@@ -200,10 +200,10 @@ public class ImportRunner implements ApplicationRunner {
     }
 
     private long importNovel(long userId, long packId) {
-        Long exist = novelData.findIdByTitle("夜班守则");
+        Long exist = novelData.findIdByTitle("导入书B");
         if (exist != null) return exist;
-        return novelData.insert(userId, "夜班守则",
-                "规则怪谈：便利店夜班与不对劲的守则（管线测试作）", packId, "auto", "active",
+        return novelData.insert(userId, "导入书B",
+                "规则怪谈：便利店值班与不对劲的规矩（管线测试作）", packId, "auto", "active",
                 NovelSourceType.IMPORTED.wire());
     }
 

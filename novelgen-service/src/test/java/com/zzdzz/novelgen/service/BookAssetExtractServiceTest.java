@@ -42,9 +42,9 @@ class BookAssetExtractServiceTest {
         var node = M.readTree("""
                 {"cards":[
                   {"name":"莉娜","kind":"character","aliases":["莉娜小姐","莉娜"],"summary":"灯塔看守之女",
-                   "content":"与黑潮号有旧约","pinned":true,"sourceChapter":1},
+                   "content":"与导入书C有旧约","pinned":true,"sourceChapter":1},
                   {"name":"莉娜","kind":"character","summary":"重复行应当被丢"},
-                  {"name":"黑潮号","kind":"vehicles","summary":"未知类型归 misc"},
+                  {"name":"导入书C","kind":"vehicles","summary":"未知类型归 misc"},
                   {"name":"","kind":"item","summary":"空名丢弃"}]}""");
         List<BookAssetExtractService.CardDraft> drafts = service().parseCards(node);
 
@@ -70,12 +70,12 @@ class BookAssetExtractServiceTest {
     @Test
     void outlineJsonRendersMarkdownSkippingBlankSections() throws Exception {
         var node = M.readTree("""
-                {"title":"黑潮号","premise":"一艘船的账本","mainline":"从打捞到远航","theme":"",
+                {"title":"导入书C","premise":"一艘船的账本","mainline":"从打捞到远航","theme":"",
                  "arcs":[{"title":"卷一 登船","summary":"接活与第一次出海"},{"title":"","summary":""}],
                  "ending":"账本封存"}""");
         String md = service().renderOutline(node);
 
-        assertThat(md).startsWith("# 全书大纲：《黑潮号》");
+        assertThat(md).startsWith("# 全书大纲：《导入书C》");
         assertThat(md).contains("## 一句话前提").contains("一艘船的账本");
         assertThat(md).contains("## 主线").contains("从打捞到远航");
         assertThat(md).doesNotContain("## 主题");                    // 空字段整段跳过
@@ -125,7 +125,7 @@ class BookAssetExtractServiceTest {
                 null, llm, new LlmJson(llm, prompts), prompts);
 
         NovelDO novel = new NovelDO();
-        novel.setTitle("黑潮号");
+        novel.setTitle("导入书C");
         when(novelData.getById(34L)).thenReturn(novel);
         ChapterDO ch = new ChapterDO();
         ch.setChapterNo(1);

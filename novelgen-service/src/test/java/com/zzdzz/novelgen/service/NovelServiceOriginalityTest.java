@@ -35,7 +35,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 大纲原创性把关闭环（书 9/10/11 悉达多换名复刻实证）：判复刻→带原因重写≤2轮→轮满仍复刻即失败；
+ * 大纲原创性把关闭环（书 9/10/11 源主角换名复刻实证）：判复刻→带原因重写≤2轮→轮满仍复刻即失败；
  * 评审调用故障 fail-open 放行；无样本/样本无骨架直通不评审。提示词走真实 PromptCatalog 目录回退。
  */
 class NovelServiceOriginalityTest {

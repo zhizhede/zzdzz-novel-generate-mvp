@@ -84,7 +84,7 @@ class ReviewAutoAcceptTest {
                 mock(TuningService.class), mock(PromptTemplateService.class), new ObjectMapper());
 
         NovelDO novel = new NovelDO();
-        novel.setTitle("长书验证·离婚后换皮33章");
+        novel.setTitle("长书验证·样本11换皮33章");
         when(novelData.getById(NOVEL_ID)).thenReturn(novel);
 
         chapter = new ChapterDO();

@@ -118,8 +118,8 @@ class GenrePresetServiceTest {
 
     @Test
     void uniqueGenreNameSuffixesWithoutCollision() {
-        java.util.Set<String> taken = new java.util.HashSet<>(List.of("刀剑神域", "刀剑神域·2"));
-        assertThat(GenrePresetService.uniqueGenreName("刀剑神域", taken)).isEqualTo("刀剑神域·3");
+        java.util.Set<String> taken = new java.util.HashSet<>(List.of("未解析长样本", "未解析长样本·2"));
+        assertThat(GenrePresetService.uniqueGenreName("未解析长样本", taken)).isEqualTo("未解析长样本·3");
         assertThat(GenrePresetService.uniqueGenreName("全新品类", taken)).isEqualTo("全新品类");
         // 长名超 64 字时限长再编号
         String longName = "很".repeat(70);

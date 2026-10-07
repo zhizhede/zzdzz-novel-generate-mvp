@@ -22,9 +22,9 @@ class NovelServiceTest {
                 autoContinue, null);
     }
 
-    private static final NovelVO IMPORTED = book(1, "夜班守则", "规则怪谈", "IMPORTED", "active", "auto", 12, false,
+    private static final NovelVO IMPORTED = book(1, "导入书B", "规则怪谈", "IMPORTED", "active", "auto", 12, false,
             "2026-09-10");
-    private static final NovelVO DERIVED = book(9, "悉达多衍生-test", "哲思衍生", "DERIVED", "active", "manual", 40, true,
+    private static final NovelVO DERIVED = book(9, "源主角衍生-test", "哲思衍生", "DERIVED", "active", "manual", 40, true,
             "2026-09-24");
     private static final NovelVO ORIGINAL = book(8, "草稿落库验证书", null, "ORIGINAL", "draft", "auto", 0, false,
             "2026-09-20");
@@ -57,9 +57,9 @@ class NovelServiceTest {
 
     @Test
     void keywordHitsTitleOrDescription() {
-        assertThat(NovelService.matches(DERIVED, query("悉达多", null, null, null, null, null, null, null, null))).isTrue();
+        assertThat(NovelService.matches(DERIVED, query("源主角", null, null, null, null, null, null, null, null))).isTrue();
         assertThat(NovelService.matches(DERIVED, query("哲思", null, null, null, null, null, null, null, null))).isTrue();
-        assertThat(NovelService.matches(ORIGINAL, query("悉达多", null, null, null, null, null, null, null, null))).isFalse();
+        assertThat(NovelService.matches(ORIGINAL, query("源主角", null, null, null, null, null, null, null, null))).isFalse();
         // 简介为空的行不会被关键字误命中（null 不参与拼接）
         assertThat(NovelService.matches(ORIGINAL, query("null", null, null, null, null, null, null, null, null))).isFalse();
     }
@@ -116,7 +116,7 @@ class NovelServiceTest {
         assertThat(rows.stream().sorted(NovelService.comparator("CHAPTERS_DESC")).map(NovelVO::id).toList())
                 .containsExactly(9L, 1L, 8L);
         assertThat(rows.stream().sorted(NovelService.comparator("TITLE_ASC")).map(NovelVO::title).toList())
-                .containsExactly("夜班守则", "悉达多衍生-test", "草稿落库验证书");
+                .containsExactly("导入书B", "源主角衍生-test", "草稿落库验证书");
     }
 
     // ===== 入库类型 =====

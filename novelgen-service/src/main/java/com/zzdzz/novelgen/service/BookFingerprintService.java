@@ -97,7 +97,7 @@ public class BookFingerprintService {
             notes.add("没有提取到任何非零指标——正文可能不是小说文体（或几乎全是对白以外的噪声）");
         }
         // 与门禁既有硬规则的交汇（实弹踩到）：对白句末标点占比在场景/章级都按硬下限 0.5 判定，与本书指纹无关。
-        // 两种情况都会撞上：①本书基线本就低于 0.5（如「夜班守则」风格 0.09）；②全书普遍无标点 → 全零被剔除、
+        // 两种情况都会撞上：①本书基线本就低于 0.5（如「导入书B」风格 0.09）；②全书普遍无标点 → 全零被剔除、
         // 基线里根本没有这一项（此时 GateService.lowerBound 回退硬下限，判定照旧）。
         Object endPunct = baseline.get("dialogue_end_punct_ratio");
         double endPunctValue = endPunct instanceof Map<?, ?> rule && rule.get("value") instanceof Number v
