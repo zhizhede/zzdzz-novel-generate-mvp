@@ -27,6 +27,10 @@ public final class MetricLabels {
     private MetricLabels() {
     }
 
+    /**
+     * 指纹指标中文名（未收录的键回退键名本身）。
+     * 写作提示与文风指纹页共用这一份口径，勿在他处另建映射。
+     */
     public static String metricLabel(String key) {
         return METRIC_LABELS.getOrDefault(key, key);
     }
