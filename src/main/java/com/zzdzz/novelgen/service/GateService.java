@@ -197,8 +197,9 @@ public class GateService {
                 (int) (wordsBudget * sceneLenMax), lenOk));
 
         checks.add(check("no_straight_quote", text.contains("\"") ? 1 : 0, 0, 0, !text.contains("\"")));
+        Map<String, Object> gateCfg = gateConfig(novelId);
         List<String> hits = new ArrayList<>();
-        for (String phrase : bannedPhrases(gateConfig(novelId))) {
+        for (String phrase : bannedPhrases(gateCfg)) {
             if (text.contains(phrase)) hits.add(phrase);
         }
         checks.add(check("banned_phrases", hits.size(), 0, 0, hits.isEmpty()));
@@ -212,7 +213,11 @@ public class GateService {
         double dunhaoMax = upperBound(base, "dunhao_per1k", 1.0);
         double exclamMax = upperBound(base, "exclam_per1k", 2.0);
         double digitMax = upperBound(base, "digit_per1k", 12.0);
-        double dlgMax = upperBound(base, "dialogue_density_per1k", 30.2);
+        // 密度上限三级：书级 gate_config 覆盖键 → 指纹 abs_max → 硬编码兜底 30.2。
+        // 旧指纹（外部工具导入的子集）普遍缺 dialogue_density 基线，撞上「信息密度红线推高对白」的
+        // 书会在 30.2 边界反复卡边——留 gate_config 开关让单书可调（第三类判据「只给开关」口径）。
+        double dlgMax = configDouble(gateCfg, "scene_dialogue_density_max",
+                upperBound(base, "dialogue_density_per1k", 30.2));
         checks.add(check("dunhao_per1k", dunhao, null, dunhaoMax, dunhao <= dunhaoMax));
         checks.add(check("exclam_per1k", exclam, null, exclamMax, exclam <= exclamMax));
         checks.add(check("digit_per1k", digit, null, digitMax, digit <= digitMax));
@@ -237,7 +242,7 @@ public class GateService {
         return gateReportData.findLatestSceneFailureJson(chapterId, sceneId);
     }
 
-    /** 失败指标人话摘要（事件流水用）：「dialogue_density_per1k=3.92（基线12.51）」。无失败返回空串。 */
+    /** 失败指标人话摘要（事件流水用）：「dialogue_density_per1k=3.92（上限30.2）」。无失败返回空串。 */
     public String failedChecksText(long chapterId) {
         return failedChecksText(gateReportData.findLatestFailureJson(chapterId));
     }
@@ -246,8 +251,13 @@ public class GateService {
         return failedChecksText(gateReportData.findLatestSceneFailureJson(chapterId, sceneId));
     }
 
-    @SuppressWarnings("unchecked")
-    private String failedChecksText(String failureJson) {
+    /**
+     * 失败项格式：双界（基线~上限）/ 仅上限 / 仅基线。
+     * 2026-10-07 卡边实弹修复：旧格式只打 baseline 不打 abs_max——对白密度显示「基线null」
+     * （修订轮不知道 30.2 上限，两次收敛到 30.44 卡死）；行均长只显示中位数 23.68（修订轮朝
+     * 中位数压，过冲到 15.65 跌破真实下限 20.13）。修订轮必须看到完整目标区间才不会修 A 坏 B。
+     */
+    static String failedChecksText(String failureJson) {
         if (failureJson == null) {
             return "";
         }
@@ -263,8 +273,16 @@ public class GateService {
                 if (sb.length() > 0) {
                     sb.append("；");
                 }
-                sb.append(c.get("check")).append('=').append(c.get("value"))
-                        .append("（基线").append(c.get("baseline")).append('）');
+                Object baseline = c.get("baseline");
+                Object absMax = c.get("abs_max");
+                sb.append(c.get("check")).append('=').append(c.get("value"));
+                if (baseline != null && absMax != null) {
+                    sb.append("（").append(baseline).append('~').append(absMax).append('）');
+                } else if (absMax != null) {
+                    sb.append("（上限").append(absMax).append('）');
+                } else if (baseline != null) {
+                    sb.append("（基线").append(baseline).append('）');
+                }
             }
             return sb.toString();
         } catch (Exception e) {
