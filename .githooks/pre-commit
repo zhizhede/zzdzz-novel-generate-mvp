@@ -4,6 +4,21 @@
 #   闸2：mvn compile 必须过（全量测试不在这里跑——慢，由 pre-push 闸2 兜底）
 export JAVA_HOME="/d/Program/Java/jdk-21"
 
+# 闸0（最快，最先跑）：密钥文件不许进暂存区。按文件名查、不信 gitignore——
+# 2026-10-08 实弹：搬迁模块后 .gitignore 锚的还是旧路径，application-local.yaml
+# 带着 api-key/master-key/jwt-secret 混进了提交。basename 级匹配，路径怎么挪都逮得住。
+for f in $(git diff --cached --name-only); do
+  base=$(basename "$f")
+  case "$base" in
+    *local.yaml|*local.yml)
+      echo "拒绝提交：疑似密钥文件 $f 在暂存区。"
+      echo "  application-local.yaml 含 api-key/master-key/jwt-secret，铁律永不入库。"
+      echo "  修 .gitignore 后 git restore --staged <file> 再提交（文件留在磁盘）。"
+      exit 1
+      ;;
+  esac
+done
+
 if git diff --cached --name-only -- docs/code-standards.md | grep -q .; then
   JAVA_STAGED=$(git diff --cached --name-only -- '*.java' | wc -l)
   if [ "$JAVA_STAGED" -ge 10 ]; then

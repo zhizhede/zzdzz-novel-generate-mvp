@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# 提交信息闸（源文件在 .githooks/，安装 = 拷进 .git/hooks/commit-msg）。
+# 规约 §5.1 原版要求「行首是中文」——那会把规约自己规定的 `type(scope): 中文` 格式全拦死，
+# 2026-10-08 修正为：type 白名单（§1.2 固定 11 值）+ 冒号后必须中文开头 + 全行 ≤70 字符。
+set -e
+# grep -P 需要 UTF-8 locale，否则中文检测静默失效（2026-10-08 实弹：正例被误杀）
+export LC_ALL=C.UTF-8
+MSG_FILE="$1"
+SUBJECT=$(head -n1 "$MSG_FILE")
+
+# 1. type 白名单（允许带 scope：feat(scope)）
+BASE=${SUBJECT%%:*}
+BASE=${BASE%%(*}
+case "$BASE" in
+  feat|fix|docs|style|refactor|perf|test|chore|build|ci|revert) ;;
+  *)
+    echo "拒绝提交：type 必须是规约 §1.2 固定值，当前: '$BASE'"
+    echo "  示例: refactor(pom): 拆分六模块并落地 Mapper 包名更名"
+    exit 1
+    ;;
+esac
+
+# 2. 冒号后必须以中文开头。用 \p{Han} 而不是字节模式：UTF-8 locale 下
+#    grep -P 的 \xE4 按字符（ä）不按字节解释，字节区间必错（§5.1 原脚本连踩两坑）
+BODY=${SUBJECT#*:}
+BODY=$(printf '%s' "$BODY" | sed 's/^[[:space:]]*//')
+if ! printf '%s' "$BODY" | grep -qP '^\p{Han}'; then
+  echo "拒绝提交：subject 冒号后必须以中文开头，当前: $SUBJECT"
+  echo "  示例: feat(auth-admin): 实现管理员 DO 切基类"
+  exit 1
+fi
+
+# 3. 全行长度 ≤70（含 type 前缀，§5.1 口径）
+LEN=${#SUBJECT}
+if [ "$LEN" -gt 70 ]; then
+  echo "拒绝提交：subject 过长($LEN > 70): $SUBJECT"
+  exit 1
+fi
+exit 0

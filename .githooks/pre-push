@@ -1,0 +1,19 @@
+#!/bin/sh
+# 预推送闸（源文件在 .githooks/，安装 = 拷进 .git/hooks/pre-push）：
+#   闸1：禁止直推 main——走分支 + PR（8df2bed 事故：未通知直推主分支）；确需直推：FORCE_MAIN=1 git push
+#   闸2：mvn test 全绿才许推（pre-commit 只挡编译，测试由这道闸兜底）
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ] && [ "$FORCE_MAIN" != "1" ]; then
+    echo "拒绝推送：禁止直推 main（教训见 code-standards §0 流水第 6 条 8df2bed）。"
+    echo "  正路：推功能分支后走 PR 合并。"
+    echo "  确需直推（如热修）：FORCE_MAIN=1 git push origin <branch>"
+    exit 1
+  fi
+done
+
+export JAVA_HOME="/d/Program/Java/jdk-21"
+if ! mvn -q test; then
+  echo "拒绝推送：mvn test 未通过——测试红不许上库。"
+  exit 1
+fi
+exit 0
