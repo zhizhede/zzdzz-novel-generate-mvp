@@ -36,6 +36,7 @@ public class ReviewService {
     private final ContextPackerService packer;
     private final GateReportDataService gateReportData;
     private final ChapterDataService chapterData;
+    private final com.zzdzz.novelgen.service.data.SceneDataService sceneData;
     private final ObjectMapper mapper;
     private final TuningService tuning;
     private final PromptTemplateService promptTemplates;
@@ -394,14 +395,31 @@ public class ReviewService {
         String ws = packer.worldState(novelId, ch.getChapterNo());
         String digestBlock = digests.isEmpty() ? "（无）\n"
                 : digests.stream().map(d -> "---\n" + d + "\n").collect(java.util.stream.Collectors.joining());
+        // 人称读取链与场景提示词/机械门禁同口径（章级→书级）；未配置传空串=审校跳过第 5 查
+        String pov = packer.effectivePov(novelId, ch.getPov());
         return promptTemplates.getSection(LlmNode.AI_REVIEW, "user",
                 java.util.Map.of("world", java.util.Objects.toString(packer.world(novelId), ""),
                         "characters", java.util.Objects.toString(packer.characters(novelId), ""),
                         "world_state", ws == null ? "（无）" : ws,
                         "digests", digestBlock,
                         "prev_tail", prevTail == null || prevTail.isBlank() ? "（无）" : prevTail,
+                        "scene_times", sceneTimeLine(ch.getId()),
+                        "pov", java.util.Objects.requireNonNullElse(pov, ""),
                         "chapter_no", String.valueOf(ch.getChapterNo()),
                         "full_text", text == null ? "" : text));
+    }
+
+    /** 场景时间线（V42 消费侧）：读 chapter_scenes.time_anchor 拼「场景N：锚」清单；全空返回占位（审校按正文自身时序查）。 */
+    String sceneTimeLine(long chapterId) {
+        List<com.zzdzz.novelgen.model.entity.SceneDO> scenes = sceneData.findByChapter(chapterId);
+        StringBuilder sb = new StringBuilder();
+        for (com.zzdzz.novelgen.model.entity.SceneDO s : scenes) {
+            String anchor = s.getTimeAnchor() == null || s.getTimeAnchor().isBlank()
+                    ? "（未定）" : s.getTimeAnchor().strip();
+            sb.append("场景").append(s.getSceneNo()).append("：").append(anchor).append('\n');
+        }
+        String out = sb.toString().strip();
+        return out.isEmpty() ? "（本章无场景时间锚——按正文自身时序自查前后一致）" : out;
     }
 
     /**
@@ -422,6 +440,16 @@ public class ReviewService {
         sb.append("· 本章的目标与钩子：目标=")
                 .append(Objects.toString(ch.getGoal(), "（无）")).append("；钩子=")
                 .append(Objects.toString(ch.getHook(), "（无）")).append('\n');
+        // 人称基准（修 pov 漂移要用）：与场景提示词/审校第 5 查同一条读取链
+        String pov = packer.effectivePov(novelId, ch.getPov());
+        if (pov != null && !pov.isBlank()) {
+            sb.append("· 叙事人称（全章必须与此一致）：").append(pov).append('\n');
+        }
+        // 场景时间线（修时序硬伤要用）：与审校 scene_times 同一份数据
+        String times = sceneTimeLine(ch.getId());
+        if (!times.startsWith("（本章无")) {
+            sb.append("· 场景时间线（正文事件先后必须与此一致，禁止颠倒/回退）：\n").append(times).append('\n');
+        }
         return sb.toString().strip();
     }
 

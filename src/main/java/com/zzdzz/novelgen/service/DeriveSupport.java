@@ -75,6 +75,21 @@ public final class DeriveSupport {
         }
     }
 
+    /**
+     * 人称读取链：章级（chapters.pov，AI 章纲步写的本章实际人称）→ 书级（derive_config.pov）→ null（不约束）。
+     * 换皮/迁移书场景预物化、章纲步不跑，章级恒空——书级回退正是它们的生效路径；
+     * 单视角书章纲步会把书级值抄进章级，多视角轮换书章级可与书级不同，读取方一律以本方法为准。
+     */
+    public static String effectivePov(String chapterPov, String bookPov) {
+        if (chapterPov != null && !chapterPov.isBlank()) {
+            return chapterPov.strip();
+        }
+        if (bookPov != null && !bookPov.isBlank()) {
+            return bookPov.strip();
+        }
+        return null;
+    }
+
     /** mode 归一化：认 MIGRATE / RESKIN（大小写/空白宽容），其余（含 null/未知值）一律 ORIGINAL。 */
     public static String normalizeMode(String mode) {
         if (mode == null) {

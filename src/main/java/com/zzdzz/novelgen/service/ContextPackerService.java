@@ -49,19 +49,18 @@ public class ContextPackerService {
     public record Pack(String system, String user) {}
 
     /** 衍生配置段：POV/主视角 + 掺水量密度口径 + 类型标签。
-     * 卷规划（packVolumePlan）与场景生成（packScene）共用；无配置返回空串（fail-open，旧书零变化）。 */
-    private String deriveSection(long novelId) {
-        return deriveSection(novelId, false);
-    }
-
-    /** sceneOnly=true 时只出场景侧要用的段（视角/密度）；标签/红线段由 volume 专用拼装避免重复注入。
-     * 段文案从 PromptCatalog（node+sectionKey，{key} 占位）读取——落库可编辑，代码只组装参数。 */
-    private String deriveSection(long novelId, boolean sceneOnly) {
+     * 卷规划（packVolumePlan）与场景生成（packScene）共用；无配置返回空串（fail-open，旧书零变化）。
+     * sceneOnly=true 时只出场景侧要用的段（视角/密度）；标签/红线段由 volume 专用拼装避免重复注入。
+     * 段文案从 PromptCatalog（node+sectionKey，{key} 占位）读取——落库可编辑，代码只组装参数。
+     * chapterPov＝章级人称（chapters.pov，AI 章纲步所写）；非空时压过书级——多视角轮换书逐章不同，
+     * 单视角书二者相同；null（换皮/迁移预物化、旧书）走书级回退，DeriveSupport.effectivePov 统一口径。 */
+    private String deriveSection(long novelId, String chapterPov, boolean sceneOnly) {
         DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
         StringBuilder sb = new StringBuilder();
-        if (cfg.pov() != null) {
+        String pov = DeriveSupport.effectivePov(chapterPov, cfg.pov());
+        if (pov != null) {
             sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_pov",
-                    java.util.Map.of("pov", cfg.pov(),
+                    java.util.Map.of("pov", pov,
                             "povCharacter", java.util.Objects.requireNonNullElse(cfg.povCharacter(), "（未指定）"))));
         }
         String density = DeriveSupport.densityHint(cfg.water());
@@ -90,7 +89,14 @@ public class ContextPackerService {
 
     /** 卷规划上下文尾部追加：衍生配置段（含类型标签）。由 packVolumePlan 调用。 */
     public String deriveVolumeSection(long novelId) {
-        return deriveSection(novelId, false);
+        return deriveSection(novelId, null, false);
+    }
+
+    /** 人称读取链公共出口（审校第 5 查/外部调用共用）：章级 chapters.pov → 书级 derive_config.pov → null。
+     *  与 packScene 的场景注入走同一条 DeriveSupport.effectivePov，避免两处口径漂移。 */
+    public String effectivePov(long novelId, String chapterPov) {
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        return DeriveSupport.effectivePov(chapterPov, cfg.pov());
     }
 
     public String styleRules(long novelId) {
@@ -419,9 +425,10 @@ public class ContextPackerService {
                 Objects.toString(ch.getGoal(), "") + "\n" + Objects.toString(ch.getHook(), "") + "\n" + spec.goal(),
                 chapterNo - 3);
         String user = promptTemplates.format(LlmNode.SCENE_DRAFT, "user", chapterNo, spec.sceneNo(), ch.getTitle(), spec.goal(),
+                sceneTimeAnchor(spec.timeAnchor(), ch.getTimeNote()),
                 spec.present(), spec.mustReveal(), spec.mustNot(), spec.words(),
                 simileRedline,
-                deriveSection(novelId) + rejectNote(ch),
+                deriveSection(novelId, ch.getPov(), false) + rejectNote(ch),
                 craft,
                 world(novelId),
                 charactersForScene(novelId, matchText),
@@ -432,6 +439,22 @@ public class ContextPackerService {
                 prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，无上一章后果）" : prevBrief,
                 prevSceneText == null ? (prevTail == null ? "（无）" : prevTail) : prevSceneText);
         return new Pack(system, user);
+    }
+
+    /**
+     * 场景时间锚取值链（V42 消费侧）：场景锚 → 章级 time_note → 兜底文案。
+     * 换皮/迁移书的章级 time_note 是 2026-10-04 起就落库的，即使 beats 没出场景锚也能吃到章级跨度；
+     * 两级全空（存量书/坏数据）才走兜底——提示词始终有这一行，模型不会因缺行而自由发挥时间线。
+     * 静态纯函数便于单测。
+     */
+    static String sceneTimeAnchor(String sceneAnchor, String chapterTimeNote) {
+        if (sceneAnchor != null && !sceneAnchor.isBlank()) {
+            return sceneAnchor.strip();
+        }
+        if (chapterTimeNote != null && !chapterTimeNote.isBlank()) {
+            return chapterTimeNote.strip() + "（本场景锚未单独给出，按章级时间跨度推进）";
+        }
+        return "（未配置——紧接上一场景的时间继续推进，禁止时间回退）";
     }
 
     /**

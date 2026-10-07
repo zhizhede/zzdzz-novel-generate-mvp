@@ -791,6 +791,7 @@ public class NovelService {
         List<int[]> order = new java.util.ArrayList<>();
         List<String> goals = new java.util.ArrayList<>();
         List<List<String>> reveals = new java.util.ArrayList<>();
+        List<String> times = new java.util.ArrayList<>();
         int i = 0;
         for (JsonNode b : arr) {
             i++;
@@ -803,6 +804,9 @@ public class NovelService {
             order.add(new int[]{i});
             goals.add(conflict.isEmpty() ? goal : goal + "（对抗：" + conflict + "）");
             reveals.add(outcome.isEmpty() ? List.of() : List.of(outcome));
+            // 时间锚（换皮 beats 的可选 time 字段）：缺失/空白/超长一律 null——迁移链样本 beats 无此字段，天然回退章级
+            String t = b.path("time").asText("").strip();
+            times.add(t.isEmpty() || t.length() > 64 ? null : t);
         }
         if (goals.isEmpty()) {
             return List.of();
@@ -810,7 +814,7 @@ public class NovelService {
         int words = Math.max(300, Math.min(1500, Math.max(budgetMin, 0) / goals.size()));
         List<SceneSpec> specs = new java.util.ArrayList<>(goals.size());
         for (int k = 0; k < goals.size(); k++) {
-            specs.add(new SceneSpec(order.get(k)[0], goals.get(k), List.of(), reveals.get(k), List.of(), words));
+            specs.add(new SceneSpec(order.get(k)[0], goals.get(k), List.of(), reveals.get(k), List.of(), words, times.get(k)));
         }
         return specs;
     }

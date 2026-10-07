@@ -25,7 +25,8 @@ public interface SceneDataService extends IService<SceneDO> {
 
     List<String> findPassedDrafts(long chapterId);
 
-    /** 章纲重出：清旧场景后按新拆解重建（顺序写入）。 */
+    /** 章纲重出：清旧场景后按新拆解重建（顺序写入）。timeAnchors 与 goals 等长，元素可空（null=本场未定时间）。 */
     void replaceAll(long chapterId, List<String> goals, List<String> presentJson,
-                    List<String> mustRevealJson, List<String> mustNotJson, List<Integer> words);
+                    List<String> mustRevealJson, List<String> mustNotJson, List<Integer> words,
+                    List<String> timeAnchors);
 }

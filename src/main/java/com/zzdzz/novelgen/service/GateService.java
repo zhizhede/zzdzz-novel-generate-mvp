@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.model.enums.GateType;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.GateReportDataService;
 import com.zzdzz.novelgen.service.data.StylePackDataService;
@@ -55,6 +56,7 @@ public class GateService {
     private final GateReportDataService gateReportData;
     private final ChapterDataService chapterData;
     private final TuningService tuning;
+    private final com.zzdzz.novelgen.service.data.NovelDataService novelData;
 
 
     @SuppressWarnings("unchecked")
@@ -93,6 +95,14 @@ public class GateService {
         int overlap = prevText == null ? 0 : openingOverlap(text, prevText);
         checks.add(check("opening_overlap", overlap, 0, 0, overlap == 0));
 
+        // 人称一致性（读取链：chapters.pov → derive_config.pov → 无配置不查）。
+        // 只抓整章级错配；默认 pov_check_block=0 只报不拦——passed 计算在下方对该项单独放行，
+        // 报告里 ok 如实记录，档案页能看到漂移但不触发重写（判据主观，先观察误报再开拦截）。
+        GateCheck pov = povCheck(effectivePov(novelId, chapterNo), text);
+        if (pov != null) {
+            checks.add(pov);
+        }
+
         // 比喻密度：人类手稿 2.4-7/千字，AI 生成可冲到 15/千字（描写铺场的量化信号）
         double simileMax = tuning.d("simile_per1k_abs_max", 8.0);
         double simile = ((Number) metrics.get("simile_per1k")).doubleValue();
@@ -109,8 +119,63 @@ public class GateService {
         }
         checks.add(check("banned_phrases", hits.size(), 0, 0, hits.isEmpty()));
 
-        boolean passed = checks.stream().allMatch(GateCheck::ok);
+        // pov_check_block（tuning，默认 0=只报不拦）：人称错配在报告里 ok 如实为 false，但不参与
+        // passed 判定——判据主观（自由间接引语/对白里都有「我」），先观察误报率再开拦截。
+        // 开启（>=1）后该项与其他硬闸同权，错配即打回重写。
+        boolean povBlock = tuning.d("pov_check_block", 0.0) >= 1.0;
+        boolean passed = checks.stream().allMatch(c -> c.ok() || (!povBlock && "pov_consistent".equals(c.check())));
         return new GateVerdict(passed, checks);
+    }
+
+    /** 人称读取链（章级→书级→null），供门禁与提示词共用口径——判据只认 DeriveSupport.effectivePov 的结果。 */
+    private String effectivePov(long novelId, int chapterNo) {
+        String chapterPov = chapterData.find(novelId, chapterNo).map(ChapterDO::getPov).orElse(null);
+        String bookPov = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).pov();
+        return DeriveSupport.effectivePov(chapterPov, bookPov);
+    }
+
+    /**
+     * 人称一致性（**整章级、保守判据**）：只抓「配置第一人称却整章第三人称叙述」与反向的明显错配，
+     * 不判章内 head-hopping、不判自由间接引语——那类交给 AI 审校（主观判断）。
+     * 判据先剥掉对白（「」/“”/"" 内文），只看叙述层的「我」：
+     * <ul>
+     *   <li>期望第一人称：叙述层「我」== 0 → 错配（整章漂移的实锤；ch1 那种主体第一人称+局部插叙不会命中）</li>
+     *   <li>期望第三人称：叙述层「我」≥ 30/千字 → 错配（每 33 字一个「我」只能是第一人称叙述）</li>
+     *   <li>多视角轮换（章级为空时的书级值）/未知人称/叙述样本不足（剥对白后 &lt;100 字）→ null 不出检查</li>
+     * </ul>
+     * 返回 null=本章不适用；否则给出 check 项（ok 如实反映判定，拦不拦由调用方按 pov_check_block 决定）。
+     */
+    public static GateCheck povCheck(String expectedPov, String text) {
+        if (expectedPov == null || expectedPov.isBlank() || text == null || text.isBlank()) {
+            return null;
+        }
+        String exp = expectedPov.strip();
+        if (exp.contains("多视角") || exp.contains("全知")) {
+            return null; // 多视角逐章由章纲定；全知视角允许自由进出人物内心，判人称只会误报
+        }
+        String narration = stripDialogue(text);
+        int narrCjk = (int) CN.matcher(narration).results().count();
+        if (narrCjk < 100) {
+            return null; // 对白占比过高，叙述层样本不足——不判（fail-open）
+        }
+        int wo = (int) count(narration, "我");
+        if (exp.contains("第一人称")) {
+            // 期望第一人称：叙述层必须有「我」；0 次=整章漂成第三人称
+            return new GateCheck("pov_consistent", wo, 1, null, wo >= 1);
+        }
+        if (exp.contains("第三人称")) {
+            // 期望第三人称：「我」密度≥30/千字=叙述层实为第一人称
+            double per1k = wo * 1000.0 / narrCjk;
+            return new GateCheck("pov_consistent", round(per1k), null, 30.0, per1k < 30.0);
+        }
+        return null; // 全知/未知口径不判
+    }
+
+    /** 剥对白：三类引号成对移除（直引号虽被门禁禁用，但审校前的稿子可能有）。残缺引号不剥（保守，宁漏不误）。 */
+    static String stripDialogue(String text) {
+        String s = text.replaceAll("「[^」]*」", "");
+        s = s.replaceAll("“[^”]*”", "");
+        return s.replaceAll("\"[^\"]*\"", "");
     }
 
     /**

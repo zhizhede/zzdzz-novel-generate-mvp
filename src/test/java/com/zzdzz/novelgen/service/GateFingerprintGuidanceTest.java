@@ -32,7 +32,8 @@ class GateFingerprintGuidanceTest {
     void setUp() {
         stylePackData = mock(StylePackDataService.class);
         service = new GateService(stylePackData, mock(GateReportDataService.class),
-                mock(ChapterDataService.class), mock(TuningService.class));
+                mock(ChapterDataService.class), mock(TuningService.class),
+                mock(com.zzdzz.novelgen.service.data.NovelDataService.class));
     }
 
     @Test

@@ -54,6 +54,9 @@ public interface ChapterMapper extends BaseMapper<ChapterDO> {
     /** 只写章纲、不动状态（给已有正文的章出纲用：不能让成品章退回「待生成」）。 */
     int updateOutlineYaml(@Param("chapterId") long chapterId, @Param("outlineYaml") String outlineYaml);
 
+    /** 记录本章叙事人称（AI 章纲输出的 pov）——单独一条 UPDATE，不动章纲/状态/正文。 */
+    int updatePov(@Param("chapterId") long chapterId, @Param("pov") String pov);
+
     int markOutlined(@Param("chapterId") long chapterId, @Param("outlineYaml") String outlineYaml);
 
     /** 打回章纲清场（流 A）：状态→NEW、清正文/章纲/轮次、落打回意见；调用方先删场景与门禁报告。 */

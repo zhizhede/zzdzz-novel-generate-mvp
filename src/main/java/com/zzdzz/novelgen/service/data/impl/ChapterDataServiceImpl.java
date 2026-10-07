@@ -87,6 +87,11 @@ public class ChapterDataServiceImpl extends ServiceImpl<ChapterMapper, ChapterDO
     }
 
     @Override
+    public void updatePov(long chapterId, String pov) {
+        baseMapper.updatePov(chapterId, pov);
+    }
+
+    @Override
     public void resetForReoutline(long chapterId, String outlineYaml) {
         baseMapper.deleteGateReports(chapterId);
         baseMapper.deleteScenes(chapterId);

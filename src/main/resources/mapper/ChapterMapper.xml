@@ -112,6 +112,11 @@
                 WHERE id=#{chapterId}
     </update>
 
+    <update id="updatePov">
+                UPDATE chapters SET pov=#{pov}, update_time=NOW()
+                WHERE id=#{chapterId}
+    </update>
+
     <update id="markOutlined">
                 UPDATE chapters SET outline_yaml=#{outlineYaml}, status='OUTLINED', update_time=NOW() WHERE id=#{chapterId}
     </update>

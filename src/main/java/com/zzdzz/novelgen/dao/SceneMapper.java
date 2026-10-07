@@ -30,5 +30,6 @@ public interface SceneMapper extends BaseMapper<SceneDO> {
 
     int insertScene(@Param("chapterId") long chapterId, @Param("sceneNo") int sceneNo, @Param("goal") String goal,
                     @Param("present") String present, @Param("mustReveal") String mustReveal,
-                    @Param("mustNot") String mustNot, @Param("words") int words);
+                    @Param("mustNot") String mustNot, @Param("words") int words,
+                    @Param("timeAnchor") String timeAnchor);
 }

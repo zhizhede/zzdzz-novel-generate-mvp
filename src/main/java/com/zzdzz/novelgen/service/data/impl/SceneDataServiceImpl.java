@@ -54,11 +54,13 @@ public class SceneDataServiceImpl extends ServiceImpl<SceneMapper, SceneDO> impl
 
     @Override
     public void replaceAll(long chapterId, List<String> goals, List<String> presentJson,
-                           List<String> mustRevealJson, List<String> mustNotJson, List<Integer> words) {
+                           List<String> mustRevealJson, List<String> mustNotJson, List<Integer> words,
+                           List<String> timeAnchors) {
         baseMapper.deleteByChapter(chapterId);
         for (int i = 0; i < goals.size(); i++) {
             baseMapper.insertScene(chapterId, i + 1, goals.get(i), presentJson.get(i),
-                    mustRevealJson.get(i), mustNotJson.get(i), words.get(i));
+                    mustRevealJson.get(i), mustNotJson.get(i), words.get(i),
+                    timeAnchors == null || i >= timeAnchors.size() ? null : timeAnchors.get(i));
         }
     }
 }

@@ -51,7 +51,7 @@ UPDATE chapter_scenes SET gate_status=#{status} WHERE id=#{sceneId}
     </delete>
 
     <insert id="insertScene">
-                INSERT INTO chapter_scenes (chapter_id, scene_no, goal, present, must_reveal, must_not, words_budget)
-                VALUES (#{chapterId}, #{sceneNo}, #{goal}, #{present}::jsonb, #{mustReveal}::jsonb, #{mustNot}::jsonb, #{words})
+                INSERT INTO chapter_scenes (chapter_id, scene_no, goal, present, must_reveal, must_not, words_budget, time_anchor)
+                VALUES (#{chapterId}, #{sceneNo}, #{goal}, #{present}::jsonb, #{mustReveal}::jsonb, #{mustNot}::jsonb, #{words}, #{timeAnchor})
     </insert>
 </mapper>

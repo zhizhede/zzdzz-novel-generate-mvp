@@ -243,7 +243,7 @@ public class PlanningService {
         return sceneData.findByChapter(chapterId).stream()
                 .map(s -> new OutlineService.SceneSpec(s.getSceneNo(), s.getGoal(),
                         toList(s.getPresent()), toList(s.getMustReveal()), toList(s.getMustNot()),
-                        s.getWordsBudget()))
+                        s.getWordsBudget(), s.getTimeAnchor()))
                 .toList();
     }
 

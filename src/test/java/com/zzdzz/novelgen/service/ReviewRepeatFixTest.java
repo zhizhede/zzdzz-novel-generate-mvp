@@ -44,7 +44,8 @@ class ReviewRepeatFixTest {
         llmJson = mock(LlmJson.class);
         gateService = mock(GateService.class);
         service = new ReviewService(llmPort, llmJson, mock(ContextPackerService.class),
-                mock(GateReportDataService.class), mock(ChapterDataService.class), M,
+                mock(GateReportDataService.class), mock(ChapterDataService.class),
+                mock(com.zzdzz.novelgen.service.data.SceneDataService.class), M,
                 mock(TuningService.class), mock(PromptTemplateService.class), gateService, mock(StageLog.class));
         chapter = new ChapterDO();
         chapter.setId(CHAPTER_ID);

@@ -30,7 +30,14 @@ public class OutlineService {
 
 
     public record SceneSpec(int sceneNo, String goal, List<String> present,
-                            List<String> mustReveal, List<String> mustNot, int words) {}
+                            List<String> mustReveal, List<String> mustNot, int words,
+                            String timeAnchor) {
+        /** 兼容旧构造：无时间锚（迁移 beats 等场景）。 */
+        public SceneSpec(int sceneNo, String goal, List<String> present,
+                         List<String> mustReveal, List<String> mustNot, int words) {
+            this(sceneNo, goal, present, mustReveal, mustNot, words, null);
+        }
+    }
 
     private final LlmJson llmJson;
     private final ObjectMapper mapper;
@@ -38,6 +45,7 @@ public class OutlineService {
     private final SceneDataService sceneData;
     private final PromptTemplateService promptTemplates;
     private final TuningService tuning;
+    private final com.zzdzz.novelgen.service.data.NovelDataService novelData;
 
 
     public ChapterDO loadChapter(long novelId, int chapterNo) {
@@ -71,19 +79,21 @@ public class OutlineService {
             goal = goal + promptTemplates.getSection(LlmNode.OUTLINE, "reject_suffix",
                     java.util.Map.of("reason", trimmed));
         }
+        String bookPov = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).pov();
         String user = promptTemplates.format(LlmNode.OUTLINE, "user", ch.getChapterNo(), ch.getTitle(), goal, ch.getHook(),
                 Objects.toString(ch.getTimeNote(), "紧接上一章，无跳跃"),
+                bookPov == null ? "（未配置——沿用前情与全书行文的既有视角，保持全章一致）" : bookPov,
                 Objects.toString(ch.getRuleRefs(), "[]"), Objects.toString(ch.getForeshadowRefs(), "[]"),
                 ch.getBudgetMin(), ch.getBudgetMax(), world, characters,
                 digests == null || digests.isEmpty() ? "（本章是第一章，无前情）" : String.join("\n---\n", digests),
                 prevBrief == null || prevBrief.isBlank() ? "（本章是第一章，无上一章后果）" : prevBrief,
                 prevTail == null ? "（无）" : prevTail);
 
-        JsonNode scenes = askScenes(LlmNode.OUTLINE, novelId, ch.getId(), user, 2);
+        JsonNode root = askScenes(LlmNode.OUTLINE, novelId, ch.getId(), user, 2);
         if (rejectReason != null && !rejectReason.isBlank()) {
             chapterData.clearRejectReason(ch.getId()); // 意见已注入本次章纲，消费清零
         }
-        materialize(ch.getId(), scenes, preserveChapterState);
+        materialize(ch.getId(), root.path("scenes"), chapterPov(root), preserveChapterState);
     }
 
     /**
@@ -99,9 +109,9 @@ public class OutlineService {
         }
         String user = promptTemplates.format(LlmNode.BOOK_CHAPTER_OUTLINE, "user",
                 ch.getChapterNo(), Objects.toString(ch.getTitle(), ""), text.length(), text);
-        JsonNode scenes = askScenes(LlmNode.BOOK_CHAPTER_OUTLINE, novelId, ch.getId(), user, 2);
-        materialize(ch.getId(), scenes, true);
-        log.info("章纲反推落库：chapterNo={} scenes={}", chapterNo, scenes.size());
+        JsonNode root = askScenes(LlmNode.BOOK_CHAPTER_OUTLINE, novelId, ch.getId(), user, 2);
+        materialize(ch.getId(), root.path("scenes"), chapterPov(root), true);
+        log.info("章纲反推落库：chapterNo={} scenes={}", chapterNo, root.path("scenes").size());
     }
 
     /** 反推结果（解析链按它写「已反推 n/m 章」）。 */
@@ -156,19 +166,23 @@ public class OutlineService {
                 .toList();
     }
 
-    /** 场景数组 → 落库：写章纲（保全状态或重置）+ 物化场景行。两条入口（规划/反推）共用这一处写路径。 */
-    private void materialize(long chapterId, JsonNode scenes, boolean preserveChapterState) {
+    /** 场景数组 → 落库：写章纲（保全状态或重置）+ 物化场景行 + 记录本章人称。两条入口（规划/反推）共用这一处写路径。
+     *  pov 非空才写（模型漏字段=不覆盖既有值；迁移/换皮预物化传 null，章级留空走书级回退）。
+     *  每个 scene 的可选 time 字段＝场景级时间锚（V42），缺失即 null——两条生产链（AI 章纲/换皮 beats）在此汇合。 */
+    private void materialize(long chapterId, JsonNode scenes, String pov, boolean preserveChapterState) {
         List<String> goals = new ArrayList<>();
         List<String> present = new ArrayList<>();
         List<String> reveal = new ArrayList<>();
         List<String> not = new ArrayList<>();
         List<Integer> words = new ArrayList<>();
+        List<String> times = new ArrayList<>();
         for (JsonNode s : scenes) {
             goals.add(s.path("goal").asText(""));
             present.add(jsonText(s.path("present")));
             reveal.add(jsonText(s.path("must_reveal")));
             not.add(jsonText(s.path("must_not")));
             words.add(s.path("words").asInt(900));
+            times.add(sceneTime(s));
         }
         // 先清旧场景与门禁报告（外键顺序在 repository 内处理），再物化新场景；
         // 已有正文的章走「保全状态」分支：只换章纲，章状态/正文/门禁报告都不动
@@ -177,8 +191,31 @@ public class OutlineService {
         } else {
             chapterData.resetForReoutline(chapterId, scenes.toString());
         }
-        sceneData.replaceAll(chapterId, goals, present, reveal, not, words);
-        log.info("章纲落库: scenes={} 保全状态={}", scenes.size(), preserveChapterState);
+        if (pov != null && !pov.isBlank()) {
+            chapterData.updatePov(chapterId, pov.strip());
+        }
+        sceneData.replaceAll(chapterId, goals, present, reveal, not, words, times);
+        log.info("章纲落库: scenes={} pov={} 保全状态={}", scenes.size(), pov, preserveChapterState);
+    }
+
+    /** 场景时间锚：缺失/空白/超长（>64 字，防模型写小作文）一律 null=不落列，消费方回退章级 time_note。 */
+    static String sceneTime(JsonNode scene) {
+        JsonNode n = scene == null ? null : scene.path("time");
+        if (n == null || !n.isTextual()) {
+            return null;
+        }
+        String v = n.asText("").strip();
+        return v.isEmpty() || v.length() > 64 ? null : v;
+    }
+
+    /** 根节点的 pov 字段（模型可能漏）：缺失/空白/非文本一律 null=不写。上限 32 字防模型跑飞写长文。 */
+    static String chapterPov(JsonNode root) {
+        JsonNode n = root == null ? null : root.path("pov");
+        if (n == null || !n.isTextual()) {
+            return null;
+        }
+        String v = n.asText("").strip();
+        return v.isEmpty() || v.length() > 32 ? null : v;
     }
 
     /**
@@ -198,15 +235,18 @@ public class OutlineService {
             o.set("must_reveal", mapper.valueToTree(s.mustReveal() == null ? List.of() : s.mustReveal()));
             o.set("must_not", mapper.valueToTree(s.mustNot() == null ? List.of() : s.mustNot()));
             o.put("words", s.words());
+            if (s.timeAnchor() != null && !s.timeAnchor().isBlank()) {
+                o.put("time", s.timeAnchor());
+            }
         }
-        materialize(chapterId, arr, preserveChapterState);
+        materialize(chapterId, arr, null, preserveChapterState);
     }
 
     public List<SceneSpec> loadSpecs(long chapterId) {
         return sceneData.findByChapter(chapterId).stream()
                 .map(s -> new SceneSpec(s.getSceneNo(), s.getGoal() == null ? "" : s.getGoal(),
                         toStringList(s.getPresent()), toStringList(s.getMustReveal()),
-                        toStringList(s.getMustNot()), s.getWordsBudget()))
+                        toStringList(s.getMustNot()), s.getWordsBudget(), s.getTimeAnchor()))
                 .toList();
     }
 
@@ -225,7 +265,8 @@ public class OutlineService {
                 this::validateScenes, tries);
     }
 
-    /** 两个入口共用同一套结构校验：2-3 个场景、每场 goal 非空。 */
+    /** 结构校验：2-3 个场景、每场 goal 非空。返回**根节点**（pov 与 scenes 同在根级）——
+     *  只返回 scenes 数组会让根级 pov 静默丢失（AGENTS 坑 14 同族：解析边界丢字段零报错）。 */
     private JsonNode validateScenes(JsonNode node) {
         JsonNode arr = node.path("scenes");
         if (!arr.isArray() || arr.size() < 2 || arr.size() > 3) {
@@ -236,7 +277,7 @@ public class OutlineService {
                 throw new LlmJson.Bad("scenes 里存在非对象元素或 goal 为空");
             }
         }
-        return arr;
+        return node;
     }
 
     /** 模型可能漏字段：MissingNode/Null 的 toString 是空串，对 ::jsonb 是非法输入，兜底为 [] */

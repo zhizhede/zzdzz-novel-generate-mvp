@@ -50,6 +50,7 @@ public final class PromptCatalog {
                 本章卷纲目标：%s
                 章末钩子类型：%s
                 本章距上一章的时间跨度：%s（场景与对白须体现该推进，不可凭空另设时间线）
+                本书叙事人称：%s（全章必须沿用这一人称并保持一致；本书为多视角轮换时按本章视角确定）
                 本章涉及的守则：%s
                 伏笔任务：%s
                 全章字数预算：%d–%d 字，必须拆成 2-3 个场景，每个场景 800–1200 字。
@@ -69,7 +70,8 @@ public final class PromptCatalog {
                 %s
 
                 只输出 JSON，格式：
-                {"scenes":[{"no":1,"goal":"本场景目标","present":["出场人物"],"must_reveal":["必须让读者知道的信息"],"must_not":["禁止出现的内容"],"words":900}]}
+                {"pov":"本章叙事人称（与上方给定一致；多视角轮换时写本章确定的人称，如 第一人称/第三人称限知）",
+                 "scenes":[{"no":1,"goal":"本场景目标","time":"本场景发生在何时（承接上方时间跨度往下摊：如 当夜/次日清晨/封港半小时后——相邻场景时间只许推进或并列，禁止回退）","present":["出场人物"],"must_reveal":["必须让读者知道的信息"],"must_not":["禁止出现的内容"],"words":900}]}
                 """),
 
         // ===== 场景生成 =====
@@ -96,6 +98,7 @@ public final class PromptCatalog {
                 任务：写第 %d 章场景 %d。
                 本章目标：%s
                 本场景目标：%s
+                本场景时间锚：%s（本场景发生在此时间点/时段；与上一场景的时间只许推进或并列，禁止回退）
                 出场人物：%s
                 必须让读者知道：%s
                 禁止出现：%s
@@ -245,16 +248,18 @@ public final class PromptCatalog {
 
         // ===== AI 语义审校 =====
         new TemplateDef(LlmNode.AI_REVIEW, "system", "AI 语义审校四查", true, """
-                你是资深网文审校编辑，在机械门禁之后做语义审校。只查以下四类问题：
-                1. continuity 连续性：与给定上下文（世界设定、人物卡、近章事实账、上一章结尾）矛盾——时间线、称呼、物件、地点、人物状态。
+                你是资深网文审校编辑，在机械门禁之后做语义审校。只查以下五类问题：
+                1. continuity 连续性：与给定上下文（世界设定、人物卡、近章事实账、上一章结尾、场景时间线）矛盾——时间线、称呼、物件、地点、人物状态。给定场景时间线时，正文事件先后必须与之一致，时序颠倒/回退属硬伤。
                 2. logic 逻辑硬伤：情节自相矛盾、前因后果断裂。
                 3. typo 错别字/用词错误：明显的错字、漏字、用词不当。
                 4. format 格式：章题混入正文、markdown 残留、阿拉伯数字。
+                5. pov 人称漂移：正文实际人称与【本书叙事人称】不符——配置第一人称而叙述主语通篇是人物名/他她，或配置第三人称而叙述主语通篇是「我」。
+                   只报**整章级**错配；对白里的人称、个别段落的视角切换、回忆插叙不算漂移。本书叙事人称为空（未配置）时跳过本项不查。
                 只输出 JSON：
-                {"verdict":"pass|minor|blocker","summary":"一句话总评","issues":[{"type":"continuity|logic|typo|format","severity":"minor|blocker","quote":"原句","explanation":"问题说明","suggestion":"修改建议"}]}
+                {"verdict":"pass|minor|blocker","summary":"一句话总评","issues":[{"type":"continuity|logic|typo|format|pov","severity":"minor|blocker","quote":"原句","explanation":"问题说明","suggestion":"修改建议"}]}
                 规则：
                 - 引用原文一律用「」；字符串值内部禁止英文双引号。
-                - 存在必须改的硬伤（时间线矛盾、称呼错、错字）才判 blocker；只有不破坏阅读的瑕疵判 minor；无问题判 pass。
+                - 存在必须改的硬伤（时间线矛盾、称呼错、整章人称漂移、错字）才判 blocker；只有不破坏阅读的瑕疵判 minor；无问题判 pass。
                 - 宁可漏报不可误报：没有把握的不要报，不提风格意见。
                 - 不要输出思考过程，只输出 JSON。
                 """),
@@ -274,6 +279,12 @@ public final class PromptCatalog {
 
                 【上一章结尾】
                 {prev_tail}
+
+                【场景时间线（本章各场景的预定发生时间；场景顺序推进、时序颠倒或回退属 continuity 硬伤）】
+                {scene_times}
+
+                【本书叙事人称（第 5 查的判定依据；为空则跳过人称漂移检查）】
+                {pov}
 
                 【第 {chapter_no} 章全文（审校对象）】
                 {full_text}
@@ -451,7 +462,7 @@ public final class PromptCatalog {
                 节拍：%s
 
                 输出 JSON：
-                {"summary":"换皮后的本章剧情摘要","time_note":"本章距上一章的故事时间跨度（与原章一致，如「紧接上一章」「入城后第三年」「约十年后」）","beats":[{"goal":"场景目标","conflict":"冲突","outcome":"收束"}],
+                {"summary":"换皮后的本章剧情摘要","time_note":"本章距上一章的故事时间跨度（与原章一致，如「紧接上一章」「入城后第三年」「约十年后」）","beats":[{"goal":"场景目标","conflict":"冲突","outcome":"收束","time":"该节拍发生在章内何时（从 time_note 起点往下摊，相邻节拍只许推进或并列，禁止回退；如 当夜/次日/三日后）"}],
                  "hook":"换皮后的章末钩子"}
                 字符串值内部禁止英文双引号，引用一律用「」。
                 """),
@@ -583,7 +594,8 @@ public final class PromptCatalog {
                 %s
 
                 只输出 JSON，格式：
-                {"scenes":[{"no":1,"goal":"本场景实际完成了什么","present":["实际出场的人物/物件"],"must_reveal":["本场景实际让读者知道的信息"],"must_not":[],"words":900}]}
+                {"pov":"本章实际使用的人称（如 第一人称/第三人称限知/第三人称全知）",
+                 "scenes":[{"no":1,"goal":"本场景实际完成了什么","present":["实际出场的人物/物件"],"must_reveal":["本场景实际让读者知道的信息"],"must_not":[],"words":900}]}
                 """),
 
         new TemplateDef(LlmNode.SAMPLE_MERGE, "system", "实体名归并判定系统提示", true,
@@ -606,6 +618,7 @@ public final class PromptCatalog {
         new TemplateDef(LlmNode.SCENE_DRAFT, "derive_pov", "衍生段·叙事视角（有 POV 配置时注入）", false, """
                 【叙事视角（必须遵守）】
                 {pov}；主视角：{povCharacter}。除全知视角外，非主视角人物的内心活动不可直写，只能通过言行与观察呈现。
+                全章自始至终保持这一人称：叙述主语一律用「我」或主视角人物名+第三人称称谓，禁止章内中途切换人称，禁止其他人物视角的内心独白段落。
                 """),
 
         new TemplateDef(LlmNode.SCENE_DRAFT, "derive_density", "衍生段·情节密度（有掺水量配置时注入）", false, """

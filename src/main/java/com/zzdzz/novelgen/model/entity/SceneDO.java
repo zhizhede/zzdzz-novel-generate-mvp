@@ -14,18 +14,9 @@ public class SceneDO extends BaseDO {
     private String mustReveal;
     private String mustNot;
     private int wordsBudget;
+    /** 场景级时间锚（V42）：本场景处于何时的自由文本；null=未定，消费方回退章级 time_note。 */
+    private String timeAnchor;
     private String draftText;
     private String gateStatus;
     private int revisionRound;
-
-
-
-
-
-
-
-
-
-
-
 }

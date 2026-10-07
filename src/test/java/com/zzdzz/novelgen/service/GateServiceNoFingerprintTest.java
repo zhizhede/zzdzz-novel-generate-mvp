@@ -31,7 +31,8 @@ class GateServiceNoFingerprintTest {
         TuningService tuning = mock(TuningService.class);
         // 参数是基本类型 double：必须用 anyDouble/anyString，用 any() 会在打桩时拆箱 NPE
         when(tuning.d(anyString(), anyDouble())).thenAnswer(inv -> inv.getArgument(1));
-        gateService = new GateService(stylePackData, mock(GateReportDataService.class), chapterData, tuning);
+        gateService = new GateService(stylePackData, mock(GateReportDataService.class), chapterData, tuning,
+                mock(com.zzdzz.novelgen.service.data.NovelDataService.class));
         when(chapterData.findFullText(anyLong(), anyInt())).thenReturn(null);
     }
 

@@ -97,4 +97,18 @@ class DeriveSupportTest {
         assertThat(DeriveSupport.parse(null).reskin()).isFalse();
         assertThat(DeriveSupport.normalizeMode(" reskin ")).isEqualTo(DeriveSupport.MODE_RESKIN);
     }
+
+    @Test
+    void effectivePovChapterOverridesBookThenFallsBack() {
+        // 章级压过书级（多视角轮换书逐章不同）
+        assertThat(DeriveSupport.effectivePov("第三人称限知", "第一人称")).isEqualTo("第三人称限知");
+        // 章级空/空白回退书级（换皮/迁移预物化、旧书的生效路径）
+        assertThat(DeriveSupport.effectivePov(null, "第一人称（主角）")).isEqualTo("第一人称（主角）");
+        assertThat(DeriveSupport.effectivePov("  ", "第一人称")).isEqualTo("第一人称");
+        // 两级都空 → null（不约束不检查，旧书零变化）
+        assertThat(DeriveSupport.effectivePov(null, null)).isNull();
+        assertThat(DeriveSupport.effectivePov("", " ")).isNull();
+        // 章级带头尾空白被 strip
+        assertThat(DeriveSupport.effectivePov(" 第一人称 ", null)).isEqualTo("第一人称");
+    }
 }
