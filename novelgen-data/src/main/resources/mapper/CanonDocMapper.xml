@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.mapper.CanonDocMapper">
+
+    <select id="exists" resultType="boolean">
+SELECT EXISTS (SELECT 1 FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name})
+    </select>
+
+    <update id="insert">
+INSERT INTO canon_docs (novel_id, kind, name, content) VALUES (#{novelId}, #{kind}, #{name}, #{content})
+    </update>
+
+    <select id="findFirstByKind" resultType="string">
+
+                SELECT content FROM canon_docs
+                WHERE novel_id=#{novelId} AND kind=#{kind} LIMIT 1
+                
+    </select>
+
+    <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.CanonDocDO">
+
+                SELECT id, novel_id, kind, name, NULL AS content, sort_no
+                FROM canon_docs WHERE novel_id=#{novelId} ORDER BY kind, sort_no, id
+                
+    </select>
+
+    <select id="findId" resultType="long">
+SELECT id FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name}
+    </select>
+
+    <!-- 规划资产页：全库同类同名文档（各书大纲）连正文一起取，带创建/更新时间 -->
+    <select id="listAliveByKindName" resultType="com.zzdzz.novelgen.model.entity.CanonDocDO">
+SELECT id, novel_id, kind, name, content, sort_no, create_time, update_time
+FROM canon_docs WHERE kind=#{kind} AND name=#{name} ORDER BY novel_id
+    </select>
+
+    <select id="findContentByKindName" resultType="string">
+
+                SELECT content FROM canon_docs
+                WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{name} LIMIT 1
+                
+    </select>
+
+    <select id="findById" resultType="com.zzdzz.novelgen.model.entity.CanonDocDO">
+
+                SELECT id, novel_id, kind, name, content, sort_no
+                FROM canon_docs WHERE id=#{id}
+                
+    </select>
+
+    <update id="updateContent">
+UPDATE canon_docs SET content=#{content}, update_time=NOW() WHERE id=#{id}
+    </update>
+
+    <delete id="delete">
+DELETE FROM canon_docs WHERE id=#{id}
+    </delete>
+</mapper>

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.mapper.ChapterMapper">
+
+    <select id="findByNovelAndNo" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
+                SELECT * FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
+    </select>
+
+    <select id="listSummaries" resultType="com.zzdzz.novelgen.model.entity.ChapterDO">
+                SELECT id, novel_id, chapter_no, volume_no, arc, title, pov, outline_yaml,
+                       NULL AS full_text, goal, hook, time_note, rule_refs, foreshadow_refs,
+                       budget_min, budget_max, status, round
+                FROM chapters WHERE novel_id=#{novelId} ORDER BY chapter_no
+    </select>
+
+    <select id="maxChapterWithText" resultType="int">
+                SELECT MAX(chapter_no) FROM chapters
+                WHERE novel_id=#{novelId} AND full_text IS NOT NULL AND full_text != ''
+    </select>
+
+    <select id="nextPlannedChapterNo" resultType="int">
+                SELECT MIN(chapter_no) FROM chapters
+                WHERE novel_id=#{novelId} AND chapter_no > #{afterNo}
+    </select>
+
+    <select id="maxPlannedChapterNo" resultType="int">
+                SELECT MAX(chapter_no) FROM chapters
+                WHERE novel_id=#{novelId}
+    </select>
+
+    <select id="maxVolumeNo" resultType="int">
+                SELECT MAX(volume_no) FROM chapters
+                WHERE novel_id=#{novelId} AND volume_no IS NOT NULL
+    </select>
+
+    <select id="findOpeningRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
+                SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
+                WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo}
+                  AND full_text IS NOT NULL AND full_text!=''
+                ORDER BY chapter_no
+    </select>
+
+    <select id="listTextsByNovel" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextWithTitleRow">
+                SELECT chapter_no AS "chapterNo", title, full_text AS "fullText" FROM chapters
+                WHERE novel_id=#{novelId}
+                  AND full_text IS NOT NULL AND full_text!=''
+                ORDER BY chapter_no
+    </select>
+
+    <!-- 规划资产页：一次取齐全库规划行。正文只给长度（LENGTH 里传输），章纲要展示故原样带出 -->
+    <select id="listPlanRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterPlanRow">
+                SELECT id, novel_id AS "novelId", chapter_no AS "chapterNo", volume_no AS "volumeNo", arc, title,
+                       goal, hook, time_note AS "timeNote", outline_yaml AS "outlineYaml",
+                       COALESCE(LENGTH(outline_yaml), 0)::bigint AS "outlineChars",
+                       budget_min AS "budgetMin", budget_max AS "budgetMax", status,
+                       COALESCE(LENGTH(full_text), 0)::bigint AS "textChars",
+                       COALESCE(foreshadow_refs::text, '[]') AS "foreshadowRefs",
+                       COALESCE(rule_refs::text, '[]') AS "ruleRefs",
+                       create_time AS "createTime", update_time AS "updateTime"
+                FROM chapters
+                WHERE (#{novelId,jdbcType=BIGINT}::bigint IS NULL OR novel_id = #{novelId})
+                ORDER BY novel_id, chapter_no
+    </select>
+
+
+    <select id="findFullText" resultType="string">
+                SELECT full_text FROM chapters
+                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo} AND full_text IS NOT NULL
+    </select>
+
+    <select id="findApprovedWithoutDigest" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ApprovedNoDigest">
+                SELECT c.id, c.novel_id AS "novelId", c.chapter_no AS "chapterNo" FROM chapters c
+                LEFT JOIN digests d ON d.chapter_id = c.id
+                WHERE c.status = 'DIGESTED' AND d.id IS NULL
+                ORDER BY c.novel_id, c.chapter_no
+    </select>
+
+    <select id="listVolumeFacts" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$VolumeFactRow">
+                SELECT chapter_no AS "chapterNo", title, goal, hook, status, budget_min AS "budgetMin", budget_max AS "budgetMax",
+                       COALESCE(LENGTH(full_text), 0)::bigint AS "textLen",
+                       COALESCE(foreshadow_refs::text, '[]') AS "refs"
+                FROM chapters
+                WHERE novel_id = #{novelId} AND volume_no = #{volNo}
+                ORDER BY chapter_no
+    </select>
+
+    <select id="existsCount" resultType="long">
+                SELECT COUNT(*) FROM chapters WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
+    </select>
+
+    <insert id="insertPlan">
+                INSERT INTO chapters (novel_id, chapter_no, volume_no, arc, title, goal, hook, time_note,
+                                      rule_refs, foreshadow_refs, budget_min, budget_max, status)
+                VALUES (#{novelId}, #{chapterNo}, #{volumeNo}, #{arc}, #{title}, #{goal}, #{hook}, #{timeNote},
+                        #{ruleRefs}::jsonb, #{foreshadowRefs}::jsonb, #{budgetMin}, #{budgetMax}, 'NEW')
+    </insert>
+
+    <delete id="deleteGateReports">
+                DELETE FROM gate_reports WHERE chapter_id=#{chapterId}
+    </delete>
+
+    <delete id="deleteScenes">
+                DELETE FROM chapter_scenes WHERE chapter_id=#{chapterId}
+    </delete>
+
+    <delete id="deleteChapterSteps">
+                DELETE FROM chapter_steps WHERE chapter_id=#{chapterId}
+    </delete>
+
+    <update id="updateOutlineYaml">
+                UPDATE chapters SET outline_yaml=#{outlineYaml}, update_time=NOW()
+                WHERE id=#{chapterId}
+    </update>
+
+    <update id="updatePov">
+                UPDATE chapters SET pov=#{pov}, update_time=NOW()
+                WHERE id=#{chapterId}
+    </update>
+
+    <update id="markOutlined">
+                UPDATE chapters SET outline_yaml=#{outlineYaml}, status='OUTLINED', update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <update id="markRejected">
+                UPDATE chapters SET status='NEW', full_text=NULL, outline_yaml=NULL, round=0,
+                       reject_reason=#{reason}, update_time=NOW()
+                WHERE id=#{chapterId}
+    </update>
+
+    <update id="markTextRejected">
+                UPDATE chapters SET status='NEW', full_text=NULL, round=0,
+                       reject_reason=#{reason}, update_time=NOW()
+                WHERE id=#{chapterId}
+    </update>
+
+    <update id="resetSceneDrafts">
+                UPDATE chapter_scenes SET draft_text=NULL, gate_status='PENDING', revision_round=0, update_time=NOW()
+                WHERE chapter_id=#{chapterId}
+    </update>
+
+    <update id="clearRejectReason">
+                UPDATE chapters SET reject_reason=NULL, update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <update id="updatePlan">
+                UPDATE chapters SET volume_no=#{volumeNo}, arc=#{arc}, title=#{title}, goal=#{goal}, hook=#{hook}, time_note=#{timeNote},
+                       budget_min=#{budgetMin}, budget_max=#{budgetMax}, update_time=NOW()
+                WHERE id=#{chapterId}
+    </update>
+
+    <delete id="deletePlan">
+                DELETE FROM chapters WHERE id=#{chapterId}
+    </delete>
+
+    <update id="updateStatus">
+                UPDATE chapters SET status=#{status}, update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <update id="updateStatusIf">
+                UPDATE chapters SET status=#{to}, update_time=NOW() WHERE id=#{chapterId} AND status=#{expect}
+    </update>
+
+    <update id="updateStatusByNo">
+                UPDATE chapters SET status=#{status}, update_time=NOW()
+                WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
+    </update>
+
+    <update id="saveFullText">
+                UPDATE chapters SET full_text=#{fullText}, update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <update id="updateReviewConfig">
+                UPDATE chapters SET review_config=#{reviewConfig}::jsonb, update_time=NOW() WHERE id=#{chapterId}
+    </update>
+
+    <select id="findDialogueRows" resultType="com.zzdzz.novelgen.service.data.ChapterDataService$ChapterTextRow">
+                SELECT chapter_no AS "chapterNo", full_text AS "fullText" FROM chapters
+                WHERE novel_id=#{novelId} AND chapter_no&lt;=#{maxChapterNo}
+                  AND full_text IS NOT NULL AND full_text!=''
+                ORDER BY chapter_no
+    </select>
+</mapper>

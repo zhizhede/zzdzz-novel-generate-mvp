@@ -1,0 +1,18 @@
+#!/bin/sh
+# 预提交闸（源文件在 .githooks/，安装 = 拷进 .git/hooks/pre-commit，源头改这里别改副本）：
+#   闸1（快，先跑）：code-standards 规约正文 + 大批 Java 改动不许同一提交（§0 流程约束，防 8df2bed 重演）
+#   闸2：mvn compile 必须过（全量测试不在这里跑——慢，由 pre-push 闸2 兜底）
+export JAVA_HOME="/d/Program/Java/jdk-21"
+
+if git diff --cached --name-only -- docs/code-standards.md | grep -q .; then
+  JAVA_STAGED=$(git diff --cached --name-only -- '*.java' | wc -l)
+  if [ "$JAVA_STAGED" -ge 10 ]; then
+    echo "拒绝提交：code-standards.md 与 $JAVA_STAGED 个 Java 文件同在暂存区。"
+    echo "  规约 §0：规约正文/流水与代码迁移必须分开提交（8df2bed 覆盖式改写的教训）。"
+    echo "  拆法：先提代码提交，再提规约提交；或反之。"
+    exit 1
+  fi
+fi
+
+mvn -q compile || exit 1
+exit 0

@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.mapper.StylePackMapper">
+
+    <select id="findIdByName" resultType="long">
+SELECT id FROM style_packs WHERE name=#{name}
+    </select>
+
+    <select id="insert" resultType="long">
+INSERT INTO style_packs (name, description, rules_md, fingerprint) VALUES (#{name}, #{description}, #{rulesMd}::text, #{fingerprint}::jsonb) RETURNING id
+    </select>
+
+    <update id="updateFingerprint">
+UPDATE style_packs SET fingerprint=#{fingerprint}::jsonb, update_time=NOW() WHERE id=#{id}
+    </update>
+
+    <update id="updateRulesMdByNovel">
+
+                UPDATE style_packs sp SET rules_md=#{rulesMd}, update_time=NOW()
+                FROM novels n WHERE n.style_pack_id = sp.id AND n.id = #{novelId}
+                
+    </update>
+
+    <select id="findGateConfigByNovel" resultType="string">
+
+                SELECT sp.gate_config::text FROM style_packs sp
+                JOIN novels n ON n.style_pack_id = sp.id WHERE n.id = #{novelId}
+                
+    </select>
+
+    <update id="updateGateConfigByNovel">
+
+                UPDATE style_packs sp SET gate_config=#{gateConfigJson}::jsonb, update_time=NOW()
+                FROM novels n WHERE n.style_pack_id = sp.id AND n.id = #{novelId}
+                
+    </update>
+
+    <select id="findRulesMdByNovel" resultType="string">
+
+                SELECT sp.rules_md FROM style_packs sp
+                JOIN novels n ON n.style_pack_id = sp.id WHERE n.id = #{novelId}
+                
+    </select>
+
+    <select id="findFingerprintByNovel" resultType="string">
+
+                SELECT sp.fingerprint::text FROM style_packs sp
+                JOIN novels n ON n.style_pack_id = sp.id WHERE n.id = #{novelId}
+
+    </select>
+
+    <select id="findGateConfigById" resultType="string">
+
+                SELECT gate_config::text FROM style_packs WHERE id = #{id}
+
+    </select>
+
+    <select id="insertPreset" resultType="long">
+INSERT INTO style_packs (name, description, rules_md, fingerprint, gate_config, is_preset)
+VALUES (#{name}, #{description}, #{rulesMd}, #{fingerprint}::jsonb, #{gateConfig}::jsonb, TRUE)
+RETURNING id
+    </select>
+
+    <select id="insertPack" resultType="long">
+INSERT INTO style_packs (name, description, rules_md, fingerprint, gate_config)
+VALUES (#{name}, #{description}, #{rulesMd}, #{fingerprint}::jsonb, #{gateConfig}::jsonb)
+RETURNING id
+    </select>
+
+    <!-- 同名可复用包：非预设，且没有任何书引用（删书残留的孤儿包）。 -->
+    <select id="findReusablePackId" resultType="long">
+SELECT sp.id FROM style_packs sp
+WHERE sp.name = #{name} AND sp.is_preset = FALSE
+  AND NOT EXISTS (SELECT 1 FROM novels n WHERE n.style_pack_id = sp.id)
+ORDER BY sp.id DESC
+LIMIT 1
+    </select>
+
+    <!-- 复用：整包字段原地改写（孤儿包转成在用的包）。与 insertPack 字段口径一致，只是打在既有行上。 -->
+    <update id="reusePack">
+UPDATE style_packs
+SET name=#{name}, description=#{description}, rules_md=#{rulesMd},
+    fingerprint=#{fingerprint}::jsonb, gate_config=#{gateConfig}::jsonb,
+    is_preset=FALSE, update_time=NOW()
+WHERE id=#{id}
+    </update>
+
+    <!-- 删书级联：本书的专属风格包若非预设且已无任何书引用，物理删除（否则活名唯一约束会挡住同名重导）。
+         须在删书之后调用，且 packId 由调用方在删书前取出——novels.style_pack_id 外键无级联，
+         包还被书引用时删不掉；而删完书就再查不到那本书的 style_pack_id 了。 -->
+    <delete id="deleteOrphanPack">
+DELETE FROM style_packs
+WHERE id=#{packId}
+  AND is_preset = FALSE
+  AND NOT EXISTS (SELECT 1 FROM novels n WHERE n.style_pack_id = style_packs.id)
+    </delete>
+</mapper>
