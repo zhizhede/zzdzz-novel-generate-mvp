@@ -169,10 +169,10 @@ com.zzdzz.novelgen
 **SQL 规约**：
 - 一律预编译参数（`?`），禁止字符串拼接；JSONB 入参用 `?::jsonb`。
 - `update_time` 由 SQL 内 `NOW()` 维护，应用不手传时间。
-- **删除＝物理删除（2026-10-03 软删机制下线，见 §0 流水 1 与 §8.6）**：代码里**不再有** `is_deleted` 过滤、**不再有** `softDelete*` 方法（已改名 `delete*` 且真的 `DELETE FROM`）。库里 `is_deleted`/`delete_time` 两列与那些 `WHERE is_deleted=false` 的条件唯一索引保留当死列/死谓词，**不要在新代码里读写它们**。
+- **删除＝物理删除（2026-10-03 软删机制下线，见 §0 流水「软删机制整体下线」条与 §8.6）**：代码里**不再有** `is_deleted` 过滤、**不再有** `softDelete*` 方法（已改名 `delete*` 且真的 `DELETE FROM`）。库里 `is_deleted`/`delete_time` 两列与那些 `WHERE is_deleted=false` 的条件唯一索引保留当死列/死谓词，**不要在新代码里读写它们**。
 - **唯一必须保留 `is_deleted` 的写法**：`ON CONFLICT (<cols>) WHERE is_deleted = FALSE`（现有 3 处：Embedding/WorldState/VolumeReview 的 upsert）。条件唯一索引还在，去掉谓词 PostgreSQL 会报 `no unique or exclusion constraint matching the ON CONFLICT specification`。
 - **删父行要级联**：19 个外键（父为 `novels`/`chapters`/`imported_samples`）已加 `ON DELETE CASCADE`（迁移 V37），删书自动带走章节/场景/门禁报告/事实账/伏笔/世界状态/素材卡/正典/任务/事件/复盘。**没有级联外键的两处要显式清**：`embeddings`（无外键）与 `style_packs`（父表，删包不该牵走别的书）——见 `NovelService.deleteNovel` + `StylePackMapper.deleteOrphanPack`。
-- **`BaseDO`（2026-10-03 抽，同日扩并收窄）**：30 个 XxxDO 一律 `extends BaseDO`。基类放**每张表都有、且每个实体都要建模的列**：`@TableId private Long id`（此前 30 份各自手写）+ `createTime/updateTime`（同日从 20 个实体上提，见 §0 流水 2 与 §8.5；`deleteTime` 曾一并上提、随软删下线移除，见 §8.6）。判定口径是「全表都有」而非「看着常用」——`novelId` 之类只在部分表里，不许进基类。
+- **`BaseDO`（2026-10-03 抽，同日扩并收窄）**：30 个 XxxDO 一律 `extends BaseDO`。基类放**每张表都有、且每个实体都要建模的列**：`@TableId private Long id`（此前 30 份各自手写）+ `createTime/updateTime`（同日从 20 个实体上提，见 §0 流水「时间三件套上提 BaseDO」条与 §8.5；`deleteTime` 曾一并上提、随软删下线移除，见 §8.6）。判定口径是「全表都有」而非「看着常用」——`novelId` 之类只在部分表里，不许进基类。
 - **时间列进基类的已知代价（知悉并接受）**：`update_time` 由 SQL 内 `NOW()` 维护、应用不手传，而 MP 更新策略是 NOT_NULL——「读出来→改字段→updateById」会把读到的旧 `update_time` 写回 SET（表上无触发器，落库即旧值）。现存 updateById 只有两处：`ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null → 不进 SET，安全）、`LlmProviderService.update`（命中，该行 `update_time` 不前进）。**修法（未做）**：给基类 `updateTime` 挂 `@TableField(update = "now()")`，让 MP 的 SET 直接写 `now()`。
 - **投影查询里时间列保持 null**：只取部分列的 SQL 不填充它们，用前判空（如规划资产页的 content-only 查询只填 `CanonDocDO.content`）。
 - 状态机抢占必须是条件更新并检查影响行数（影响 0 行 = 并发冲突，报冲突而非静默）。
@@ -290,7 +290,7 @@ Controller/Runner 禁止：…返回 DO…
 
 **风险与实弹**：MP 生成的 SQL 列清单会变（读路径多三列）、`INSERT` 不受影响（null → NOT_NULL 策略跳过 → 走 DB 默认值）。验证四层：`grep`（无实体再声明时间列）→ `mvn compile` → `mvn test` 232/232 → 重启实弹：17 个端点全 200、日志零异常，且打开 mapper DEBUG 后确认 MP 为 `ChapterDO` 生成的是 `SELECT id,novel_id,…,reject_reason,create_time,update_time,delete_time FROM chapters WHERE id=?`——**继承字段确实进了 SQL**（这一层必须看，否则「字段没被 MP 认下」会静默表现为读出来恒 null）。
 
-**文档同步**：本节 + §0 流水 2 + §2 包结构 + §3.6 + §4「`BaseDO`」条 + `AGENTS.md` 铁律与坑 20。按 §0「流程约束」，**改规约与改代码分属两个提交**。
+**文档同步**：本节 + §0 流水「时间三件套上提 BaseDO」条 + §2 包结构 + §3.6 + §4「`BaseDO`」条 + `AGENTS.md` 铁律与坑 20。按 §0「流程约束」，**改规约与改代码分属两个提交**。
 
 **【同日后被 §8.6 收窄】**：本节的 `deleteTime` 已随软删下线从 `BaseDO` 移除，只留 `createTime/updateTime`。本节按「只追加」规则保留原文。
 
@@ -310,7 +310,7 @@ Controller/Runner 禁止：…返回 DO…
 
 **证据**：`mvn test` 232/232（两个 NovelService 测试的构造器与断言跟着改）、前端 `npm run build` 通过、26 个端点实弹 200（另两个非 200 是我自己写错的 URL：缺 `novelId` 参数、路径不存在）、日志零异常；三路删除实弹——删书（书/章/卡/正典/风格包/向量全为 0，级联生效）、删自定义提示词、删素材卡，均物理消失且全库 `is_deleted=true` 为 0 行。
 
-**文档同步**：本节 + §0 流水 1 + §1 图 + §3.6 + §4 全部软删条目 + `AGENTS.md`（铁律「数据库」条、坑 9/11/20、端点速查）+ `docs/STATUS.md`。按 §0「流程约束」，**规约改动与代码改动分属两个提交**。`docs/architecture/pipeline-contracts.md §六` 的四条口径按「删除＝真删」重读。
+**文档同步**：本节 + §0 流水「软删机制整体下线」条 + §1 图 + §3.6 + §4 全部软删条目 + `AGENTS.md`（铁律「数据库」条、坑 9/11/20、端点速查）+ `docs/STATUS.md`。按 §0「流程约束」，**规约改动与代码改动分属两个提交**。`docs/architecture/pipeline-contracts.md §六` 的四条口径按「删除＝真删」重读。
 
 ## §9. 前端补充（web/）
 
