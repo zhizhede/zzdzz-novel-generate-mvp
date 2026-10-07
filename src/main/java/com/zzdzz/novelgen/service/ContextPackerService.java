@@ -424,7 +424,12 @@ public class ContextPackerService {
         String ragSection = embeddingService.searchSection(novelId, chapterNo,
                 Objects.toString(ch.getGoal(), "") + "\n" + Objects.toString(ch.getHook(), "") + "\n" + spec.goal(),
                 chapterNo - 3);
-        String user = promptTemplates.format(LlmNode.SCENE_DRAFT, "user", chapterNo, spec.sceneNo(), ch.getTitle(), spec.goal(),
+        String user = promptTemplates.format(LlmNode.SCENE_DRAFT, "user", chapterNo, spec.sceneNo(),
+                String.valueOf(ch.getTitle()),
+                // 章纲 goal/hook 此前根本没进过场景提示词（模板「本章目标」槽位填的是章题，
+                // goal/hook 只被拿去做了卡片匹配与 RAG 查询）——写手与审校必须看同一份契约
+                Objects.toString(ch.getGoal(), "（无）"), Objects.toString(ch.getHook(), "（无）"),
+                spec.goal(),
                 sceneTimeAnchor(spec.timeAnchor(), ch.getTimeNote()),
                 spec.present(), spec.mustReveal(), spec.mustNot(), spec.words(),
                 simileRedline,

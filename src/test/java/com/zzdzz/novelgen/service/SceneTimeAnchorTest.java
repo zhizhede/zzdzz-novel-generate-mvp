@@ -78,11 +78,13 @@ class SceneTimeAnchorTest {
     void sceneDraftTemplateHasAnchorLineAndArityTwenty() {
         String content = PromptCatalog.contentOf(LlmNode.SCENE_DRAFT, "user");
         assertThat(content).contains("本场景时间锚：%s");
-        // arity 锁：19→20 个实参（新增时间锚行）；specs 含「±15%%」的转义 `%%` 要滤掉——
-        // 调用点在 ContextPackerService.packScene，formatSafe 对个数不匹配会静默回退（AGENTS 坑 14 同族）
+        // arity 锁：20→22 个实参（2026-10-07 写侧契约：「本章目标」槽位此前填的是章题，
+        // 拆成 章题/章纲目标/章末钩子 三行，goal/hook 第一次真正进场景提示词）；
+        // specs 含「±15%%」的转义 `%%` 要滤掉——调用点在 ContextPackerService.packScene，
+        // formatSafe 对个数不匹配会静默回退（AGENTS 坑 14 同族）
         List<String> args = PromptTemplateService.specs(content).stream()
                 .filter(s -> !s.equals("%%")).toList();
-        assertThat(args).hasSize(20);
+        assertThat(args).hasSize(22);
     }
 
     @Test

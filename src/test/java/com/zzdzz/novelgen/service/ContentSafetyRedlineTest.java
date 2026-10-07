@@ -66,11 +66,12 @@ class ContentSafetyRedlineTest {
     @Test
     void safetyRedlineDoesNotBreakFormatArity() {
         // 红线是纯文本行，不得引入新的 %s/%d——位置参数模板 arity 变了会静默回退（AGENTS 坑 14）
-        // SCENE_DRAFT user：20 实参（SceneTimeAnchorTest 已锁）；关键位置模板的 specs 数与已知一致
+        // SCENE_DRAFT user：22 实参（SceneTimeAnchorTest 已锁；2026-10-07 写侧契约 +2：章题/目标/钩子拆行）；
+        // 关键位置模板的 specs 数与已知一致
         int sceneSpecs = PromptTemplateService.specs(
                 PromptCatalog.contentOf(LlmNode.SCENE_DRAFT, "user")).stream()
                 .filter(s -> !s.equals("%%")).toList().size();
-        assertThat(sceneSpecs).isEqualTo(20);
+        assertThat(sceneSpecs).isEqualTo(22);
         // OUTLINE user：15 实参（OutlineChapterPovTest 已锁）
         assertThat(PromptTemplateService.specs(
                 PromptCatalog.contentOf(LlmNode.OUTLINE, "user"))).hasSize(15);
