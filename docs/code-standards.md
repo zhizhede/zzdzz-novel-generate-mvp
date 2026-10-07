@@ -11,11 +11,13 @@
 
 **变更流水（倒序）**：
 
-1. **2026-10-03｜软删机制整体下线（用户定调：「把软删相关的设定全部从代码层清除」）**：删除一律**物理删除**。被推翻的原话是 §4「软删标记不进领域模型」「已知缺口（待收口）」两条，以及 §3.6「`is_deleted/...` 一并建模」——**"软删标记不进领域模型" 这条定调本身没被推翻，是被"整个软删都不要了"覆盖了**：既然不再软删，就没有标记该不该进模型的问题。落地范围：①XML 里 152 处 `is_deleted` 读过滤删除、Java 里 35 处 `.eq("is_deleted", false)` 删除；②6 个 `softDelete*` 语句改 `DELETE FROM`，方法名统一去 soft（`deletePlan`/`deleteCustom`/`deleteCard`/`deleteOrphanPack`…）；③`BaseDO` 去掉 `deleteTime`（只剩 `createTime/updateTime`）；④存量软删行一次性物理清洗（全库 30 张表软删行 0 行，整库备份 `var/purge-backup-20261003-201839.sql`）、活数据未动；⑤**新迁移 V37**：19 个外键加 `ON DELETE CASCADE`（父为 novels/chapters/imported_samples），否则硬删有内容的书会撞 `chapters_novel_id_fkey`——这是原先记在"已知缺口"里、被标为"必须拍板"的那个决定，本次拍板为级联。**刻意保留的两处**：库里 `is_deleted`/`delete_time` 两列与 8 个条件唯一索引留作死列/死谓词（同日定调「列留库里当死列，只清代码」）；3 处 `ON CONFLICT (...) WHERE is_deleted = FALSE` 必须原样保留（索引带谓词，去掉会报 no unique or exclusion constraint）。**前端同步**：6 处写着"软删，可恢复"的删除确认文案改口（否则会骗用户）；提示词页删掉那个恒为 false 的删除列开关。证据：`mvn test` 232/232、前端 `npm run build` 通过、26 个端点实弹 200、删书（级联）/删提示词/删素材卡三路实弹均物理消失、日志零异常。
-2. **2026-10-03｜时间三件套上提 `BaseDO`（用户定调，同日其后被上一条收窄为两列）**：`createTime/updateTime/deleteTime` 由各实体改为基类统一持有（30 张业务表逐表核过三列俱在、且统一 `NOT NULL DEFAULT now()`）。此前 20 个实体各自手写、10 个根本没建模。**同一条「不进基类」的旧结论只对 `isDeleted` 继续成立**——软删标记不进领域模型这条铁律当时没变，变的只是它的邻座。被本次推翻的原话（§4「`BaseDO`」条、已按 §8.5 改写）："`isDeleted` 与时间戳刻意都不进基类"。**当时已记下**的代价：`update_time` 由 SQL 内 `NOW()` 维护，而 MP 更新策略是 NOT_NULL，所以「读出来→改字段→updateById」会把旧值写回 SET；现存两处 updateById 里 `ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null，不进 SET）不受影响，`LlmProviderService.update` 命中该路径（既有问题，未修，修法见 §4）。落地：`/api/chapters/**` 等 17 个端点实弹 200、MP 生成 SQL 已带继承列、`mvn test` 232/232。
-3. **2026-10-03｜回退命名配对（用户定调，已落地主体）**：恢复 `DO=库实体（model/entity）/ DTO=入参（model/dto）/ VO=出参（model/vo）`，撤销 2026-09-21 的「DTO=库实体、DO 后缀废除」。已落地：31 实体 `XxxDTO→XxxDO` 迁 `model/entity/`、7 个纯收参类入 `model/dto/`、`LoginVO` 拆成 `LoginDTO`+`LoginVO`。未落地：controller 内嵌的 23 个入参 record 提取归位（见 §8.4 进度）。**方式上的纠正**：本次先在本节留下流水、并在 §8.4 抄录原规则原文，再动代码——不再「先改代码、顺手把规约覆盖掉」。
-4. **2026-09-21｜命名配对切换（提交 `8df2bed`，142 文件）**：`DO→DTO` 22 个实体并把 `model/entity/` 并进 `model/dto/`；27 个收参类 `XxxDTO→XxxVO`；同提交重写本规约 54 行 + `AGENTS.md` 铁律。**本次变更的问题不只是内容，而是方式**：正文被覆盖式改写、无变更记录，导致原规则不可追溯。
-5. **2026-09-10｜规约首版**：基准为阿里巴巴《Java 开发手册》+ 命名参考，采用 `DO / DTO / VO` 三件套。
+1. **2026-10-08｜Mapper 文件夹统一更名（用户定调：「之后放 xxxMapper 这种文件的文件夹统一都叫 mapper」）**：`com.zzdzz.novelgen.dao` 包整体更名 `com.zzdzz.novelgen.mapper`——目录 `novelgen-data/.../dao` → `mapper`，93 个文件字面替换（Mapper 类的 package 行、全部 import、27 个 XML 的 namespace、启动类 `@MapperScan`），全库 `novelgen.dao` 引用 0 残留；`resources/mapper`（XML 目录）本就叫 mapper，两侧自此同名。**规约**：Mapper 类所在文件夹/包一律 `mapper`，不再新增 `dao` 命名；口头讲分层仍可说「dao 层」，但落码、路径、包名一律 mapper。历史流水与 §8 记录里的 `dao/` 字样按「只追加不改写」保留原貌。证据：`mvn clean test` 全绿（6 模块 56 测试类）。
+2. **2026-10-08｜Maven 多模块拆分（用户定调「先把当前代码抽成多模块，基建/hook/规约弄好」）**：单模块拆为 6 模块（common/model/data/llm/service/app），依赖方向见 §1.1，编译期强制。三处逆向边的处置：①`FingerprintMetricVO` 对 `GateService.metricLabel` 的引用 → 中文名映射下沉 `model/vo/MetricLabels`（GateService 改静态导入）；②`dao`/`llm` 对 `service.data` 的行为依赖 → `service/data` 整体与 `dao` 合并进 `novelgen-data` 模块（层内自洽，行 record 无需搬家）；③`LlmJson`/`PromptCatalog` 对 `PromptTemplateService` 的依赖 → 该类物理下沉 `novelgen-llm`（包名 `service` 不变，零 import 改动）。**方式沿用本节约束**：先留流水与方案（`docs/改造方案-多模块与多书拼接.md`），代码单独落地。证据：每步 `mvn clean test` 全绿（终态 6 模块 354+ 条）、`mvn -DskipTests package` 出可执行 jar、`.githooks/pre-commit` 实跑通过（JDK17 环境被 enforcer 正确拦截后改钉 JDK21）。
+3. **2026-10-03｜软删机制整体下线（用户定调：「把软删相关的设定全部从代码层清除」）**：删除一律**物理删除**。被推翻的原话是 §4「软删标记不进领域模型」「已知缺口（待收口）」两条，以及 §3.6「`is_deleted/...` 一并建模」——**"软删标记不进领域模型" 这条定调本身没被推翻，是被"整个软删都不要了"覆盖了**：既然不再软删，就没有标记该不该进模型的问题。落地范围：①XML 里 152 处 `is_deleted` 读过滤删除、Java 里 35 处 `.eq("is_deleted", false)` 删除；②6 个 `softDelete*` 语句改 `DELETE FROM`，方法名统一去 soft（`deletePlan`/`deleteCustom`/`deleteCard`/`deleteOrphanPack`…）；③`BaseDO` 去掉 `deleteTime`（只剩 `createTime/updateTime`）；④存量软删行一次性物理清洗（全库 30 张表软删行 0 行，整库备份 `var/purge-backup-20261003-201839.sql`）、活数据未动；⑤**新迁移 V37**：19 个外键加 `ON DELETE CASCADE`（父为 novels/chapters/imported_samples），否则硬删有内容的书会撞 `chapters_novel_id_fkey`——这是原先记在"已知缺口"里、被标为"必须拍板"的那个决定，本次拍板为级联。**刻意保留的两处**：库里 `is_deleted`/`delete_time` 两列与 8 个条件唯一索引留作死列/死谓词（同日定调「列留库里当死列，只清代码」）；3 处 `ON CONFLICT (...) WHERE is_deleted = FALSE` 必须原样保留（索引带谓词，去掉会报 no unique or exclusion constraint）。**前端同步**：6 处写着"软删，可恢复"的删除确认文案改口（否则会骗用户）；提示词页删掉那个恒为 false 的删除列开关。证据：`mvn test` 232/232、前端 `npm run build` 通过、26 个端点实弹 200、删书（级联）/删提示词/删素材卡三路实弹均物理消失、日志零异常。
+4. **2026-10-03｜时间三件套上提 `BaseDO`（用户定调，同日其后被上一条收窄为两列）**：`createTime/updateTime/deleteTime` 由各实体改为基类统一持有（30 张业务表逐表核过三列俱在、且统一 `NOT NULL DEFAULT now()`）。此前 20 个实体各自手写、10 个根本没建模。**同一条「不进基类」的旧结论只对 `isDeleted` 继续成立**——软删标记不进领域模型这条铁律当时没变，变的只是它的邻座。被本次推翻的原话（§4「`BaseDO`」条、已按 §8.5 改写）："`isDeleted` 与时间戳刻意都不进基类"。**当时已记下**的代价：`update_time` 由 SQL 内 `NOW()` 维护，而 MP 更新策略是 NOT_NULL，所以「读出来→改字段→updateById」会把旧值写回 SET；现存两处 updateById 里 `ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null，不进 SET）不受影响，`LlmProviderService.update` 命中该路径（既有问题，未修，修法见 §4）。落地：`/api/chapters/**` 等 17 个端点实弹 200、MP 生成 SQL 已带继承列、`mvn test` 232/232。
+5. **2026-10-03｜回退命名配对（用户定调，已落地主体）**：恢复 `DO=库实体（model/entity）/ DTO=入参（model/dto）/ VO=出参（model/vo）`，撤销 2026-09-21 的「DTO=库实体、DO 后缀废除」。已落地：31 实体 `XxxDTO→XxxDO` 迁 `model/entity/`、7 个纯收参类入 `model/dto/`、`LoginVO` 拆成 `LoginDTO`+`LoginVO`。未落地：controller 内嵌的 23 个入参 record 提取归位（见 §8.4 进度）。**方式上的纠正**：本次先在本节留下流水、并在 §8.4 抄录原规则原文，再动代码——不再「先改代码、顺手把规约覆盖掉」。
+6. **2026-09-21｜命名配对切换（提交 `8df2bed`，142 文件）**：`DO→DTO` 22 个实体并把 `model/entity/` 并进 `model/dto/`；27 个收参类 `XxxDTO→XxxVO`；同提交重写本规约 54 行 + `AGENTS.md` 铁律。**本次变更的问题不只是内容，而是方式**：正文被覆盖式改写、无变更记录，导致原规则不可追溯。
+7. **2026-09-10｜规约首版**：基准为阿里巴巴《Java 开发手册》+ 命名参考，采用 `DO / DTO / VO` 三件套。
 
 **流程约束（今后）**：改命名/分层这类规约，**同一提交内只允许改规约正文 + 本节追加一条流水**；代码迁移单独提交，提交信息里引用本节的条目号。禁止只改正文不留痕。
 
@@ -26,7 +28,7 @@
    ↓ 只做：参数校验、调用 service、组装响应
 业务层   service/（业务逻辑、事务边界、状态机推进、管线节点）
    ↓ 只做：业务编排
-数据层   dao/（全部 SQL 唯一容身处）
+数据层   mapper/（原 dao，2026-10-08 更名；全部 SQL 唯一容身处）
    ↓
 DB      PostgreSQL（删除＝物理删除；`is_deleted` 列留作死列，见 §4）
 
@@ -35,8 +37,32 @@ model/   entity(DO 库实体) / dto(入参) / vo(出参)  贯穿各层，依赖�
 
 **铁律**：
 1. Controller/Runner 禁止出现业务逻辑与 SQL；Service 禁止出现拼 SQL 与 HTTP 依赖；DAO 禁止出现业务判断。
-2. 依赖只能 `入口 → service → dao`；`llm/`、`infra/` 是基础设施，service 可调用，但业务代码不得绕过 `LlmPort` 直接依赖 MiniMax 实现类。
+2. 依赖只能 `入口 → service → mapper`；`llm/`、`infra/` 是基础设施，service 可调用，但业务代码不得绕过 `LlmPort` 直接依赖 MiniMax 实现类。
 3. 跨层传参：**入口层收 DTO、出 VO**；**DO 禁止逸出 service 层**（DAO 返回 DO 给 service 是终点，不给前端看表结构）。
+
+### §1.1 Maven 多模块边界（2026-10-08 拆分，编译期强制）
+
+```
+novelgen-app ──→ novelgen-service ──→ novelgen-llm ──→ novelgen-data ──→ novelgen-model
+     │                  │   └──────────────┴──────────────→ novelgen-common（叶子）
+     │                  └─────────────────────────────────→ novelgen-model / novelgen-common
+     └─ 含 controller/runner/config/启动类/web 三件套/application*.yaml（boot 打包只在 app）
+novelgen-llm → novelgen-data（Resolver/MiniMaxClient 调数据接口）
+novelgen-data = mapper/（原 dao，2026-10-08 更名）+ service/data/ + mapper XML + Flyway SQL（层内自洽，SQL 只在此模块）
+```
+
+**模块归属口诀**：包 `com.zzdzz.novelgen.X` 的代码物理上放 `novelgen-X`。以下三处**历史分裂**是拆分时为消逆向边做的定点搬迁，**新代码不得扩大分裂**：
+
+1. `common/web` 包一半在 common（`BizException/ErrorCode/Result`），一半在 app（`AuthInterceptor/JwtService/GlobalExceptionHandler`——依赖 jjwt/LlmException/spring-webmvc，只能随启动层走）；
+2. `PromptTemplateService` 物理在 llm 模块（包名仍是 `service`）——`LlmJson`/`PromptCatalog` 依赖它，放 service 层会成环；service/llm 两模块都可引它，方向合法；
+3. 测试夹具 `fixtures/` 在 service 模块测试资源里，llm 模块自带一份 `digest_new_threads_nested_in_state.txt` 副本（两模块的测试都要读，test 资源不跨模块共享）。
+
+**禁令**（违者编译期即报，新增依赖请先想清楚放哪层）：
+- `model`/`common` 不得依赖任何业务模块；
+- `service` 不得引 `controller`/`config`/`runner`（app 层）；
+- `llm`/`data` 不得引 `service` 根包业务类（例外：上面第 2 条的 `PromptTemplateService`）。
+
+**钩子**：`.githooks/pre-commit`（仓库内源头）→ 拷贝安装到 `.git/hooks/pre-commit`；跑 `mvn -q compile` 只挡编译错误，**不跑全量测试**（提交前自觉 `mvn test`）。钩子内无条件 `export JAVA_HOME=/d/Program/Java/jdk-21`——本机 Git Bash 环境常指向 jdk-17，enforcer 会拦（已实弹）。
 
 ## §2. 包结构
 
@@ -45,7 +71,7 @@ com.zzdzz.novelgen
 ├── controller/     # Web 入口：XxxController（REST/SSE）
 ├── runner/         # CLI 入口：XxxRunner（ApplicationRunner，视同 controller 层禁令）
 ├── service/        # 业务：XxxService（含管线节点：OutlineService、GateService…）
-├── dao/            # 数据访问：XxxMapper（MyBatis-Plus，SQL 在此类与 resources/mapper/*.xml）
+├── mapper/         # 数据访问：XxxMapper（MyBatis-Plus，SQL 在此类与 resources/mapper/*.xml；2026-10-08 由 dao/ 更名，规约：Mapper 文件夹一律叫 mapper）
 ├── model/
 │   ├── entity/     # XxxDO：库实体，与表一一对应（mapper 层配对，@TableName）；**一律 extends BaseDO**（id + 时间三件套）
 │   ├── dto/        # 入参：XxxRequest / XxxDTO（如 XxxQueryDTO）
