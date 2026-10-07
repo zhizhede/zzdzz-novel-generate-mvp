@@ -108,6 +108,13 @@ public class GateService {
         double simile = ((Number) metrics.get("simile_per1k")).doubleValue();
         checks.add(check("simile_per1k", simile, null, simileMax, simile <= simileMax));
 
+        // 对白密度上界（**章级主判据**，2026-10-07 自场景级上移）：章级样本 ~3000 字指标稳定
+        //（实测 12 个已成稿章 20.7–33.8），30.2 上限偶发越界且章级修订易收敛；场景级 450 字
+        // 单个「≈2.2/千字方差过大（实弹同轮 1 章 5 次卡边、30.44/30.49 边界反复磨），只留 1.5 倍极端护栏。
+        double dlg = ((Number) metrics.get("dialogue_density_per1k")).doubleValue();
+        double dlgMax = densityCap(gateCfg, base);
+        checks.add(check("dialogue_density_per1k", dlg, null, dlgMax, dlg <= dlgMax));
+
         checks.addAll(fingerprintChecks(base, metrics));
 
         boolean noStraightQuote = !text.contains("\"");
@@ -179,8 +186,8 @@ public class GateService {
     }
 
     /**
-     * 场景级门禁：只查确定性硬规则与方差可控的指标（对话密度/句末标点/顿号/感叹号/数字）。
-     * 破折号等稀疏统计留到章级判定——几百字样本上单场景方差过大。
+     * 场景级门禁：只查确定性硬规则与方差可控的指标（对白密度极端护栏/句末标点/顿号/感叹号/数字）。
+     * 破折号等稀疏统计与对白密度主判据留到章级——几百字样本上方差过大（2026-10-07 密度实弹上移）。
      */
     @SuppressWarnings("unchecked")
     public GateVerdict checkScene(long novelId, long chapterId, long sceneId, int sceneNo, String text, int wordsBudget) {
@@ -213,18 +220,17 @@ public class GateService {
         double dunhaoMax = upperBound(base, "dunhao_per1k", 1.0);
         double exclamMax = upperBound(base, "exclam_per1k", 2.0);
         double digitMax = upperBound(base, "digit_per1k", 12.0);
-        // 密度上限三级：书级 gate_config 覆盖键 → 指纹 abs_max → 硬编码兜底 30.2。
-        // 旧指纹（外部工具导入的子集）普遍缺 dialogue_density 基线，撞上「信息密度红线推高对白」的
-        // 书会在 30.2 边界反复卡边——留 gate_config 开关让单书可调（第三类判据「只给开关」口径）。
-        double dlgMax = configDouble(gateCfg, "scene_dialogue_density_max",
-                upperBound(base, "dialogue_density_per1k", 30.2));
+        // 对白密度三层回退（gate_config dialogue_density_max → 指纹 → 30.2）。
+        // 场景级只留 1.5× 极端护栏：450 字样本单个「≈2.2/千字（小样本方差大），主判据已上移
+        // 章级——本检查只拦病理级灌水（实测自然输出 25-37，病理稿 55+），不再参与常规卡边。
+        double dlgMax = densityCap(gateCfg, base) * 1.5;
         checks.add(check("dunhao_per1k", dunhao, null, dunhaoMax, dunhao <= dunhaoMax));
         checks.add(check("exclam_per1k", exclam, null, exclamMax, exclam <= exclamMax));
         checks.add(check("digit_per1k", digit, null, digitMax, digit <= digitMax));
         // 对白句末标点是下限指标（要高合规——曾按上限 0.35 执法，强制出「走吧」他说 式无标点对白，已翻转）
         double endPunctFloor = lowerBound(base, "dialogue_end_punct_ratio", 0.5);
         checks.add(check("dialogue_end_punct_ratio", endPunct, endPunctFloor, null, endPunct >= endPunctFloor));
-        // 对话密度：场景级只防灌水（上界）；低界留章级——叙事型场景天然低对话，几百字样本下界误杀
+        // 对白密度：场景级仅极端护栏（1.5× 章级上限），主判据在章级 evaluateChapter（2026-10-07 上移）
         checks.add(check("dialogue_density_per1k", dlg, null, dlgMax, dlg <= dlgMax));
 
         boolean passed = checks.stream().allMatch(GateCheck::ok);
@@ -302,6 +308,9 @@ public class GateService {
         for (Map.Entry<String, Object> e : metrics.entrySet()) {
             String key = e.getKey();
             if (key.equals("cjk")) continue;
+            // 对白密度跳过：统一由章级显式密度检查按三层回退处理（gate_config→指纹→30.2），
+            // 避免有密度基线的指纹产生两条同名检查、两套带宽打架
+            if (key.equals("dialogue_density_per1k")) continue;
             Map<String, Object> baselineMap = (Map<String, Object>) base.get("baseline");
             Map<String, Object> rule = (Map<String, Object>) baselineMap.get(key);
             double value = ((Number) e.getValue()).doubleValue();
@@ -401,6 +410,14 @@ public class GateService {
 
     private static double configDouble(Map<String, Object> cfg, String key, double fallback) {
         return cfg.get(key) instanceof Number n ? n.doubleValue() : fallback;
+    }
+
+    /** 对白密度上限三层回退：书级 gate_config 键 dialogue_density_max → 指纹 abs_max/基线 → 硬编码 30.2。
+     * 2026-10-07 卡边实弹：旧指纹（外部工具导入的子集）普遍缺密度基线，恒落 30.2；键名由
+     * scene_dialogue_density_max 统一改为 dialogue_density_max（检查已上移章级，场景级只是 1.5× 护栏共用本上限）。 */
+    private static double densityCap(Map<String, Object> gateCfg, Map<String, Object> base) {
+        return configDouble(gateCfg, "dialogue_density_max",
+                upperBound(base, "dialogue_density_per1k", 30.2));
     }
 
     /** 指标的场景级上限：读指纹 baseline（abs_max 优先，否则 基线*(1+容差)）；未配置用兜底值。 */

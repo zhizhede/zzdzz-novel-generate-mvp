@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
  * 对白密度显示「基线null」（模型不知道 30.2 上限，两次收敛到 30.44 卡死）；
  * 行均长只显示中位数 23.68（模型朝中位数压，过冲到 15.65 跌破真实下限 20.13）。
  * 契约：① failedChecksText 打全目标区间 ② 修订模板带指标修复方向（纯文本行不改 arity）
- * ③ 密度上限支持书级 gate_config 覆盖键 scene_dialogue_density_max。
+ * ③ 密度主判据在章级（30.2，gate_config 键 dialogue_density_max 可覆盖）、场景级仅 1.5× 极端护栏。
  */
 class ReviseFeedbackTest {
 
@@ -86,9 +86,11 @@ class ReviseFeedbackTest {
         assertThat(content).contains("合并连续对白");
     }
 
-    // ===== ③ 密度上限三级回退：gate_config 覆盖 → 指纹 → 30.2 =====
+    // ===== ③ 密度三层回退：gate_config dialogue_density_max → 指纹 → 30.2 =====
+    // 章级=主判据（30.2），场景级=1.5×极端护栏（45.3）——2026-10-07 密度实弹上移：
+    // 450 字场景单个「≈2.2/千字方差过大，同轮 1 章 5 次卡边；章级 12 个已成稿章 20.7–33.8 稳定。
 
-    /** 密度约 46/千字的对白密集场景稿（cjk=87、4 个「→ 4*1000/87≈46，落在 30.2 与 50 之间）。 */
+    /** 密度约 46/千字的对白密集文本（cjk=87、4 个「→ 4*1000/87≈46）。 */
     private static String denseDialogueScene() {
         return "「嗯。」「走。」「来。」「上。」\n"
                 + "他点了点头然后转身走向走廊尽头灯光渐渐暗了下去风从舷窗缝隙里挤进来带着咸腥的气味"
@@ -118,19 +120,29 @@ class ReviseFeedbackTest {
     }
 
     @Test
-    void densityCapFallsBackTo302WithoutOverride() {
-        GateVerdict v = gateWith(null).checkScene(7L, 1L, 1L, 1, denseDialogueScene(), 100);
+    void chapterDensityCapFallsBackTo302() {
+        // 章级主判据：默认 30.2
+        GateVerdict v = gateWith(null).evaluateChapter(7L, 1, denseDialogueScene(), 50, 300);
         assertThat(densityAbsMax(v)).isEqualTo(30.2);
     }
 
     @Test
-    void densityCapOverridablePerBookViaGateConfig() {
-        GateVerdict v = gateWith("{\"scene_dialogue_density_max\":50}")
-                .checkScene(7L, 1L, 1L, 1, denseDialogueScene(), 100);
+    void chapterDensityCapOverridablePerBook() {
+        GateVerdict v = gateWith("{\"dialogue_density_max\":50}")
+                .evaluateChapter(7L, 1, denseDialogueScene(), 50, 300);
         assertThat(densityAbsMax(v)).isEqualTo(50.0);
-        // 密度 40 落在覆盖后的 [_,50] 内 → 该检查项应通过（其余指标允许失败，只看这一项）
         GateCheck density = v.checks().stream()
                 .filter(c -> c.check().equals("dialogue_density_per1k")).findFirst().orElseThrow();
-        assertThat(density.ok()).isTrue();
+        assertThat(density.ok()).isTrue(); // 46 ≤ 50 覆盖后通过
+    }
+
+    @Test
+    void sceneDensityKeepsLooseTailGuard() {
+        // 场景级 = 章级上限 × 1.5：默认 45.3；覆盖 50 → 75
+        GateVerdict v = gateWith(null).checkScene(7L, 1L, 1L, 1, denseDialogueScene(), 100);
+        assertThat(densityAbsMax(v)).isEqualTo(45.3);
+        GateVerdict v2 = gateWith("{\"dialogue_density_max\":50}")
+                .checkScene(7L, 1L, 1L, 1, denseDialogueScene(), 100);
+        assertThat(densityAbsMax(v2)).isEqualTo(75.0);
     }
 }
