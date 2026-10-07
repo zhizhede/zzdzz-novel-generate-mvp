@@ -28,7 +28,7 @@ export JAVA_HOME="D:\Program\Java\jdk-21"
 日志看 `var/web.log`。等大约 10-30 秒，出现 `novelgen-server` 初始化完成即就绪，验证：
 
 ```bash
-curl -s -X POST http://localhost:8090/api/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123"}'
+curl -s -X POST http://localhost:8090/api/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"<本机口令>"}'
 # 返回 {"code":"00000",...} 即成功
 ```
 
@@ -38,7 +38,7 @@ curl -s -X POST http://localhost:8090/api/auth/login -H "Content-Type: applicati
 cd web && (npm run dev > ../var/vite.log 2>&1 &)
 ```
 
-日志看 `var/vite.log`，出现 `VITE ready` 即就绪。浏览器打开 <http://localhost:5173>，用 `admin / admin123` 登录。
+日志看 `var/vite.log`，出现 `VITE ready` 即就绪。浏览器打开 <http://localhost:5173>，用 `admin / <本机口令>` 登录。
 
 ## 常见坑
 

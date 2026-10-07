@@ -201,7 +201,7 @@ flowchart LR
 
 验收口径：①生大纲即落库，书籍管理页立即可见（状态=草稿）；②克隆样本资产时 AI 大纲必须贴合克隆世界（derive_outline/world 段，PromptCatalog 可编辑）——否则卷规划审校必打回（书 9 实证）；③克隆预设的章长带约束卷规划预算；④掺水量/POV/标签/每卷章数/目标/无人续跑全参数书级可改（PUT derive-config，fail-open）。**已知约束**：克隆世界观与 AI 自创大纲是组合风险，向导须提示（TODO：勾选联动警告）。
 
-**复刻防线契约（2026-09-26 增补，书 9/10/11 悉达多换名复刻实证）**：
+**复刻防线契约（2026-09-26 增补，书 9/10/11 源主角换名复刻实证）**：
 
 - **cloneAssets 全路径生效**：AI 大纲异步路径与直接创建路径都必须传 cloneAssets（此前 buildOutlinePayload 丢弃勾选，后端 null 一律全克隆）；`plotOutline`（骨架预填）默认**关**。
 - **大纲原创性把关（derive_originality 节点）**：sampleId 存在且样本已有书级剧情骨架时，大纲生成后自动评审——对照样本骨架+原书人物名（★2+ 人物卡），判复刻（主角同一/换名对应物/主线同序同构/桥段搬用）→ 带原因重写（derive_outline/rewrite 段）≤2 轮 → 仍复刻 → 任务 FAILED，消息含可行动建议；评审调用本身故障时 fail-open 放行但必留 log.warn。llm_call_log node=derive_originality 可回放。
@@ -226,7 +226,7 @@ flowchart LR
 - **卷规划守卫**：迁移书按「AI 规划一卷」会从 from 起**整卷删掉重写**（`VolumePlanService.adopt`），等于抹掉迁移结果。两道拦截：入队口 `GenerationQueueService.assertMigratedNotOverwritten`（花钱之前，STATE_CONFLICT）+ adopt 内同条件兜底。迁移书的正路是**直接入队生成**，不走卷规划。
 - **提示词二选一（同日补，实跑暴露）**：`ContextPackerService.deriveSection` 里，选样本时原本固定注入 `derive_redline`（「禁止复述原书情节、主角必须原创」）——**这与迁移完全对立**。现按模式二选一：ORIGINAL 注入 `derive_redline`，MIGRATE 注入新的 `derive_migrate`（按章纲推进、章纲里的样本主角名统一按 `{povCharacter}` 写、配角沿用原名）。
 - **自愈梯子不换目标（同日补，实跑暴露）**：`replanChapter` 内部 `resetForReoutline` 会删场景并清章纲，随后 AI 重编——实跑第 1 章就是这样丢掉整章迁移剧情的（5 个迁移场景全 PASSED、成稿 2996 字 → replan → 场景清零、AI 重出 3 场）。现 `ChapterPipelineService` 两处 replan 调用点（失败梯子 / 审校 BLOCKER 自动重写）在 MIGRATE 书上一律早退，失败与硬伤转人工。
-- **迁移换主角名＝显式字段，禁止自动推断**：`derive_config.protagonistFrom`（样本里的原书主角名）→ 迁入的章纲/goal/hook/beats 里全部替换为 `povCharacter`；留空则不换。**不做自动推断**——样本深度解析未必给主角建卡（悉达多样本 ★2+ 只有乔文达/迦摩罗等配角），按「出现最多」猜会把配角名静默改掉（v1 实测把「乔文达」当成了主角）。换名是纯文本替换（`NovelService.renameProtagonist`），只换指定名字，配角原样保留。
+- **迁移换主角名＝显式字段，禁止自动推断**：`derive_config.protagonistFrom`（样本里的原书主角名）→ 迁入的章纲/goal/hook/beats 里全部替换为 `povCharacter`；留空则不换。**不做自动推断**——样本深度解析未必给主角建卡（源主角样本 ★2+ 只有源配角甲/源配角乙等配角），按「出现最多」猜会把配角名静默改掉（v1 实测把「源配角甲」当成了主角）。换名是纯文本替换（`NovelService.renameProtagonist`），只换指定名字，配角原样保留。
 
 **剧情换皮模式（RESKIN，2026-10-04 增补；用户定调「剧情复刻但其它全部随机重新生成」）**：
 
@@ -243,8 +243,8 @@ flowchart LR
 
 - **为什么必须有「设定卡补全」这一步**（2026-10-04 晚增补）：素材卡是设定层的注入来源（场景按 `pinned` + 别名命中注入）。换皮设定里的 `characters` 只覆盖人物，实跑书 56 因此只有 6 张卡且**全是 character、aliases 全空**——地点/器物/组织/现象一律无卡，注入形同虚设，正文随之漂出「无来历的铜片」「同一件衣服前后两个名字」。补全后同一本书是 **40 张卡覆盖 6 类**（地点 6 / 物品 8 / 组织 5 / 现象 9 / 灾害 1 / 人物 11），32 张带别名——「纹服」的别名里直接记着「纹衣」，一个卡位就收掉了术语不一致。
 
-验收（2026-10-04 实弹，悉达多 3 章探针、已清）：建书即自动入队 → DONE「3 章 / 18 场景」，4 次调用 21,254 tokens；古印度宗教 → 科幻轨道打捞，悉达多 → 周衡、乔文达 → 宋砚、沙门 → 零压行者、吠陀 → 《轨道律》，而第 1 章仍是同样 5 拍同序同功能。
-- **验收（2026-10-03 实弹，悉达多样本 3 章探针、已清）**：9 张卡（含 4 张人物卡）、3 章章行（卷号/卷名/goal/hook 全来自样本）、18 个场景预物化、activate 放行；跑第 1 章得 `llm_call_log` **无 `outline` 节点**、6 次 scene_draft + 3 次 scene_revise → 成稿 2929 字 DIGESTED，记忆四层（digest/world_state/foreshadow/embedding）均有真实行。
+验收（2026-10-04 实弹，源主角 3 章探针、已清）：建书即自动入队 → DONE「3 章 / 18 场景」，4 次调用 21,254 tokens；古印度宗教 → 科幻轨道打捞，源主角 → 周衡、源配角甲 → 宋砚、沙门 → 零压行者、吠陀 → 《设定内典籍》，而第 1 章仍是同样 5 拍同序同功能。
+- **验收（2026-10-03 实弹，源主角样本 3 章探针、已清）**：9 张卡（含 4 张人物卡）、3 章章行（卷号/卷名/goal/hook 全来自样本）、18 个场景预物化、activate 放行；跑第 1 章得 `llm_call_log` **无 `outline` 节点**、6 次 scene_draft + 3 次 scene_revise → 成稿 2929 字 DIGESTED，记忆四层（digest/world_state/foreshadow/embedding）均有真实行。
 - **合规口径（不藏）**：本模式产出与样本剧情高度一致，属**实质性相似**范畴；向导文案已明写「请在授权范围内使用」，平台侧不提供自动规避查重的任何能力。
 
 **「时间跨度」契约（2026-10-04 晚增补；书 56 跑满 13 章后暴露，两条都已修）**：
@@ -280,7 +280,7 @@ flowchart LR
 
 **导入书籍（POST /api/novels/import）**：书名 + 文风预设（**可选**：选了就克隆其指纹/门禁/规则；不选则建空风格包、门禁回退代码/tuning 默认值，导入后按本书正文提指纹回填——但**不采纳指纹就生成时门禁跳过指纹类指标**，见 GateService fail-open）+ 正文（粘贴文本优先，否则上传文件 base64，字段 `fileBase64`）。
 
-**风格包取名与删书级联（2026-09-30 增补，修「删书后同名重导必炸」）**：`style_packs.name` 上有活名唯一约束 `uq_style_packs_name_alive ON style_packs(name) WHERE is_deleted=false`，而删书原先只软删 novels 行、把「书名·风格」包留成活着的孤儿——于是**删掉一本书再用同名重导，INSERT 必撞唯一键**，界面横幅里滚出整段 SQL 与 mapper 路径（用户实弹，书 25 黑潮号）。两条修：①**删书级联**（`StylePackMapper.softDeleteOrphanOfNovel`）——本书专属风格包若非预设且已无活书引用则一并软删，共享包（多书引用）与预设永不碰；②**开书/导入统一走 `NovelService.acquireStylePack`**，取名顺序＝同名可复用包（已软删 or 活着但无活书引用的孤儿包）**原地改写复活** → 活名空缺则新建 → 活名被在用的包/预设占着才退让改名为「书名·风格·2」（连续 50 次仍不空则报 A0006 人话），任何一步都不再抛数据库唯一键异常。边界：①`style_packs` 无 `@TableLogic`，故**软删包与恢复后的书之间的引用照旧可读**（`findFingerprintByNovel`/`findGateConfigByNovel`/`findRulesMdByNovel` 都不滤包软删），psql 恢复一本书时**建议连包一起恢复**；②删书**不级联章节**（既有口径，章节行保留以便整本恢复，代价是库里会留下「已删书仍活章」）；③活孤儿包在界面上看不见（指纹页 BOOK 来源遍历活书），只能靠复用回收，不做后台清扫。
+**风格包取名与删书级联（2026-09-30 增补，修「删书后同名重导必炸」）**：`style_packs.name` 上有活名唯一约束 `uq_style_packs_name_alive ON style_packs(name) WHERE is_deleted=false`，而删书原先只软删 novels 行、把「书名·风格」包留成活着的孤儿——于是**删掉一本书再用同名重导，INSERT 必撞唯一键**，界面横幅里滚出整段 SQL 与 mapper 路径（用户实弹，书 25 导入书C）。两条修：①**删书级联**（`StylePackMapper.softDeleteOrphanOfNovel`）——本书专属风格包若非预设且已无活书引用则一并软删，共享包（多书引用）与预设永不碰；②**开书/导入统一走 `NovelService.acquireStylePack`**，取名顺序＝同名可复用包（已软删 or 活着但无活书引用的孤儿包）**原地改写复活** → 活名空缺则新建 → 活名被在用的包/预设占着才退让改名为「书名·风格·2」（连续 50 次仍不空则报 A0006 人话），任何一步都不再抛数据库唯一键异常。边界：①`style_packs` 无 `@TableLogic`，故**软删包与恢复后的书之间的引用照旧可读**（`findFingerprintByNovel`/`findGateConfigByNovel`/`findRulesMdByNovel` 都不滤包软删），psql 恢复一本书时**建议连包一起恢复**；②删书**不级联章节**（既有口径，章节行保留以便整本恢复，代价是库里会留下「已删书仍活章」）；③活孤儿包在界面上看不见（指纹页 BOOK 来源遍历活书），只能靠复用回收，不做后台清扫。
 
 **支持的上传格式（2026-09-30 增补）**：txt/md（前端直读文本）、**docx/docm**（`DocxExtractor`：zip 内 `word/document.xml` 按 w:p/w:t 取字，w:br/w:tab 保留、修订删除与域代码跳过、空段落压缩）、mobi/azw/azw3（`MobiExtractor`，需无 DRM）。**分派按文件头不按扩展名**（拖拽来的扩展名不可信）：PK→docx、D0CF11E0→旧版 .doc（明确拒绝并提示另存为 .docx/.txt）、其余走 MOBI。前端拖拽区也必须自判类型——浏览器只在系统选择框上按 accept 过滤，不判就会把 docx 当文本读成乱码（本批实弹踩到并修）。切章规则：按**行首标题行**切，三种样式——①「第N章」（阿拉伯数字，与 ImportRunner 章文件口径一致）②「第X章」（中文数字：第一章）③「X、标题」（中文数字 + 顿号/点/冒号：一、登船），②③ 带整行 ≤30 字长度闸（防「一、他想起……」这类正文行被误判成标题）；标题行不计入正文，首章前的残余文字并入第 1 章；识别不到标题则整篇作为第 1 章并在响应 notes 里明说。原章号不是 1..N 连续时按出现顺序重排，notes 里报「已重排」。章落库状态 `FINAL`（导入正文终态，不进生成状态机，ChaptersView 显示「导入正文」）；章预算取风格包 gate_config 章长带，无带则 0（前端显示 —）。
 
@@ -288,7 +288,7 @@ flowchart LR
 
 **按本书正文提指纹（2026-09-30 增补，A+B 两条触发时机）**：`POST /api/novels/{id}/style/extract-fingerprint` 出草稿（机械指标、零 LLM、不落库）→ `POST /api/novels/{id}/style/apply-fingerprint`（body 回传草稿的 fingerprintJson + 章长带 + syncBudgetBand）采纳。时机 A＝导入书籍弹窗勾选后自动弹草稿；时机 B＝书籍管理行内「提指纹」按钮。口径与品类语料提取**同一套数学**（同包直取 `GenrePresetService.buildBaseline/budgetBand`，样本单元＝一章），指标中文名走 `GateService.metricLabel` 单源，指标行由 `FingerprintMetricVO.parse` 统一产出（指纹页与草稿弹窗共用，前端不建第二份映射）。三条硬约束：①正文总量 <2000 汉字直接拒绝，章数 <10 记低置信、<3 记「样本过少」强提示；②指纹 JSON 由前端原样回传、后端只校验「含非空 baseline 的 JSON 对象」与章长带数值区间；③**采纳必须经草稿确认**——指纹是门禁阈值来源，覆盖它等于改这本书后续生成的宽严，且勾了同步章长带却不给数值时报错而非静默跳过。副作用：覆盖本书 `style_packs.fingerprint`（可选把章长带合并进本书 `gate_config`，其余键不动）；恢复路径＝素材库「应用到本书」覆盖回预设口径。
 
-**已知交汇（实弹踩到，故意不改门禁）**：`dialogue_end_punct_ratio` 在场景级/章级都有硬下限 0.5（既有反 AI 腔规则，见 GateService）。若本书自身就低于该线（如「夜班守则」风格基线 0.09），或全书对白句末普遍无标点导致该指标被全零剔除，采纳本书自己的指纹后**该指标仍按 0.5 判**——草稿 notes 会在两种情况下都明确告知。
+**已知交汇（实弹踩到，故意不改门禁）**：`dialogue_end_punct_ratio` 在场景级/章级都有硬下限 0.5（既有反 AI 腔规则，见 GateService）。若本书自身就低于该线（如「导入书B」风格基线 0.09），或全书对白句末普遍无标点导致该指标被全零剔除，采纳本书自己的指纹后**该指标仍按 0.5 判**——草稿 notes 会在两种情况下都明确告知。
 
 ## 六、软删 × 唯一键 × 召回：四条口径（2026-09-30 增补，全库排查后固化）
 
