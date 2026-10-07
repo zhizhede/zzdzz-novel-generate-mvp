@@ -62,7 +62,11 @@ class BookFingerprintServiceTest {
 
     @Test
     void draftFromTwoChaptersIsLowConfidence() {
-        when(chapterData.listTextsByNovel(9L)).thenReturn(List.of(row(1, chapter(20)), row(2, chapter(20))));
+        // punct 指标 2026-10-07 改口径：无收引号行尾的文本 = 1.0 跳过（不再全零），触发不了「硬下限提示」——
+        // 要测该笔记得给「行尾收引号但句末无标点」的真实低分区行（ratio 0.0 → 全零剔除 → 笔记提示 0.5 硬下限仍在）
+        String lowPunct = "“扫了十一年”\n“她没接话”\n“雨停了”\n";
+        when(chapterData.listTextsByNovel(9L)).thenReturn(
+                List.of(row(1, chapter(20) + lowPunct), row(2, chapter(20) + lowPunct)));
 
         BookFingerprintDraftVO draft = service.draft(9L);
 

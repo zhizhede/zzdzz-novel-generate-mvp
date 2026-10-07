@@ -217,7 +217,9 @@ public class GateService {
         double endPunct = ((Number) metrics.get("dialogue_end_punct_ratio")).doubleValue();
         double dlg = ((Number) metrics.get("dialogue_density_per1k")).doubleValue();
         // 场景级阈值全部读指纹基线（abs_max 优先，否则 基线*(1+容差)），多风格包可移植
-        double dunhaoMax = upperBound(base, "dunhao_per1k", 1.0);
+        // 顿号上限地板 0.05/千字（2026-10-07）：指纹把原文真实 0.012/千字四舍五入成 0.0 → abs_max 精确 0；
+        // 整数计数下 0.05 仍要求 0 用（行为不变），语义上消除「上限0.0」怪相——真正容 1 个需 2.2/千字级，另行调
+        double dunhaoMax = Math.max(upperBound(base, "dunhao_per1k", 1.0), 0.05);
         double exclamMax = upperBound(base, "exclam_per1k", 2.0);
         double digitMax = upperBound(base, "digit_per1k", 12.0);
         // 对白密度三层回退（gate_config dialogue_density_max → 指纹 → 30.2）。
@@ -331,6 +333,10 @@ public class GateService {
             double tol = ((Number) rule.get("tolerance")).doubleValue();
             double upper = rule.containsKey("abs_max")
                     ? ((Number) rule.get("abs_max")).doubleValue() : v * (1 + tol);
+            // 顿号上限地板 0.05/千字（与场景级同口径，2026-10-07）：原文真实 0.012 被指纹舍入成 0.0 → abs_max=0
+            if ("dunhao_per1k".equals(key)) {
+                upper = Math.max(upper, 0.05);
+            }
             boolean ok;
             if (rule.containsKey("abs_min")) {
                 ok = value >= ((Number) rule.get("abs_min")).doubleValue() && value <= upper;
@@ -699,13 +705,22 @@ public class GateService {
     private static double dialogueEndPunctRatio(List<String> lines) {
         int total = 0, punct = 0;
         for (String s : lines) {
-            if (s.endsWith("」")) {
-                total++;
-                String inner = s.substring(0, s.lastIndexOf("」"));
-                if (!inner.isEmpty() && "。？！…".indexOf(inner.charAt(inner.length() - 1)) >= 0) punct++;
+            // 三类收引号同等识别（2026-10-07 迁移书64实弹）：旧版只认「」，而样本11原文通篇 “”
+            //（43,926 行中 5,770 行以 ” 收尾、0 行以 」 收尾）——原作者自己被算成 0.0 撞 0.5 硬下限
+            String close = s.endsWith("」") ? "」" : s.endsWith("”") ? "”" : s.endsWith("\"") ? "\"" : null;
+            if (close == null) {
+                continue;
             }
+            total++;
+            String inner = s.substring(0, s.lastIndexOf(close));
+            if (!inner.isEmpty() && "。？！…".indexOf(inner.charAt(inner.length() - 1)) >= 0) punct++;
         }
-        return total == 0 ? 0.0 : Math.round(punct * 1000.0 / total) / 1000.0;
+        // 行尾无收引号结构（归属式对白：「……。」他说 这种行尾是叙述）＝本指标不适用，按通过处理——
+        // 旧版返回 0.0 撞硬下限＝结构性必死，修订轮修不动（书64 ch1 三场景两轮耗尽实弹）
+        if (total == 0) {
+            return 1.0;
+        }
+        return Math.round(punct * 1000.0 / total) / 1000.0;
     }
 
     private static long count(String t, String s) {

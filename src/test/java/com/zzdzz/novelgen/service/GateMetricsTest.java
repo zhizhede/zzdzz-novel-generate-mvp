@@ -56,11 +56,23 @@ class GateMetricsTest {
         assertThat(m.get("dialogue_end_punct_ratio")).isEqualTo(1.0);
     }
 
+    /** 弯引号/直引号行尾与「」同等识别——旧版只认「」，样本11原文（通篇“”、0个「」）被算成 0.0。 */
     @Test
-    void dialogueEndPunctRatioZeroWhenNoClosingLine() {
+    void dialogueEndPunctRatioRecognizesCurlyAndAsciiQuotes() {
+        assertThat(GateService.computeMetrics("“签了它。”\n“走吧！”").get("dialogue_end_punct_ratio"))
+                .isEqualTo(1.0);
+        assertThat(GateService.computeMetrics("“签了它”\n“走吧”").get("dialogue_end_punct_ratio"))
+                .isEqualTo(0.0); // 收引号前无句末标点——防污染能力必须保住
+        assertThat(GateService.computeMetrics("\"签了它。\"\n叙述一行").get("dialogue_end_punct_ratio"))
+                .isEqualTo(1.0);
+    }
+
+    /** 行尾无收引号结构（归属式对白）＝不适用按通过——旧版返回 0.0 撞 0.5 硬下限＝结构性必死（书64 ch1 实弹）。 */
+    @Test
+    void dialogueEndPunctRatioSkipsWhenNoClosingLine() {
         String text = "「喵。」咱家说。\n叙述一行";
         Map<String, Object> m = GateService.computeMetrics(text);
-        assertThat(m.get("dialogue_end_punct_ratio")).isEqualTo(0.0);
+        assertThat(m.get("dialogue_end_punct_ratio")).isEqualTo(1.0);
     }
 
     @Test
