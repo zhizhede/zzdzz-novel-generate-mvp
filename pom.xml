@@ -113,6 +113,12 @@
                 <requireMavenVersion>
                   <version>[3.6,)</version>
                 </requireMavenVersion>
+                <requireProperty>
+                  <property>project.build.sourceEncoding</property>
+                  <regex>UTF-8</regex>
+                  <regexMessage>project.build.sourceEncoding 必须是 UTF-8</regexMessage>
+                </requireProperty>
+                <dependencyConvergence/>
               </rules>
             </configuration>
           </execution>
