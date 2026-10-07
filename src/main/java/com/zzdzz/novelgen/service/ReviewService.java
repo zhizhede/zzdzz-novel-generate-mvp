@@ -408,16 +408,46 @@ public class ReviewService {
                 : digests.stream().map(d -> "---\n" + d + "\n").collect(java.util.stream.Collectors.joining());
         // 人称读取链与场景提示词/机械门禁同口径（章级→书级）；未配置传空串=审校跳过第 5 查
         String pov = packer.effectivePov(novelId, ch.getPov());
-        return promptTemplates.getSection(LlmNode.AI_REVIEW, "user",
-                java.util.Map.of("world", java.util.Objects.toString(packer.world(novelId), ""),
-                        "characters", java.util.Objects.toString(packer.characters(novelId), ""),
-                        "world_state", ws == null ? "（无）" : ws,
-                        "digests", digestBlock,
-                        "prev_tail", prevTail == null || prevTail.isBlank() ? "（无）" : prevTail,
-                        "scene_times", sceneTimeLine(ch.getId()),
-                        "pov", java.util.Objects.requireNonNullElse(pov, ""),
-                        "chapter_no", String.valueOf(ch.getChapterNo()),
-                        "full_text", text == null ? "" : text));
+        // Map.of 上限 10 对，这里 11 对必须换 LinkedHashMap（漏一对就是运行期 IllegalArgumentException）
+        Map<String, String> params = new java.util.LinkedHashMap<>();
+        params.put("world", java.util.Objects.toString(packer.world(novelId), ""));
+        params.put("characters", java.util.Objects.toString(packer.characters(novelId), ""));
+        params.put("chapter_goal", chapterGoal(ch));
+        params.put("scene_goals", sceneGoals(ch.getId()));
+        params.put("world_state", ws == null ? "（无）" : ws);
+        params.put("digests", digestBlock);
+        params.put("prev_tail", prevTail == null || prevTail.isBlank() ? "（无）" : prevTail);
+        params.put("scene_times", sceneTimeLine(ch.getId()));
+        params.put("pov", java.util.Objects.requireNonNullElse(pov, ""));
+        params.put("chapter_no", String.valueOf(ch.getChapterNo()));
+        params.put("full_text", text == null ? "" : text);
+        return promptTemplates.getSection(LlmNode.AI_REVIEW, "user", params);
+    }
+
+    /** 章纲目标/钩子（审校「目标核销」与称谓指称的判定依据——2026-10-07 漏判实证：首审拿不到章纲，
+     *  「电话该是苏栖棠打的」这类指称判断无从对照，同一条称呼硬伤下一轮整条漏掉）。 */
+    String chapterGoal(ChapterDO ch) {
+        String goal = ch.getGoal() == null || ch.getGoal().isBlank() ? "（无）" : ch.getGoal().strip();
+        String hook = ch.getHook() == null || ch.getHook().isBlank() ? "（无）" : ch.getHook().strip();
+        return "目标：" + goal + "\n钩子：" + hook;
+    }
+
+    /** 场景任务清单（蓝图字段 goal/mustReveal/mustNot——审校核销「正文应落实目标、不得触犯禁现项」）。 */
+    String sceneGoals(long chapterId) {
+        StringBuilder sb = new StringBuilder();
+        for (com.zzdzz.novelgen.model.entity.SceneDO s : sceneData.findByChapter(chapterId)) {
+            sb.append("场景").append(s.getSceneNo()).append("：")
+                    .append(s.getGoal() == null || s.getGoal().isBlank() ? "（无）" : s.getGoal().strip());
+            if (s.getMustReveal() != null && !s.getMustReveal().isBlank()) {
+                sb.append("；必现：").append(s.getMustReveal().strip());
+            }
+            if (s.getMustNot() != null && !s.getMustNot().isBlank()) {
+                sb.append("；禁现：").append(s.getMustNot().strip());
+            }
+            sb.append('\n');
+        }
+        String out = sb.toString().strip();
+        return out.isEmpty() ? "（本章无场景任务）" : out;
     }
 
     /** 场景时间线（V42 消费侧）：读 chapter_scenes.time_anchor 拼「场景N：锚」清单；全空返回占位（审校按正文自身时序查）。 */
