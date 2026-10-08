@@ -421,9 +421,10 @@ public class VolumePlanService {
         int fromNo = draft.rows().get(0).chapterNo();
         List<String> warnings = new ArrayList<>();
         List<String> adopted = new ArrayList<>();
-        // 剧情迁移书：迁入的章自带章纲（就是迁移来的剧情），即使还没正文也不许被卷规划覆盖——
-        // 覆盖＝把迁移的剧情连同场景一起抹掉换成 AI 新编的卷纲，用户以为在"规划"其实在销毁迁移结果。
-        boolean migrate = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).migrate();
+        // 蓝图保护（FORBID_VOLUME_PLAN 能力）：预置章纲是产线素材，即使还没正文也不许被卷规划覆盖——
+        // 覆盖＝把素材连同场景一起抹掉换成 AI 新编的卷纲，用户以为在"规划"其实在销毁素材。
+        boolean forbid = DeriveProfile.can(Recipe.parse(novelData.findDeriveConfig(novelId)),
+                DeriveProfile.Capability.FORBID_VOLUME_PLAN);
         tx.executeWithoutResult(status -> {
             for (ChapterDO c : chapterData.listSummariesByNovel(novelId)) {
                 if (c.getChapterNo() >= fromNo) {
@@ -431,10 +432,10 @@ public class VolumePlanService {
                         throw new BizException(ErrorCode.PARAM_ERROR,
                                 "第 " + c.getChapterNo() + " 章已有正文，禁止覆盖其规划行");
                     }
-                    if (migrate && c.getOutlineYaml() != null && !c.getOutlineYaml().isBlank()) {
+                    if (forbid && c.getOutlineYaml() != null && !c.getOutlineYaml().isBlank()) {
                         throw new BizException(ErrorCode.STATE_CONFLICT,
-                                "第 " + c.getChapterNo() + " 章是「剧情迁移」迁入的剧情（已带章纲），卷规划会把它整卷抹掉——"
-                                        + "迁移书请直接入队生成；确需重规划请先删除该卷，或改成原创衍生模式");
+                                "第 " + c.getChapterNo() + " 章带产线预置章纲（受保护蓝图），卷规划会把它整卷抹掉——"
+                                        + "本书配方禁止卷规划覆盖；确需重规划请先删除该卷，或改用原创衍生配方");
                     }
                     chapterData.deletePlan(c.getId());
                 }

@@ -64,8 +64,6 @@ public class NovelService {
     private final LlmJson llmJson;
     private final PromptTemplateService promptTemplates;
     private final ObjectMapper mapper;
-    /** 剧情迁移用：把样本章级 beats 预物化成场景（与章纲生成共用同一落库写路径）。 */
-    private final OutlineService outlineService;
 
     public List<NovelVO> list() {
         return list(null);
@@ -182,9 +180,10 @@ public class NovelService {
     public void activate(long novelId) {
         requireNovel(novelId);
         String outline = canonData.findContentByKindName(novelId, "misc", "大纲");
-        // 剧情迁移（MIGRATE）模式下样本骨架就是本书大纲，不做「必须改写」拦截；原创衍生仍拦。
-        boolean migrate = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).migrate();
-        if (!migrate && outline != null && outline.strip().startsWith(SKELETON_OUTLINE_MARKER)) {
+        // 取材产线（RESKIN/SPLICE 预设）下样本骨架就是本书大纲的起点，不做「必须改写」拦截；原创衍生仍拦。
+        Recipe recipe = Recipe.parse(novelData.findDeriveConfig(novelId));
+        if (recipe.preset() == Recipe.Preset.ORIGINAL
+                && outline != null && outline.strip().startsWith(SKELETON_OUTLINE_MARKER)) {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "大纲仍是样本剧情骨架（未改写）——先完成「AI 生成大纲」或在「规划」页改写大纲后再激活");
         }
@@ -224,12 +223,14 @@ public class NovelService {
             throw new BizException(ErrorCode.STATE_CONFLICT,
                     "这本书还有排队/运行中的生成任务——先到工作台停止任务，再删除");
         }
-        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        String oldJson = novelData.findDeriveConfig(novelId);
+        Recipe oldRecipe = Recipe.parse(oldJson);
+        DeriveSupport.Cfg cfg = oldRecipe.params();
         if (cfg.autoContinueOn()) {
             novelData.updateDeriveConfig(novelId, deriveConfigJson(
                     new NovelCreateDTO.DeriveConfigVO(cfg.water(), cfg.pov(), cfg.povCharacter(), cfg.pacingNote(),
                             cfg.chaptersPerVolume(), cfg.targetChapters(), false, cfg.priority(), cfg.tags(),
-                            cfg.mode(), cfg.protagonistFrom()), novelId));
+                            oldRecipe.preset().name(), null, null), novelId));
         }
         novelData.updateAutoState(novelId, "OFF", "书籍已删除，无人续跑已关闭");
         Long packId = novel.getStylePackId();   // 必须在删书前取：删完就查不到这本书的 style_pack_id
@@ -292,16 +293,17 @@ public class NovelService {
         String bookStatus = Boolean.TRUE.equals(vo.draft()) ? "draft" : "active";
         long novelId = novelData.insert(userId, title, vo.description() == null ? "" : vo.description(), packId, "auto",
                 bookStatus, com.zzdzz.novelgen.model.enums.NovelSourceType.ofSample(vo.sampleId()));
-        if (derive != null) {
-            novelData.updateDeriveConfig(novelId, deriveConfigJson(derive, vo.sampleId()));
+        String cfgJson = derive == null ? null : deriveConfigJson(derive, vo.sampleId(), vo.cloneAssets());
+        // 写门口即验配方（SPLICE 选材等不变量在此拒绝，坏配方不落库）；同一配方供克隆分流读取
+        Recipe recipe = Recipe.parse(cfgJson);
+        if (cfgJson != null) {
+            novelData.updateDeriveConfig(novelId, cfgJson);
             if (derive.autoContinue() != null && derive.autoContinue()) {
                 novelData.updatePlanMode(novelId, PlanMode.AUTO.wire());
             }
         }
         if (vo.sampleId() != null) {
-            String mode = derive == null ? DeriveSupport.MODE_ORIGINAL : DeriveSupport.normalizeMode(derive.mode());
-            // MIGRATE=原样迁移（连外衣一起搬）；RESKIN=换皮迁移（只搬剧情结构，外衣由换皮任务重造）
-            cloneSampleAssets(novelId, vo.sampleId(), vo.cloneAssets(), mode, derive);
+            cloneSampleAssets(novelId, vo.sampleId(), recipe, derive);
         }
         NovelDO n = novelData.getById(novelId);
         return new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(), n.getStatus(),
@@ -592,18 +594,8 @@ public class NovelService {
 
     /** 风格包 gate_config 的章长预算带（无配置/坏 JSON 返回 null；导入章的预算与后续生成同一口径）。 */
     private double[] budgetBand(String gateConfigJson) {
-        if (gateConfigJson == null || gateConfigJson.isBlank()) {
-            return null;
-        }
-        try {
-            JsonNode cfg = mapper.readTree(gateConfigJson);
-            return cfg.path("budget_min").isNumber() && cfg.path("budget_max").isNumber()
-                    ? new double[]{cfg.path("budget_min").asDouble(), cfg.path("budget_max").asDouble()}
-                    : null;
-        } catch (Exception e) {
-            log.warn("门禁配置解析失败，导入章预算按 0 落库：{}", e.getMessage());
-            return null;
-        }
+        int[] band = DeriveSupport.readBudgetBand(gateConfigJson);
+        return band == null ? null : new double[]{band[0], band[1]};
     }
 
     /** 品类预设校验（开书与导入共用）：必须存在且 is_preset。 */
@@ -622,71 +614,49 @@ public class NovelService {
     /**
      * 样本资产克隆：素材卡（★2+）/世界观文档/剧情骨架预填大纲（标注待改写）。
      *
-     * <p>migrate=true（剧情迁移模式）时口径反转，用于「批量迁移样本剧情」：
-     * ① 人物卡照常克隆（迁移就是要沿用原书人物，不再拦复述）；
-     * ② 章级剧情节点写成新书的章行（卷纲）+ 预物化场景（章纲），管线据此逐章复现样本剧情；
-     * ③ 骨架大纲不再标注「待改写」——迁移模式下它就是本书大纲（activate 门禁已放行）；
-     * ④ 换主角名（`protagonistFrom` → `povCharacter`）**要覆盖全部克隆产物的文本**：
-     * 大纲、世界观、素材卡、章级剧情。只改章级剧情不够——实跑踩过：大纲里还写着原书主角名，
-     * 而大纲是场景提示词里最显眼的名字来源，模型照抄它，正文照样出现原名。
+     * <p>按能力表分流（推翻重构规划 §2.6/§3.2）：门= {@link DeriveProfile.Capability#CLONE_ASSETS}
+     * （ORIGINAL 有、取材产线无），勾选从配方 {@code clones} 段读（规划 §126：判据与勾选都收在配方上）。
+     * ORIGINAL=按勾选克隆设定卡/世界观/骨架大纲（人物卡一律不克隆，大纲带「待改写」标记）；
+     * RESKIN（含历史 MIGRATE 归档）=只取剧情结构章行，素材卡/世界观/大纲全是旧外衣一概不克隆，
+     * 新外衣由换皮任务重造；SPLICE 取材走四步链，不进本方法。
      */
-    private void cloneSampleAssets(long novelId, long sampleId, NovelCreateDTO.CloneAssetsVO flags,
-                                   String mode, NovelCreateDTO.DeriveConfigVO derive) {
+    private void cloneSampleAssets(long novelId, long sampleId, Recipe recipe, NovelCreateDTO.DeriveConfigVO derive) {
+        if (recipe.preset() == Recipe.Preset.SPLICE) {
+            return; // 拼接配方不走单样本克隆：取材由四步链按 sources.samples 完成
+        }
         ImportedSampleDO sample = sampleData.getById(sampleId);
         if (sample == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "所选导入样本不存在: " + sampleId);
         }
-        boolean migrate = DeriveSupport.MODE_MIGRATE.equals(mode) || DeriveSupport.MODE_RESKIN.equals(mode);
-        boolean reskin = DeriveSupport.MODE_RESKIN.equals(mode);
-        // 换皮模式：样本的素材卡/世界观/大纲**全是旧外衣**，一概不克隆——新外衣由换皮任务重造。
-        boolean cloneCards = !reskin && (flags == null || flags.cards() == null || flags.cards());
-        boolean cloneWorld = !reskin && (flags == null || flags.world() == null || flags.world());
-        boolean cloneOutline = !reskin && (flags == null || flags.plotOutline() == null || flags.plotOutline());
-        // 迁移换主角名：**由用户显式指定**样本里的原书主角名（derive_config.protagonistFrom），
-        // 克隆产物的文本里全部换成本书主视角名。刻意不做自动推断——样本深度解析未必给主角建卡
-        // （源主角样本只有源配角甲/源配角乙等配角卡），按「出现最多」猜会把配角名静默改掉（实跑踩过）。
-        // 换皮模式不需要这个：外衣连同人名全部由换皮任务重造。
-        String lead = !migrate || reskin || derive == null || derive.protagonistFrom() == null
-                ? null : derive.protagonistFrom().strip();
-        String protagonist = derive == null || derive.povCharacter() == null ? null : derive.povCharacter().strip();
-        boolean renaming = lead != null && !lead.isBlank() && protagonist != null && !protagonist.isBlank();
-        if (renaming) {
-            log.info("剧情迁移换主角名：样本主角「{}」→ 本书主视角「{}」（覆盖大纲/世界观/素材卡/章级剧情）",
-                    lead, protagonist);
-        }
+        boolean take = !DeriveProfile.can(recipe, DeriveProfile.Capability.CLONE_ASSETS);
+        Recipe.Clones cl = recipe.clones();
+        boolean cloneCards = !take && cl.cards();
+        boolean cloneWorld = !take && cl.world();
+        boolean cloneOutline = !take && cl.plotOutline();
         if (cloneCards) {
             int count = 0;
-            int characters = 0;
             for (SampleCardDO c : sampleCardData.listBySample(sampleId)) {
                 if (c.getKind().equals("world") || (c.getImportance() == null || c.getImportance() < 2)) {
                     continue;
                 }
-                // 原创衍生口径（书 10 实证教训）：人物卡不克隆——新书主角团必须原创，克隆原书主角团
-                // 会让卷规划顺着原书人生轨迹排章（衍生变复述）；设定类卡（地点/物品/组织/现象等）照常克隆。
-                // 剧情迁移口径：人物卡一并克隆（迁移的定义就是沿用原书人物与轨迹）。
-                // 两模式共同：cloned 卡一律不 pinned（常驻注入会持续把原书设定压进每章上下文）。
+                // 人物卡一律不克隆：原 MIGRATE 专属克隆已随产线下线；ORIGINAL 的防复刻口径不变（书 10 实证——
+                // 克隆原书主角团会让卷规划顺着原书人生轨迹排章）。设定类卡（地点/物品/组织/现象等）照常克隆。
                 if (c.getKind().equals("character")) {
-                    if (!migrate) {
-                        continue;
-                    }
-                    characters++;
+                    continue;
                 }
-                String name = renaming ? renameProtagonist(c.getName(), lead, protagonist) : c.getName();
-                String summary = renaming ? renameProtagonist(c.getSummary(), lead, protagonist) : c.getSummary();
-                String content = renaming ? renameProtagonist(c.getContentMd(), lead, protagonist) : c.getContentMd();
-                cardData.insert(novelId, c.getKind(), name, parseAliases(c.getAliases()),
-                        summary, content, false, "active", c.getFirstSeq());
+                // cloned 卡一律不 pinned（常驻注入会持续把原书设定压进每章上下文）
+                cardData.insert(novelId, c.getKind(), c.getName(), parseAliases(c.getAliases()),
+                        c.getSummary(), c.getContentMd(), false, "active", c.getFirstSeq());
                 count++;
             }
-            log.info("样本资产克隆：sampleId={} → novelId={} 素材卡 {} 张（★2+，其中人物卡 {} 张，模式={}）",
-                    sampleId, novelId, count, characters, migrate ? "MIGRATE" : "ORIGINAL");
+            log.info("样本资产克隆：sampleId={} → novelId={} 素材卡 {} 张（★2+，preset={}）",
+                    sampleId, novelId, count, recipe.preset());
         }
         if (cloneWorld) {
             for (SampleCardDO c : sampleCardData.listBySample(sampleId)) {
                 if (c.getKind().equals("world") && c.getContentMd() != null && !c.getContentMd().isBlank()) {
                     String world = stripFastNote(c.getContentMd());
-                    canonData.insert(novelId, "world", "世界观",
-                            renaming ? renameProtagonist(world, lead, protagonist) : world);
+                    canonData.insert(novelId, "world", "世界观", world);
                     break;
                 }
             }
@@ -694,8 +664,8 @@ public class NovelService {
         if (cloneOutline) {
             for (SamplePlotNodeDO n : plotData.listBySample(sampleId)) {
                 if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
-                    String summary = renaming ? renameProtagonist(n.getSummary(), lead, protagonist) : n.getSummary();
-                    String body = migrate
+                    String summary = n.getSummary();
+                    String body = take
                             ? summary
                             : "> 由样本《" + sample.getTitle() + "》剧情骨架生成，供参考改写——确认人设与主线后再交给卷规划。\n\n"
                                     + summary;
@@ -704,10 +674,11 @@ public class NovelService {
                 }
             }
         }
-        if (migrate) {
-            // 换皮模式下**不预物化场景**：章行先按样本结构建好（含样本摘要作临时目标），
-            // 由 RESKIN 任务逐章换成新外衣并物化场景；管线此时若被启动，会退回 AI 章纲，不会误用旧外衣。
-            clonePlotChapters(novelId, sampleId, derive, sample, lead, protagonist, !reskin);
+        if (take) {
+            // 取材产线（RESKIN/归档 MIGRATE）：章行先按样本结构建好（含样本摘要作临时目标），
+            // 由 RESKIN 任务逐章换成新外衣；不预物化场景（场景由换皮/拼接任务各自物化）。
+            // 管线此时若被启动，会退回 AI 章纲，不会误用旧外衣。
+            clonePlotChapters(novelId, sampleId, derive, sample);
         }
     }
 
@@ -719,7 +690,7 @@ public class NovelService {
      * @return 迁入的章数
      */
     int clonePlotChapters(long novelId, long sampleId, NovelCreateDTO.DeriveConfigVO derive,
-                          ImportedSampleDO sample, String lead, String protagonist, boolean withScenes) {
+                          ImportedSampleDO sample) {
         List<SamplePlotNodeDO> chapters = plotData.listBySample(sampleId).stream()
                 .filter(n -> "chapter".equals(n.getLevel()))
                 .sorted(java.util.Comparator.comparingInt(SamplePlotNodeDO::getSeq))
@@ -742,7 +713,6 @@ public class NovelService {
             budgetMin = (int) band[0];
             budgetMax = (int) band[1];
         }
-        // 换主角名由调用方算好并覆盖全部克隆产物文本；这里只负责章级剧情那部分
         int no = 0;
         for (SamplePlotNodeDO node : chapters) {
             if (no >= cap) {
@@ -751,20 +721,12 @@ public class NovelService {
             no++;
             int volNo = (no - 1) / perVolume + 1;
             String arc = arcBase + "·迁移卷" + volNo;
-            String beats = renameProtagonist(node.getBeats(), lead, protagonist);
+            String beats = node.getBeats();
             List<SceneSpec> specs = beatsToScenes(beats, budgetMin);
             String hook = specs.isEmpty() ? null : lastOutcome(beats);
             chapterData.insertPlan(novelId, no, volNo, arc, cleanNodeTitle(node.getTitle()),
-                    renameProtagonist(node.getSummary(), lead, protagonist),
+                    node.getSummary(),
                     truncate(hook, 250), null, null, null, budgetMin, budgetMax);
-            ChapterDO ch = chapterData.find(novelId, no).orElse(null);
-            if (ch == null) {
-                log.warn("剧情迁移：章行落库后取不到（novelId={} chapterNo={}），跳过场景物化", novelId, no);
-                continue;
-            }
-            if (withScenes && !specs.isEmpty()) {
-                outlineService.materializeScenes(ch.getId(), specs, false);
-            }
         }
         log.info("剧情迁移完成：sampleId={} → novelId={} 迁入 {} 章（每卷 {} 章，场景取自章级 beats）",
                 sampleId, novelId, no, perVolume);
@@ -819,19 +781,6 @@ public class NovelService {
         return specs;
     }
 
-    /** 本书已迁入的章行数（换皮任务要按它定逐章范围）；无章行返回 0。 */
-    public int migratedChapterCount(long novelId) {
-        return chapterData.listSummariesByNovel(novelId).size();
-    }
-
-    /** 迁移换主角名：from/to 任一为空或相同则原样返回（未指定原书主角名＝沿用样本原名，不改）。 */
-    static String renameProtagonist(String text, String from, String to) {
-        if (text == null || from == null || from.isBlank() || to == null || to.isBlank() || from.equals(to)) {
-            return text;
-        }
-        return text.replace(from, to);
-    }
-
     /** beats 末条的 outcome（用作章钩子：这一章留给下一章的悬念）。 */
     private static String lastOutcome(String beatsJson) {
         try {
@@ -859,6 +808,12 @@ public class NovelService {
 
     /** derive_config JSON 组装（空值字段不落，读侧 fail-open 给默认）。 */
     private String deriveConfigJson(NovelCreateDTO.DeriveConfigVO d, Long sampleId) {
+        return deriveConfigJson(d, sampleId, null);
+    }
+
+    /** flags 非空且有样本时把克隆意图显式落 clones 段（配方自描述，M3 起写侧带出；能力门仍由 DeriveProfile 把守）。 */
+    private String deriveConfigJson(NovelCreateDTO.DeriveConfigVO d, Long sampleId,
+                                    NovelCreateDTO.CloneAssetsVO flags) {
         Map<String, Object> m = new LinkedHashMap<>();
         if (d.water() != null) {
             m.put("water", Math.max(0, Math.min(100, d.water())));
@@ -887,11 +842,22 @@ public class NovelService {
         if (sampleId != null) {
             m.put("sourceSampleId", sampleId);
         }
-        if (d.mode() != null && !d.mode().isBlank()) {
-            m.put("mode", DeriveSupport.normalizeMode(d.mode()));
+        if (d.samples() != null && !d.samples().isEmpty()) {
+            // SPLICE 多书取材清单 → sources.samples（Recipe.sourcesOf 据此判 MULTI_SAMPLE 与 N≥2 不变量）
+            m.put("sources", Map.of("samples",
+                    d.samples().stream().filter(java.util.Objects::nonNull).distinct().toList()));
         }
-        if (d.protagonistFrom() != null && !d.protagonistFrom().isBlank()) {
-            m.put("protagonistFrom", d.protagonistFrom().strip());
+        if (d.mode() != null && !d.mode().isBlank()) {
+            // 写侧落 preset 键（mode 键自此只存在于历史行，读侧 Recipe.ofRaw 兼容两者）
+            m.put("preset", Recipe.ofRaw(d.mode()).name());
+        }
+        if (sampleId != null && flags != null) {
+            Map<String, Object> cl = new LinkedHashMap<>();
+            cl.put("characters", false); // 人物卡克隆随 MIGRATE 产线下线，恒 false
+            cl.put("cards", flags.cards() == null || flags.cards());
+            cl.put("world", flags.world() == null || flags.world());
+            cl.put("plotOutline", flags.plotOutline() == null || flags.plotOutline());
+            m.put("clones", cl);
         }
         if (d.tags() != null && !d.tags().isEmpty()) {
             java.util.List<String> tags = d.tags().stream()
@@ -912,13 +878,15 @@ public class NovelService {
         }
     }
 
-    /** 衍生配置全量读（书全生命周期可改参的回显口；无配置返回默认值对象）。 */
+    /** 衍生配置全量读（书全生命周期可改参的回显口；无配置返回默认值对象）。mode 出参＝配方 preset，samples＝取材清单。 */
     public DeriveConfigFullVO deriveConfig(long novelId) {
         requireNovel(novelId);
-        DeriveSupport.Cfg c = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        String json = novelData.findDeriveConfig(novelId);
+        Recipe recipe = Recipe.parse(json);
+        DeriveSupport.Cfg c = recipe.params();
         return new DeriveConfigFullVO(c.water(), c.pov(), c.povCharacter(), c.pacingNote(),
                 c.chaptersPerVolume(), c.targetChapters(), c.autoContinue(), c.priority(),
-                c.sourceSampleId(), c.tags(), c.mode(), c.protagonistFrom());
+                c.sourceSampleId(), c.tags(), recipe.preset().name(), recipe.samples());
     }
 
     /** 衍生配置编辑（开书后改目标章数/掺水量/POV/每卷章数/标签/无人续跑/优先级；老书由此启用无人续跑）。
@@ -927,8 +895,14 @@ public class NovelService {
      * 其余门禁键（恢复线/扩写护栏等）不动。 */
     public DeriveConfigFullVO updateDeriveConfig(long novelId, NovelCreateDTO.DeriveConfigVO d) {
         requireNovel(novelId);
-        DeriveSupport.Cfg old = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
-        novelData.updateDeriveConfig(novelId, deriveConfigJson(d, old.sourceSampleId()));
+        String oldJson = novelData.findDeriveConfig(novelId);
+        DeriveSupport.Cfg old = DeriveSupport.parse(oldJson);
+        String json = deriveConfigJson(d, old.sourceSampleId());
+        // 配方完整性：请求没带 preset → 保留旧预设；没带 sources → 搬旧取材清单（本更新是全量替换，
+        // 不保会把产线/取材洗掉）；写前过配方门（如 SPLICE 缺选材即拒），坏配方不落库（与建书口同口径）。
+        json = mergeRecipeMeta(json, d, oldJson);
+        Recipe.parse(json);
+        novelData.updateDeriveConfig(novelId, json);
         if (d.autoContinue() != null && d.autoContinue()) {
             novelData.updatePlanMode(novelId, PlanMode.AUTO.wire());
         }
@@ -945,6 +919,28 @@ public class NovelService {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelId);
         }
         return novel;
+    }
+
+    /** 配方元数据保全（改参口全量替换用）：请求没带 preset → 补旧预设；没带 sources → 搬旧取材清单。任一步失败原样返回。 */
+    private String mergeRecipeMeta(String json, NovelCreateDTO.DeriveConfigVO d, String oldJson) {
+        try {
+            com.fasterxml.jackson.databind.node.ObjectNode n =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(json);
+            com.fasterxml.jackson.databind.JsonNode old = mapper.readTree(oldJson);
+            if (d.mode() == null || d.mode().isBlank()) {
+                if (old.has("preset")) {
+                    n.set("preset", old.get("preset"));
+                } else if (old.has("mode")) {
+                    n.put("preset", Recipe.ofRaw(old.get("mode").asText()).name());
+                }
+            }
+            if ((d.samples() == null || d.samples().isEmpty()) && old.has("sources")) {
+                n.set("sources", old.get("sources"));
+            }
+            return mapper.writeValueAsString(n);
+        } catch (Exception e) {
+            return json;
+        }
     }
 
     /** 全书导出：书名 + 拼好的正文（有正文的章按章号升序）。 */
@@ -990,11 +986,11 @@ public class NovelService {
         return base + " " + title;
     }
 
-    /** 衍生配置全量（含 sourceSampleId 回显、类型标签、开书模式与迁移换名源）。 */
+    /** 衍生配置全量（含 sourceSampleId 回显、类型标签、开书预设与 SPLICE 取材清单）。 */
     public record DeriveConfigFullVO(Integer water, String pov, String povCharacter, String pacingNote,
                                      Integer chaptersPerVolume, Integer targetChapters, Boolean autoContinue,
                                      Integer priority, Long sourceSampleId, java.util.List<String> tags,
-                                     String mode, String protagonistFrom) {
+                                     String mode, java.util.List<Long> samples) {
     }
 
     /**
@@ -1066,7 +1062,8 @@ public class NovelService {
         if (outline.isEmpty()) {
             throw new BizException(ErrorCode.LLM_OUTPUT_INVALID, "大纲生成为空（llm_call_log node=derive_outline 可回放），请重试");
         }
-        if (vo.sampleId() != null && !isMigrate(vo)) {
+        if (vo.sampleId() != null
+                && DeriveProfile.can(recipeOf(vo), DeriveProfile.Capability.RUN_ORIGINALITY_REVIEW)) {
             outline = ensureOriginality(vo, outline);
         }
         return outline;
@@ -1082,17 +1079,30 @@ public class NovelService {
     record OriginalityVerdict(boolean copy, List<String> reasons) {}
 
     /**
-     * 是否「按样本剧情走」的模式（MIGRATE 原样迁移 / RESKIN 换皮迁移）：这两种模式下都跳过复刻审校。
-     * 先看入参里的 deriveConfig.mode，入参没带（如草稿续跑只传 novelId）时回落读该书已落库的 derive_config。
-     * 读不到一律 false（按原创衍生处理，保持既有防线）。
+     * 配方读口（能力判据唯一入口）：入参带 deriveConfig 用入参（建书/向导草稿），
+     * 否则回落读该书已落库的 derive_config（outline-draft 只传 novelId 的路径）。读不到 fail-open 到 ORIGINAL。
      */
-    private boolean isMigrate(NovelCreateDTO vo) {
-        if (vo.deriveConfig() != null && vo.deriveConfig().mode() != null) {
-            String m = DeriveSupport.normalizeMode(vo.deriveConfig().mode());
-            return DeriveSupport.MODE_MIGRATE.equals(m) || DeriveSupport.MODE_RESKIN.equals(m);
+    private Recipe recipeOf(NovelCreateDTO vo) {
+        if (vo.deriveConfig() != null) {
+            return Recipe.parse(deriveConfigJson(vo.deriveConfig(), vo.sampleId()));
         }
-        return vo.novelId() != null
-                && DeriveSupport.parse(novelData.findDeriveConfig(vo.novelId())).migrate();
+        if (vo.novelId() != null) {
+            return Recipe.parse(novelData.findDeriveConfig(vo.novelId()));
+        }
+        return Recipe.parse(null);
+    }
+
+    /** 建书入队任务键（能力表 QUEUE_BOOK_TASK 分派；无任务返回 null）。Controller 判换皮/拼接入队用。 */
+    public String bookTaskKey(NovelCreateDTO dto) {
+        if (dto == null || dto.deriveConfig() == null) {
+            return null;
+        }
+        boolean hasSource = dto.sampleId() != null
+                || (dto.deriveConfig().samples() != null && !dto.deriveConfig().samples().isEmpty());
+        if (!hasSource) {
+            return null;
+        }
+        return DeriveProfile.queueTaskKey(recipeOf(dto));
     }
 
     /**

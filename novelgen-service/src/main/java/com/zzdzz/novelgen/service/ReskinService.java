@@ -27,7 +27,7 @@ import java.util.List;
 import java.util.function.BiConsumer;
 
 /**
- * 剧情换皮（derive_config.mode=RESKIN）：**保住剧情骨架，把人名/场景/职业/实体/结局执行者全部随机重造**。
+ * 剧情换皮（derive_config.preset=RESKIN）：**保住剧情骨架，把人名/场景/职业/实体/结局执行者全部随机重造**。
  *
  * <p>与 MIGRATE（原样迁移）的区别：MIGRATE 连人名地名一起搬，只做可选的主角改名；RESKIN 连世界观都不沿用，
  * 只按样本的节拍表（谁想做什么/遇到谁/对方提出什么/如何凑人/结果如何）重写一套全新外衣。

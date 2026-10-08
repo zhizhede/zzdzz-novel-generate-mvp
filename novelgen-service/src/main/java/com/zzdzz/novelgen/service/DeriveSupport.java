@@ -3,40 +3,23 @@ package com.zzdzz.novelgen.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 衍生配置（novels.derive_config JSONB）的解析与换算：开书向导落的衍生参数在此统一成类型化读数，
  * 各消费方（场景提示词/卷规划/审批处置/续跑闭环）fail-open——无配置或坏 JSON 一律给默认，绝不拦生成。
+ * 预设（preset）与选材/克隆判据不在这里——一律走 {@code Recipe}/{@code DeriveProfile}。
  */
+@Slf4j
 public final class DeriveSupport {
-
-    /**
-     * 开书模式：ORIGINAL=原创衍生（默认，走防复刻三道闸：人物卡不克隆、激活拦骨架、复刻审校）；
-     * MIGRATE=剧情迁移（沿用样本世界观/人物/逐章剧情，不做原创性审校）；
-     * RESKIN=剧情换皮（保留样本**剧情骨架**，人名/场景/职业/实体/结局执行者全部随机重造）。
-     */
-    public static final String MODE_ORIGINAL = "ORIGINAL";
-    public static final String MODE_MIGRATE = "MIGRATE";
-    public static final String MODE_RESKIN = "RESKIN";
 
     /** 解析后的衍生配置（全部可空=未设置，消费方各自取默认）。 */
     public record Cfg(Integer water, String pov, String povCharacter, String pacingNote,
                       Integer chaptersPerVolume, Integer targetChapters, Boolean autoContinue,
-                      Integer priority, Long sourceSampleId, java.util.List<String> tags, String mode,
-                      String protagonistFrom) {
+                      Integer priority, Long sourceSampleId, java.util.List<String> tags) {
 
         public boolean autoContinueOn() {
             return Boolean.TRUE.equals(autoContinue);
-        }
-
-        /** 是否「按样本剧情走」的模式（原样迁移或换皮迁移）。防复刻三闸与自愈换目标在这些模式下都要退让。 */
-        public boolean migrate() {
-            return MODE_MIGRATE.equals(mode) || MODE_RESKIN.equals(mode);
-        }
-
-        /** 是否剧情换皮模式：结构照搬、外衣全随机，需要跑 derive_reskin 任务。 */
-        public boolean reskin() {
-            return MODE_RESKIN.equals(mode);
         }
     }
 
@@ -48,7 +31,7 @@ public final class DeriveSupport {
     /** 坏 JSON/空值容忍：解析失败返回全空配置。 */
     public static Cfg parse(String json) {
         if (json == null || json.isBlank()) {
-            return new Cfg(null, null, null, null, null, null, null, null, null, null, null, null);
+            return new Cfg(null, null, null, null, null, null, null, null, null, null);
         }
         try {
             JsonNode n = MAPPER.readTree(json);
@@ -67,11 +50,9 @@ public final class DeriveSupport {
                     n.path("autoContinue").isBoolean() ? n.path("autoContinue").asBoolean() : null,
                     intOrNull(n.path("priority")),
                     n.path("sourceSampleId").canConvertToLong() ? n.path("sourceSampleId").asLong() : null,
-                    tags,
-                    normalizeMode(textOrNull(n.path("mode"))),
-                    textOrNull(n.path("protagonistFrom")));
+                    tags);
         } catch (Exception e) {
-            return new Cfg(null, null, null, null, null, null, null, null, null, null, null, null);
+            return new Cfg(null, null, null, null, null, null, null, null, null, null);
         }
     }
 
@@ -88,21 +69,6 @@ public final class DeriveSupport {
             return bookPov.strip();
         }
         return null;
-    }
-
-    /** mode 归一化：认 MIGRATE / RESKIN（大小写/空白宽容），其余（含 null/未知值）一律 ORIGINAL。 */
-    public static String normalizeMode(String mode) {
-        if (mode == null) {
-            return MODE_ORIGINAL;
-        }
-        String m = mode.strip();
-        if (MODE_MIGRATE.equalsIgnoreCase(m)) {
-            return MODE_MIGRATE;
-        }
-        if (MODE_RESKIN.equalsIgnoreCase(m)) {
-            return MODE_RESKIN;
-        }
-        return MODE_ORIGINAL;
     }
 
     /**
@@ -156,6 +122,26 @@ public final class DeriveSupport {
         node.put("budget_max", budgetMax);
         node.put("chapter_length_tolerance", tolerance);
         return node.toString();
+    }
+
+    /**
+     * 读章长带（budget_min/max，与 {@link #applyBudgetBand} 同一解析口径）：两键齐全才返回，
+     * 坏 JSON / 缺键 / 非数值一律 null——**默认值由调用方决定**（拼接用 1500-4500 兜底，导入按 0 落库）。
+     */
+    public static int[] readBudgetBand(String gateJson) {
+        if (gateJson == null || gateJson.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode n = MAPPER.readTree(gateJson);
+            if (n.path("budget_min").canConvertToInt() && n.path("budget_max").canConvertToInt()) {
+                return new int[]{n.path("budget_min").asInt(), n.path("budget_max").asInt()};
+            }
+            return null;
+        } catch (Exception e) {
+            log.warn("门禁配置解析失败，章长带按未配置处理：{}", e.getMessage());
+            return null;
+        }
     }
 
     /** 掺水量的人话提示词口径（场景生成密度段用）；null=未设置不注入。 */

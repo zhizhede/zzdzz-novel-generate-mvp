@@ -7,7 +7,6 @@ import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.ApprovalModeDTO;
 import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.NovelVO;
-import com.zzdzz.novelgen.service.DeriveSupport;
 import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.NovelService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -100,16 +99,8 @@ public class NovelController {
     public Result<NovelVO> create(@RequestBody NovelCreateDTO dto, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
         NovelVO vo = novelService.create(dto, userId);
-        if (dto != null && dto.sampleId() != null && dto.deriveConfig() != null
-                && DeriveSupport.MODE_RESKIN.equals(DeriveSupport.normalizeMode(dto.deriveConfig().mode()))) {
-            int chapters = novelService.migratedChapterCount(vo.id());
-            if (chapters > 0) {
-                long taskId = queueService.submitReskin(vo.id(), vo.title(), 1, chapters, userId);
-                log.info("剧情换皮任务已入队：novelId={} taskId={} 章数={}", vo.id(), taskId, chapters);
-            } else {
-                log.warn("剧情换皮：本书没有迁入章行（样本无章级剧情？），未入队 novelId={}", vo.id());
-            }
-        }
+        // 产线任务入队（RESKIN/SPLICE 分派与守卫）收口在队列服务——事务提交后调用，worker 才读得到章行
+        queueService.submitBookPipeline(vo, dto, novelService.bookTaskKey(dto), userId);
         return Result.success(vo);
     }
 

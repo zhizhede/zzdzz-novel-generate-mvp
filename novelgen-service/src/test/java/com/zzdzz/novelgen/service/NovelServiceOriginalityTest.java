@@ -65,14 +65,13 @@ class NovelServiceOriginalityTest {
                 sampleData, mock(MaterialCardDataService.class), mock(CanonDocDataService.class),
                 mock(GenerationTaskDataService.class), mock(com.zzdzz.novelgen.service.data.EmbeddingDataService.class),
                 llm, llmJson,
-                new PromptTemplateService(promptDao), new ObjectMapper(),
-                mock(OutlineService.class));
+                new PromptTemplateService(promptDao), new ObjectMapper());
     }
 
     private NovelCreateDTO vo(Long sampleId) {
         return new NovelCreateDTO("新书", "简介", 1L, sampleId, null,
                 new NovelCreateDTO.DeriveConfigVO(50, "第三人称限知", null, null, 10, 100, false, 1, List.of(),
-                        DeriveSupport.MODE_ORIGINAL, null),
+                        "ORIGINAL", null, null),
                 null, null);
     }
 

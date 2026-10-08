@@ -55,7 +55,8 @@ public class ContextPackerService {
      * chapterPov＝章级人称（chapters.pov，AI 章纲步所写）；非空时压过书级——多视角轮换书逐章不同，
      * 单视角书二者相同；null（换皮/迁移预物化、旧书）走书级回退，DeriveSupport.effectivePov 统一口径。 */
     private String deriveSection(long novelId, String chapterPov, boolean sceneOnly) {
-        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        Recipe recipe = Recipe.parse(novelData.findDeriveConfig(novelId));
+        DeriveSupport.Cfg cfg = recipe.params();
         StringBuilder sb = new StringBuilder();
         String pov = DeriveSupport.effectivePov(chapterPov, cfg.pov());
         if (pov != null) {
@@ -72,16 +73,17 @@ public class ContextPackerService {
             sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_tags",
                     java.util.Map.of("tags", String.join("、", cfg.tags()))));
         }
-        // 衍生差异红线（书 10 实证：克隆的原书主角卡 pinned 注入后，卷规划复述了原书剧情）。
-        // 剧情迁移模式注入相反口径的「迁移段」：红线命令「禁止复述原书情节、主角必须原创」，
-        // 迁移要的正是照章纲复现——两段同注会让模型无所适从，故二选一。
-        if (!sceneOnly && cfg.sourceSampleId() != null) {
-            if (cfg.migrate()) {
-                sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_migrate",
-                        java.util.Map.of("povCharacter",
-                                java.util.Objects.requireNonNullElse(cfg.povCharacter(), "本书主角"))));
-            } else {
-                sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_redline", java.util.Map.of()));
+        // 衍生口径段（书 10 实证：克隆的原书主角卡 pinned 注入后，卷规划复述了原书剧情）：
+        // ORIGINAL 注入「差异红线」，取材产线（RESKIN/归档 MIGRATE/SPLICE）注入相反口径的「蓝图段」——
+        // 两段同注会让模型无所从，由 DeriveProfile.injectSegment 二选一（与旧 migrate() 口径逐一对齐）。
+        if (!sceneOnly) {
+            String segment = DeriveProfile.injectSegment(recipe);
+            if (segment != null) {
+                sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, segment,
+                        "derive_migrate".equals(segment)
+                                ? java.util.Map.of("povCharacter",
+                                        java.util.Objects.requireNonNullElse(cfg.povCharacter(), "本书主角"))
+                                : java.util.Map.of()));
             }
         }
         return sb.toString();

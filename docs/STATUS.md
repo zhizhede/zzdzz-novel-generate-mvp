@@ -2,6 +2,41 @@
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
 
+## codebase-design 盘点后的外科重构：死键清理 + 接线收口（2026-10-08 晚，未提交，404 测试绿 + 前端 build 过）
+
+**背景**：用户指令「表结构/业务逻辑/依赖关系多了少了复杂了就再重构」，三路并行盘点（表结构与迁移 / 业务逻辑深浅 / 六模块依赖）后按规格（`docs/改造方案-业务侧推翻重构详细规划.md`，下称规划）执行。**先核规格再动手**：`gates`/`clones`/`SEED_PRELUDE` 是规划 D3/§3.2 明定的预留位（词条段、能力表目标态），**保留不删**；真正动的是规格要接没接、或已成死肉的部分。
+
+**已落（本批）**：
+- **死键清理**：`Cfg` 删 `mode`/`protagonistFrom` 两组件（前者只读已被 V43 清零的 `mode` 键且全库零消费者，后者 DTO 已注明「仅存兼容不再消费」但写侧还在落库——现在写侧也停了，DTO 字段保留兼容）；删 `normalizeMode`+`MODE_ORIGINAL/RESKIN` 常量（`Recipe.ofRaw` 单点，附带**消掉 Recipe↔DeriveSupport 双向环**）；`DeriveConfigFullVO` 删 `protagonistFrom` 出参、删 `readSamples`（改用 `Recipe.samples()`）；`Recipe.sourcesOf` 删从未有写点的 `sources.type` 分支。
+- **规划 §126 接线兑现**：`cloneSampleAssets` 判据改 `!DeriveProfile.can(recipe, CLONE_ASSETS)`、勾选改读配方 `clones` 段（与写侧同源，行为等价），删 `CloneAssetsVO flags` 形参——能力表从「声明」变「真读口」。
+- **死分支删除**：`clonePlotChapters` 删 `withScenes` 形参与恒假分支（SPLICE 早退后调用点恒 false，场景物化早已由换皮/拼接任务各自负责），连带删只为它服务的 `ChapterDO` 回查；随之 `NovelService.outlineService` 字段零引用，删除（3 个测试构造器同步收参）。
+- **编排下沉**：controller 里 RESKIN/SPLICE 入队分支（章数守卫/目标缺省/日志）整体收进 `GenerationQueueService.submitBookPipeline(vo, dto, taskKey, userId)`，`submitReskin/submitSplice` 收为 private，`NovelService.migratedChapterCount` 删除（队列服务直接读 `chapterData`）——controller 回到两行胶水。
+- **平行实现收口**：章长带读口统一为 `DeriveSupport.readBudgetBand`（两键齐全才返回，坏 JSON warn；默认值归调用方），`NovelService.budgetBand` 与 `SpliceService.budgetBand` 都改委托（语义各自保留：导入 null→0、拼接 null→1500-4500）。
+- **读点补齐**：向导草稿恢复 `resumeDraft` 补回 `d.mode` 与 `spliceSamples`（此前 RESKIN/SPLICE 草稿恢复后 UI 误显 ORIGINAL、取材清单丢失）。
+- **口径与死物清理**：`NovelController` 死 import（DeriveSupport）删除；`ReskinService` javadoc `mode`→`preset`；`PromptCatalog` derive_migrate 段标题改「取材蓝图口径（RESKIN/SPLICE 注入）」（**段键不动**——改键要配数据迁移）；`SpliceService`/`NovelService` 注释里的 M4 过期口径修正。
+
+**验证**：根目录 `mvn test` **404 全绿**（EXIT=0）；`web npm run build` 过（1650 modules）。
+
+**盘点判定为「正常/保留」的**：`gates`（规划 D3 词条占位）、`clones`（本批起真消费）、`SEED_PRELUDE`（能力表目标态，消费点随校验层落地）；V1–V43 无重复迁移、无表增删、mode→preset 主链对齐；六模块 pom 方向零改动、无越界、无循环依赖。
+
+**留待下一批（本轮刻意不动）**：①`NovelService`（1245 行）/`GenerationQueueService`（~830 行）的职责拆分——工作区还有 SPLICE 大批未提交改动，大拆类风险叠加，单独一批做；②「挖空模板」资产层缺失——用户聊天记录（`docs/docs/提取黑潮号小说大纲并按占位符格式改写.md`）实证的工作流是 原文→大纲→抽象→**挖空模板**→融合生成，库里 `sample_plot_nodes` 只有原始层，挖空/抽象这层组合单元无表承载，属产品决策后再动；③`derive_migrate` 段键改名（需配数据迁移）；④V43 文件名/注释名实不符（改历史迁移碰 checksum，不值得）。
+
+## 业务侧推翻重构 M0-M4：配方/能力表、守卫分流、写侧向导、SPLICE 四步链全落（2026-10-08，未提交，后端 379 测试绿 + 前端 build 过）
+
+**背景**：阶段二放行——用户拍板 D1-D4 全按推荐、姿态=推翻重构（`docs/adr/0001-rebuild-over-compat.md`，规划= `docs/改造方案-业务侧推翻重构详细规划.md`）。开工前摸底实锤：同一谓词 7 处重复实现、3 处语义漂移（注释/日志/文案把 RESKIN 说成 MIGRATE）。**实施前修正两处设计错误**：①「守卫纯结构化」被代码推翻（ORIGINAL 书 replan 自愈与 adopt 是正常功能，按「场景存在」判会误杀，「章纲是外部素材」无结构事实可依）→ 守卫改走能力表；② D1「删 mode 键→ORIGINAL」有漏洞（提示词注入仍读 `migrate()`，两本存量迁移书会被差异红线压制）→ 归档 `preset=RESKIN`。
+
+**已落（M0+M1+M2 全部完成）**：`GLOSSARY.md`（14 业务术语）+ 规划 §3.1/§9 修正与拍板记录 + ADR-0001；**M0** `Recipe`（六段解析，fail-open + SPLICE N≥2 不变量，`Recipe.ofRaw`＝读写两侧唯一旧值映射点）、`DeriveProfile`（7 能力×3 预设表、injectSegment/queueTaskKey 分派）；**M1** 守卫五处切读口（`blueprintProtected`、`assertBlueprintNotOverwritten`、adopt 兜底、activate「结构×预设」）+ `BlueprintGuardTest` 6 条（入队口拒/双向不误杀、adopt 兜底、activate 双向）；**M2** 四类分流切换——提示词注入（`ContextPackerDeriveSegmentTest` 4 条三态+D1 回归）、入队 `bookTaskKey`、复刻审校 `recipeOf`、克隆 preset 分流；**MIGRATE 专属行为随产线删除**（人物卡克隆、protagonistFrom 换主角名、`renameProtagonist`、克隆期场景预物化；历史 POST mode=MIGRATE 现归档为 RESKIN 产线行为，写侧 `normalizeMode` 与读侧同源）；`Cfg.migrate()/reskin()`、`MODE_MIGRATE`、`isMigrate()` 全删，**生产代码旧判据 grep 0 残留**（仅剩 `Recipe.ofRaw` 能力表内 `"MIGRATE"` 字面量）。测试：`DeriveProfileTest` 9 + `BlueprintGuardTest` 6 + `ContextPackerDeriveSegmentTest` 4 + `DeriveSupportTest` 重写，**全量 373 绿**。
+
+**M3 已落（2026-10-08 同日）**：①写侧——`deriveConfigJson` 落 `preset` 键（`mode` 键自此只存在于历史）+ 有样本时显式写 `clones` 段（characters 恒 false）；建书口与改参口都过配方门（`Recipe.parse` 校验 SPLICE 不变量，坏配方不落库）；`updateDeriveConfig` 全量替换时**保留旧预设**（不带 mode 不洗产线）；GET `derive-config` 的 `mode` 出参＝`preset`（字段名兼容前端）。②Flyway **V43**：8 行显式 mode → `preset`（MIGRATE/RESKIN→RESKIN，psql 实 applied，`mode` 键清零、54/64 归档 RESKIN）。③前端向导——mode 三 radio 重写为**配方卡**（原创衍生 / 剧情换皮 / 多书拼接·待上线禁用），`isMigrate` 全删改 `isTake`，**protagonistFrom 输入与提交字段移除**，成功页迁移分支删除，`npm run build` 过，web/src 旧词（剧情迁移/`"MIGRATE"`/`isMigrate`）**0 残留**。④契约——`pipeline-contracts.md` 迁移契约段落加 2026-10-08 改口标注转历史记录；交接文档 §1 MIGRATE 处置改「已下线」。
+
+**M4 已落（2026-10-08 同日，SPLICE 四步链零到一）**：①`sources.samples` 贯通——DTO 加 `samples` 组件、写侧落 `sources` 段、改参口保全 preset+sources、GET 回显；②`SamplePlotNodeDataService.listChapterNodesBySamples` 跨书聚合（素材池①摘取，取样地址=(sampleId,seq)）；③`TaskKind.SPLICE` + `submitSplice`/派发/`runSpliceTask` + Controller 建书入队（`bookTaskKey` 放行多书 sources）；④**`SpliceService` 四步链**：聚合→`derive_splice` 两层取样（新提示词，两层/指定逻辑/来源合法性写进契约）→确定性结构校验（章号连续/来源在池/跨源≥2/beats 非空/不超目标/种子必填，`LlmJson.Bad` 喂回重试≤2）→统一设定+大纲落 canon →逐章 `insertPlan`+beats 物化（章纲步见场景即跳过）→**前情种子落 `world_states` chapter_no=0**（首章读取链 `<1` 命中）；⑤向导拼接卡解锁：多选样本、≥2 前置校验、payload 带 `samples`、完成页单独指引。测试 `SpliceServiceTest` 6 条（校验5+全链 mock1），**全量 379 绿 + `npm run build` 过**。
+
+**M4 与方案的已知偏差（诚实记录）**：拼接审校的**独立 LLM 节点未建**——结构/来源/跨源校验已确定性内置（ask 重试≤2），语义级审校随探针验收补；前情种子只落 world_state（digest 因 `chapter_no<1` 语义种不进首章，事实账自然从 ch1 digest 滚动）；拼接完成**不自动入队生成**（任务行无 userId，与换皮同口径手启）；素材特征标签/层标记显式化（B 包素材形态）与长篇中间层仍为后续扩展。
+
+**探针实弹进行中（2026-10-08 17:53 起，已获端到端证据）**：V43 随重启记账成功 → 探针书 66《拼接探针·10章》（样本 3 克苏鲁怪谈 + 7 悉达多 + 11 离婚后，目标 10 章）→ 拼接任务 #121 **DONE**（flash 模型 derive_splice 29.9k tokens/692s，RST 重试 1 次成功）→ 落库核验全过：10 章行、53 场景（每章 4-6）、`world_states` ch0 前情种子、canon 拼接设定/大纲、**四卷起承转合**；provenance 回填 `拼接表`——**三源轮转 3→7→11 循环、相邻章不同源**（跨源取样达标）→ 代码补 provenance 自动落库（SpliceService + 测试绿，已重启生效）→ 生成任务 #122 入队 **RUNNING**：章纲步已跳过（预物化生效）、第 1 章场景 1 **PENDED→PASSED**（448 字过门禁）、场景 2 生成中。**余下**：#122 跑完 10 章（约 1.5-2.5h）后做四档统计 + 缝合处（跨源边界章 3/7/10）人工通读（方案 §2.5 验收收口）。
+
+**待办**：AGENTS.md 迁移条目改口（L2，等确认）；replan 流程级测试挂尾。**未 commit（无授权）**。
+
 ## 门禁卡边三因修复：反馈打全区间 + 修订给方向 + 密度上限可覆盖（2026-10-07，分支 `10/1007-门禁卡边反馈修复`，已 push `caba482`）
 
 **背景**：书 60 ch3/ch4、书 61 ch2 反复被机械门禁卡边（章长差 2 字、行均两头翻、密度差 0.24），每次白烧 2 轮章级修订 + 1 次断点重跑，本轮咬人 3 次。诊断出三个叠加根因：

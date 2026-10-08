@@ -23,6 +23,18 @@ public class SamplePlotNodeDataServiceImpl extends ServiceImpl<SamplePlotNodeMap
     }
 
     @Override
+    public List<SamplePlotNodeDO> listChapterNodesBySamples(List<Long> sampleIds) {
+        if (sampleIds == null || sampleIds.isEmpty()) {
+            return List.of();
+        }
+        return list(new QueryWrapper<SamplePlotNodeDO>()
+                .in("sample_id", sampleIds)
+                .eq("level", "chapter")
+                .orderByAsc("sample_id")
+                .orderByAsc("seq"));
+    }
+
+    @Override
     public SamplePlotNodeDO findBySeq(long sampleId, String level, int seq) {
         return getOne(new QueryWrapper<SamplePlotNodeDO>()
                 .eq("sample_id", sampleId)

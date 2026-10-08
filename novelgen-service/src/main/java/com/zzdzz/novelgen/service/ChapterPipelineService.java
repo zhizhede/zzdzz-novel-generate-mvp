@@ -154,12 +154,12 @@ public class ChapterPipelineService {
             }
         }
         if (outcome != ChapterOutcome.FAILED) return outcome;
-        // 剧情迁移书：不换目标。replanChapter 会 resetForReoutline（删掉迁入的场景与章纲）让 AI 重编，
-        // 等于把这一章的迁移剧情换成 AI 现编——「换一条写法」正是迁移要避免的事。失败就交人工。
-        if (isMigrate(novelId)) {
+        // 受保护蓝图（PROTECT_BLUEPRINT 能力）：replanChapter 会 resetForReoutline（删掉预物化的场景与章纲）
+        // 让 AI 重编——等于把产线素材换成 AI 现编，「换一条写法」正是取材产线要避免的事。失败就交人工。
+        if (blueprintProtected(novelId)) {
             stageLog.emit(novelId, chapterNo, HEAL, REPLAN,
-                    Map.of("message", "剧情迁移章：不换目标（迁入剧情固定），保留原章纲转人工"));
-            log.warn("第 {} 章重试仍败；本书为剧情迁移模式，跳过 replan（迁入剧情不换），转人工", chapterNo);
+                    Map.of("message", "受保护蓝图章：不换目标（产线素材固定），保留原章纲转人工"));
+            log.warn("第 {} 章重试仍败；本书配方为受保护蓝图（PROTECT_BLUEPRINT），跳过 replan，转人工", chapterNo);
             return outcome;
         }
         String reason = failureReason(novelId, chapterNo);
@@ -1046,7 +1046,7 @@ public class ChapterPipelineService {
         }
         ChapterDO ch = chapterData.find(novelId, chapterNo)
                 .orElseThrow(() -> new BizException(ErrorCode.NOT_FOUND, "章不存在: " + chapterNo));
-        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        Recipe recipe = Recipe.parse(novelData.findDeriveConfig(novelId));
 
         // ── 档1：保剧情重写（auto 全模式第一档，含迁移/换皮——只清草稿正文，蓝图不动） ──
         if (remedySwitch(novelId, "review_rewrite", TuningDefaults.REVIEW_REWRITE) > 0) {
@@ -1063,9 +1063,9 @@ public class ChapterPipelineService {
             }
         }
 
-        // ── 档2：换目标重写（原 review_blocker_replan 机制；迁移换皮依旧禁用） ──
-        boolean replanAllowed = !cfg.migrate()
-                && (cfg.autoContinueOn() || remedySwitch(novelId, "review_blocker_replan",
+        // ── 档2：换目标重写（原 review_blocker_replan 机制；受保护蓝图配方依旧禁用） ──
+        boolean replanAllowed = !DeriveProfile.can(recipe, DeriveProfile.Capability.PROTECT_BLUEPRINT)
+                && (recipe.params().autoContinueOn() || remedySwitch(novelId, "review_blocker_replan",
                         TuningDefaults.REVIEW_BLOCKER_REPLAN) > 0);
         if (replanAllowed) {
             log.warn("第 {} 章审校硬伤自愈档2：换目标重写一轮（review_blocker_replan）", chapterNo);
@@ -1127,9 +1127,10 @@ public class ChapterPipelineService {
         return ChapterOutcome.PENDING;
     }
 
-    /** 本书是否剧情迁移模式（derive_config.mode=MIGRATE）：迁移书的章纲是迁入的剧情，一律不换目标。 */
-    private boolean isMigrate(long novelId) {
-        return DeriveSupport.parse(novelData.findDeriveConfig(novelId)).migrate();
+    /** 受保护蓝图：配方授予的 PROTECT_BLUEPRINT 能力（replan 禁令的唯一读口，替换散落 mode 判据）。 */
+    private boolean blueprintProtected(long novelId) {
+        return DeriveProfile.can(Recipe.parse(novelData.findDeriveConfig(novelId)),
+                DeriveProfile.Capability.PROTECT_BLUEPRINT);
     }
 
     /** replan 前清正文：replanChapter 守卫拒绝带正文的章（既有梯子在拼章后失败走 replan 会撞守卫的潜伏坑）。 */

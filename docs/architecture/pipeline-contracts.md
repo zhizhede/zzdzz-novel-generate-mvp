@@ -208,6 +208,8 @@ flowchart LR
 - **骨架大纲激活门禁**：canon 大纲仍是样本剧情骨架原文（"> 由样本《" 开头）时 `POST /{id}/activate` 拒绝——防"骨架直通下游"（大纲=原书时章纲/正文全链复刻）。
 - **卷规划审校复刻判据**：sourceSampleId 存在时审校 user 注入 derive_no_copy 段（含样本骨架），复刻样本剧情=BLOCKER，与既有"贴合克隆世界"口径并行。
 
+> **【2026-10-08 改口·业务侧推翻重构（ADR-0001，M0-M3 已落地）】** 下面「剧情迁移模式契约」与「剧情换皮模式」段中的 `mode` 三值/`migrate()` 口径整段转为**历史记录**：**MIGRATE 产线已下线**——读判据全部收敛到 `Recipe`/`DeriveProfile` 能力表（`PROTECT_BLUEPRINT`/`FORBID_VOLUME_PLAN`/`CLONE_ASSETS`/`RUN_ORIGINALITY_REVIEW`/`INJECT_DERIVE_PROMPT`/`QUEUE_BOOK_TASK`/`SEED_PRELUDE`）；写侧键 `mode`→`preset`（V43 已迁 8 行，历史 MIGRATE 归档 RESKIN，读侧 `Recipe.ofRaw` 兼容旧键）；人物卡克隆、`protagonistFrom` 换名（`renameProtagonist`）、克隆期场景预物化、向导迁移入口均已删除；`assertMigratedNotOverwritten` 更名 `assertBlueprintNotOverwritten`；提示词二选一走 `DeriveProfile.injectSegment`（接线测试 `ContextPackerDeriveSegmentTest` 锁三态）。下表与后文仍有效的只剩 RESKIN 存续行为（建章行、蓝图保护、换皮任务），设计见 `docs/改造方案-业务侧推翻重构详细规划.md`。
+
 **剧情迁移模式契约（2026-10-03 增补，`derive_config.mode`＝MIGRATE；用户定调「最重要的就是剧情批量迁移」）**：
 
 两套口径由 `DeriveSupport.MODE_ORIGINAL`（默认）与 `MODE_MIGRATE` 分流，**缺省/未知/坏 JSON 一律按 ORIGINAL**（防复刻防线不因坏配置被静默关掉）。

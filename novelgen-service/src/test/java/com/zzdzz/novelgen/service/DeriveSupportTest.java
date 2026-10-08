@@ -70,32 +70,23 @@ class DeriveSupportTest {
     }
 
     @Test
-    void modeDefaultsToOriginalAndOnlyMigrateIsOptIn() {
-        // 缺省/未知/坏 JSON 一律按原创衍生（防复刻防线不因坏配置被静默关掉）
-        assertThat(DeriveSupport.parse(null).migrate()).isFalse();
-        assertThat(DeriveSupport.parse("{bad json").migrate()).isFalse();
-        assertThat(DeriveSupport.parse("{\"mode\":\"WHATEVER\"}").migrate()).isFalse();
-        assertThat(DeriveSupport.parse("{\"mode\":\"\"}").migrate()).isFalse();
-        assertThat(DeriveSupport.parse("{\"mode\":\"ORIGINAL\"}").migrate()).isFalse();
-        // MIGRATE 大小写与空白宽容
-        assertThat(DeriveSupport.parse("{\"mode\":\"MIGRATE\"}").migrate()).isTrue();
-        assertThat(DeriveSupport.parse("{\"mode\":\" migrate \"}").migrate()).isTrue();
-        assertThat(DeriveSupport.normalizeMode(null)).isEqualTo(DeriveSupport.MODE_ORIGINAL);
-        assertThat(DeriveSupport.normalizeMode("Migrate")).isEqualTo(DeriveSupport.MODE_MIGRATE);
-    }
-
-    @Test
-    void reskinIsMigrateLikeButFlaggedSeparately() {
-        DeriveSupport.Cfg r = DeriveSupport.parse("{\"mode\":\"RESKIN\"}");
-        // 换皮同样是「按样本剧情走」：防复刻三闸与自愈换目标都要退让（migrate() 为真）
-        assertThat(r.migrate()).isTrue();
-        assertThat(r.reskin()).isTrue();
-        DeriveSupport.Cfg m = DeriveSupport.parse("{\"mode\":\"MIGRATE\"}");
-        assertThat(m.migrate()).isTrue();
-        assertThat(m.reskin()).isFalse();
-        assertThat(DeriveSupport.parse("{\"mode\":\"ORIGINAL\"}").reskin()).isFalse();
-        assertThat(DeriveSupport.parse(null).reskin()).isFalse();
-        assertThat(DeriveSupport.normalizeMode(" reskin ")).isEqualTo(DeriveSupport.MODE_RESKIN);
+    void parseFailsOpenAndLegacyMigrateArchivesToReskin() {
+        // 读侧 fail-open：空/坏 JSON/未知 mode 一律 ORIGINAL 默认配方（防复刻防线不因坏配置被静默关掉）
+        assertThat(Recipe.parse(null).preset()).isEqualTo(Recipe.Preset.ORIGINAL);
+        assertThat(Recipe.parse("{bad json").preset()).isEqualTo(Recipe.Preset.ORIGINAL);
+        assertThat(Recipe.parse("{\"mode\":\"WHATEVER\"}").preset()).isEqualTo(Recipe.Preset.ORIGINAL);
+        assertThat(Recipe.parse("{\"mode\":\"ORIGINAL\"}").preset()).isEqualTo(Recipe.Preset.ORIGINAL);
+        // D1 拍板：历史 MIGRATE 归档 RESKIN 能力集（产线下线，两者能力表一致，蓝图口径提示词段不丢）
+        assertThat(Recipe.parse("{\"mode\":\"MIGRATE\"}").preset()).isEqualTo(Recipe.Preset.RESKIN);
+        assertThat(Recipe.parse("{\"mode\":\" migrate \"}").preset()).isEqualTo(Recipe.Preset.RESKIN);
+        // 写侧归一与读侧同源（Recipe.ofRaw 单点）
+        assertThat(Recipe.ofRaw(null)).isEqualTo(Recipe.Preset.ORIGINAL);
+        assertThat(Recipe.ofRaw("WHATEVER")).isEqualTo(Recipe.Preset.ORIGINAL);
+        assertThat(Recipe.ofRaw("Migrate")).isEqualTo(Recipe.Preset.RESKIN);
+        assertThat(Recipe.ofRaw(" reskin ")).isEqualTo(Recipe.Preset.RESKIN);
+        // 取材产线能力集：RESKIN 与归档 MIGRATE 完全一致（旧 migrate() 双值语义由能力表承接）
+        assertThat(DeriveProfile.of(Recipe.parse("{\"mode\":\"RESKIN\",\"sourceSampleId\":1}")))
+                .isEqualTo(DeriveProfile.of(Recipe.parse("{\"mode\":\"MIGRATE\",\"sourceSampleId\":1}")));
     }
 
     @Test
