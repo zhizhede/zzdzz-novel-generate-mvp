@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.NovelMapper">
+
+    <!-- jsonb 三列显式 ::jsonb（MP save 绑 varchar 会被 PG 拒——AGENTS 坑 #13）；created_* 走库默认 -->
+    <select id="insertFull" resultType="long">
+        INSERT INTO novels (title, source_type, category_tags, char_count, form, chapter_count,
+                            author, platform, summary, run_id, story_settings, story_assets)
+        VALUES (#{p.title}, #{p.sourceType}, #{p.categoryTags}::jsonb, #{p.charCount}, #{p.form}, #{p.chapterCount},
+                #{p.author}, #{p.platform}, #{p.summary}, #{p.runId},
+                #{p.storySettings}::jsonb, #{p.storyAssets}::jsonb)
+        RETURNING id
+    </select>
+
+</mapper>
