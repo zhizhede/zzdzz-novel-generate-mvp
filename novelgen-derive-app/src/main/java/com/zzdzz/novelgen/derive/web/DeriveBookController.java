@@ -2,11 +2,16 @@ package com.zzdzz.novelgen.derive.web;
 
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.derive.service.DeriveBookService;
+import com.zzdzz.novelgen.derive.service.DeriveDeindexService;
 import com.zzdzz.novelgen.derive.service.DeriveExtractService;
+import com.zzdzz.novelgen.derive.service.DeriveLabelingService;
 import com.zzdzz.novelgen.model.dto.derive.BookIngestDTO;
 import com.zzdzz.novelgen.model.vo.derive.BookIngestVO;
 import com.zzdzz.novelgen.model.vo.derive.BookVO;
+import com.zzdzz.novelgen.model.vo.derive.DeindexVO;
 import com.zzdzz.novelgen.model.vo.derive.ExtractVO;
+import com.zzdzz.novelgen.model.vo.derive.GrepVO;
+import com.zzdzz.novelgen.model.vo.derive.LabelVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,7 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-/** ①取样入库 + ②结构抽取 REST（均需登录，/api/** 拦截）。 */
+/** ①取样入库 + ②结构抽取 + ③无指向化 REST（均需登录，/api/** 拦截）。 */
 @RestController
 @RequestMapping("/api/derive/books")
 @RequiredArgsConstructor
@@ -25,6 +30,8 @@ public class DeriveBookController {
 
     private final DeriveBookService bookService;
     private final DeriveExtractService extractService;
+    private final DeriveDeindexService deindexService;
+    private final DeriveLabelingService labelingService;
 
     @PostMapping
     public Result<BookIngestVO> ingest(@RequestBody BookIngestDTO dto) {
@@ -40,5 +47,23 @@ public class DeriveBookController {
     @PostMapping("/{id}/extract")
     public Result<ExtractVO> extract(@PathVariable long id) {
         return Result.success(extractService.extract(id));
+    }
+
+    /** ③无指向化（2 次 LLM 调用：批量清洗 + 源词表）。 */
+    @PostMapping("/{id}/deindex")
+    public Result<DeindexVO> deindex(@PathVariable long id) {
+        return Result.success(deindexService.deindex(id));
+    }
+
+    /** ④a 黑名单/领域词 grep（脚本侧，命中→打回③；id=-1 = 全池）。 */
+    @PostMapping("/{id}/grep")
+    public Result<GrepVO> grep(@PathVariable long id) {
+        return Result.success(labelingService.grep(id));
+    }
+
+    /** ④b 批量打标（LLM，标签只进 label_index）。 */
+    @PostMapping("/{id}/label")
+    public Result<LabelVO> label(@PathVariable long id) {
+        return Result.success(labelingService.label(id));
     }
 }
