@@ -25,6 +25,7 @@
     <module>novelgen-llm</module>
     <module>novelgen-service</module>
     <module>novelgen-app</module>
+    <module>novelgen-derive-app</module>
   </modules>
 
   <properties>
