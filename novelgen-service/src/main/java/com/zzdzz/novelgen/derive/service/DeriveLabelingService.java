@@ -55,7 +55,9 @@ public class DeriveLabelingService {
             对下列素材逐条打标，输出一个 JSON 对象（无其他文字）：
             {"labels":[{"code":"S-P44","cat":{"言情":0.0,"悬疑":0.0,"校园":0.0},"beat_type":"铺垫","pacing":0.75,"arc":["开头","中段"],"standalone":false}]}
             规则：
-            - cat：关系母题亲和 0~1，域中性不影响打标。
+            - cat：关系母题亲和 0~1，域中性不影响打标。键用通用类别词（从素材真实气质选，
+              如 言情/悬疑/校园/冒险/科幻/奇幻/甜宠/历史/现实…），只列相关的 1~4 个键；
+              **每条至少一个键 >0（全 0 不合规会被打回）**；参考源书类别优先，气质相近可另选。
             - beat_type：单选，只打该拍的主导功能（铺垫|情绪|事件|反转|抉择|收束）；世界观条目不打本项（给 null）。
             - pacing：只许五锚点 0.00/0.25/0.50/0.75/1.00（0 慢 1 快）；事件/反转取
               0.75~1.00，铺垫/情绪取 0.00~0.25，两可取 0.50；禁止锚点以外的取值
@@ -71,7 +73,14 @@ public class DeriveLabelingService {
     private final AssetWorldMapper worldMapper;
     private final LabelIndexMapper labelIndexMapper;
     private final WordlistMapper wordlistMapper;
+    private final com.zzdzz.novelgen.derive.mapper.NovelMapper novelMapper;
     private final LlmJson llmJson;
+
+    /** 源书类别 jsonb（打标参考词表）；查无此书返回 {}。 */
+    String loadCategoryTags(long novelId) {
+        com.zzdzz.novelgen.model.entity.derive.NovelDO n = novelMapper.selectById(novelId);
+        return n == null || n.getCategoryTags() == null ? "{}" : n.getCategoryTags();
+    }
 
     // ================= 4a · 黑名单/领域词全量 grep =================
 
@@ -170,10 +179,14 @@ public class DeriveLabelingService {
             throw new BizException(ErrorCode.PARAM_ERROR, "本书还没有标签层文案，先走③无指向化");
         }
 
+        // 源书类别参考（cat 键优先贴源书类别，避免 LLM 照抄示例词表打全 0）
+        String catRef = loadCategoryTags(novelId);
+
         List<LabelDraft> drafts = llmJson.ask(
                 new LlmPort.ChatRequest(NODE_LABEL, novelId, null,
                         List.of(LlmPort.Message.system(LABEL_PROMPT),
-                                LlmPort.Message.user(DeriveDeindexService.toInputJson(toServiceItems(items)))),
+                                LlmPort.Message.user("源书类别参考：" + catRef + "\n"
+                                        + DeriveDeindexService.toInputJson(toServiceItems(items)))),
                         0.2),
                 DeriveLabelingService::parseLabels, 3);
 
@@ -299,11 +312,16 @@ public class DeriveLabelingService {
             if (!cat.isObject() || cat.isEmpty()) {
                 throw new LlmJson.Bad(code + " 缺 cat 对象");
             }
+            double catMax = 0;
             for (JsonNode v : cat) {
                 double d = v.asDouble(-1);
                 if (d < 0 || d > 1) {
                     throw new LlmJson.Bad(code + " cat 取值必须 0~1");
                 }
+                catMax = Math.max(catMax, d);
+            }
+            if (catMax <= 0) {
+                throw new LlmJson.Bad(code + " cat 不得全 0——按素材真实气质给至少一个 >0 的类别亲和");
             }
             String beatType = n.path("beat_type").isNull() || n.path("beat_type").asText("").isEmpty()
                     ? null : n.path("beat_type").asText();
