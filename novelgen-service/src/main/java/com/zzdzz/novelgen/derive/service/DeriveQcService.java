@@ -123,15 +123,16 @@ public class DeriveQcService {
                 .eq(BeatInstanceDO::getRunId, runId)
                 .orderByAsc(BeatInstanceDO::getSeq));
 
-        // ---- 脚本 7 项硬判 ----
+        // ---- 脚本 7 项硬判（防复刻开关：关=词表类降报告，语义判定交 LLM domain 项）----
+        boolean antiRepro = Boolean.TRUE.equals(run.getAntiRepro());
         List<CheckItem> script = new ArrayList<>();
         script.add(checkTotalWords(run, chapters));
         script.add(checkChapterBudgets(chapters));
         script.add(checkBeats(beats, chapters));
-        script.add(checkBlacklist(run, chapters));
-        script.add(checkCounterWords(run, chapters));
+        script.add(checkBlacklist(run, chapters, antiRepro));
+        script.add(checkCounterWords(run, chapters, antiRepro));
         script.add(checkCategoryConcentration(run, chapters));
-        script.add(checkFingerprint(run, novel, chapters));
+        script.add(checkFingerprint(run, novel, chapters, antiRepro));
 
         boolean scriptPass = script.stream().allMatch(CheckItem::pass);
 
@@ -319,28 +320,39 @@ public class DeriveQcService {
                         : String.join("；", problems));
     }
 
-    CheckItem checkBlacklist(RunDO run, List<ChapterDO> chapters) {
-        List<String> black = wordlistMapper.selectList(new LambdaQueryWrapper<WordlistDO>()
-                        .eq(WordlistDO::getKind, "BLACKLIST"))
-                .stream().map(WordlistDO::getWord).filter(w -> w != null && !w.isBlank()).toList();
+    CheckItem checkBlacklist(RunDO run, List<ChapterDO> chapters, boolean antiRepro) {
         String full = joinContent(chapters);
-        List<String> hits = black.stream().filter(full::contains).toList();
+        // 编号/工作流痕迹 regex：工程卫生，恒硬判（与防复刻开关无关）
         Matcher fm = FLOW_PATTERN.matcher(full);
         List<String> flow = new ArrayList<>();
         while (fm.find()) {
             flow.add(fm.group());
         }
-        boolean pass = hits.isEmpty() && flow.isEmpty();
-        return new CheckItem("4黑名单/痕迹", pass,
-                "BLACKLIST 命中=" + (hits.isEmpty() ? 0 : hits)
-                        + "；流程痕迹=" + (flow.isEmpty() ? 0 : flow));
+        List<String> hits = List.of();
+        boolean pass = flow.isEmpty();
+        if (antiRepro) {
+            // 词表黑名单（真实作品名/血缘词面）：防复刻原口径才硬判
+            hits = wordlistMapper.selectList(new LambdaQueryWrapper<WordlistDO>()
+                            .eq(WordlistDO::getKind, "BLACKLIST"))
+                    .stream().map(WordlistDO::getWord).filter(w -> w != null && !w.isBlank())
+                    .filter(full::contains).toList();
+            pass = pass && hits.isEmpty();
+        }
+        String detail = "流程痕迹=" + (flow.isEmpty() ? 0 : flow)
+                + "；BLACKLIST=" + (antiRepro ? (hits.isEmpty() ? 0 : hits) : "降报告（anti_repro=关）");
+        return new CheckItem("4黑名单/痕迹", pass, detail);
     }
 
-    CheckItem checkCounterWords(RunDO run, List<ChapterDO> chapters) {
+    CheckItem checkCounterWords(RunDO run, List<ChapterDO> chapters, boolean antiRepro) {
         // domain_snapshot.counterWords 是 PG 数组字面量字符串 "{a,b,c}"
         List<String> counters = parsePgArray(run.getDomainSnapshot(), "counterWords");
         String full = joinContent(chapters);
         List<String> hits = counters.stream().filter(full::contains).toList();
+        if (!antiRepro) {
+            // 反域词多为常用词（正面/公开/空旷），字面 grep 误伤高——关=只报告，语义判定在 LLM domain 项
+            return new CheckItem("5反域词", true,
+                    "报告（anti_repro=关，语义判定交 LLM domain 项）：命中=" + (hits.isEmpty() ? 0 : hits));
+        }
         return new CheckItem("5反域词", hits.isEmpty(),
                 "counterWords " + counters.size() + " 词命中=" + (hits.isEmpty() ? 0 : hits));
     }
@@ -372,15 +384,15 @@ public class DeriveQcService {
                 weak.isEmpty() ? "每章类别词 ≥3" : "低于 3 的章：" + weak);
     }
 
-    CheckItem checkFingerprint(RunDO run, NovelDO novel, List<ChapterDO> chapters) {
+    CheckItem checkFingerprint(RunDO run, NovelDO novel, List<ChapterDO> chapters, boolean antiRepro) {
         List<String> problems = new ArrayList<>();
-        // 章数：有正文的章必须 ≥1，且全部 DRAFTED/QC_PASS
+        // 章数：有正文的章必须 ≥1，且全部成稿（工程卫生，恒判）
         long drafted = chapters.stream()
                 .filter(c -> c.getContent() != null && !c.getContent().isBlank()).count();
         if (drafted != chapters.size() || chapters.isEmpty()) {
             problems.add("章数不齐：有正文 " + drafted + "/" + chapters.size());
         }
-        // 主角名：读 story_assets，正文必须出现；work_fingerprint 查重
+        // 主角名出现（称谓锚点信号，恒判）；历史重名查重仅防复刻开时拦
         String protagonist = readProtagonist(novel);
         if (protagonist == null || protagonist.isBlank()) {
             problems.add("story_assets 缺 protagonist（⑥b 未落库？）");
@@ -389,17 +401,20 @@ public class DeriveQcService {
             if (!full.contains(protagonist)) {
                 problems.add("正文未出现主角名「" + protagonist + "」");
             }
-            long dup = fingerprintMapper.selectCount(new LambdaQueryWrapper<WorkFingerprintDO>()
-                    .eq(WorkFingerprintDO::getKind, "PROTAGONIST_NAME")
-                    .eq(WorkFingerprintDO::getValue, protagonist));
-            if (dup > 0) {
-                problems.add("主角名「" + protagonist + "」与历史 work_fingerprint 重复");
+            if (antiRepro) {
+                long dup = fingerprintMapper.selectCount(new LambdaQueryWrapper<WorkFingerprintDO>()
+                        .eq(WorkFingerprintDO::getKind, "PROTAGONIST_NAME")
+                        .eq(WorkFingerprintDO::getValue, protagonist));
+                if (dup > 0) {
+                    problems.add("主角名「" + protagonist + "」与历史 work_fingerprint 重复");
+                }
             }
         }
-        return new CheckItem("7结构指纹", problems.isEmpty(),
-                problems.isEmpty()
-                        ? "章数=" + chapters.size() + "；主角名=" + protagonist + " 无历史重复"
-                        : String.join("；", problems));
+        String detail = problems.isEmpty()
+                ? "章数=" + chapters.size() + "；主角名=" + protagonist
+                    + (antiRepro ? " 无历史重复" : "（历史重名查重随 anti_repro=关跳过）")
+                : String.join("；", problems);
+        return new CheckItem("7结构指纹", problems.isEmpty(), detail);
     }
 
     // ================= LLM 快检 =================
