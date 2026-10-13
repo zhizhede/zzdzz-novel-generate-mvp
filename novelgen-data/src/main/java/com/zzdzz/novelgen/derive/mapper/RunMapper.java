@@ -14,4 +14,7 @@ public interface RunMapper extends BaseMapper<RunDO> {
 
     /** 5.3 焊接完成后回填：welded + status（SAMPLING→PLANNING）。 */
     int updateWeld(@Param("id") long id, @Param("welded") String welded);
+
+    /** ⑥a 建成品书后回填 run.novel_id（status 不动，仍 PLANNING）。 */
+    int updateNovelId(@Param("id") long id, @Param("novelId") long novelId);
 }

@@ -30,4 +30,11 @@
         WHERE id = #{id}
     </update>
 
+    <update id="updateNovelId">
+        UPDATE run
+        SET novel_id     = #{novelId},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>
