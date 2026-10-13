@@ -3,12 +3,14 @@ package com.zzdzz.novelgen.derive.web;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.derive.service.DeriveBookService;
 import com.zzdzz.novelgen.derive.service.DeriveDeindexService;
+import com.zzdzz.novelgen.derive.service.DeriveDomainService;
 import com.zzdzz.novelgen.derive.service.DeriveExtractService;
 import com.zzdzz.novelgen.derive.service.DeriveLabelingService;
 import com.zzdzz.novelgen.model.dto.derive.BookIngestDTO;
 import com.zzdzz.novelgen.model.vo.derive.BookIngestVO;
 import com.zzdzz.novelgen.model.vo.derive.BookVO;
 import com.zzdzz.novelgen.model.vo.derive.DeindexVO;
+import com.zzdzz.novelgen.model.vo.derive.DomainVO;
 import com.zzdzz.novelgen.model.vo.derive.ExtractVO;
 import com.zzdzz.novelgen.model.vo.derive.GrepVO;
 import com.zzdzz.novelgen.model.vo.derive.LabelVO;
@@ -32,6 +34,7 @@ public class DeriveBookController {
     private final DeriveExtractService extractService;
     private final DeriveDeindexService deindexService;
     private final DeriveLabelingService labelingService;
+    private final DeriveDomainService domainService;
 
     @PostMapping
     public Result<BookIngestVO> ingest(@RequestBody BookIngestDTO dto) {
@@ -65,5 +68,11 @@ public class DeriveBookController {
     @PostMapping("/{id}/label")
     public Result<LabelVO> label(@PathVariable long id) {
         return Result.success(labelingService.label(id));
+    }
+
+    /** ④c 域格归纳（LLM → domain_cell，同 grp+name 幂等跳过）。 */
+    @PostMapping("/{id}/domains")
+    public Result<DomainVO> domains(@PathVariable long id) {
+        return Result.success(domainService.domains(id));
     }
 }
