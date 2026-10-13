@@ -9,6 +9,7 @@
 - 配置落库：门禁黑名单/章长容差在 style_packs.gate_config，风格指纹按书，卷纲在 chapters 规划行，大纲在 canon misc/大纲。
 - API key 在 `src/main/resources/application-local.yaml`（gitignore），**永不入库入 git**；novels/ 原稿除 canon 包外不入 git。
 - 没有用户明确允许，禁止 commit/push。
+- **文档版本化（2026-10-13 用户定调重申）**：`随机衍生工作流/` 下工作流文档要改内容，**必须先复制目标文件为新文件并改名为新版本号（v3.2→v3.3、表结构 v1.2→v1.3…），原版一字不动，然后只改副本**；禁止原地编辑原版，禁止只改不升版本。
 
 ## 常用命令
 
