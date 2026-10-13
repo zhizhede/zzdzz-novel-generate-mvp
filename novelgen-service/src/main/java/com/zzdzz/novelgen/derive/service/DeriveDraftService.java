@@ -1,0 +1,306 @@
+package com.zzdzz.novelgen.derive.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.zzdzz.novelgen.common.web.BizException;
+import com.zzdzz.novelgen.common.web.ErrorCode;
+import com.zzdzz.novelgen.derive.mapper.AssetBeatMapper;
+import com.zzdzz.novelgen.derive.mapper.AssetWorldMapper;
+import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
+import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
+import com.zzdzz.novelgen.derive.mapper.NovelMapper;
+import com.zzdzz.novelgen.derive.mapper.RunMapper;
+import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
+import com.zzdzz.novelgen.llm.LlmJson;
+import com.zzdzz.novelgen.llm.LlmPort;
+import com.zzdzz.novelgen.model.entity.derive.AssetBeatDO;
+import com.zzdzz.novelgen.model.entity.derive.AssetWorldDO;
+import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
+import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
+import com.zzdzz.novelgen.model.entity.derive.NovelDO;
+import com.zzdzz.novelgen.model.entity.derive.RunDO;
+import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
+import com.zzdzz.novelgen.model.vo.derive.DraftVO;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * ⑥b 生成具体稿（v3.2 §⑥b）。
+ *
+ * <p>输入：域格快照 / param_tags·pace / 抽中世界观标签层 / welded 主线 / 拍清单（含标签层与章归属）
+ * / 章节计划；输出：逐拍填实 filled_text + 每章具体大纲与标题定稿 + 成品书题名/摘要/主角名。
+ * 人名规避：work_fingerprint 已用主角名进禁用名单（提示词注入，⑧再登记新名）。
+ * 落库（无事务，LLM 在前）：beat_instance.filled_text、跳过拍 status=SKIPPED、
+ * chapters.draft_outline/title、novels.title/summary、run.status=DRAFTING。
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class DeriveDraftService {
+
+    public static final String NODE_DRAFT = "derive_draft";
+
+    static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
+
+    static final String DRAFT_PROMPT = """
+            你在为一部小说生成"具体稿"（不是正文）。输入含：域格、类别与目标节奏、世界观条目、
+            标签层主线、拍清单（seq/拍型/标签层文案/归属章）、章节计划（章号/章题/预算）。
+            要求：
+            1. 起作品名、主角与配角人名、地名；结局形状落地；事件必须在域格内成立；
+            2. 每个拍实例填实成具体情节点（1~2 句，写 filled）；确实用不上的拍放进 skipped 数组；
+            3. 主角名不得出现在禁用名单里，不得用"沈X"式单姓+单字套路名；
+            4. 每章给 draft_outline（本章具体大纲 2~3 句）与 title 定稿（≤12字，可沿用或改）；
+            5. 只输出具体稿结构，不写正文，不提素材来源与编号（对外只出现 seq）。
+            输出 JSON 对象：
+            {"title":"作品名","summary":"一句话概括","protagonist":"主角名",
+             "chapters":[{"no":1,"title":"章题","draft_outline":"…","beats":[{"seq":1,"filled":"…"}]}],
+             "skipped":[…]}
+            filled 覆盖的 seq ∪ skipped 必须恰好等于拍清单全部 seq 且不重不漏；
+            chapters 的章号集合与章数必须与章节计划一致。只输出 JSON。
+            """;
+
+    private final RunMapper runMapper;
+    private final NovelMapper novelMapper;
+    private final ChapterMapper chapterMapper;
+    private final BeatInstanceMapper beatInstanceMapper;
+    private final AssetWorldMapper worldMapper;
+    private final AssetBeatMapper beatMapper;
+    private final WorkFingerprintMapper fingerprintMapper;
+    private final LlmJson llmJson;
+
+    /** ⑥b：LLM 生成具体稿 → 回填五张表 + run→DRAFTING。 */
+    public DraftVO draft(long runId) {
+        RunDO run = runMapper.selectById(runId);
+        if (run == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
+        }
+        // REWORK=⑧打回后重跑（qc_round+1≤2）；PLANNING=首轮
+        if (!("PLANNING".equals(run.getStatus()) || "REWORK".equals(run.getStatus())) || run.getNovelId() == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "run 应处于 PLANNING/REWORK 且已计划（当前 " + run.getStatus() + "，novelId=" + run.getNovelId() + "）");
+        }
+        long novelId = run.getNovelId();
+
+        List<BeatInstanceDO> beats = beatInstanceMapper.selectList(new LambdaQueryWrapper<BeatInstanceDO>()
+                .eq(BeatInstanceDO::getRunId, runId)
+                .orderByAsc(BeatInstanceDO::getSeq));
+        List<ChapterDO> chapters = chapterMapper.selectList(new LambdaQueryWrapper<ChapterDO>()
+                .eq(ChapterDO::getNovelId, novelId)
+                .orderByAsc(ChapterDO::getChapterNo));
+
+        // 世界观 + 原生拍标签层（ARC_SEG 按 arc_id+seg_no 回查原生链）
+        String worldLabel = "";
+        if (run.getPickedWorldId() != null) {
+            AssetWorldDO w = worldMapper.selectById(run.getPickedWorldId());
+            if (w != null) {
+                worldLabel = w.getLabelText() == null ? w.getExtractedText() : w.getLabelText();
+            }
+        }
+        Map<Long, List<String>> nativeLabels = new HashMap<>();
+        Map<Integer, String> labelBySeq = new HashMap<>();
+        for (BeatInstanceDO b : beats) {
+            if ("ASSET".equals(b.getSource()) && b.getAssetId() != null) {
+                AssetBeatDO row = beatMapper.selectById(b.getAssetId());
+                labelBySeq.put(b.getSeq(), row == null ? "" : nullToEmpty(row.getLabelText(), row.getExtractedText()));
+            } else if (b.getArcId() != null) {
+                nativeLabels.computeIfAbsent(b.getArcId(), k -> {
+                    List<AssetBeatDO> list = beatMapper.selectList(new LambdaQueryWrapper<AssetBeatDO>()
+                            .eq(AssetBeatDO::getParentArcId, k)
+                            .orderByAsc(AssetBeatDO::getId));
+                    List<String> out = new ArrayList<>();
+                    for (AssetBeatDO r : list) {
+                        out.add(nullToEmpty(r.getLabelText(), r.getExtractedText()));
+                    }
+                    return out;
+                });
+                List<String> chain = nativeLabels.get(b.getArcId());
+                int seg = b.getArcSegNo() == null ? -1 : b.getArcSegNo();
+                labelBySeq.put(b.getSeq(), seg >= 0 && seg < chain.size() ? chain.get(seg) : "");
+            }
+        }
+
+        // 主角名禁用名单（⑧登记的历史名）
+        List<String> banned = fingerprintMapper.selectList(new LambdaQueryWrapper<WorkFingerprintDO>()
+                        .eq(WorkFingerprintDO::getKind, "PROTAGONIST_NAME"))
+                .stream().map(WorkFingerprintDO::getValue).filter(v -> v != null && !v.isBlank()).toList();
+
+        // 章节计划上下文
+        Map<Integer, List<BeatInstanceDO>> byChapter = new LinkedHashMap<>();
+        for (BeatInstanceDO b : beats) {
+            byChapter.computeIfAbsent(b.getChapterNo() == null ? 0 : b.getChapterNo(), k -> new ArrayList<>()).add(b);
+        }
+
+        DraftContext ctx = new DraftContext(beats.stream().map(BeatInstanceDO::getSeq).toList(),
+                chapters.stream().map(ChapterDO::getChapterNo).toList(), banned);
+        String user = buildUser(run, chapters, beats, labelBySeq, worldLabel, banned);
+
+        JsonNode out = llmJson.ask(
+                new LlmPort.ChatRequest(NODE_DRAFT, runId, novelId,
+                        List.of(LlmPort.Message.system(DRAFT_PROMPT), LlmPort.Message.user(user)),
+                        0.4),
+                root -> parseDraft(root, ctx), 3);
+
+        // ---- 落库 ----
+        Set<Integer> skipped = new HashSet<>();
+        out.path("skipped").forEach(n -> skipped.add(n.asInt()));
+        Map<Integer, String> filled = new HashMap<>();
+        int filledCount = 0;
+        for (JsonNode c : out.path("chapters")) {
+            for (JsonNode b : c.path("beats")) {
+                filled.put(b.path("seq").asInt(), b.path("filled").asText());
+                filledCount++;
+            }
+        }
+        for (BeatInstanceDO b : beats) {
+            if (skipped.contains(b.getSeq())) {
+                b.setStatus("SKIPPED");
+            } else {
+                b.setFilledText(filled.get(b.getSeq()));
+                b.setStatus("PLANNED"); // ⑦写正文时转 WRITTEN
+            }
+            beatInstanceMapper.updateById(b);
+        }
+        boolean rework = "REWORK".equals(run.getStatus());
+        for (JsonNode c : out.path("chapters")) {
+            int no = c.path("no").asInt();
+            ChapterDO ch = chapters.stream().filter(x -> x.getChapterNo() == no).findFirst().orElse(null);
+            if (ch == null) {
+                continue;
+            }
+            ch.setTitle(c.path("title").asText(ch.getTitle()));
+            ch.setDraftOutline(c.path("draft_outline").asText(""));
+            chapterMapper.updateById(ch);
+        }
+        if (rework) {
+            // ⑧打回后重跑：清旧正文让⑦重写（MP NOT_NULL 策略 set null 无效，走显式 SQL）
+            chapterMapper.clearForRewrite(novelId);
+        }
+
+        NovelDO novel = novelMapper.selectById(novelId);
+        String finalTitle = out.path("title").asText(novel.getTitle());
+        String finalSummary = out.path("summary").asText("");
+        novelMapper.updateMeta(novelId, finalTitle, finalSummary);
+        // 主角名进 story_assets（jsonb 留缝；⑧ QC 读它做指纹登记与查重）
+        novelMapper.updateProtagonist(novelId, out.path("protagonist").asText(""));
+        runMapper.updateStatus(runId, "DRAFTING", null);
+
+        String protagonist = out.path("protagonist").asText("");
+        log.info("⑥b具体稿：runId={} novelId={} 书名={} 主角={} 填实{} 跳过{}",
+                runId, novelId, finalTitle, protagonist, filledCount, skipped.size());
+        return new DraftVO(runId, novelId, finalTitle, protagonist,
+                chapters.size(), filledCount, skipped.size());
+    }
+
+    // ---- 输入构造 ----
+
+    String buildUser(RunDO run, List<ChapterDO> chapters, List<BeatInstanceDO> beats,
+                     Map<Integer, String> labelBySeq, String worldLabel, List<String> banned) {
+        ObjectNode root = STATIC_MAPPER.createObjectNode();
+        root.set("域", readTreeSafe(run.getDomainSnapshot()));
+        root.set("类别", readTreeSafe(run.getParamTags()));
+        root.put("目标节奏", run.getParamPace().toPlainString());
+        root.put("结局形状", run.getParamOutcome());
+        root.put("产品形态", run.getParamForm());
+        root.put("世界观", worldLabel);
+        root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+        root.put("主角名禁用名单", String.join("、", banned));
+        var chArr = root.putArray("章节计划");
+        for (ChapterDO c : chapters) {
+            var n = chArr.addObject();
+            n.put("no", c.getChapterNo());
+            n.put("title", c.getTitle());
+            n.put("budget", c.getBudget());
+        }
+        var bArr = root.putArray("拍清单");
+        for (BeatInstanceDO b : beats) {
+            var n = bArr.addObject();
+            n.put("seq", b.getSeq());
+            n.put("chapter", b.getChapterNo());
+            n.put("beat_type", b.getBeatType());
+            n.put("pacing", b.getPacing().toPlainString());
+            n.put("label", labelBySeq.getOrDefault(b.getSeq(), ""));
+        }
+        return root.toString();
+    }
+
+    // ---- 解析校验 ----
+
+    record DraftContext(List<Integer> allSeqs, List<Integer> chapterNos, List<String> banned) {
+    }
+
+    static JsonNode parseDraft(JsonNode root, DraftContext ctx) {
+        String title = root.path("title").asText("").trim();
+        String summary = root.path("summary").asText("").trim();
+        String protagonist = root.path("protagonist").asText("").trim();
+        if (title.isEmpty() || summary.isEmpty() || protagonist.isEmpty()) {
+            throw new LlmJson.Bad("title/summary/protagonist 均不能为空");
+        }
+        if (ctx.banned().contains(protagonist)) {
+            throw new LlmJson.Bad("protagonist「" + protagonist + "」在禁用名单（历史成品已用），换一个");
+        }
+        JsonNode chArr = root.path("chapters");
+        if (!chArr.isArray() || chArr.size() != ctx.chapterNos().size()) {
+            throw new LlmJson.Bad("chapters 章数必须 = " + ctx.chapterNos().size());
+        }
+        Set<Integer> seenCh = new HashSet<>();
+        Set<Integer> filled = new HashSet<>();
+        for (JsonNode c : chArr) {
+            int no = c.path("no").asInt(-1);
+            if (!ctx.chapterNos().contains(no) || !seenCh.add(no)) {
+                throw new LlmJson.Bad("chapters 章号非法或重复: " + no);
+            }
+            if (c.path("draft_outline").asText("").trim().isEmpty()) {
+                throw new LlmJson.Bad("第" + no + "章缺 draft_outline");
+            }
+            for (JsonNode b : c.path("beats")) {
+                int seq = b.path("seq").asInt(0);
+                if (!ctx.allSeqs().contains(seq) || !filled.add(seq)) {
+                    throw new LlmJson.Bad("filled beats 含非法或重复 seq: " + seq);
+                }
+                if (b.path("filled").asText("").trim().isEmpty()) {
+                    throw new LlmJson.Bad("seq " + seq + " 缺 filled");
+                }
+            }
+        }
+        Set<Integer> skipped = new HashSet<>();
+        for (JsonNode s : root.path("skipped")) {
+            int seq = s.asInt(0);
+            if (!ctx.allSeqs().contains(seq) || filled.contains(seq) || !skipped.add(seq)) {
+                throw new LlmJson.Bad("skipped 含非法/重复 seq: " + seq);
+            }
+        }
+        // 覆盖且不重不漏
+        Set<Integer> union = new HashSet<>(filled);
+        union.addAll(skipped);
+        if (union.size() != ctx.allSeqs().size()) {
+            throw new LlmJson.Bad("filled ∪ skipped 必须恰好覆盖全部 " + ctx.allSeqs().size() + " 拍（当前 " + union.size() + "）");
+        }
+        return root;
+    }
+
+    static String nullToEmpty(String a, String b) {
+        if (a != null && !a.isBlank()) {
+            return a;
+        }
+        return b == null ? "" : b;
+    }
+
+    static JsonNode readTreeSafe(String json) {
+        try {
+            return STATIC_MAPPER.readTree(json == null || json.isBlank() ? "{}" : json);
+        } catch (Exception e) {
+            return STATIC_MAPPER.createObjectNode();
+        }
+    }
+}
