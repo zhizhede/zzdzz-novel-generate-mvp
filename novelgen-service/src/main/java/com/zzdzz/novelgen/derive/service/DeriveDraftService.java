@@ -61,13 +61,16 @@ public class DeriveDraftService {
             2. 每个拍实例填实成具体情节点（1~2 句，写 filled）；确实用不上的拍放进 skipped 数组；
             3. 主角名不得出现在禁用名单里，不得用"沈X"式单姓+单字套路名；
             4. 每章给 draft_outline（本章具体大纲 2~3 句）与 title 定稿（≤12字，可沿用或改）；
-            5. 只输出具体稿结构，不写正文，不提素材来源与编号（对外只出现 seq）。
+            5. 输出 cast 全书人物表（主角排首，含配角与关键路人）：name=定名人名（2~3字）、
+               role=身份一句话、gender=性别——正文各章必须严格沿用此表人名与性别，禁止同人异名；
+            6. 只输出具体稿结构，不写正文，不提素材来源与编号（对外只出现 seq）。
             输出 JSON 对象：
             {"title":"作品名","summary":"一句话概括","protagonist":"主角名",
+             "cast":[{"name":"…","role":"…","gender":"…"}],
              "chapters":[{"no":1,"title":"章题","draft_outline":"…","beats":[{"seq":1,"filled":"…"}]}],
              "skipped":[…]}
             filled 覆盖的 seq ∪ skipped 必须恰好等于拍清单全部 seq 且不重不漏；
-            chapters 的章号集合与章数必须与章节计划一致。只输出 JSON。
+            chapters 的章号集合与章数必须与章节计划一致；cast 至少 3 人且含 protagonist。只输出 JSON。
             """;
 
     private final RunMapper runMapper;
@@ -130,10 +133,12 @@ public class DeriveDraftService {
             }
         }
 
-        // 主角名禁用名单（⑧登记的历史名）
-        List<String> banned = fingerprintMapper.selectList(new LambdaQueryWrapper<WorkFingerprintDO>()
-                        .eq(WorkFingerprintDO::getKind, "PROTAGONIST_NAME"))
-                .stream().map(WorkFingerprintDO::getValue).filter(v -> v != null && !v.isBlank()).toList();
+        // 主角名禁用名单（⑧登记的历史名）——防复刻开关开才注入；关=空名单不拦
+        List<String> banned = Boolean.TRUE.equals(run.getAntiRepro())
+                ? fingerprintMapper.selectList(new LambdaQueryWrapper<WorkFingerprintDO>()
+                                .eq(WorkFingerprintDO::getKind, "PROTAGONIST_NAME"))
+                        .stream().map(WorkFingerprintDO::getValue).filter(v -> v != null && !v.isBlank()).toList()
+                : List.of();
 
         // 章节计划上下文
         Map<Integer, List<BeatInstanceDO>> byChapter = new LinkedHashMap<>();
@@ -191,8 +196,9 @@ public class DeriveDraftService {
         String finalTitle = out.path("title").asText(novel.getTitle());
         String finalSummary = out.path("summary").asText("");
         novelMapper.updateMeta(novelId, finalTitle, finalSummary);
-        // 主角名进 story_assets（jsonb 留缝；⑧ QC 读它做指纹登记与查重）
-        novelMapper.updateProtagonist(novelId, out.path("protagonist").asText(""));
+        // 主角名 + 全书 cast 表进 story_assets（jsonb 留缝；⑦ 每章注入防称谓漂移，⑧ 读主角名做指纹）
+        novelMapper.updateCast(novelId, out.path("protagonist").asText(""),
+                out.path("cast").toString());
         runMapper.updateStatus(runId, "DRAFTING", null);
 
         String protagonist = out.path("protagonist").asText("");
@@ -248,6 +254,28 @@ public class DeriveDraftService {
         }
         if (ctx.banned().contains(protagonist)) {
             throw new LlmJson.Bad("protagonist「" + protagonist + "」在禁用名单（历史成品已用），换一个");
+        }
+        // cast 全书人物表：≥3 人、含主角、人名不重复（⑦ 各章注入的称谓锚点）
+        JsonNode cast = root.path("cast");
+        if (!cast.isArray() || cast.size() < 3) {
+            throw new LlmJson.Bad("cast 至少 3 人");
+        }
+        Set<String> castNames = new HashSet<>();
+        boolean castHasProtagonist = false;
+        for (JsonNode c : cast) {
+            String nm = c.path("name").asText("").trim();
+            if (nm.isEmpty()) {
+                throw new LlmJson.Bad("cast 有成员缺 name");
+            }
+            if (!castNames.add(nm)) {
+                throw new LlmJson.Bad("cast 人名重复: " + nm);
+            }
+            if (nm.equals(protagonist)) {
+                castHasProtagonist = true;
+            }
+        }
+        if (!castHasProtagonist) {
+            throw new LlmJson.Bad("cast 必须包含 protagonist「" + protagonist + "」");
         }
         JsonNode chArr = root.path("chapters");
         if (!chArr.isArray() || chArr.size() != ctx.chapterNos().size()) {

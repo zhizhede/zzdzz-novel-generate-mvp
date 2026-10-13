@@ -25,6 +25,10 @@ public interface NovelMapper extends BaseMapper<NovelDO> {
     /** ⑥b 落主角名（story_assets.protagonist，jsonb 留缝；⑧ QC 读它做指纹登记与查重）。 */
     int updateProtagonist(@Param("id") long id, @Param("protagonist") String protagonist);
 
+    /** ⑥b 落主角名+全书 cast 表（story_assets；⑦ 每章注入 cast 防称谓漂移）。 */
+    int updateCast(@Param("id") long id, @Param("protagonist") String protagonist,
+                   @Param("cast") String castJson);
+
     /** ⑧ 统计回填（char_count / chapter_count）。 */
     int updateStats(@Param("id") long id, @Param("charCount") int charCount,
                     @Param("chapterCount") int chapterCount);

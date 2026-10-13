@@ -29,6 +29,16 @@
         WHERE id = #{id}
     </update>
 
+    <!-- ⑥b：protagonist + 全书 cast 表一并落（⑦ 各章注入的称谓锚点） -->
+    <update id="updateCast">
+        UPDATE novels
+        SET story_assets = COALESCE(story_assets, '{"v":1}'::jsonb)
+                               || jsonb_build_object('protagonist', to_jsonb(#{protagonist}),
+                                                     'cast', #{cast}::jsonb),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
     <update id="updateStats">
         UPDATE novels
         SET char_count     = #{charCount},

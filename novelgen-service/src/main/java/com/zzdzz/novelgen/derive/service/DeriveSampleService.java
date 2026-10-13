@@ -224,8 +224,12 @@ public class DeriveSampleService {
         btNode.put("beat", finalBeats.size());
 
         // ---- 5.2.4+5 弧桶分配（同构弧登记跳过、run 内唯一）+ 补差拍 ----
-        Set<String> registered = fingerprintMapper.selectList(new LambdaQueryWrapper<>())
-                .stream().map(WorkFingerprintDO::getFingerprint).collect(Collectors.toSet());
+        // 防复刻开关：默认关=不按历史指纹阻断（一致性优先），开=九轮原口径
+        boolean antiRepro = Boolean.TRUE.equals(dto.antiRepro());
+        Set<String> registered = antiRepro
+                ? fingerprintMapper.selectList(new LambdaQueryWrapper<>())
+                        .stream().map(WorkFingerprintDO::getFingerprint).collect(Collectors.toSet())
+                : Set.of();
         List<Row> pickedOutlines = pickOutlines(finalOutlines, kTarget, tags, registered, rnd);
         List<Row> beatShuffle = new ArrayList<>(finalBeats);
         Collections.shuffle(beatShuffle, rnd);
@@ -268,6 +272,7 @@ public class DeriveSampleService {
         run.setPickedWorldId(world == null ? null : world.id());
         run.setStatus("SAMPLING");
         run.setQcRound(0);
+        run.setAntiRepro(antiRepro);
         run.setStepStatus("{\"v\":1,\"steps\":{\"SAMPLE\":{\"status\":\"RUNNING\"}}}");
         long runId = runMapper.insertFull(run);
 
