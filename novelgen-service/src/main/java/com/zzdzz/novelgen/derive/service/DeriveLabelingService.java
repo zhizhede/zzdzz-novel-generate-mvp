@@ -35,8 +35,9 @@ import java.util.Set;
  * ④入库打标（脚本 + LLM 批量，v3.2 §④）。
  *
  * <ul>
- *   <li><b>4a 全量 grep</b>：wordlist（BLACKLIST+DOMAIN_WORD）对全池 label_text/func_tag 做包含匹配，
- *       命中即列出（打回③的依据）。脚本侧无 LLM。—— 编号在 ② 插入时已按全局 O-Pxx 分配，4a 不再重排。</li>
+ *   <li><b>4a 全量 grep</b>：wordlist（BLACKLIST+DOMAIN_WORD）对全池 label_text/func_tag 做包含匹配。
+ *       v3.3 按 kind 分口径：BLACKLIST 命中＝硬判打回③；DOMAIN_WORD 命中＝报告人工判。脚本侧无 LLM。
+ *       —— 编号在 ② 插入时已按全局 O-Pxx 分配，4a 不再重排。</li>
  *   <li><b>4b 批量打标</b>：v3.2 §4b 提示词原文（规则不改字），JSON 数组输出；pacing 锚点在解析层校验、
  *       DB CHECK 二次把关（pacing_src=LLM 强制锚点）；arc 多选→arc_fit 权重脚本后处理（首选1.0/次选0.5/其余0.0）。
  *       标签只进 label_index，不回写条目正文；重打=先删本书已有行再插（(entry_type,entry_type_id) 复合唯一）。</li>
@@ -82,13 +83,27 @@ public class DeriveLabelingService {
         return n == null || n.getCategoryTags() == null ? "{}" : n.getCategoryTags();
     }
 
-    // ================= 4a · 黑名单/领域词全量 grep =================
+    // ================= 4a · 词表全量 grep（v3.3 按 kind 分口径） =================
 
-    /** 对本书（novelId≥0）或全池（novelId<0）的标签层做 wordlist 包含匹配。 */
+    /**
+     * 对本书（novelId≥0）或全池（novelId<0）的标签层做 wordlist 包含匹配。
+     * v3.3：BLACKLIST 命中＝硬判（打回③）；DOMAIN_WORD 命中＝报告清单，人工判。
+     */
     public GrepVO grep(long novelId) {
-        List<String> words = wordlistMapper.selectList(new LambdaQueryWrapper<WordlistDO>()
-                        .in(WordlistDO::getKind, List.of("BLACKLIST", "DOMAIN_WORD")))
-                .stream().map(WordlistDO::getWord).filter(w -> w != null && !w.isBlank()).toList();
+        List<WordlistDO> wordRows = wordlistMapper.selectList(new LambdaQueryWrapper<WordlistDO>()
+                .in(WordlistDO::getKind, List.of("BLACKLIST", "DOMAIN_WORD")));
+        List<String> blacklist = new ArrayList<>();
+        List<String> domain = new ArrayList<>();
+        for (WordlistDO w : wordRows) {
+            if (w.getWord() == null || w.getWord().isBlank()) {
+                continue;
+            }
+            if ("BLACKLIST".equals(w.getKind())) {
+                blacklist.add(w.getWord());
+            } else {
+                domain.add(w.getWord());
+            }
+        }
 
         List<GrepVO.Hit> hits = new ArrayList<>();
         int scanned = 0;
@@ -101,37 +116,42 @@ public class DeriveLabelingService {
                         : new LambdaQueryWrapper<AssetBeatDO>().eq(AssetBeatDO::getSrcNovelId, novelId));
         for (AssetOutlineDO a : arcs) {
             scanned++;
-            grepRow(a.getCode(), a.getLabelText(), a.getFuncTag(), words, hits);
+            grepRow(a.getCode(), a.getLabelText(), a.getFuncTag(), blacklist, domain, hits);
         }
         for (AssetBeatDO b : beats) {
             scanned++;
-            grepRow(b.getCode(), b.getLabelText(), b.getFuncTag(), words, hits);
+            grepRow(b.getCode(), b.getLabelText(), b.getFuncTag(), blacklist, domain, hits);
         }
         List<AssetWorldDO> worlds = worldMapper.selectList(
                 novelId < 0 ? new LambdaQueryWrapper<AssetWorldDO>()
                         : new LambdaQueryWrapper<AssetWorldDO>().eq(AssetWorldDO::getSrcNovelId, novelId));
         for (AssetWorldDO w : worlds) {
             scanned++;
-            grepRow(w.getCode(), w.getLabelText(), null, words, hits);
+            grepRow(w.getCode(), w.getLabelText(), null, blacklist, domain, hits);
         }
-        log.info("④a grep：novelId={} 扫描 {} 条，命中 {} 处", novelId, scanned, hits.size());
-        return new GrepVO(novelId, scanned, hits);
+        int blacklistHits = (int) hits.stream().filter(h -> "BLACKLIST".equals(h.kind())).count();
+        int domainWordHits = hits.size() - blacklistHits;
+        log.info("④a grep：novelId={} 扫描 {} 条，命中 {} 处（黑名单 {} / 领域词 {}）",
+                novelId, scanned, hits.size(), blacklistHits, domainWordHits);
+        return new GrepVO(novelId, scanned, hits, blacklistHits, domainWordHits);
     }
 
     private static void grepRow(String code, String label, String funcTag,
-                                List<String> words, List<GrepVO.Hit> hits) {
-        scanField(code, "label_text", label, words, hits);
-        scanField(code, "func_tag", funcTag, words, hits);
+                                List<String> blacklist, List<String> domain, List<GrepVO.Hit> hits) {
+        scanField(code, "label_text", label, blacklist, "BLACKLIST", hits);
+        scanField(code, "func_tag", funcTag, blacklist, "BLACKLIST", hits);
+        scanField(code, "label_text", label, domain, "DOMAIN_WORD", hits);
+        scanField(code, "func_tag", funcTag, domain, "DOMAIN_WORD", hits);
     }
 
     private static void scanField(String code, String field, String value,
-                                  List<String> words, List<GrepVO.Hit> hits) {
+                                  List<String> words, String kind, List<GrepVO.Hit> hits) {
         if (value == null || value.isBlank()) {
             return;
         }
         for (String w : words) {
             if (value.contains(w)) {
-                hits.add(new GrepVO.Hit(code, field, w));
+                hits.add(new GrepVO.Hit(code, field, w, kind));
             }
         }
     }
@@ -216,6 +236,7 @@ public class DeriveLabelingService {
             LabelIndexDO row = new LabelIndexDO();
             row.setEntryType(typeByCode.get(d.code()));
             row.setEntryTypeId(entryId);
+            row.setSrcNovelId(novelId);
             row.setCat(d.catJson());
             row.setBeatType(d.beatType());
             row.setPacing(d.pacing());

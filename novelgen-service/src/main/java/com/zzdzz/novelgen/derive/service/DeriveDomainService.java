@@ -2,16 +2,19 @@ package com.zzdzz.novelgen.derive.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.AssetOutlineMapper;
 import com.zzdzz.novelgen.derive.mapper.AssetWorldMapper;
 import com.zzdzz.novelgen.derive.mapper.DomainCellMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
+import com.zzdzz.novelgen.derive.mapper.WordlistMapper;
 import com.zzdzz.novelgen.model.entity.derive.AssetOutlineDO;
 import com.zzdzz.novelgen.model.entity.derive.AssetWorldDO;
 import com.zzdzz.novelgen.model.entity.derive.DomainCellDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
+import com.zzdzz.novelgen.model.entity.derive.WordlistDO;
 import com.zzdzz.novelgen.model.vo.derive.DomainVO;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -21,16 +24,21 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * ④c 域格归纳（v3.2 §4c：04c 域表 → domain_cell）。
+ * ④c 域格归纳 + 类别浓度词表（v3.3）。
  *
  * <p>域格 = 角色关系能落位的具体场所/情境单元（"食堂 / 小卖部"），跨书共享的维表；
- * ⑤抽样按 cats⊇主类别 + 加权 seed 抽 1（v3.2 §5.2.6），⑧质检拿 counter_words 做反域 grep。
+ * ⑤抽样按 cats⊇主类别 + 加权 seed 抽 1（§5.2.6），⑧质检拿 counter_words 做反域 grep。
  * 本服务从本书素材的标签层归纳（LLM），落 domain_cell（jsonb/text[] 走 insertFull）；
  * 同 (grp,name) 已存在则跳过（多书归纳是增量合并，不覆盖——ref_ids 留首归纳来源）。
+ * **v3.3**：域格落库后按本书 category_tags 生成 CATEGORY_TERM 类别浓度词表（⑧第 6 项依赖）。
  */
 @Service
 @RequiredArgsConstructor
@@ -38,6 +46,7 @@ import java.util.Set;
 public class DeriveDomainService {
 
     public static final String NODE_DOMAIN = "derive_domain";
+    public static final String NODE_CATEGORY_TERMS = "derive_category_terms";
 
     /** 域格归纳提示词（v3.2 §4c 未给正文，此为系统侧实现；输出必须对象根）。 */
     static final String PROMPT = """
@@ -55,10 +64,20 @@ public class DeriveDomainService {
             "beat_types":["铺垫"],"relation_note":"","counter_words":["词"],"ref_ids":["W-P01"]}]}
             """;
 
+    /** v3.3 类别浓度词表提示词（⑧第 6 项每章≥3 命中的数据源）。 */
+    static final String CATEGORY_TERMS_PROMPT = """
+            你在为质检生成"类别浓度词表"。对给定的每个类别，输出 10~20 个该类别作品正文中高频出现的特征词（供逐章浓度 grep，每章≥3 命中为达标）：
+            - 词≤4 字，名词/动词/短语均可；必须是该类别确实高频的词（如言情：告白、牵手、心跳）；
+            - 不要专名、不要虚词（的/了/很）、不要过宽多义词（东西、时候）；
+            - 各类别独立成数组，键与输入类别一致。
+            只输出 JSON 对象：{"terms":{"类别":["词"],"…":["词"]}}
+            """;
+
     private final NovelMapper novelMapper;
     private final AssetOutlineMapper outlineMapper;
     private final AssetWorldMapper worldMapper;
     private final DomainCellMapper domainCellMapper;
+    private final WordlistMapper wordlistMapper;
     private final LlmJson llmJson;
 
     /** ④c 归纳本书域格（幂等：同 grp+name 已存在跳过）。 */
@@ -122,7 +141,91 @@ public class DeriveDomainService {
             created++;
         }
         log.info("④c 域格：novelId={} 归纳 {} 个，新建 {} 跳过 {}", novelId, cells.size(), created, skipped);
-        return new DomainVO(novelId, created, skipped);
+
+        // ---- v3.3：按书类别生成 CATEGORY_TERM（⑧第 6 项依赖；无类别 tags 则跳过） ----
+        int categoryTermsAdded = 0;
+        String tagsJson = novel.getCategoryTags();
+        Set<String> cats = parseTagKeys(tagsJson);
+        if (!cats.isEmpty()) {
+            Map<String, List<String>> terms = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_CATEGORY_TERMS, novelId, null,
+                            List.of(LlmPort.Message.system(CATEGORY_TERMS_PROMPT),
+                                    LlmPort.Message.user("类别：" + tagsJson)),
+                            0.3),
+                    root -> parseCategoryTerms(root, cats), 3);
+            categoryTermsAdded = addCategoryTerms(terms);
+        }
+        log.info("④c 类别浓度词：novelId={} 类别 {} 产出 {} 词", novelId, cats, categoryTermsAdded);
+        return new DomainVO(novelId, created, skipped, categoryTermsAdded);
+    }
+
+    // ---- v3.3 CATEGORY_TERM ----
+
+    /** 解析 category_tags 的键集合（坏 JSON/空按无类别处理）。 */
+    static Set<String> parseTagKeys(String tagsJson) {
+        Set<String> out = new LinkedHashSet<>();
+        if (tagsJson == null || tagsJson.isBlank()) {
+            return out;
+        }
+        try {
+            JsonNode n = new ObjectMapper().readTree(tagsJson);
+            if (n.isObject()) {
+                n.fieldNames().forEachRemaining(out::add);
+            }
+        } catch (Exception e) {
+            log.warn("category_tags 解析失败，跳过 CATEGORY_TERM：{}", e.getMessage());
+        }
+        return out;
+    }
+
+    static Map<String, List<String>> parseCategoryTerms(JsonNode root, Set<String> expected) {
+        JsonNode terms = root.path("terms");
+        if (!terms.isObject() || terms.isEmpty()) {
+            throw new LlmJson.Bad("terms 必须是非空对象");
+        }
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        for (String cat : expected) {
+            JsonNode arr = terms.path(cat);
+            List<String> words = new ArrayList<>();
+            if (arr.isArray()) {
+                for (JsonNode n : arr) {
+                    String v = n.asText("").trim();
+                    if (!v.isEmpty() && v.length() <= 4) {
+                        words.add(v);
+                    }
+                }
+            }
+            if (!words.isEmpty()) {
+                out.put(cat, words);
+            }
+        }
+        if (out.isEmpty()) {
+            throw new LlmJson.Bad("未产出任何类别词（期望类别：" + expected + "）");
+        }
+        return out;
+    }
+
+    /** 写入 wordlist(kind=CATEGORY_TERM)；按 (kind,word) 去重。 */
+    int addCategoryTerms(Map<String, List<String>> termsByCat) {
+        Set<String> existing = wordlistMapper.selectList(
+                        new LambdaQueryWrapper<WordlistDO>().eq(WordlistDO::getKind, "CATEGORY_TERM"))
+                .stream().map(WordlistDO::getWord).filter(w -> w != null && !w.isBlank()).collect(Collectors.toSet());
+        int added = 0;
+        for (Map.Entry<String, List<String>> e : termsByCat.entrySet()) {
+            for (String w : e.getValue()) {
+                if (existing.contains(w)) {
+                    continue;
+                }
+                WordlistDO row = new WordlistDO();
+                row.setKind("CATEGORY_TERM");
+                row.setWord(w);
+                row.setCategory(e.getKey());
+                wordlistMapper.insert(row);
+                existing.add(w);
+                added++;
+            }
+        }
+        return added;
     }
 
     /** 字符串数组 → PG 数组字面量 "{a,b}"（insertFull 里 ::text[]）。 */
