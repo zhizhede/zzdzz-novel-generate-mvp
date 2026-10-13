@@ -37,4 +37,12 @@
         WHERE id = #{id}
     </update>
 
+    <update id="updateStatus">
+        UPDATE run
+        SET status       = #{status},
+            qc_round     = COALESCE(#{qcRound}, qc_round),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

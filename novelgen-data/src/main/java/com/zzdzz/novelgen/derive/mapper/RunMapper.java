@@ -17,4 +17,8 @@ public interface RunMapper extends BaseMapper<RunDO> {
 
     /** ⑥a 建成品书后回填 run.novel_id（status 不动，仍 PLANNING）。 */
     int updateNovelId(@Param("id") long id, @Param("novelId") long novelId);
+
+    /** 状态机推进（⑥b→DRAFTING、⑦→QC、⑧→PASSED/REWORK/FAILED）；qc_round 一并可改。 */
+    int updateStatus(@Param("id") long id, @Param("status") String status,
+                     @Param("qcRound") Integer qcRound);
 }

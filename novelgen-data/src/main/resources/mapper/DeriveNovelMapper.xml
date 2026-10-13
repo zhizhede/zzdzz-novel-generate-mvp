@@ -12,4 +12,29 @@
         RETURNING id
     </select>
 
+    <update id="updateMeta">
+        UPDATE novels
+        SET title        = #{title},
+            summary      = #{summary},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- jsonb 留缝：protagonist 进 story_assets（⑧ QC 读主角名做指纹登记）；|| 合并保已有键 -->
+    <update id="updateProtagonist">
+        UPDATE novels
+        SET story_assets = COALESCE(story_assets, '{"v":1}'::jsonb)
+                               || jsonb_build_object('protagonist', to_jsonb(#{protagonist})),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStats">
+        UPDATE novels
+        SET char_count     = #{charCount},
+            chapter_count  = #{chapterCount},
+            updated_time   = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

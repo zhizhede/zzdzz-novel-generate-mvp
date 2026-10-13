@@ -15,4 +15,17 @@ public interface NovelMapper extends BaseMapper<NovelDO> {
 
     /** 业务列全量插入（jsonb 显式 cast，created_* 走库默认），返回新 id。 */
     long insertFull(@Param("p") NovelDO novel);
+
+    /**
+     * 元数据更新（⑥b 起名/摘要）。
+     * ⚠ 禁走 MP updateById：selectById 读回的 jsonb 列非空 → NOT_NULL 策略会把它们绑成 varchar 写回被 PG 拒。
+     */
+    int updateMeta(@Param("id") long id, @Param("title") String title, @Param("summary") String summary);
+
+    /** ⑥b 落主角名（story_assets.protagonist，jsonb 留缝；⑧ QC 读它做指纹登记与查重）。 */
+    int updateProtagonist(@Param("id") long id, @Param("protagonist") String protagonist);
+
+    /** ⑧ 统计回填（char_count / chapter_count）。 */
+    int updateStats(@Param("id") long id, @Param("charCount") int charCount,
+                    @Param("chapterCount") int chapterCount);
 }

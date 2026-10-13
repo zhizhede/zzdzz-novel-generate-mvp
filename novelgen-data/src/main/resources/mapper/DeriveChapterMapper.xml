@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.ChapterMapper">
+
+    <!-- ⑧ REWORK：显式置 NULL（MP NOT_NULL 策略做不到） -->
+    <update id="clearForRewrite">
+        UPDATE chapters
+        SET content      = NULL,
+            char_count   = NULL,
+            comment      = NULL,
+            status       = 'PLANNED',
+            updated_time = NOW()
+        WHERE novel_id = #{novelId}
+    </update>
+
+</mapper>
