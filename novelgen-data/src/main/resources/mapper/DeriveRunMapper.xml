@@ -8,12 +8,13 @@
                          param_form, param_outcome, domain_id, domain_snapshot,
                          b0, p_min, p_max, k_outline, m_beat,
                          tolerance_trace, picked_outline_ids, picked_beat_ids, picked_world_id,
-                         welded, novel_id, status, qc_round, step_status)
+                         welded, novel_id, status, qc_round, step_status, anti_repro)
         VALUES (#{p.seed}, #{p.paramWordsMin}, #{p.paramWordsMax}, #{p.paramTags}::jsonb, #{p.paramPace},
                 #{p.paramForm}, #{p.paramOutcome}, #{p.domainId}, #{p.domainSnapshot}::jsonb,
                 #{p.b0}, #{p.pMin}, #{p.pMax}, #{p.kOutline}, #{p.mBeat},
                 #{p.toleranceTrace}::jsonb, #{p.pickedOutlineIds}::jsonb, #{p.pickedBeatIds}::jsonb, #{p.pickedWorldId},
-                #{p.welded}::jsonb, #{p.novelId}, #{p.status}, #{p.qcRound}, #{p.stepStatus}::jsonb)
+                #{p.welded}::jsonb, #{p.novelId}, #{p.status}, #{p.qcRound}, #{p.stepStatus}::jsonb,
+                COALESCE(#{p.antiRepro}, FALSE))
         RETURNING id
     </select>
 

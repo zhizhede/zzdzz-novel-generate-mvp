@@ -83,4 +83,7 @@ public class RunDO extends DeriveBaseDO {
 
     /** L2 步状态 jsonb {"v":1,"steps":{...}} */
     private String stepStatus;
+
+    /** 防复刻开关（V108，默认 FALSE=一致性优先；TRUE=九轮原口径，详见列注释） */
+    private Boolean antiRepro;
 }

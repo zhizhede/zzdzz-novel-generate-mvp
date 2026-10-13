@@ -14,6 +14,7 @@ public record RunCreateDTO(
         String pace,
         Long seed,
         String form,
-        String outcome
+        String outcome,
+        Boolean antiRepro
 ) {
 }
