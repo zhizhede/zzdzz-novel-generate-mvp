@@ -62,15 +62,43 @@ public class DeriveDraftService {
             3. 主角名不得出现在禁用名单里，不得用"沈X"式单姓+单字套路名；
             4. 每章给 draft_outline（本章具体大纲 2~3 句）与 title 定稿（≤12字，可沿用或改）；
             5. 输出 cast 全书人物表（主角排首，含配角与关键路人）：name=定名人名（2~3字）、
-               role=身份一句话、gender=性别——正文各章必须严格沿用此表人名与性别，禁止同人异名；
-            6. 只输出具体稿结构，不写正文，不提素材来源与编号（对外只出现 seq）。
+               role=身份一句话、gender=性别、persona={temperament性格底色, conduct行为准则
+               （什么绝不会做/什么一定做）, speech说话方式, desire核心欲望, flaw缺陷或恐惧}
+               ——persona 优先从『题材意图』已有抽取、禁止与意图矛盾；正文各章必须严格沿用
+               此表人名/性别/persona，禁止同人异名、行为与人设相悖；
+            6. 类别含「推理」或「悬疑」时必须额外输出『真相卡』truth=
+               {reveal_chapter真相揭示章, clues:[{clue现象级线索, planted_chapter}],
+                timeline_anchors:[{fact纯数字或时刻事实, chapter}],
+                solution:{culprit,motive,method}}——
+               reveal_chapter 不得早于 max(planted_chapter)；clue 只写可观测现象，
+               禁止写成解释或出现 solution 核心内容；anchors 不得含因果结论；
+               结局章（reveal_chapter）完成 culprit/motive/method 三要素还原；非推理体裁省略 truth；
+            7. 所有体裁必须输出『brief』拆分（把题材意图拆成两段）：
+               {"premise":"人物设定/世界观/氛围/描写红线（全程可用，≤300字）",
+                "ending":"结局与真相相关段落（无结局信息给空串）"}——premise 不得含结局答案，
+               ending 集中放 twist/真凶/动机/结局走向；与意图矛盾的拆分视为无效；
+            8. 若输入带『题材意图』：人物设定、剧情走向、结局与描写红线以它为准——拍清单只作结构
+               骨架（每拍的叙事功能必须兑现），血肉（谁/在哪/发生什么）按意图重排；与意图明显冲突的
+               拍填成意图内的等价情节点，不得照抄拍文案的表层事物；
+            9. 意图若指明世界观前提（如「剑与魔法」「一切以存在魔法为前提」），该前提**决定文化取向**：
+               人名、称谓、器物、服饰、建筑、礼俗必须符合该世界观的常识体系（西式剑与魔法⇒西式人名
+               与译名、骑士/领主/修道院式称谓、相应器物），全程禁止混入异文化元素（如中式发饰、中式
+               乐器、中式家族继承话语）。cast 的 name/role/persona 一并按此取名；
+            10. 只输出具体稿结构，不写正文，不提素材来源与编号（对外只出现 seq）。
             输出 JSON 对象：
             {"title":"作品名","summary":"一句话概括","protagonist":"主角名",
-             "cast":[{"name":"…","role":"…","gender":"…"}],
+             "cast":[{"name":"…","role":"…","gender":"…",
+                      "persona":{"temperament":"…","conduct":"…","speech":"…","desire":"…","flaw":"…"}}],
+             "brief":{"premise":"…","ending":"…"},
+             "truth":{"reveal_chapter":12,
+                      "clues":[{"clue":"…","planted_chapter":3}],
+                      "timeline_anchors":[{"fact":"…","chapter":5}],
+                      "solution":{"culprit":"…","motive":"…","method":"…"}},
              "chapters":[{"no":1,"title":"章题","draft_outline":"…","beats":[{"seq":1,"filled":"…"}]}],
              "skipped":[…]}
             filled 覆盖的 seq ∪ skipped 必须恰好等于拍清单全部 seq 且不重不漏；
-            chapters 的章号集合与章数必须与章节计划一致；cast 至少 3 人且含 protagonist。只输出 JSON。
+            chapters 的章号集合与章数必须与章节计划一致；cast 至少 3 人且含 protagonist、
+            每人必含 persona 五键；brief.premise 必填。只输出 JSON。
             """;
 
     private final RunMapper runMapper;
@@ -147,7 +175,8 @@ public class DeriveDraftService {
         }
 
         DraftContext ctx = new DraftContext(beats.stream().map(BeatInstanceDO::getSeq).toList(),
-                chapters.stream().map(ChapterDO::getChapterNo).toList(), banned);
+                chapters.stream().map(ChapterDO::getChapterNo).toList(), banned,
+                reasoningGenre(run.getParamTags()));
         String user = buildUser(run, chapters, beats, labelBySeq, worldLabel, banned);
 
         JsonNode out = llmJson.ask(
@@ -199,6 +228,11 @@ public class DeriveDraftService {
         // 主角名 + 全书 cast 表进 story_assets（jsonb 留缝；⑦ 每章注入防称谓漂移，⑧ 读主角名做指纹）
         novelMapper.updateCast(novelId, out.path("protagonist").asText(""),
                 out.path("cast").toString());
+        // v3.6：brief 拆分（全体裁必落）；真相卡分段契约（推理体裁），v 升 3
+        novelMapper.updateBrief(novelId, out.path("brief").toString());
+        if (out.path("truth").isObject()) {
+            novelMapper.updateTruth(novelId, out.path("truth").toString());
+        }
         runMapper.updateStatus(runId, "DRAFTING", null);
 
         String protagonist = out.path("protagonist").asText("");
@@ -218,6 +252,9 @@ public class DeriveDraftService {
         root.put("目标节奏", run.getParamPace().toPlainString());
         root.put("结局形状", run.getParamOutcome());
         root.put("产品形态", run.getParamForm());
+        if (run.getParamIntent() != null && !run.getParamIntent().isBlank()) {
+            root.put("题材意图", run.getParamIntent());
+        }
         root.put("世界观", worldLabel);
         root.put("主线", run.getWelded() == null ? "" : run.getWelded());
         root.put("主角名禁用名单", String.join("、", banned));
@@ -242,7 +279,13 @@ public class DeriveDraftService {
 
     // ---- 解析校验 ----
 
-    record DraftContext(List<Integer> allSeqs, List<Integer> chapterNos, List<String> banned) {
+    /** 推理体裁判定：tags 含 推理/悬疑 → truth 真相卡必出（v3.4）。 */
+    static boolean reasoningGenre(String paramTags) {
+        return paramTags != null && (paramTags.contains("推理") || paramTags.contains("悬疑"));
+    }
+
+    record DraftContext(List<Integer> allSeqs, List<Integer> chapterNos, List<String> banned,
+                        boolean reasoning) {
     }
 
     static JsonNode parseDraft(JsonNode root, DraftContext ctx) {
@@ -272,6 +315,16 @@ public class DeriveDraftService {
             }
             if (nm.equals(protagonist)) {
                 castHasProtagonist = true;
+            }
+            // persona 人设卡五键（v3.4：行为一致性的数据载体）
+            JsonNode persona = c.path("persona");
+            if (!persona.isObject()) {
+                throw new LlmJson.Bad("cast 成员「" + nm + "」缺 persona 人设卡（五键对象）");
+            }
+            for (String k : List.of("temperament", "conduct", "speech", "desire", "flaw")) {
+                if (persona.path(k).asText("").trim().isEmpty()) {
+                    throw new LlmJson.Bad("cast 成员「" + nm + "」persona 缺 " + k);
+                }
             }
         }
         if (!castHasProtagonist) {
@@ -313,6 +366,57 @@ public class DeriveDraftService {
         union.addAll(skipped);
         if (union.size() != ctx.allSeqs().size()) {
             throw new LlmJson.Bad("filled ∪ skipped 必须恰好覆盖全部 " + ctx.allSeqs().size() + " 拍（当前 " + union.size() + "）");
+        }
+        // brief 拆分（v3.6 全体裁必出：premise 全程可用、ending 仅揭示章起注入）
+        JsonNode brief = root.path("brief");
+        if (!brief.isObject() || brief.path("premise").asText("").trim().isEmpty()) {
+            throw new LlmJson.Bad("必须输出 brief.premise（人物/世界观/氛围/红线摘要，≤300字）");
+        }
+        // 真相卡（推理体裁必出，v3.6 分段：clues=现象、solution=揭示章前不外发）
+        if (ctx.reasoning()) {
+            JsonNode truth = root.path("truth");
+            if (!truth.isObject()) {
+                throw new LlmJson.Bad("推理体裁（tags 含 推理/悬疑）必须输出 truth 真相卡");
+            }
+            int reveal = truth.path("reveal_chapter").asInt(-1);
+            if (!ctx.chapterNos().contains(reveal)) {
+                throw new LlmJson.Bad("truth.reveal_chapter 越界或缺失: " + reveal);
+            }
+            JsonNode sol = truth.path("solution");
+            if (!sol.isObject()
+                    || sol.path("culprit").asText("").trim().isEmpty()
+                    || sol.path("motive").asText("").trim().isEmpty()
+                    || sol.path("method").asText("").trim().isEmpty()) {
+                throw new LlmJson.Bad("truth.solution 缺 culprit/motive/method 三要素");
+            }
+            JsonNode clues = truth.path("clues");
+            if (!clues.isArray() || clues.size() < 3) {
+                throw new LlmJson.Bad("truth.clues 至少 3 条（当前 "
+                        + (clues.isArray() ? clues.size() : 0) + "）");
+            }
+            int maxPlanted = -1;
+            String culprit = sol.path("culprit").asText("");
+            for (JsonNode cl : clues) {
+                int pc = cl.path("planted_chapter").asInt(-1);
+                String clueText = cl.path("clue").asText("").trim();
+                if (clueText.isEmpty() || !ctx.chapterNos().contains(pc)) {
+                    throw new LlmJson.Bad("truth.clues 有缺 clue 或 planted_chapter 越界: " + pc);
+                }
+                if (!culprit.isEmpty() && clueText.contains(culprit)) {
+                    throw new LlmJson.Bad("clue「" + clueText + "」直接出现 solution 内容——"
+                            + "clue 只许写可观测现象，不许写解释或答案");
+                }
+                maxPlanted = Math.max(maxPlanted, pc);
+            }
+            if (reveal < maxPlanted) {
+                throw new LlmJson.Bad("truth.reveal_chapter(" + reveal + ") 不得早于最晚埋设章(" + maxPlanted + ")");
+            }
+            for (JsonNode a : truth.path("timeline_anchors")) {
+                if (a.path("fact").asText("").trim().isEmpty()
+                        || !ctx.chapterNos().contains(a.path("chapter").asInt(-1))) {
+                    throw new LlmJson.Bad("truth.timeline_anchors 有缺 fact 或 chapter 越界");
+                }
+            }
         }
         return root;
     }
