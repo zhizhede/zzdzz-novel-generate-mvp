@@ -36,6 +36,15 @@ public class RunDO extends DeriveBaseDO {
     /** 结局形状：循环/开放/闭合（⑤seed 抽） */
     private String paramOutcome;
 
+    /** 题材意图 brief（v3.3 意图层；⑥b/⑦ 注入生成提示，⑧ domain 让口；不参与⑤过滤） */
+    private String paramIntent;
+
+    /** 目标文风自由文本（v3.6 方案B；⑦ 注入优先于成品书 style_profile，冲突处弃源书习惯） */
+    private String paramStyle;
+
+    /** 类别归一化记录 jsonb（v3.5 ⑤前置归一化；param_tags=映射后池键，本列存 raw+映射明细） */
+    private String tagsNorm;
+
     /** 抽中域格 → domain_cell.id */
     private Long domainId;
 
@@ -86,4 +95,7 @@ public class RunDO extends DeriveBaseDO {
 
     /** 防复刻开关（V108，默认 FALSE=一致性优先；TRUE=九轮原口径，详见列注释） */
     private Boolean antiRepro;
+
+    /** 输入思路预审记录 jsonb（V114；入参 intakeOptimize 开启时⑤预审，{v,score,holes,changes,source,error?}） */
+    private String intakeReview;
 }

@@ -107,11 +107,57 @@ public class DeriveSampleService {
     private final LlmJson llmJson;
     private final ObjectMapper om;
 
+    public static final String NODE_TAG_NORM = "derive_tag_norm";
+
+    /** 输入思路 AI 优化（intakeOptimize 开关，V114；默认关）。 */
+    public static final String NODE_INTAKE = "derive_intake_review";
+
+    /** v1 思路预审提示词：审思路本身（非成稿），保留骨架只修硬伤，输出可直接使用的优化稿。 */
+    static final String INTAKE_PROMPT = """
+            你在做「创作思路预审」：开写之前鉴定用户的思路是否符合目标成品小说需求，
+            指出硬伤并给出更优的完整思路。
+            输入：目标参数（字数区间/类别/节奏/形态/文风）+ 用户创作思路全文。
+            审「思路本身」（不是审成稿），维度：
+            1. 逻辑可行性：设定/行为/环境的硬漏洞（例：伪装物在日常场景必然被识破、设定过度兜底）；
+            2. 伏笔与回收：埋下的线是否都有回收方案（例：开篇命案悬置不收）；
+            3. 人物动机：关键人物行为是否有可成立的动机；
+            4. 目标匹配：思路体量是否匹配字数区间与节奏（慢热/快热）；红线合规（不写令人不适的描写）。
+            规则：
+            - 保留用户原意、骨架、体裁与结局形状，只修硬伤，禁止换题材重编；
+            - optimized_intent = 优化后的完整创作思路，自包含、可直接作为后续生成输入；
+              修改写成对思路本身的设定级表述（如「主角极少出门，遛狗改为在楼道窗台」），
+              禁止「删掉第X章」这类针对未生成文本的指令；
+            - 思路本身无硬伤时，optimized_intent 原样返回用户思路。
+            只输出 JSON 对象：
+            {"score":0.0,
+             "holes":["按严重度排序的硬伤，每条≤60字"],
+             "changes":["对应修改，每条≤60字"],
+             "optimized_intent":"优化后的完整创作思路"}
+            """;
+
+    /** v3.5 类别归一化提示词（只映射池内键；%s=池键清单；全部本就是池键时恒等直通不调用）。 */
+    static final String TAG_NORM_PROMPT = """
+            你在做类别标签归一化：把用户的题材词映射到素材池既有类别键。
+            池内可用键（只能用这些）：%s
+            规则：
+            - 每个输入词映射到池内语义最近的键，禁止发明池外键；
+            - confidence 0~1：直接对应 ≥0.9，明显相关 0.6~0.85，勉强 <0.6；
+            - mapping 条数=输入条数，input 与输入顺序一一对应；
+            - 如实给 confidence，不要为过关虚报高值。
+            只输出 JSON 对象：{"mapping":[{"input":"词","key":"池键","confidence":0.9,"reason":"≤15字"}]}
+            """;
+
     // ================= 主流程 =================
 
     /** 建 run：5.1 → 5.2 → 插档（SAMPLING）→ 5.3 焊接 → 回填（PLANNING）。无事务（LLM 不进事务）。 */
     public RunVO create(RunCreateDTO dto) {
         validate(dto);
+        // ---- 输入思路 AI 优化（v1，开关默认关）：预审通过则以优化稿顶替 intent 进后续链路 ----
+        IntakeResult intake = Boolean.TRUE.equals(dto.intakeOptimize())
+                ? optimizeIntake(dto)
+                : new IntakeResult(dto.intent(), null);
+        String effectiveIntent = intake.intent() == null || intake.intent().isBlank()
+                ? null : intake.intent().strip();
         long seed = dto.seed() != null ? dto.seed() : ThreadLocalRandom.current().nextLong();
         Random rnd = new Random(seed);
 
@@ -147,8 +193,57 @@ public class DeriveSampleService {
 
         ObjectNode trace = om.createObjectNode();
 
+        // ---- 5.2.0 类别归一化（v3.5：原始 tags → 池内键；全命中=恒等免 LLM，否则一次 LLM 映射、≥0.6 才过）----
+        List<String> rawTags = dto.tags();
+        Set<String> poolKeys = new LinkedHashSet<>();
+        for (Row r : outlineRows) {
+            poolKeys.addAll(r.cat().keySet());
+        }
+        for (Row r : beatRows) {
+            poolKeys.addAll(r.cat().keySet());
+        }
+        List<String> tags;
+        List<NormStep> normSteps = new ArrayList<>();
+        if (rawTags.stream().allMatch(poolKeys::contains)) {
+            tags = new ArrayList<>(rawTags);
+            for (String t : rawTags) {
+                normSteps.add(new NormStep(t, t, 1.0, "池键直用"));
+            }
+        } else {
+            String keys = String.join("、", poolKeys);
+            List<NormStep> steps = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_TAG_NORM, null, null,
+                            List.of(LlmPort.Message.system(TAG_NORM_PROMPT.formatted(keys)),
+                                    LlmPort.Message.user("输入题材词（按序）：" + rawTags)),
+                            0.1),
+                    root -> parseNorm(root, rawTags, poolKeys), 3);
+            normSteps = steps;
+            LinkedHashSet<String> mapped = new LinkedHashSet<>();
+            for (NormStep s : steps) {
+                mapped.add(s.key());
+            }
+            tags = new ArrayList<>(mapped);
+            log.info("⑤类别归一化：{} → {}（LLM 映射，steps={}）", rawTags, tags, steps.size());
+        }
+        if (tags.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "归一化后 tags 为空");
+        }
+        ObjectNode tagsNorm = om.createObjectNode();
+        tagsNorm.put("v", 1);
+        ArrayNode rawArr = tagsNorm.putArray("raw");
+        rawTags.forEach(rawArr::add);
+        ArrayNode mappedArr = tagsNorm.putArray("mapped");
+        tags.forEach(mappedArr::add);
+        ArrayNode stepArr = tagsNorm.putArray("steps");
+        for (NormStep s : normSteps) {
+            ObjectNode n = stepArr.addObject();
+            n.put("input", s.input());
+            n.put("key", s.key());
+            n.put("confidence", s.confidence());
+            n.put("reason", s.reason() == null ? "" : s.reason());
+        }
+
         // ---- 5.2.1 类别过滤（丢最弱次标签→θ降档，全档位取并集，每档命中进 trace）----
-        List<String> tags = dto.tags();
         Set<Long> catOutIds = new LinkedHashSet<>();
         Set<Long> catBeatIds = new LinkedHashSet<>();
         ArrayNode catArr = trace.putArray("cat");
@@ -239,15 +334,19 @@ public class DeriveSampleService {
         String main = tags.get(0);
         Row world = weightedPick(worldRows.stream()
                 .filter(r -> r.cat().containsKey(main)).toList(), main, rnd);
-        List<DomainCellDO> cellEligible = domainCellMapper.selectList(new LambdaQueryWrapper<DomainCellDO>()
-                        .eq(DomainCellDO::getEnabled, true)
-                        .orderByAsc(DomainCellDO::getId)).stream()
+        List<DomainCellDO> allCells = domainCellMapper.selectList(new LambdaQueryWrapper<DomainCellDO>()
+                .eq(DomainCellDO::getEnabled, true)
+                .orderByAsc(DomainCellDO::getId));
+        List<DomainCellDO> cellEligible = allCells.stream()
                 .filter(c -> parseCatJson(c.getCats()).containsKey(main))
                 .toList();
         DomainCellDO cell = weightedPickCell(cellEligible, main, rnd);
         if (cell == null) {
+            Set<String> cellKeys = new LinkedHashSet<>();
+            allCells.forEach(c -> cellKeys.addAll(parseCatJson(c.getCats()).keySet()));
             throw new BizException(ErrorCode.PARAM_ERROR,
-                    "域格池中没有承载主标签「" + main + "」的启用域格——先走 ④c 域格归纳");
+                    "域格池中没有承载主标签「" + main + "」的启用域格——有域格的键：" + String.join("、", cellKeys)
+                            + "（把主标签归一化到其中之一）");
         }
 
         // ---- 插档（SAMPLING；jsonb 七列走 insertFull）----
@@ -259,6 +358,10 @@ public class DeriveSampleService {
         run.setParamPace(pace);
         run.setParamForm(form);
         run.setParamOutcome(outcome);
+        run.setParamIntent(effectiveIntent);
+        run.setParamStyle(dto.style() == null || dto.style().isBlank() ? null : dto.style().strip());
+        run.setIntakeReview(intake.review() == null ? null : intake.review().toString());
+        run.setTagsNorm(tagsNorm.toString());
         run.setDomainId(cell.getId());
         run.setDomainSnapshot(cellSnapshot(cell));
         run.setB0(b0);
@@ -311,7 +414,7 @@ public class DeriveSampleService {
                 wordsPred, cell.getName(), weldedCode == null ? "无" : weldedCode, btFallback);
         return new RunVO(runId, seed, b0, pMin, pMax, wordsPred,
                 pickedOutlines.size(), pickedBeats.size(), form, outcome,
-                cell.getName(), weldedCode, "PLANNING");
+                cell.getName(), weldedCode, "PLANNING", tags);
     }
 
     // ================= 池加载 =================
@@ -635,6 +738,9 @@ public class DeriveSampleService {
         } catch (NumberFormatException e) {
             throw new BizException(ErrorCode.PARAM_ERROR, "pace 非法数字");
         }
+        if (Boolean.TRUE.equals(dto.intakeOptimize()) && (dto.intent() == null || dto.intent().isBlank())) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "intakeOptimize 开启时 intent 必填（预审对象就是创作思路本身）");
+        }
     }
 
     static String tagsJson(List<String> tags) {
@@ -646,6 +752,102 @@ public class DeriveSampleService {
             sb.append('"').append(tags.get(i)).append("\":1");
         }
         return sb.append('}').toString();
+    }
+
+    /** 归一化映射一步（落 run.tags_norm.steps；v3.5）。 */
+    record NormStep(String input, String key, double confidence, String reason) {
+    }
+
+    /** 思路预审结果：优化后 intent + 评审明细（失败时原思路 + error 记录，fail-open）。 */
+    record IntakeResult(String intent, ObjectNode review) {
+    }
+
+    /**
+     * 输入思路 AI 优化（v1，intakeOptimize 开启时）：LLM 预审并产出优化稿。
+     * LlmJson 重试耗尽后 fail-open——用原思路建 run，error 落 intake_review，不阻断。
+     */
+    IntakeResult optimizeIntake(RunCreateDTO dto) {
+        String original = dto.intent().strip();
+        ObjectNode review = om.createObjectNode();
+        review.put("v", 1);
+        try {
+            JsonNode out = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_INTAKE, null, null,
+                            List.of(LlmPort.Message.system(INTAKE_PROMPT),
+                                    LlmPort.Message.user(intakeUser(dto))),
+                            0.3),
+                    DeriveSampleService::parseIntake, 3);
+            String optimized = out.path("optimized_intent").asText("").strip();
+            review.put("score", out.path("score").asDouble(-1));
+            review.set("holes", out.path("holes"));
+            review.set("changes", out.path("changes"));
+            boolean changed = !optimized.equals(original);
+            review.put("source", changed ? "OPTIMIZED" : "USER");
+            log.info("⑤思路预审：score={} holes={} source={}",
+                    review.path("score").asDouble(), review.path("holes").size(),
+                    review.path("source").asText());
+            return new IntakeResult(optimized, review);
+        } catch (Exception e) {
+            log.warn("⑤思路预审失败（fail-open，用原思路）：{}", e.getMessage());
+            review.put("source", "USER");
+            review.put("error", e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            return new IntakeResult(original, review);
+        }
+    }
+
+    /** 思路预审校验（不过喂回重试）：optimized_intent 非空、score∈[0,10]、holes/changes 为数组。 */
+    static JsonNode parseIntake(JsonNode root) {
+        if (root.path("optimized_intent").asText("").trim().isEmpty()) {
+            throw new LlmJson.Bad("缺 optimized_intent（优化后的完整创作思路；无修改时原样返回用户思路）");
+        }
+        double score = root.path("score").asDouble(-1);
+        if (score < 0 || score > 10) {
+            throw new LlmJson.Bad("score 须为 0~10，当前 " + score);
+        }
+        if (!root.path("holes").isArray() || !root.path("changes").isArray()) {
+            throw new LlmJson.Bad("holes/changes 须为数组（可为空数组）");
+        }
+        return root;
+    }
+
+    String intakeUser(RunCreateDTO dto) {
+        ObjectNode root = om.createObjectNode();
+        root.put("字数区间", dto.wordsMin() + "~" + dto.wordsMax());
+        root.put("类别", String.join("、", dto.tags()));
+        root.put("节奏", dto.pace());
+        root.put("形态", dto.form() == null || dto.form().isBlank() ? "未指定（系统抽）" : dto.form());
+        root.put("文风", dto.style() == null || dto.style().isBlank() ? "未指定" : dto.style());
+        root.put("创作思路", dto.intent());
+        return root.toString();
+    }
+
+    /** 归一化解析：条数/input 顺序/池内键/置信 ≥0.6 逐项校验，不过喂回（末次原因带池键清单）。 */
+    static List<NormStep> parseNorm(JsonNode root, List<String> rawTags, Set<String> poolKeys) {
+        String keys = String.join("、", poolKeys);
+        JsonNode arr = root.path("mapping");
+        if (!arr.isArray() || arr.size() != rawTags.size()) {
+            throw new LlmJson.Bad("mapping 条数必须 = 输入 " + rawTags.size() + "；池键=" + keys);
+        }
+        List<NormStep> out = new ArrayList<>();
+        for (int i = 0; i < rawTags.size(); i++) {
+            JsonNode m = arr.get(i);
+            String input = m.path("input").asText("").trim();
+            String key = m.path("key").asText("").trim();
+            double conf = m.path("confidence").asDouble(-1);
+            if (!rawTags.get(i).equals(input)) {
+                throw new LlmJson.Bad("mapping[" + i + "].input 应为「" + rawTags.get(i)
+                        + "」，当前「" + input + "」；池键=" + keys);
+            }
+            if (!poolKeys.contains(key)) {
+                throw new LlmJson.Bad("key「" + key + "」不在池键，禁止发明；池键=" + keys);
+            }
+            if (conf < 0.6) {
+                throw new LlmJson.Bad("「" + input + "」映射 confidence=" + conf
+                        + " <0.6，无高置信对应——请在池键内重选最接近者，或如实说明无法映射；池键=" + keys);
+            }
+            out.add(new NormStep(input, key, conf, m.path("reason").asText("")));
+        }
+        return out;
     }
 
     String cellSnapshot(DomainCellDO c) {
