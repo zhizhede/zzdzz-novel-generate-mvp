@@ -52,7 +52,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * ⑧ 质检（v3.2 §⑧：脚本 7 项硬判 + LLM 快检 4 项 → qc_report）。
+ * ⑧ 质检（v3.4：脚本 7 项硬判 + LLM 快检 5 项 → qc_report）。
  *
  * <p>脚本项全硬判（grep/计数，不口头 PASS）；LLM 快检 fail-open 由脚本兜底。
  * 通过 → PASSED + calibration 回填 + work_fingerprint 登记（主角名+抽中弧 BRIDGE）
@@ -73,18 +73,34 @@ public class DeriveQcService {
             "O-P\\d|S-P\\d|W-P\\d|O-F\\d|素材池|素材来源|抽取稿|标签层|约束采样|域格|拍实例|拍素材|弧素材|beat_type|arc_fit|label_text|工作流");
 
     static final String QC_PROMPT = """
-            你是小说质检员。输入含：域格、类别与目标节奏、结局形状、产品形态、
-            主线、拍清单（seq/拍型/filled 情节点/归属章）、各章（章号/章题/章纲/正文）。
-            只依据给出材料判断，四项各给 pass 与 note（note ≤40字）：
+            你是小说质检员。输入含：域格、类别与目标节奏、结局形状、产品形态、主线、
+            拍清单（seq/拍型/filled 情节点/归属章）、各章（章号/章题/章纲/正文）、
+            人物人设卡、真相卡（若有）、世界观前提（若有）、题材意图（若有）。
+            只依据给出材料判断，五项各给 pass 与 note（note ≤40字）：
             1. fulfillment：每个非 SKIPPED 拍在对应章正文是否兑现（丢了哪些 seq 列出）；
             2. pacing：节奏是否符合目标（锚点 0.75/1.00 要求前 3 章内进冲突；0.00/0.25 允许铺垫）；
-            3. voice：跨章人物语气/称谓是否一致；
-            4. domain：事件是否在域格关系动作内成立、是否混入反域元素。
+            3. voice：①跨章人物语气/称谓是否一致；②每个出场角色本章行为能否由其 persona
+               行为准则与欲望推出——推不出的点名（角色X做Y与其人设Z相悖）；persona 缺失的
+               旧角色只查①并在 note 注明「无人设卡」；③文风贴合（若输入带『文风卡』或『目标文风』：
+               句长/叙事密度/成语文言度/意象系的主要偏离点名；无卡跳过并注明「无文风基准」）；
+            4. domain：事件是否在域格关系动作内成立、是否混入反域元素；若输入带『题材意图』，
+               以意图的人物设定与剧情走向为预期基准——意图内的合理细节与人物不因超出素材域单独判负，
+               只判真冲突（反域元素、与意图事实矛盾）；若输入带『世界观前提』，人名/器物/礼俗/称谓
+               必须符合该世界观体系，混入异文化元素判 fail——**成语堆砌、文言腔、诗词化旁白**
+               同计文化取向违例；
+            5. logic：跨章一致与推理自洽——①关键数字/时间戳前后一致（金额、时刻、人数）；
+               ②证据与结论挂钩（定性须有物证或已落实证言支撑，纯推测链不得作结案根据）；
+               ③线索公平（谜面核心信息须在揭示前给到读者，不得用"没打听到"式省略堵死诡计）；
+               ④若输入带『真相卡』：按卡对账——真凶/动机/手法在结局章是否明确还原，
+               埋设线索是否按 planted_chapter 出现，禁止卡外新事实；无真相卡时按①②③判；
+               ⑤剧透检查：若带 truth.reveal_chapter——reveal 之前的章节出现 solution 内容或
+               暗示性写法（引号反讽、旁白剧透、角色提前知情）判 fail。
             输出 JSON 对象（只输出 JSON）：
             {"fulfillment":{"pass":true,"note":"…"},
              "pacing":{"pass":true,"note":"…"},
              "voice":{"pass":true,"note":"…"},
              "domain":{"pass":true,"note":"…"},
+             "logic":{"pass":true,"note":"…"},
              "issues":["可执行的问题描述，没有则空数组"]}
             """;
 
@@ -136,16 +152,16 @@ public class DeriveQcService {
 
         boolean scriptPass = script.stream().allMatch(CheckItem::pass);
 
-        // ---- LLM 快检 4 项（脚本全过才跑，省一轮钱；fail-open 由 issues 收口）----
+        // ---- LLM 快检 5 项（脚本全过才跑，省一轮钱；异常 fail-open 由 issues 收口）----
         JsonNode llmResult = null;
         List<String> llmIssues = new ArrayList<>();
         boolean llmPass = true;
         if (scriptPass) {
             try {
                 llmResult = llmCheck(run, novel, chapters, beats, llmIssues);
-                // v3.2 口径：判定只看四项 pass；issues 数组是建议清单，记录但不参与判定
+                // v3.4 口径：判定只看五项 pass；issues 数组是建议清单，记录但不参与判定
                 llmPass = true;
-                for (String key : List.of("fulfillment", "pacing", "voice", "domain")) {
+                for (String key : List.of("fulfillment", "pacing", "voice", "domain", "logic")) {
                     if (!llmResult.path(key).path("pass").asBoolean(true)) {
                         llmPass = false;
                     }
@@ -234,7 +250,7 @@ public class DeriveQcService {
         int scriptPassedCount = (int) script.stream().filter(CheckItem::pass).count();
         log.info("⑧质检：runId={} round={} script={}/{} llm={} verdict={} issues={}",
                 runId, roundNo, scriptPassedCount, script.size(),
-                scriptPass ? (llmPass ? "4/4" : "fail") : "skip", verdict, issues.size());
+                scriptPass ? (llmPass ? "5/5" : "fail") : "skip", verdict, issues.size());
         return new QcVO(runId, novelId, roundNo, verdict,
                 scriptPassedCount, script.size(), scriptPass, llmPass,
                 issues, wordsActual, chapterAvg, pActual);
@@ -430,12 +446,12 @@ public class DeriveQcService {
     }
 
     JsonNode parseQc(JsonNode root, List<String> issues) {
-        for (String key : List.of("fulfillment", "pacing", "voice", "domain")) {
+        for (String key : List.of("fulfillment", "pacing", "voice", "domain", "logic")) {
             JsonNode n = root.path(key);
             if (!n.has("pass")) {
                 throw new LlmJson.Bad("缺 " + key + ".pass");
             }
-            if (!n.path("pass").asBoolean()) {
+            if (!n.path("pass").asBoolean(false)) {
                 issues.add(key + "：" + n.path("note").asText("未通过"));
             }
         }
@@ -452,6 +468,27 @@ public class DeriveQcService {
         root.put("目标节奏", run.getParamPace().toPlainString());
         root.put("结局形状", run.getParamOutcome());
         root.put("产品形态", run.getParamForm());
+        if (run.getParamIntent() != null && !run.getParamIntent().isBlank()) {
+            root.put("题材意图", run.getParamIntent());
+        }
+        String wv = DeriveWriteService.extractWorldviewPremise(run.getParamIntent());
+        if (wv != null) {
+            root.put("世界观前提", wv);
+        }
+        // ---- 文风卡（v3.6 方案B：voice ③ 文风贴合的对照基准；优先级与⑦同构）----
+        if (run.getParamStyle() != null && !run.getParamStyle().isBlank()) {
+            root.put("目标文风", run.getParamStyle());
+        } else {
+            JsonNode sp = DeriveWriteService.readTreeSafe(novel.getStorySettings()).path("style_profile");
+            if (sp.isObject()) {
+                root.set("文风卡", sp);
+            }
+        }
+        JsonNode assets = DeriveWriteService.readTreeSafe(novel.getStoryAssets());
+        root.set("人物人设卡", assets.path("cast"));
+        if (assets.path("truth").isObject()) {
+            root.set("真相卡", assets.path("truth"));
+        }
         root.put("主线", run.getWelded() == null ? "" : run.getWelded());
         var bArr = root.putArray("拍清单");
         for (BeatInstanceDO b : beats) {

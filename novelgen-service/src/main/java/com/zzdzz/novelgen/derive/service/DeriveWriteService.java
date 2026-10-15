@@ -56,10 +56,18 @@ public class DeriveWriteService {
     /** 禁词：素材编号与工作流痕迹（工程卫生，与防复刻开关无关，恒开） */
     static final Pattern FORBIDDEN = Pattern.compile("O-P\\d|S-P\\d|W-P\\d|O-F\\d|素材来源|抽取稿|标签层");
 
-    /** 九轮原口径：独立干净会话（anti_repro=ON 时用）。 */
+    /** 剧透禁令（v3.6 方案A）：揭示章前每章必注入——反暗示 + 无知之幕。 */
+    static final String SPOILER_BAN =
+            "本章处于揭示章之前，真相未揭晓。禁止以任何方式写出或暗示真相——"
+            + "禁止给关键名词加引号/着重号/破折号强调，禁止“其实/仿佛/不知道的是”式旁白反讽，"
+            + "禁止任何角色提前知情或言及；写主角视角必须按主角当前认知写（无知之幕）："
+            + "他不知道的事就是不知道。线索只按埋设表以「现象」自然呈现，不加任何指向性修辞。";
+
+    /** 九轮原口径：独立干净会话（anti_repro=ON 时用）。v3.6：文化语感/剧透禁令/密度/文风卡。 */
     static final String WRITE_PROMPT_INDEPENDENT = """
             你在按章节计划写一章小说正文。独立干净会话：只依据给出的全局设定与本章材料，不参考其他章节原文。
-            全局：作品名、域格、类别与目标节奏、结局形状、世界观条目、标签层主线。
+            全局：作品名、域格、类别与目标节奏、结局形状、世界观条目、标签层主线、
+            创作前提（若有）、真相卡埋设表或完整真相卡（若有）、文风卡/目标文风（若有）。
             本章：章号/章题/预算字数/计划节奏、本章拍实例（seq + 具体情节点）。
             要求：
             1. 正文字数 = 预算 ±10%（按中文字数计，不含章注）；
@@ -68,24 +76,47 @@ public class DeriveWriteService {
             4. 事件在域格内成立；人名与称谓必须沿用"全书人名锚点"与具体稿，禁止同人异名/换性/换视角；
             系列单卷卷末留钩子、独立短篇闭合；
             5. 禁止出现真实作品名、素材编号（O-P/S-P/W-P/O-F）、"素材/抽取/标签层"等来源痕迹；
-            6. 只输出正文本身；正文最后单独一行输出章注：
+            6. 『世界观前提』决定文化取向：人名/称谓/器物/服饰/建筑/礼俗符合该体系，禁止异文化元素；
+            语言肌理同禁：不堆中文成语、不用文言句式与诗词化旁白，对话按人物身份与该世界观语感，
+            环境描写用该文化感官库；
+            7. 若状态含『创作前提』：人物设定/氛围/描写红线以此为准，与章纲冲突以章纲为骨架、意图为血肉；
+            若含『结局段』：真相相关按其还原，不引入卡外事实；
+            8. 真相卡（若有）：clues 按 planted_chapter 埋为「现象」，不加指向性修辞；anchors 数字全书一致；
+            若同时含『剧透禁令』：揭示前章节按在场角色认知边界写作（无知之幕）——禁止给关键名词加
+            引号/着重号、禁止"其实/仿佛"式旁白暗示、禁止任何角色提前知情；
+            9. 叙事密度优先：每段须推进情节/人物/信息之一；前情仅供事实对齐，禁止复述与回顾式过渡；
+            单处环境描写 ≤2 句；慢热=铺垫节奏，不等于注水；
+            10. 若状态含『文风卡』或『目标文风』：句式/对话比/叙事密度/用语按卡执行，no_go 逐条规避；
+            11. 只输出正文本身；正文最后单独一行输出章注：
                <!-- 本章X字，挂拍：seq,seq -->
             不要输出任何解释、标题行或 markdown 围栏。
             """;
 
-    /** 连续创作会话（anti_repro=OFF 默认，harness）：前情+cast 是称谓与事实的锚。 */
+    /** 连续创作会话（anti_repro=OFF 默认，harness）。v3.6：文化语感/剧透禁令/密度/文风卡。 */
     static final String WRITE_PROMPT_CONTINUOUS = """
-            你在按章节计划写一章小说正文。输入含全书状态包：cast 人物表、前情（前章正文尾段）、
-            全书章纲概览、本章拍实例——你已"读过前文"，必须与前文保持同一部书的连续性。
+            你在按章节计划写一章小说正文。输入含全书状态包：cast 人物表（含人设卡）、前情（前章正文尾段）、
+            全书章纲概览、本章拍实例、创作前提/真相卡（若有）——你已"读过前文"，必须保持同一部书的连续性。
             要求：
             1. 正文字数 = 预算 ±10%（按中文字数计，不含章注）；
             2. 必须兑现本章全部拍实例（情节按 seq 顺序展开，可丰满不可丢失）；
-            3. 人名、性别、身份、称谓严格沿用 cast 表，禁止同人异名/换性/换视角/中途换称谓；
+            3. 人名、性别、身份、称谓严格沿用 cast 表，行为必须符合其 persona 行为准则与欲望，
+            禁止同人异名/换性/换视角/中途换称谓/行为与人设相悖；
             重要配角一旦在前文出场，本章称呼必须与前文一致；
             4. 已在前情确定的事实（关键物件、已发生事件、人物关系）不得推翻或漂移；
             5. 类别核心元素本章至少出现 1 次；事件在域格内成立；
             6. 禁止出现真实作品名、素材编号（O-P/S-P/W-P/O-F）、"素材/抽取/标签层"等来源痕迹；
-            7. 只输出正文本身；正文最后单独一行输出章注：
+            7. 『世界观前提』决定文化取向：人名/称谓/器物/服饰/建筑/礼俗符合该体系，禁止异文化元素；
+            语言肌理同禁：不堆中文成语、不用文言句式与诗词化旁白，对话按人物身份与该世界观语感，
+            环境描写用该文化感官库；
+            8. 若状态含『创作前提』：人物设定/氛围/描写红线以此为准；若含『结局段』：真相按其还原，
+            不引入卡外事实；
+            9. 真相卡（若有）：clues 按 planted_chapter 埋为「现象」；anchors 数字全书一致；
+            若同时含『剧透禁令』：揭示前章节按在场角色认知边界写作（无知之幕）——禁止给关键名词加
+            引号/着重号、禁止"其实/仿佛"式旁白暗示、禁止任何角色提前知情；
+            10. 叙事密度优先：每段须推进情节/人物/信息之一；前情仅供事实对齐，禁止复述与回顾式过渡；
+            单处环境描写 ≤2 句；慢热=铺垫节奏，不等于注水；
+            11. 若状态含『文风卡』或『目标文风』：句式/对话比/叙事密度/用语按卡执行，no_go 逐条规避；
+            12. 只输出正文本身；正文最后单独一行输出章注：
                <!-- 本章X字，挂拍：seq,seq -->
             不要输出任何解释、标题行或 markdown 围栏。
             """;
@@ -203,6 +234,27 @@ public class DeriveWriteService {
 
     // ---- 输入（状态包） ----
 
+    /** 从意图里抽『世界观前提』句（含关键词的句子）；无则 null——朴素匹配（v3.4），不做 NLP。 */
+    static String extractWorldviewPremise(String intent) {
+        if (intent == null || intent.isBlank()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String s : intent.split("[。；\\n！？]")) {
+            String t = s.strip();
+            if (t.isEmpty()) {
+                continue;
+            }
+            if (t.contains("世界观") || t.contains("为前提") || t.contains("大前提")) {
+                if (sb.length() > 0) {
+                    sb.append('；');
+                }
+                sb.append(t);
+            }
+        }
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
     String buildUser(RunDO run, NovelDO novel, ChapterDO ch, List<BeatInstanceDO> beats,
                      List<ChapterDO> allChapters, boolean independent) {
         ObjectNode root = STATIC_MAPPER.createObjectNode();
@@ -212,12 +264,56 @@ public class DeriveWriteService {
         root.put("目标节奏", run.getParamPace().toPlainString());
         root.put("结局形状", run.getParamOutcome());
         root.put("产品形态", run.getParamForm());
+        JsonNode assets = readTreeSafe(novel.getStoryAssets());
+
+        // ---- 创作前提/结局段（v3.6 brief 拆分：premise 全程、ending 仅揭示章起；老 run 回退 intent 全文+警示）----
+        JsonNode brief = assets.path("brief");
+        int revealCh = assets.path("truth").path("reveal_chapter").asInt(Integer.MAX_VALUE);
+        boolean beforeReveal = ch.getChapterNo() < revealCh;
+        if (brief.path("premise").asText("").trim().isEmpty()) {
+            if (run.getParamIntent() != null && !run.getParamIntent().isBlank()) {
+                root.put("题材意图（含结局真相：揭示前只取人物/氛围/红线，严禁暗示结局）",
+                        run.getParamIntent());
+            }
+        } else {
+            root.put("创作前提（人物设定/世界观/氛围/描写红线以此为准；与章纲冲突以章纲为骨架、意图为血肉）",
+                    brief.path("premise").asText(""));
+            if (!beforeReveal && !brief.path("ending").asText("").trim().isEmpty()) {
+                root.put("结局段（真相相关，本章起可用）", brief.path("ending").asText(""));
+            }
+        }
+        String wv = extractWorldviewPremise(run.getParamIntent());
+        if (wv != null) {
+            root.put("世界观前提（文化取向硬约束：人名/称谓/器物/服饰/建筑/礼俗符合该体系，禁止异文化元素）", wv);
+        }
+        // ---- 文风卡（v3.6）：param_style 目标文风 > 源书 style_profile ----
+        if (run.getParamStyle() != null && !run.getParamStyle().isBlank()) {
+            root.put("目标文风（优先于源书文风卡；冲突处以此为准）", run.getParamStyle());
+        } else {
+            JsonNode sp = readTreeSafe(novel.getStorySettings()).path("style_profile");
+            if (sp.isObject()) {
+                root.set("文风卡（源书画像；句式/对话比/密度/用语按此执行，no_go 逐条规避）", sp);
+            }
+        }
         root.put("主线", run.getWelded() == null ? "" : run.getWelded());
 
         // ---- 状态包：cast 人物表（harness 核心，任何模式都给——它不是"其他章原文"）----
-        JsonNode assets = readTreeSafe(novel.getStoryAssets());
         root.put("主角名", assets.path("protagonist").asText(""));
         root.set("cast人物表", assets.path("cast"));
+
+        // ---- 真相卡按章分段注入（v3.6 剧透门禁核心：揭示前只给埋设表+禁令，solution 不下凡）----
+        JsonNode truth = assets.path("truth");
+        if (truth.path("solution").isObject() || truth.path("culprit").asText("").length() > 0) {
+            if (beforeReveal) {
+                ObjectNode sched = root.putObject("真相卡·埋设表");
+                sched.put("reveal_chapter", revealCh == Integer.MAX_VALUE ? -1 : revealCh);
+                sched.set("clues", truth.path("clues"));
+                sched.set("timeline_anchors", truth.path("timeline_anchors"));
+                root.put("剧透禁令", SPOILER_BAN);
+            } else {
+                root.set("真相卡（含 solution，本章起可还原真相）", truth);
+            }
+        }
 
         var c = root.putObject("本章");
         c.put("no", ch.getChapterNo());
