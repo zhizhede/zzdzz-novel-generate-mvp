@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.derive.mapper.AssetBeatMapper;
 import com.zzdzz.novelgen.derive.mapper.AssetWorldMapper;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
+import com.zzdzz.novelgen.derive.mapper.DraftHistoryMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
@@ -19,6 +20,7 @@ import com.zzdzz.novelgen.model.entity.derive.AssetBeatDO;
 import com.zzdzz.novelgen.model.entity.derive.AssetWorldDO;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
+import com.zzdzz.novelgen.model.entity.derive.DraftHistoryDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
@@ -108,6 +110,7 @@ public class DeriveDraftService {
     private final AssetWorldMapper worldMapper;
     private final AssetBeatMapper beatMapper;
     private final WorkFingerprintMapper fingerprintMapper;
+    private final DraftHistoryMapper draftHistoryMapper;
     private final LlmJson llmJson;
 
     /** ⑥b：LLM 生成具体稿 → 回填五张表 + run→DRAFTING。 */
@@ -217,7 +220,8 @@ public class DeriveDraftService {
             chapterMapper.updateById(ch);
         }
         if (rework) {
-            // ⑧打回后重跑：清旧正文让⑦重写（MP NOT_NULL 策略 set null 无效，走显式 SQL）
+            // ⑧打回后重跑：先把本轮成稿归档（V113 draft_history；run11 清稿丢稿教训），再清旧正文让⑦重写
+            archiveRejectedDrafts(run, novelId, chapters);
             chapterMapper.clearForRewrite(novelId);
         }
 
@@ -240,6 +244,37 @@ public class DeriveDraftService {
                 runId, novelId, finalTitle, protagonist, filledCount, skipped.size());
         return new DraftVO(runId, novelId, finalTitle, protagonist,
                 chapters.size(), filledCount, skipped.size());
+    }
+
+    /**
+     * 打回归档（V113 draft_history，附录 A-2）：clearForRewrite 之前把 content 非空的章
+     * 逐行落档，version=归档时 qc_round。清稿后 write 失败不再丢稿（run11 教训）。
+     * 空正文/首跑（qc_round=0）自然零行，幂等。
+     */
+    void archiveRejectedDrafts(RunDO run, long novelId, List<ChapterDO> chapters) {
+        int round = run.getQcRound() == null ? 0 : run.getQcRound();
+        int version = Math.max(1, round);
+        int n = 0;
+        for (ChapterDO ch : chapters) {
+            if (ch.getContent() == null || ch.getContent().isBlank()) {
+                continue;
+            }
+            DraftHistoryDO h = new DraftHistoryDO();
+            h.setRunId(run.getId());
+            h.setNovelId(novelId);
+            h.setChapterId(ch.getId());
+            h.setChapterNo(ch.getChapterNo());
+            h.setVersion(version);
+            h.setQcRound(round);
+            h.setContent(ch.getContent());
+            h.setCharCount(ch.getCharCount() == null ? ch.getContent().length() : ch.getCharCount());
+            h.setReason("REWORK");
+            draftHistoryMapper.insert(h);
+            n++;
+        }
+        if (n > 0) {
+            log.info("打回归档：runId={} novelId={} 归档 {} 章（version={}）→ draft_history", run.getId(), novelId, n, version);
+        }
     }
 
     // ---- 输入构造 ----
