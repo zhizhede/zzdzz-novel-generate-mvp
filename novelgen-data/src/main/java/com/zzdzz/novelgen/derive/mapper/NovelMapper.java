@@ -29,6 +29,15 @@ public interface NovelMapper extends BaseMapper<NovelDO> {
     int updateCast(@Param("id") long id, @Param("protagonist") String protagonist,
                    @Param("cast") String castJson);
 
+    /** ⑥b 落真相卡（story_assets.truth，推理体裁；v3.6 分段契约：reveal_chapter/solution；⑦ 按章注入、⑧ logic 对账）。 */
+    int updateTruth(@Param("id") long id, @Param("truth") String truthJson);
+
+    /** ⑥b 落 brief 拆分（story_assets.brief={premise,ending}；premise 全程注入⑦、ending 仅揭示章起）。 */
+    int updateBrief(@Param("id") long id, @Param("brief") String briefJson);
+
+    /** ④d 落文风卡（story_settings.style_profile；覆盖式幂等；⑦ 无 param_style 时注入、⑧ voice 对照）。 */
+    int updateStyleProfile(@Param("id") long id, @Param("styleProfile") String styleProfileJson);
+
     /** ⑧ 统计回填（char_count / chapter_count）。 */
     int updateStats(@Param("id") long id, @Param("charCount") int charCount,
                     @Param("chapterCount") int chapterCount);
