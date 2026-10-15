@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.derive.service.DeriveDeindexService;
 import com.zzdzz.novelgen.derive.service.DeriveDomainService;
 import com.zzdzz.novelgen.derive.service.DeriveExtractService;
 import com.zzdzz.novelgen.derive.service.DeriveLabelingService;
+import com.zzdzz.novelgen.derive.service.DeriveStyleService;
 import com.zzdzz.novelgen.model.dto.derive.BookIngestDTO;
 import com.zzdzz.novelgen.model.vo.derive.BookIngestVO;
 import com.zzdzz.novelgen.model.vo.derive.BookVO;
@@ -14,6 +15,7 @@ import com.zzdzz.novelgen.model.vo.derive.DomainVO;
 import com.zzdzz.novelgen.model.vo.derive.ExtractVO;
 import com.zzdzz.novelgen.model.vo.derive.GrepVO;
 import com.zzdzz.novelgen.model.vo.derive.LabelVO;
+import com.zzdzz.novelgen.model.vo.derive.StyleVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,6 +37,7 @@ public class DeriveBookController {
     private final DeriveDeindexService deindexService;
     private final DeriveLabelingService labelingService;
     private final DeriveDomainService domainService;
+    private final DeriveStyleService styleService;
 
     @PostMapping
     public Result<BookIngestVO> ingest(@RequestBody BookIngestDTO dto) {
@@ -74,5 +77,11 @@ public class DeriveBookController {
     @PostMapping("/{id}/domains")
     public Result<DomainVO> domains(@PathVariable long id) {
         return Result.success(domainService.domains(id));
+    }
+
+    /** ④d 文风抽取（可选步，LLM → story_settings.style_profile；覆盖式幂等）。 */
+    @PostMapping("/{id}/style")
+    public Result<StyleVO> style(@PathVariable long id) {
+        return Result.success(styleService.extract(id));
     }
 }

@@ -172,6 +172,11 @@ public class DerivePlanService {
         novel.setCategoryTags(run.getParamTags());
         novel.setForm(run.getParamForm());
         novel.setRunId(runId);
+        // 文风卡传播（v3.6 方案B，用户定调⑥a 建书时从源书复制）：取第一本抽中弧所在源书
+        String styleCard = pickedOutlineStyleCard(arcIds);
+        if (styleCard != null) {
+            novel.setStorySettings(styleCard);
+        }
         long novelId = novelMapper.insertFull(novel);
 
         // tempSeq → 最终 seq / chapter 映射（按 LLM 章序+章内拍序定序）
@@ -363,6 +368,28 @@ public class DerivePlanService {
         } catch (Exception e) {
             return "中段";
         }
+    }
+
+    /** 文风卡传播（v3.6 方案B）：第一本抽中弧所在源书的 style_profile → 成品书 story_settings；无卡跳过。 */
+    String pickedOutlineStyleCard(List<Long> arcIds) {
+        if (arcIds.isEmpty()) {
+            return null;
+        }
+        AssetOutlineDO first = outlineMapper.selectById(arcIds.get(0));
+        if (first == null || first.getSrcNovelId() == null) {
+            return null;
+        }
+        NovelDO src = novelMapper.selectById(first.getSrcNovelId());
+        JsonNode sp = DeriveWriteService
+                .readTreeSafe(src == null ? null : src.getStorySettings())
+                .path("style_profile");
+        if (!sp.isObject()) {
+            return null;
+        }
+        ObjectNode out = STATIC_MAPPER.createObjectNode();
+        out.put("v", 1);
+        out.set("style_profile", sp);
+        return out.toString();
     }
 
     static List<Long> jsonLongArray(String json) {
