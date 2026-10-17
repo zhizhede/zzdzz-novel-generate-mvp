@@ -1,5 +1,8 @@
 server:
   port: 8090
+  # Nginx 反代后识别 X-Forwarded-Proto/Port：浏览器 Origin 是 https://zzdzz.cn:8888，
+  # 后端不透传时 scheme=http、同源判定失败 → 403 "Invalid CORS request"（生产同源被误判跨域）
+  forward-headers-strategy: framework
 
 spring:
   application:
