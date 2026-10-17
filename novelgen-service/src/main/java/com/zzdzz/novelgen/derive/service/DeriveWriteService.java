@@ -36,8 +36,10 @@ import java.util.regex.Pattern;
  *       + ⑧ 上轮 issues——每次调用等价于"看过前文再写"，孤立重写不再孤立；</li>
  *   <li>字数修整轮：首稿超带不再整章重掷，改为"带上一稿+目标带+差值"定向增删
  *       （对应 agent 当场数字数增删，治篇幅惯性不收敛）；</li>
- *   <li>输出 gate：字数带/章注/禁词/主角名出现，带结构化原因喂回重试 ≤3 轮，
- *       耗尽取最优稿落库交⑧硬判。</li>
+ *   <li>输出 gate：字数带/禁词/主角名出现，带结构化原因喂回重试 ≤3 轮，
+ *       耗尽取最优稿落库交⑧硬判。<b>章注不再由 LLM 输出</b>（P0，2026-10-16）——
+ *       字数与挂拍 seq 系统可算，persist 时机器合成，避免 run10/run12 实测的
+ *       「缺章注打满 3 轮」重发损耗（12 章 9 章打满 ≈1h 白烧）。</li>
  * </ul>
  * 防复刻开关（run.anti_repro，默认关）：关=连续创作会话（注入前情）；
  * 开=九轮原口径独立干净会话（不给前章原文，只给章纲概览）。
@@ -157,7 +159,7 @@ public class DeriveWriteService {
                 .orElse(null);
         if (target == null) {
             runMapper.updateStatus(runId, "QC", null);
-            return new WriteVO(runId, novelId, -1, 0, 0, 0, true);
+            return new WriteVO(runId, novelId, -1, 0, 0, 0, true, true, "");
         }
 
         NovelDO novel = novelMapper.selectById(novelId);
@@ -168,6 +170,7 @@ public class DeriveWriteService {
                 .orderByAsc(BeatInstanceDO::getSeq));
 
         boolean independent = Boolean.TRUE.equals(run.getAntiRepro());
+        boolean lenCheck = Boolean.TRUE.equals(run.getLenCheck()); // V115：默认关=不做字数带校验（无修整轮）
         String user = buildUser(run, novel, target, chBeats, chapters, independent);
         int budget = target.getBudget();
         int lo = (int) Math.floor(budget * 0.9);
@@ -206,7 +209,7 @@ public class DeriveWriteService {
                     < Math.abs(len(extractContent(best)) - budget)) {
                 best = text;
             }
-            String issue = validate(text, lo, hi, protagonist);
+            String issue = validate(text, lo, hi, protagonist, lenCheck);
             if (issue == null) {
                 persist(target, chBeats, text);
                 int remaining = (int) chapters.stream()
@@ -218,7 +221,7 @@ public class DeriveWriteService {
                 log.info("⑦正文：novelId={} 第{}章 {}字（预算{}/±10%=[{},{}]）剩余{}章",
                         novelId, target.getChapterNo(), len(extractContent(text)), budget, lo, hi, remaining);
                 return new WriteVO(runId, novelId, target.getChapterNo(),
-                        len(extractContent(text)), budget, remaining, allDone);
+                        len(extractContent(text)), budget, remaining, allDone, true, "");
             }
             lastIssue = issue;
             lastWasLen = issue.startsWith("正文字数");
@@ -229,7 +232,7 @@ public class DeriveWriteService {
                 .filter(c -> c.getContent() == null || c.getContent().isBlank()).count();
         log.warn("⑦正文：第{}章 3 轮未过 gate（末次：{}），按最优稿落库交⑧硬判", target.getChapterNo(), lastIssue);
         return new WriteVO(runId, novelId, target.getChapterNo(),
-                len(extractContent(best)), budget, remaining, false);
+                len(extractContent(best)), budget, remaining, false, false, lastIssue);
     }
 
     // ---- 输入（状态包） ----
@@ -330,6 +333,8 @@ public class DeriveWriteService {
         }
 
         // ---- 全书章纲概览（情节与人名锚点，任何模式都给）----
+        // 剧透分段（修1，2026-10-16）：揭示前未来章（no>本章）只给章号+章题，不给纲——
+        // run10 实证 ch12 章纲含完整解法，概览注入=剧透通道；已写章与本章纲照常（本章是写作指令）。
         var o = root.putArray("全书章纲概览");
         for (ChapterDO other : allChapters) {
             if (other.getChapterNo() == ch.getChapterNo()) {
@@ -338,7 +343,11 @@ public class DeriveWriteService {
             var n = o.addObject();
             n.put("no", other.getChapterNo());
             n.put("title", other.getTitle());
-            n.put("outline", other.getDraftOutline() == null ? "" : other.getDraftOutline());
+            if (beforeReveal && other.getChapterNo() > ch.getChapterNo()) {
+                n.put("outline", "（剧透禁令：揭示章之前不提供未来章纲，只知章号与章题）");
+            } else {
+                n.put("outline", other.getDraftOutline() == null ? "" : other.getDraftOutline());
+            }
         }
 
         // ---- 前情：已写成稿章的正文尾段（仅 anti_repro=OFF；"独立干净会话"口径下不给原文）----
@@ -380,18 +389,16 @@ public class DeriveWriteService {
 
     // ---- 校验与落库 ----
 
-    /** 返回 null=通过；否则是喂回给 LLM 的问题描述（"正文字数"开头=字数问题，走修整轮）。 */
-    static String validate(String text, int lo, int hi, String protagonist) {
+    /** 返回 null=通过；否则是喂回给 LLM 的问题描述（"正文字数"开头=字数问题，走修整轮）。
+     *  章注存在性不再校验（P0：persist 机器合成，LLM 输出与否均剥离重拼）。
+     *  lenCheck（V115，默认关）：关=跳过字数带校验（不做修整轮），禁词/主角名仍硬校验。 */
+    static String validate(String text, int lo, int hi, String protagonist, boolean lenCheck) {
         if (text == null || text.isBlank()) {
             return "正文为空";
         }
-        Matcher m = COMMENT_PATTERN.matcher(text);
-        if (!m.find()) {
-            return "缺章注行（<!-- 本章X字，挂拍：seq --> 格式，置于正文最后）";
-        }
         String body = extractContent(text);
         int n = len(body);
-        if (n < lo || n > hi) {
+        if (lenCheck && (n < lo || n > hi)) {
             return "正文字数 " + n + " 超出预算带 [" + lo + "," + hi + "]（预算±10%），调整篇幅";
         }
         Matcher f = FORBIDDEN.matcher(body);
@@ -426,16 +433,23 @@ public class DeriveWriteService {
         return s == null ? 0 : s.replaceAll("\\s", "").length();
     }
 
-    void persist(ChapterDO ch, List<BeatInstanceDO> beats, String rawText) {
-        Matcher m = COMMENT_PATTERN.matcher(rawText == null ? "" : rawText);
-        String comment = "";
-        if (m.find()) {
-            comment = m.group().trim();
+    /** P0 章注机器合成：字数=纯正文实数，挂拍=本章 PLANNED 拍 seq（⑧ 拍兑现按此对账）。 */
+    static String buildComment(String body, List<BeatInstanceDO> beats) {
+        StringBuilder seqs = new StringBuilder();
+        for (BeatInstanceDO b : beats) {
+            if (seqs.length() > 0) {
+                seqs.append(',');
+            }
+            seqs.append(b.getSeq());
         }
+        return "<!-- 本章" + len(body) + "字，挂拍：" + seqs + " -->";
+    }
+
+    void persist(ChapterDO ch, List<BeatInstanceDO> beats, String rawText) {
         String body = extractContent(rawText);
         ch.setContent(body);
         ch.setCharCount(len(body));
-        ch.setComment(comment);
+        ch.setComment(buildComment(body, beats));
         ch.setStatus("DRAFTED");
         chapterMapper.updateById(ch);
         for (BeatInstanceDO b : beats) {

@@ -361,6 +361,7 @@ public class DeriveSampleService {
         run.setParamIntent(effectiveIntent);
         run.setParamStyle(dto.style() == null || dto.style().isBlank() ? null : dto.style().strip());
         run.setIntakeReview(intake.review() == null ? null : intake.review().toString());
+        run.setLenCheck(dto.lenCheck());
         run.setTagsNorm(tagsNorm.toString());
         run.setDomainId(cell.getId());
         run.setDomainSnapshot(cellSnapshot(cell));

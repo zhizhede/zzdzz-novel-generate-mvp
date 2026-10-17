@@ -75,6 +75,9 @@ public class DeriveDraftService {
                reveal_chapter 不得早于 max(planted_chapter)；clue 只写可观测现象，
                禁止写成解释或出现 solution 核心内容；anchors 不得含因果结论；
                结局章（reveal_chapter）完成 culprit/motive/method 三要素还原；非推理体裁省略 truth；
+               写章纲同守无知之幕（修1）：章号 < reveal_chapter 的章，draft_outline 与 title
+               只写在场角色认知内的情节走向，禁写 solution/真凶身份/解法/视角反转——
+               心理医生报告类还原视角叙事只许出现在章号 ≥ reveal_chapter 的章纲里；
             7. 所有体裁必须输出『brief』拆分（把题材意图拆成两段）：
                {"premise":"人物设定/世界观/氛围/描写红线（全程可用，≤300字）",
                 "ending":"结局与真相相关段落（无结局信息给空串）"}——premise 不得含结局答案，
@@ -182,11 +185,13 @@ public class DeriveDraftService {
                 reasoningGenre(run.getParamTags()));
         String user = buildUser(run, chapters, beats, labelBySeq, worldLabel, banned);
 
+        // 流式（2026-10-15）：44 章大 draft 非流式输出一次 >720s 被网关 RST_STREAM 掐断（run15 连挂 3 次）；
+        // 流式帧持续发送不触连接上限。onDelta 给 no-op——只借传输形态，不改记账与解析。
         JsonNode out = llmJson.ask(
                 new LlmPort.ChatRequest(NODE_DRAFT, runId, novelId,
                         List.of(LlmPort.Message.system(DRAFT_PROMPT), LlmPort.Message.user(user)),
                         0.4),
-                root -> parseDraft(root, ctx), 3);
+                root -> parseDraft(root, ctx), 3, (think, piece) -> { });
 
         // ---- 落库 ----
         Set<Integer> skipped = new HashSet<>();

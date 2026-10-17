@@ -143,7 +143,7 @@ public class DeriveQcService {
         boolean antiRepro = Boolean.TRUE.equals(run.getAntiRepro());
         List<CheckItem> script = new ArrayList<>();
         script.add(checkTotalWords(run, chapters));
-        script.add(checkChapterBudgets(chapters));
+        script.add(checkChapterBudgets(run, chapters));
         script.add(checkBeats(beats, chapters));
         script.add(checkBlacklist(run, chapters, antiRepro));
         script.add(checkCounterWords(run, chapters, antiRepro));
@@ -152,25 +152,25 @@ public class DeriveQcService {
 
         boolean scriptPass = script.stream().allMatch(CheckItem::pass);
 
-        // ---- LLM 快检 5 项（脚本全过才跑，省一轮钱；异常 fail-open 由 issues 收口）----
+        // ---- LLM 快检 5 项（修4，2026-10-16：script 未过也跑——原「全过才跑」让 run10 三轮
+        //      REWORK 的 logic⑤ 剧透检查全程不可达；判定口径不变：pass = scriptPass && llmPass，
+        //      失败轮多跑一次只为 issues 带语义方向 + 剧透兑底可达；异常仍 fail-open）----
         JsonNode llmResult = null;
         List<String> llmIssues = new ArrayList<>();
         boolean llmPass = true;
-        if (scriptPass) {
-            try {
-                llmResult = llmCheck(run, novel, chapters, beats, llmIssues);
-                // v3.4 口径：判定只看五项 pass；issues 数组是建议清单，记录但不参与判定
-                llmPass = true;
-                for (String key : List.of("fulfillment", "pacing", "voice", "domain", "logic")) {
-                    if (!llmResult.path(key).path("pass").asBoolean(true)) {
-                        llmPass = false;
-                    }
+        try {
+            llmResult = llmCheck(run, novel, chapters, beats, llmIssues);
+            // v3.4 口径：判定只看五项 pass；issues 数组是建议清单，记录但不参与判定
+            llmPass = true;
+            for (String key : List.of("fulfillment", "pacing", "voice", "domain", "logic")) {
+                if (!llmResult.path(key).path("pass").asBoolean(true)) {
+                    llmPass = false;
                 }
-            } catch (Exception e) {
-                log.warn("⑧LLM 快检异常（fail-open，记入 issues）：{}", e.getMessage());
-                llmIssues.add("LLM 快检失败：" + e.getMessage());
-                llmPass = false;
             }
+        } catch (Exception e) {
+            log.warn("⑧LLM 快检异常（fail-open，记入 issues）：{}", e.getMessage());
+            llmIssues.add("LLM 快检失败：" + e.getMessage());
+            llmPass = false;
         }
 
         // ---- 汇总问题清单 ----
@@ -269,7 +269,8 @@ public class DeriveQcService {
                 "Σ char_count=" + total + " ∈ [" + lo + "," + hi + "]");
     }
 
-    CheckItem checkChapterBudgets(List<ChapterDO> chapters) {
+    /** 每章字数带（V115 len_check，默认关=降报告不判负；与⑦ validate 同开关同口径）。 */
+    CheckItem checkChapterBudgets(RunDO run, List<ChapterDO> chapters) {
         List<String> bad = new ArrayList<>();
         for (ChapterDO c : chapters) {
             int budget = c.getBudget() == null ? 0 : c.getBudget();
@@ -279,6 +280,12 @@ public class DeriveQcService {
             if (n < lo || n > hi) {
                 bad.add("ch" + c.getChapterNo() + "=" + n + "（预算" + budget + "带[" + lo + "," + hi + "]）");
             }
+        }
+        boolean lenCheck = run != null && Boolean.TRUE.equals(run.getLenCheck());
+        if (!lenCheck) {
+            return new CheckItem("2每章字数", true,
+                    "报告（len_check=关，不判负）：超差 " + bad.size() + " 章"
+                            + (bad.isEmpty() ? "" : "：" + String.join("；", bad)));
         }
         return new CheckItem("2每章字数", bad.isEmpty(),
                 bad.isEmpty() ? chapters.size() + " 章全部 ±10% 内" : "超差：" + String.join("；", bad));
@@ -386,18 +393,31 @@ public class DeriveQcService {
             return new CheckItem("6类别浓度", true,
                     "降级：wordlist 无 CATEGORY_TERM 行，跳过硬判（待词表补齐后启用）");
         }
-        List<String> weak = new ArrayList<>();
+        // 修3（2026-10-16）：「每章≥3」三连误伤（run6/10/11；run12 优化后仍 10/12 章不达标）——
+        // 日常/慢热章结构性 0 命中是体裁常态（案件词集中于案件章）。改**全书级**：
+        // Σ全书 ≥ ceil(章数/2) 硬判（防整本跑题）；单章读数仅记录不判负，跑题语义交⑧ LLM domain/fulfillment。
+        Map<Integer, Integer> hitsByCh = new LinkedHashMap<>();
+        int total = 0;
         for (ChapterDO c : chapters) {
             String body = c.getContent() == null ? "" : c.getContent();
             int sum = termsByCat.values().stream()
                     .mapToInt(ws -> ws.stream().mapToInt(body::indexOf).filter(i -> i >= 0).sum())
                     .sum();
-            if (sum < 3) {
-                weak.add("ch" + c.getChapterNo() + "=" + sum);
-            }
+            hitsByCh.put(c.getChapterNo(), sum);
+            total += sum;
         }
-        return new CheckItem("6类别浓度", weak.isEmpty(),
-                weak.isEmpty() ? "每章类别词 ≥3" : "低于 3 的章：" + weak);
+        int need = (chapters.size() + 1) / 2;
+        boolean pass = total >= need;
+        List<String> zero = hitsByCh.entrySet().stream()
+                .filter(e -> e.getValue() == 0)
+                .map(e -> "ch" + e.getKey()).toList();
+        String detail = "全书Σ=" + total + "（需≥" + need + "＝ceil(章数/2)）；单章读数仅记录；0词章："
+                + (zero.isEmpty() ? "无" : String.join(",", zero))
+                + hitsByCh.entrySet().stream()
+                        .filter(e -> e.getValue() > 0)
+                        .map(e -> "；ch" + e.getKey() + "=" + e.getValue())
+                        .collect(java.util.stream.Collectors.joining());
+        return new CheckItem("6类别浓度", pass, detail);
     }
 
     CheckItem checkFingerprint(RunDO run, NovelDO novel, List<ChapterDO> chapters, boolean antiRepro) {

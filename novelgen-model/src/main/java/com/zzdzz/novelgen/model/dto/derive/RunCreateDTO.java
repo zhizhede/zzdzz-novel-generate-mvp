@@ -10,6 +10,8 @@ import java.util.List;
  * style=目标文风自由文本（可空；v3.6 方案B，落 run.param_style，⑦ 注入优先于源书文风卡）。
  * intakeOptimize=输入思路 AI 优化开关（默认关；开启须带 intent——⑤ 先 LLM 预审思路，
  * 有更优选择时以优化稿顶替 param_intent，评审明细落 run.intake_review；失败 fail-open 用原思路）。
+ * lenCheck=每章字数带校验开关（**默认关**；关=⑦ 不因 budget±10% 打回/修整、⑧「2每章字数」降报告；
+ * 总字数/禁词/主角名 gate 不受影响）。
  */
 public record RunCreateDTO(
         int wordsMin,
@@ -22,6 +24,7 @@ public record RunCreateDTO(
         Boolean antiRepro,
         String intent,
         String style,
-        Boolean intakeOptimize
+        Boolean intakeOptimize,
+        Boolean lenCheck
 ) {
 }

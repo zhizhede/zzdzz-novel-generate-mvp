@@ -98,4 +98,7 @@ public class RunDO extends DeriveBaseDO {
 
     /** 输入思路预审记录 jsonb（V114；入参 intakeOptimize 开启时⑤预审，{v,score,holes,changes,source,error?}） */
     private String intakeReview;
+
+    /** 每章字数带校验开关（V115，默认 FALSE=关；关=⑦ 跳过±10% gate、⑧「2每章字数」降报告） */
+    private Boolean lenCheck;
 }

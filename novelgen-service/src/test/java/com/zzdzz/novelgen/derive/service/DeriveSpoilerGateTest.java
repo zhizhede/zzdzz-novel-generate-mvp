@@ -125,4 +125,29 @@ class DeriveSpoilerGateTest {
         assertNotNull(DeriveWriteService.SPOILER_BAN);
         assertFalse(DeriveWriteService.SPOILER_BAN.isBlank());
     }
+
+    /** 修1 章纲分段（ASSETS reveal=3）：揭示前未来章不给纲、已写章给；揭示章起全给。 */
+    @Test
+    void outlineOverview_futureChaptersWithheldBeforeReveal() {
+        ChapterDO ch1 = chapter(1);
+        ch1.setDraftOutline("第1章纲要");
+        ChapterDO ch2 = chapter(2);
+        ch2.setDraftOutline("第2章纲要");
+        ChapterDO ch12 = chapter(12);
+        ch12.setDraftOutline("真容揭露：卸下金毛头套露出成年男人脸");
+        List<ChapterDO> all = List.of(ch1, ch2, ch12);
+
+        // 写第2章（2 < reveal=3）：已写章1给纲，未来章2/12只留占位
+        String at2 = svc.buildUser(run(), novel(ASSETS, "{}"), chapter(2),
+                List.<BeatInstanceDO>of(), all, false);
+        assertTrue(at2.contains("第1章纲要"), "已写章纲照常注入");
+        assertFalse(at2.contains("卸下金毛头套"), "未来章纲（含解法）不得注入");
+        assertTrue(at2.contains("剧透禁令：揭示章之前不提供未来章纲"), "未来章以占位说明替代");
+
+        // 写揭示章3（3 = reveal）：全书章纲完整
+        String at3 = svc.buildUser(run(), novel(ASSETS, "{}"), chapter(3),
+                List.<BeatInstanceDO>of(), all, false);
+        assertTrue(at3.contains("第2章纲要"), "揭示章起章纲概览完整");
+        assertTrue(at3.contains("卸下金毛头套"), "揭示章起未来章纲不再遮蔽");
+    }
 }
