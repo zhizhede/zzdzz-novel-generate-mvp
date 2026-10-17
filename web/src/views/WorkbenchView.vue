@@ -27,6 +27,11 @@
             <el-option :value="2" label="高" />
           </el-select>
         </span>
+        <el-tooltip placement="bottom" content="本批跑完后自动排下一批（每批最多 10 章，写到已规划的章写完为止；设了总目标章数则钳到目标）。关掉则本批结束即停。开了「无人续跑」的书以无人续跑链为准（会自动规划下卷）。">
+          <span>自动续跑：
+            <el-switch v-model="runAutoContinue" size="small" />
+          </span>
+        </el-tooltip>
         <el-button type="primary" size="small" :loading="running" @click="run">启动生成</el-button>
         <el-button size="small" type="danger" plain @click="stopAllTasks">全部停止</el-button>
         <el-tag :type="running ? 'warning' : 'info'" size="small">{{ running ? '运行中' : '空闲' }}</el-tag>
@@ -331,6 +336,8 @@ const planManual = ref(false)
 const from = ref(2)
 const to = ref(2)
 const runPriority = ref(1)
+// 自动续跑默认开（本批跑完自动排下一批）
+const runAutoContinue = ref(true)
 const running = ref(false)
 const lastMessage = ref('')
 const queue = ref([])
@@ -831,7 +838,7 @@ async function switchPlanMode() {
 
 async function run() {
   try {
-    await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value, priority: runPriority.value })
+    await api.post('/api/pipeline/run', { novel: novel.value.title, from: from.value, to: to.value, priority: runPriority.value, autoContinue: runAutoContinue.value })
     scenes.value = []
     transcript.value = []
     sessionSeededKey = ''

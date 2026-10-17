@@ -33,7 +33,8 @@ public class PipelineController {
     private final PipelineSseService sseService;
 
 
-    /** 入队异步生成，立即返回任务 id；运行中提交不再 409，排队等待。priority 0-2 可选（默认按书衍生配置）。 */
+    /** 入队异步生成，立即返回任务 id；运行中提交不再 409，排队等待。priority 0-2 可选（默认按书衍生配置）。
+     * autoContinue 任务级自动续跑（null=默认开）：本批跑完自动续批下一段已规划章，规划用尽即停。 */
     @PostMapping("/run")
     public Result<Map<String, Object>> run(@RequestBody PipelineRunDTO dto, HttpServletRequest request) {
         if (dto == null || dto.novel() == null || dto.from() == null || dto.to() == null
@@ -41,7 +42,8 @@ public class PipelineController {
             throw new BizException(ErrorCode.PARAM_ERROR, "参数不合法：novel/from/to 必填，from ≤ to");
         }
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
-        long taskId = queueService.submit(dto.novel(), dto.from(), dto.to(), userId, dto.priority());
+        long taskId = queueService.submit(dto.novel(), dto.from(), dto.to(), userId, dto.priority(),
+                dto.autoContinue());
         return Result.success(Map.of("taskId", taskId));
     }
 

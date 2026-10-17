@@ -432,7 +432,7 @@ async function loadChapters() {
 async function rerunChapter() {
   const novel = novels.value.find((n) => n.id === novelId.value)
   try {
-    await api.post('/api/pipeline/run', { novel: novel.title, from: detail.value.chapterNo, to: detail.value.chapterNo })
+    await api.post('/api/pipeline/run', { novel: novel.title, from: detail.value.chapterNo, to: detail.value.chapterNo, autoContinue: false })
     ElMessage.success('已断点续跑，进度见工作台')
   } catch (e) {
     ElMessage.error(e.message)
