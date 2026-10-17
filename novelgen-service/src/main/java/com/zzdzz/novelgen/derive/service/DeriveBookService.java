@@ -1,6 +1,5 @@
 package com.zzdzz.novelgen.derive.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
@@ -9,7 +8,6 @@ import com.zzdzz.novelgen.model.dto.derive.BookIngestDTO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.SourceChapterDO;
 import com.zzdzz.novelgen.model.vo.derive.BookIngestVO;
-import com.zzdzz.novelgen.model.vo.derive.BookVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,6 +22,7 @@ import java.util.List;
  *
  * <p>切章口径对齐 zzdzz（TextSplitter 头注）；事务只包短写（建书+落章），无 LLM 调用。
  * jsonb 写入走 NovelMapper.insertFull（MP save 会被 PG 拒隐式转）。
+ * 列表/详情等读端点在 {@link DeriveQueryService}。
  */
 @Service
 @RequiredArgsConstructor
@@ -91,18 +90,6 @@ public class DeriveBookService {
         log.info("取样入库：novelId={} title={} 章数={} 字数={} 重排={}",
                 novelId, novel.getTitle(), slices.size(), totalChars, renumbered);
         return new BookIngestVO(novelId, novel.getTitle(), slices.size(), totalChars, renumbered, notes);
-    }
-
-    /** 源书列表（id 倒序）。 */
-    public List<BookVO> list() {
-        List<NovelDO> rows = novelMapper.selectList(
-                new LambdaQueryWrapper<NovelDO>()
-                        .eq(NovelDO::getSourceType, "SOURCE")
-                        .orderByDesc(NovelDO::getId));
-        return rows.stream()
-                .map(n -> new BookVO(n.getId(), n.getTitle(), n.getSourceType(), n.getAuthor(),
-                        n.getPlatform(), n.getChapterCount(), n.getCharCount()))
-                .toList();
     }
 
     private static String blankToNull(String s) {
