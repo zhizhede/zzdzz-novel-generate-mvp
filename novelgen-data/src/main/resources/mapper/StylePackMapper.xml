@@ -11,12 +11,12 @@ INSERT INTO style_packs (name, description, rules_md, fingerprint) VALUES (#{nam
     </select>
 
     <update id="updateFingerprint">
-UPDATE style_packs SET fingerprint=#{fingerprint}::jsonb, update_time=NOW() WHERE id=#{id}
+UPDATE style_packs SET fingerprint=#{fingerprint}::jsonb, updated_time=NOW() WHERE id=#{id}
     </update>
 
     <update id="updateRulesMdByNovel">
 
-                UPDATE style_packs sp SET rules_md=#{rulesMd}, update_time=NOW()
+                UPDATE style_packs sp SET rules_md=#{rulesMd}, updated_time=NOW()
                 FROM novels n WHERE n.style_pack_id = sp.id AND n.id = #{novelId}
                 
     </update>
@@ -30,7 +30,7 @@ UPDATE style_packs SET fingerprint=#{fingerprint}::jsonb, update_time=NOW() WHER
 
     <update id="updateGateConfigByNovel">
 
-                UPDATE style_packs sp SET gate_config=#{gateConfigJson}::jsonb, update_time=NOW()
+                UPDATE style_packs sp SET gate_config=#{gateConfigJson}::jsonb, updated_time=NOW()
                 FROM novels n WHERE n.style_pack_id = sp.id AND n.id = #{novelId}
                 
     </update>
@@ -81,7 +81,7 @@ LIMIT 1
 UPDATE style_packs
 SET name=#{name}, description=#{description}, rules_md=#{rulesMd},
     fingerprint=#{fingerprint}::jsonb, gate_config=#{gateConfig}::jsonb,
-    is_preset=FALSE, update_time=NOW()
+    is_preset=FALSE, updated_time=NOW()
 WHERE id=#{id}
     </update>
 

@@ -98,7 +98,7 @@ public class StyleFingerprintService {
                     analysis == null ? null : analysis.path("recommendation").asText(null),
                     sample.getId(), sample.getPresetId(),
                     adoptedPreset == null ? null : adoptedPreset.getName(),
-                    null, sample.getCreateTime(), sample.getUpdateTime(),
+                    null, sample.getCreatedTime(), sample.getUpdatedTime(),
                     baseline != null, metrics(baseline),
                     fingerprint == null ? null : fingerprint.toString(),
                     stringList(analysis == null ? null : analysis.path("notes")),
@@ -130,7 +130,7 @@ public class StyleFingerprintService {
                     band == null ? null : (int) band[0], band == null ? null : (int) band[1],
                     band == null ? null : band[2],
                     null, null, null, preset.getId(), preset.getName(), null,
-                    preset.getCreateTime(), preset.getUpdateTime(),
+                    preset.getCreatedTime(), preset.getUpdatedTime(),
                     baseline != null, metrics(baseline), preset.getFingerprint(),
                     new ArrayList<>(), new ArrayList<>(), new ArrayList<>()));
         }
@@ -164,7 +164,7 @@ public class StyleFingerprintService {
                     band == null ? null : band[2],
                     null, null,
                     sourceSampleId, null, null, novel.getId(),
-                    pack.getCreateTime(), pack.getUpdateTime(),
+                    pack.getCreatedTime(), pack.getUpdatedTime(),
                     baseline != null, metrics(baseline), pack.getFingerprint(),
                     new ArrayList<>(), new ArrayList<>(),
                     source == null ? new ArrayList<>() : stringList(parse(source.getTags()))));

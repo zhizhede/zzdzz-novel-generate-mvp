@@ -7,7 +7,7 @@
                 VALUES (#{sourceType}, #{sourceId}, #{novelId}, #{chapterNo}, #{content}, #{vecStr}::vector)
                 ON CONFLICT (source_type, source_id) WHERE is_deleted = FALSE
                 DO UPDATE SET embedding = EXCLUDED.embedding, content = EXCLUDED.content,
-                              chapter_no = EXCLUDED.chapter_no, update_time = NOW()
+                              chapter_no = EXCLUDED.chapter_no, updated_time = NOW()
     </update>
 
     <select id="search" resultType="com.zzdzz.novelgen.service.data.EmbeddingDataService$Hit">

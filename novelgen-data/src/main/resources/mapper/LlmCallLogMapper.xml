@@ -40,8 +40,8 @@
 
     <select id="usageByNodeSince" resultType="com.zzdzz.novelgen.service.data.LlmCallLogDataService$UsageGroup">
                 SELECT l.node, l.model,
-                       (EXTRACT(HOUR FROM l.create_time AT TIME ZONE 'Asia/Shanghai') >= p.peak_start_hour
-                        AND EXTRACT(HOUR FROM l.create_time AT TIME ZONE 'Asia/Shanghai') &lt; p.peak_end_hour) AS "peak",
+                       (EXTRACT(HOUR FROM l.created_time AT TIME ZONE 'Asia/Shanghai') >= p.peak_start_hour
+                        AND EXTRACT(HOUR FROM l.created_time AT TIME ZONE 'Asia/Shanghai') &lt; p.peak_end_hour) AS "peak",
                        COUNT(*)::bigint AS "calls",
                        COALESCE(SUM(l.prompt_tokens),0)::bigint AS "promptTokens",
                        COALESCE(SUM(COALESCE(l.cached_tokens,0)),0)::bigint AS "cachedTokens",
@@ -49,7 +49,7 @@
                        COALESCE(SUM(l.latency_ms),0)::bigint AS "latencySum"
                 FROM llm_call_log l
                 LEFT JOIN llm_model_price p ON p.model = l.model AND p.enabled=true
-                WHERE l.create_time &gt; NOW() - ((#{days}) || ' days')::interval
+                WHERE l.created_time &gt; NOW() - ((#{days}) || ' days')::interval
                 GROUP BY 1, 2, 3
                 ORDER BY 1
     </select>

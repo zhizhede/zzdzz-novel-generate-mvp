@@ -15,7 +15,7 @@ public interface SampleParseTaskDataService extends IService<SampleParseTaskDO> 
     /** 状态机抢占：fromStatus → toStatus，0 行=并发冲突由调用方处理。 */
     int casStatus(long taskId, String fromStatus, String toStatus);
 
-    /** 进度回写（done_units/stage，随行 update_time）。 */
+    /** 进度回写（done_units/stage，随行 updated_time）。 */
     void updateProgress(long taskId, int doneUnits, String stage);
 
     /** 任务总量落库（进度条分母，runParse 切分完成后立即写）。 */

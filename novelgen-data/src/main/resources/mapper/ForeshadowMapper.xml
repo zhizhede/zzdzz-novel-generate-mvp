@@ -19,7 +19,7 @@ INSERT INTO foreshadows (novel_id, code, content, planted_in, recovered_in) VALU
 
     <update id="update">
 
-                UPDATE foreshadows SET content=#{content}, planted_in=#{plantedIn}, recovered_in=#{recoveredIn}, status=#{status}, update_time=NOW()
+                UPDATE foreshadows SET content=#{content}, planted_in=#{plantedIn}, recovered_in=#{recoveredIn}, status=#{status}, updated_time=NOW()
                 WHERE id=#{id}
                 
     </update>
@@ -76,28 +76,28 @@ SELECT EXISTS (SELECT 1 FROM foreshadows WHERE novel_id=#{novelId} AND content=#
 
     <update id="promoteProposal">
 
-                UPDATE foreshadows SET status='planned', planted_in=#{plantedIn}, update_time=NOW()
+                UPDATE foreshadows SET status='planned', planted_in=#{plantedIn}, updated_time=NOW()
                 WHERE id=#{id} AND status='proposed'
                 
     </update>
 
     <update id="scheduleRecovery">
 
-                UPDATE foreshadows SET recovered_in=#{recoveredIn}, update_time=NOW()
+                UPDATE foreshadows SET recovered_in=#{recoveredIn}, updated_time=NOW()
                 WHERE id=#{id} AND status='planted' AND recovered_in IS NULL
                 
     </update>
 
     <update id="markPlanted">
 
-                UPDATE foreshadows SET status='planted', update_time=NOW()
+                UPDATE foreshadows SET status='planted', updated_time=NOW()
                 WHERE novel_id=#{novelId} AND planted_in &lt;= #{chapterNo} AND status='planned'
                 
     </update>
 
     <update id="markRecovered">
 
-                UPDATE foreshadows SET status='recovered', update_time=NOW()
+                UPDATE foreshadows SET status='recovered', updated_time=NOW()
                 WHERE novel_id=#{novelId} AND recovered_in &lt;= #{chapterNo} AND status='planted'
 
     </update>

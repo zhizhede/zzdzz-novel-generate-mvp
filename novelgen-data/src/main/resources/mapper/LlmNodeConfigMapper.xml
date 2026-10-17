@@ -30,7 +30,7 @@ DELETE FROM llm_node_config WHERE id=#{id}
 
     <update id="update">
                 UPDATE llm_node_config SET model=#{model}, temperature=#{temperature}, max_tokens=#{maxTokens}, extra_json=#{extraJson}::jsonb,
-                       enabled=#{enabled}, remark=#{remark}, update_time=NOW()
+                       enabled=#{enabled}, remark=#{remark}, updated_time=NOW()
                 WHERE id=#{id}
     </update>
 </mapper>

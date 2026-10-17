@@ -14,11 +14,11 @@ RETURNING id
     <update id="resetTask">
 UPDATE import_analyze_tasks
 SET steps=#{stepsJson}::jsonb, status='QUEUED', current_step=NULL, done_steps='[]'::jsonb,
-    message=NULL, update_time=NOW()
+    message=NULL, updated_time=NOW()
 WHERE id=#{id}
     </update>
 
     <update id="updateDoneSteps">
-UPDATE import_analyze_tasks SET done_steps=#{doneStepsJson}::jsonb, update_time=NOW() WHERE id=#{id}
+UPDATE import_analyze_tasks SET done_steps=#{doneStepsJson}::jsonb, updated_time=NOW() WHERE id=#{id}
     </update>
 </mapper>

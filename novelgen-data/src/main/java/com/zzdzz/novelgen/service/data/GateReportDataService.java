@@ -6,10 +6,10 @@ import com.zzdzz.novelgen.model.entity.GateReportDO;
 /** gate_reports 数据服务接口（原 GateReportDAO）。 */
 public interface GateReportDataService extends IService<GateReportDO> {
 
-    record LatestChapterReport(boolean passed, java.time.OffsetDateTime createTime, String resultJson) {
+    record LatestChapterReport(boolean passed, java.time.OffsetDateTime createdTime, String resultJson) {
     }
 
-    record LatestReview(boolean passed, java.time.OffsetDateTime createTime, String resultJson) {
+    record LatestReview(boolean passed, java.time.OffsetDateTime createdTime, String resultJson) {
     }
 
     void insert(long chapterId, Long sceneId, String gateType, int round,

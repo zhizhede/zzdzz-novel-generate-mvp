@@ -14,13 +14,13 @@
                             <otherwise>NULL</otherwise>
                         </choose>)
                 ON CONFLICT (novel_id, chapter_no, name) WHERE is_deleted = FALSE
-                DO UPDATE SET location = EXCLUDED.location, possessions = EXCLUDED.possessions, update_time = now()
+                DO UPDATE SET location = EXCLUDED.location, possessions = EXCLUDED.possessions, updated_time = now()
                 RETURNING 1
     </select>
 
     <select id="listByChapter" resultType="com.zzdzz.novelgen.model.entity.CharacterStateDO">
                 SELECT id, novel_id AS "novelId", chapter_no AS "chapterNo", name, location,
-                       possessions, create_time AS "createTime", update_time AS "updateTime"
+                       possessions, created_time AS "createTime", updated_time AS "updateTime"
                 FROM character_states
                 WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
                 ORDER BY name
@@ -28,7 +28,7 @@
 
     <select id="listByNovel" resultType="com.zzdzz.novelgen.model.entity.CharacterStateDO">
                 SELECT id, novel_id AS "novelId", chapter_no AS "chapterNo", name, location,
-                       possessions, create_time AS "createTime", update_time AS "updateTime"
+                       possessions, created_time AS "createTime", updated_time AS "updateTime"
                 FROM character_states
                 WHERE novel_id=#{novelId}
                 ORDER BY chapter_no, name
@@ -36,7 +36,7 @@
 
     <select id="findLatestBeforeForName" resultType="com.zzdzz.novelgen.model.entity.CharacterStateDO">
                 SELECT id, novel_id AS "novelId", chapter_no AS "chapterNo", name, location,
-                       possessions, create_time AS "createTime", update_time AS "updateTime"
+                       possessions, created_time AS "createTime", updated_time AS "updateTime"
                 FROM character_states
                 WHERE novel_id=#{novelId} AND name=#{name} AND chapter_no &lt; #{beforeChapter}
                 ORDER BY chapter_no DESC LIMIT 1

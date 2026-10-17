@@ -30,7 +30,7 @@ class PromptTemplateGetTest {
         row.setVersion(1);
         row.setCustom(false);
         row.setEnabled(enabled);
-        row.setUpdateTime(OffsetDateTime.now());
+        row.setUpdatedTime(OffsetDateTime.now());
         return row;
     }
 

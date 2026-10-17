@@ -88,6 +88,6 @@ public class ChapterStepDataServiceImpl extends ServiceImpl<ChapterStepMapper, C
                 .eq("status", StepStatus.RUNNING.wire())
                 .set("status", "INTERRUPTED")
                 .set("detail", "{\"reason\": \"用户终止（硬中断）\"}")
-                .set("update_time", java.time.LocalDateTime.now()));
+                .set("updated_time", java.time.LocalDateTime.now()));
     }
 }
