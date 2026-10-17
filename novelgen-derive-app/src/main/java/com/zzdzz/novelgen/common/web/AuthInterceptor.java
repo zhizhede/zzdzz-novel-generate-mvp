@@ -8,8 +8,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * 登录态拦截：/api/** 除登录接口外要求有效 JWT（HttpOnly Cookie 优先，兼容 Authorization: Bearer）。
- * 无服务端会话状态，后端重启不影响已登录浏览器。
+ * 登录态拦截：/api/** 除登录接口外要求有效 JWT（HttpOnly Cookie 优先，兼容 Authorization: Bearer）
+ * **且 Redis 会话存在**（2026-10-16：服务端可吊销，过期=登录起 30 天，见 SessionStore）。
  */
 @RequiredArgsConstructor
 public class AuthInterceptor implements HandlerInterceptor {
@@ -20,6 +20,7 @@ public class AuthInterceptor implements HandlerInterceptor {
     public static final String ATTR_ROLE = "role";
 
     private final JwtService jwtService;
+    private final SessionStore sessionStore;
 
 
     @Override
@@ -27,9 +28,13 @@ public class AuthInterceptor implements HandlerInterceptor {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             return true;
         }
-        Claims claims = jwtService.parse(extractToken(request));
+        String token = extractToken(request);
+        Claims claims = jwtService.parse(token);
         if (claims == null) {
             throw new BizException(ErrorCode.NOT_LOGIN, "未登录或登录已过期");
+        }
+        if (!sessionStore.exists(token)) {
+            throw new BizException(ErrorCode.NOT_LOGIN, "登录会话已过期或已登出，请重新登录");
         }
         request.setAttribute(ATTR_USER_ID, Long.valueOf(claims.getSubject()));
         request.setAttribute(ATTR_USERNAME, claims.get("username", String.class));

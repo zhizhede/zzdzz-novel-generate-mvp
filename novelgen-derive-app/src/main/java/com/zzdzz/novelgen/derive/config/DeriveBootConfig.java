@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.derive.config;
 
 import com.zzdzz.novelgen.common.web.AuthInterceptor;
 import com.zzdzz.novelgen.common.web.JwtService;
+import com.zzdzz.novelgen.common.web.SessionStore;
 import com.zzdzz.novelgen.llm.LlmProperties;
 import com.zzdzz.novelgen.service.AuthService;
 import com.zzdzz.novelgen.service.PromptTemplateService;
@@ -29,6 +30,7 @@ import java.net.http.HttpClient;
 public class DeriveBootConfig implements WebMvcConfigurer {
 
     private final JwtService jwtService;
+    private final SessionStore sessionStore;
 
 
     @Bean
@@ -44,7 +46,7 @@ public class DeriveBootConfig implements WebMvcConfigurer {
 
     @Bean
     public AuthInterceptor authInterceptor() {
-        return new AuthInterceptor(jwtService);
+        return new AuthInterceptor(jwtService, sessionStore);
     }
 
     /** LLM HTTP 客户端装配：共享 HttpClient；接入要素每次调用由 LlmProviderResolver 解析（同 zzdzz 口径）。 */
