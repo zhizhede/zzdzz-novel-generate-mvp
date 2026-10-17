@@ -11,6 +11,7 @@
 
 **变更流水（倒序）**：
 
+0. **2026-10-16｜全库时间列统一 ed 形（用户定调：「数据库创建、更新时间统一为 ed」）**：库列 `create_time`/`update_time` → **`created_time`/`updated_time`**。落地：novel_gen **V44** / derive_gen **V117** 幂等 RENAME（仅当旧列在且新列不在）；`BaseDO`/`DeriveBaseDO` 属性已是 `createdTime`/`updatedTime`（camelCase↔snake_case 自动映射）；手写 XML 与 `.set(...)` 已同步。**对外 JSON 键（VO/DTO/投影别名 `AS "createTime"`）保持 createTime/updateTime 不变**（前端依赖，仅持久层改名）。索引定义随 RENAME COLUMN 自动更新。被覆盖的旧惯例见 §3.6/§4 中 `create_time/update_time` 字样（正文已改口，历史流水 §8.5 按只追加保留原貌）。证据：两库 `information_schema` 旧列 0 行 / 新列 novel_gen 64 + derive 全量；`idx_*` 定义已带 created_time；V44/V117 applied success。
 1. **2026-10-08｜剧情取样层级定调（用户定调：「大框架/小框架两层取样，长篇中间再加一层更细的取样迁移，基建和规范当成后续扩展必做」）**：SPLICE 拼接按**两层取样**设计——大框架层（书/卷级骨架）+ 小框架层（章/beat 节拍），两层可跨书取源；素材必须做成「随时、按指定逻辑、可取样拼接复用」的统一形态。**长篇须在两层中间再加一层更细的取样迁移层，列为后续扩展必做**——取样单元的层标记、拼接表的分层来源记录（provenance）、取样器的层参数一律按**三层可扩**预留，禁止把「两层」写死进接口。本条只记定调，阶段二封印未解、零代码；正文见 §1.2，方案增补见 `docs/改造方案-多模块与多书拼接.md` §2.2，目的段见 `docs/交接-业务推翻重建与SPLICE方向.md` §0.5。
 2. **2026-10-08｜Mapper 文件夹统一更名（用户定调：「之后放 xxxMapper 这种文件的文件夹统一都叫 mapper」）**：`com.zzdzz.novelgen.dao` 包整体更名 `com.zzdzz.novelgen.mapper`——目录 `novelgen-data/.../dao` → `mapper`，93 个文件字面替换（Mapper 类的 package 行、全部 import、27 个 XML 的 namespace、启动类 `@MapperScan`），全库 `novelgen.dao` 引用 0 残留；`resources/mapper`（XML 目录）本就叫 mapper，两侧自此同名。**规约**：Mapper 类所在文件夹/包一律 `mapper`，不再新增 `dao` 命名；口头讲分层仍可说「dao 层」，但落码、路径、包名一律 mapper。历史流水与 §8 记录里的 `dao/` 字样按「只追加不改写」保留原貌。证据：`mvn clean test` 全绿（6 模块 56 测试类）。
 3. **2026-10-08｜Maven 多模块拆分（用户定调「先把当前代码抽成多模块，基建/hook/规约弄好」）**：单模块拆为 6 模块（common/model/data/llm/service/app），依赖方向见 §1.1，编译期强制。三处逆向边的处置：①`FingerprintMetricVO` 对 `GateService.metricLabel` 的引用 → 中文名映射下沉 `model/vo/MetricLabels`（GateService 改静态导入）；②`dao`/`llm` 对 `service.data` 的行为依赖 → `service/data` 整体与 `dao` 合并进 `novelgen-data` 模块（层内自洽，行 record 无需搬家）；③`LlmJson`/`PromptCatalog` 对 `PromptTemplateService` 的依赖 → 该类物理下沉 `novelgen-llm`（包名 `service` 不变，零 import 改动）。**方式沿用本节约束**：先留流水与方案（`docs/改造方案-多模块与多书拼接.md`），代码单独落地。证据：每步 `mvn clean test` 全绿（终态 6 模块 354+ 条）、`mvn -DskipTests package` 出可执行 jar、`.githooks/pre-commit` 实跑通过（JDK17 环境被 enforcer 正确拦截后改钉 JDK21）。
@@ -150,7 +151,7 @@ com.zzdzz.novelgen
 
 **DO（entity/）=库实体**：与表一一对应（清单以 `model/entity/` 现状为准），MyBatis-Plus `@Data + @TableName`。原规约的「MVP 用 record、只能由 DAO 的 RowMapper 构造」两条自 2026-09-13 数据层切 MyBatis-Plus 后已不适用（MP 的写入依赖无参构造 + setter），**其余（与表一一对应、DO 不出 service）不变**：
 
-- 字段 camelCase 对应表列；`create_time/update_time` **由 `BaseDO` 统一提供，实体里不再重复声明**（见 §4）；`is_deleted`/`delete_time` **不建模**（软删机制已下线，两列留库当死列，见 §8.6）；JSONB/List 字段挂 TypeHandler + autoResultMap
+- 字段 camelCase 对应表列；`created_time/updated_time` **由 `BaseDO` 统一提供，实体里不再重复声明**（见 §4；2026-10-16 起库列统一 ed 形，见 §0 流水「全库时间列统一 ed 形」）；`is_deleted`/`delete_time` **不建模**（软删机制已下线，两列留库当死列，见 §8.6）；JSONB/List 字段挂 TypeHandler + autoResultMap
 - 只经 mapper 写入（BaseMapper / 自定义语句），禁止业务代码绕过数据层改库
 - **库实体不出 service 层**：mapper 返回 DTO 给 service 是终点，跨层出参一律 VO（service 内 `from()` 转换）
 
@@ -175,12 +176,12 @@ com.zzdzz.novelgen
 
 **SQL 规约**：
 - 一律预编译参数（`?`），禁止字符串拼接；JSONB 入参用 `?::jsonb`。
-- `update_time` 由 SQL 内 `NOW()` 维护，应用不手传时间。
+- `updated_time` 由 SQL 内 `NOW()` 维护，应用不手传时间。
 - **删除＝物理删除（2026-10-03 软删机制下线，见 §0 流水「软删机制整体下线」条与 §8.6）**：代码里**不再有** `is_deleted` 过滤、**不再有** `softDelete*` 方法（已改名 `delete*` 且真的 `DELETE FROM`）。库里 `is_deleted`/`delete_time` 两列与那些 `WHERE is_deleted=false` 的条件唯一索引保留当死列/死谓词，**不要在新代码里读写它们**。
 - **唯一必须保留 `is_deleted` 的写法**：`ON CONFLICT (<cols>) WHERE is_deleted = FALSE`（现有 3 处：Embedding/WorldState/VolumeReview 的 upsert）。条件唯一索引还在，去掉谓词 PostgreSQL 会报 `no unique or exclusion constraint matching the ON CONFLICT specification`。
 - **删父行要级联**：19 个外键（父为 `novels`/`chapters`/`imported_samples`）已加 `ON DELETE CASCADE`（迁移 V37），删书自动带走章节/场景/门禁报告/事实账/伏笔/世界状态/素材卡/正典/任务/事件/复盘。**没有级联外键的两处要显式清**：`embeddings`（无外键）与 `style_packs`（父表，删包不该牵走别的书）——见 `NovelService.deleteNovel` + `StylePackMapper.deleteOrphanPack`。
-- **`BaseDO`（2026-10-03 抽，同日扩并收窄）**：30 个 XxxDO 一律 `extends BaseDO`。基类放**每张表都有、且每个实体都要建模的列**：`@TableId private Long id`（此前 30 份各自手写）+ `createTime/updateTime`（同日从 20 个实体上提，见 §0 流水「时间三件套上提 BaseDO」条与 §8.5；`deleteTime` 曾一并上提、随软删下线移除，见 §8.6）。判定口径是「全表都有」而非「看着常用」——`novelId` 之类只在部分表里，不许进基类。
-- **时间列进基类的已知代价（知悉并接受）**：`update_time` 由 SQL 内 `NOW()` 维护、应用不手传，而 MP 更新策略是 NOT_NULL——「读出来→改字段→updateById」会把读到的旧 `update_time` 写回 SET（表上无触发器，落库即旧值）。现存 updateById 只有两处：`ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null → 不进 SET，安全）、`LlmProviderService.update`（命中，该行 `update_time` 不前进）。**修法（未做）**：给基类 `updateTime` 挂 `@TableField(update = "now()")`，让 MP 的 SET 直接写 `now()`。
+- **`BaseDO`（2026-10-03 抽，同日扩并收窄；2026-10-16 列名改 ed 形）**：30 个 XxxDO 一律 `extends BaseDO`。基类放**每张表都有、且每个实体都要建模的列**：`@TableId private Long id`（此前 30 份各自手写）+ `createdTime/updatedTime`（库列 `created_time/updated_time`，2026-10-16 V44 统一；属性上提与 ed 改名见 §0 流水）；`deleteTime` 曾一并上提、随软删下线移除，见 §8.6。判定口径是「全表都有」而非「看着常用」——`novelId` 之类只在部分表里，不许进基类。**对外 JSON 键保持 createTime/updateTime**（VO/DTO 层手写，勿把 ed 形漏到 API）。
+- **时间列进基类的已知代价（知悉并接受）**：`updated_time` 由 SQL 内 `NOW()` 维护、应用不手传，而 MP 更新策略是 NOT_NULL——「读出来→改字段→updateById」会把读到的旧 `updated_time` 写回 SET（表上无触发器，落库即旧值）。现存 updateById 只有两处：`ChapterStepDataServiceImpl.finish` 传新建 patch（时间列全 null → 不进 SET，安全）、`LlmProviderService.update`（命中，该行 `updated_time` 不前进）。**修法（未做）**：给基类 `updatedTime` 挂 `@TableField(update = "now()")`，让 MP 的 SET 直接写 `now()`。
 - **投影查询里时间列保持 null**：只取部分列的 SQL 不填充它们，用前判空（如规划资产页的 content-only 查询只填 `CanonDocDO.content`）。
 - 状态机抢占必须是条件更新并检查影响行数（影响 0 行 = 并发冲突，报冲突而非静默）。
 - **查询条件超过 3 个时建 `XxxQueryDTO`**（`model/dto/`）：controller 组装查询条件 → DAO 接收 DTO 拼 WHERE；2-3 个简单参数直接用方法签名裸参数，不造空壳。**查询结果一律返回 DO 或类型化投影 record**（随 DataService 声明），不在 mapper 造 VO。
