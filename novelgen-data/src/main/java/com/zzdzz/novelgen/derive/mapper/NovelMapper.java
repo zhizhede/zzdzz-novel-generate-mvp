@@ -41,4 +41,7 @@ public interface NovelMapper extends BaseMapper<NovelDO> {
     /** ⑧ 统计回填（char_count / chapter_count）。 */
     int updateStats(@Param("id") long id, @Param("charCount") int charCount,
                     @Param("chapterCount") int chapterCount);
+
+    /** ⑥b REWORK 回炉（v3.7）：清头产物键，逼 ⑥b-0 重跑（style_profile 等其他键保留）。 */
+    int clearDraftAssets(@Param("id") long id);
 }

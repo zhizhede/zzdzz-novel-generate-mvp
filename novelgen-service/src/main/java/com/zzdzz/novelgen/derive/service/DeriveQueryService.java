@@ -78,7 +78,29 @@ public class DeriveQueryService {
     private final AssetBeatMapper assetBeatMapper;
     private final AssetWorldMapper assetWorldMapper;
     private final LabelIndexMapper labelIndexMapper;
+    private final com.zzdzz.novelgen.mapper.LlmCallLogMapper llmCallLogMapper;
     private final ObjectMapper objectMapper;
+
+    /**
+     * run 的 LLM 调用时间线（最新在前 40 条）。
+     * derive 节点的 ChatRequest 把 runId 放在 novelId 槽位 → llm_call_log.novel_id 即 runId。
+     */
+    public List<com.zzdzz.novelgen.model.vo.derive.LlmTrailVO> listLlmTrail(long runId) {
+        return llmCallLogMapper.selectList(new LambdaQueryWrapper<com.zzdzz.novelgen.model.entity.LlmCallLogDO>()
+                        .eq(com.zzdzz.novelgen.model.entity.LlmCallLogDO::getNovelId, runId)
+                        .likeRight(com.zzdzz.novelgen.model.entity.LlmCallLogDO::getNode, "derive_")
+                        .orderByDesc(com.zzdzz.novelgen.model.entity.LlmCallLogDO::getId)
+                        .last("LIMIT 40"))
+                .stream()
+                .map(r -> new com.zzdzz.novelgen.model.vo.derive.LlmTrailVO(
+                        r.getId(), r.getNode(), r.getStatus(),
+                        r.getPromptTokens(), r.getCompletionTokens(), r.getTotalTokens(),
+                        r.getLatencyMs(),
+                        r.getErrorMsg() == null ? "" :
+                                (r.getErrorMsg().length() > 160 ? r.getErrorMsg().substring(0, 160) + "…" : r.getErrorMsg()),
+                        r.getCreatedTime()))
+                .toList();
+    }
 
     /** run 列表（带筛选；novelTitle 回填成品书名供 keyword 命中与展示）。 */
     public List<RunListItemVO> listRuns(RunQueryDTO q) {

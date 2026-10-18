@@ -74,4 +74,13 @@
         WHERE id = #{id}
     </update>
 
+    <!-- v3.7 ⑥b REWORK：清头产物键（protagonist/cast/truth/brief），逼 ⑥b-0 重跑；其他键保留 -->
+    <update id="clearDraftAssets">
+        UPDATE novels
+        SET story_assets = (COALESCE(story_assets, '{"v":1}'::jsonb))
+                             - 'protagonist' - 'cast' - 'truth' - 'brief',
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

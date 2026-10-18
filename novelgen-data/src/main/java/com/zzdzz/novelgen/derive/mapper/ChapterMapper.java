@@ -12,4 +12,7 @@ public interface ChapterMapper extends BaseMapper<ChapterDO> {
      * ⚠ 必须显式 SQL——MP updateById 的 NOT_NULL 策略跳过 null 字段，set content=null 不生效。
      */
     int clearForRewrite(@Param("novelId") long novelId);
+
+    /** ⑥b REWORK 回炉（v3.7）：清 draft_outline 让分批窗从头重填（title 保留⑥a 章题）。 */
+    int clearDraftOutlines(@Param("novelId") long novelId);
 }

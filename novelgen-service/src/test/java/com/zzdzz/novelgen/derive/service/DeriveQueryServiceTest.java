@@ -58,11 +58,14 @@ class DeriveQueryServiceTest {
     private final AssetBeatMapper assetBeatMapper = mock(AssetBeatMapper.class);
     private final AssetWorldMapper assetWorldMapper = mock(AssetWorldMapper.class);
     private final LabelIndexMapper labelIndexMapper = mock(LabelIndexMapper.class);
+    private final com.zzdzz.novelgen.mapper.LlmCallLogMapper llmCallLogMapper =
+            mock(com.zzdzz.novelgen.mapper.LlmCallLogMapper.class);
 
     private final DeriveQueryService svc = new DeriveQueryService(
             runMapper, novelMapper, chapterMapper, beatInstanceMapper,
             qcReportMapper, calibrationMapper, sourceChapterMapper,
             assetOutlineMapper, assetBeatMapper, assetWorldMapper, labelIndexMapper,
+            llmCallLogMapper,
             new ObjectMapper());
 
     private static RunListItemVO runRow(long id, String status, Long novelId, String title,

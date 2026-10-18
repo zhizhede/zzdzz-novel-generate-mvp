@@ -13,4 +13,12 @@
         WHERE novel_id = #{novelId}
     </update>
 
+    <!-- v3.7 ⑥b REWORK：清 draft_outline（title 保留⑥a 章题，分批窗重填纲） -->
+    <update id="clearDraftOutlines">
+        UPDATE chapters
+        SET draft_outline = NULL,
+            updated_time  = NOW()
+        WHERE novel_id = #{novelId}
+    </update>
+
 </mapper>
