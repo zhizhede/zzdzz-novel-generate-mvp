@@ -39,7 +39,9 @@ except ImportError:
 
 CHAP_NUM = r"[0-9０-９零〇一二三四五六七八九十百千万两]+"
 PART_RE = re.compile(rf"^第{CHAP_NUM}[卷部集辑篇]$")
-CHAPTER_RE = re.compile(rf"^第{CHAP_NUM}[章回节歌幕场折夜]$")
+# 「第N章」或「第N章 标题」；单位字后须直接结束或空白/标点分隔，
+# 防「第一节课前」把课文明文误判为标题
+CHAPTER_RE = re.compile(rf"^第{CHAP_NUM}[章回节歌幕场折夜](?:$|[\s　：:·•\-—~～*])")
 PREFIX_CHAPTER_RE = re.compile(rf"^[一二三四五六七八九十百]+、")
 EN_CHAPTER_RE = re.compile(r"^(Chapter|CHAPTER|Part|PART)\s+[0-9IVXLC]+", re.I)
 SPECIALS = (
@@ -58,6 +60,9 @@ def norm(s: str) -> str:
 
 def classify_heading(text: str) -> str | None:
     """整行是否像标题。返回 'part' | 'chapter' | 'special'，否则 None。"""
+    # 章节模式需保留空白来区分「第N章 标题」与「第一节课…」等正文
+    if CHAPTER_RE.match(text.strip()):
+        return "chapter"
     t = norm(text).strip("·•‧.。:：!！?？-—~～*")
     if not t:
         return None
@@ -65,8 +70,6 @@ def classify_heading(text: str) -> str | None:
         return "part"
     if re.match(r"^[上中下终]?[卷部]([一二三四五六七八九十0-9]+)?$", t):
         return "part"
-    if CHAPTER_RE.match(t):
-        return "chapter"
     if t in SPECIALS:
         return "special"
     # 多字特殊标题允许带副题（如「序章：xxx」）；单字（序/跋）只认全等，防「序曲」误判
