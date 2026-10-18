@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.derive.web;
 
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.derive.service.DeriveDraftService;
+import com.zzdzz.novelgen.derive.service.DeriveGateService;
 import com.zzdzz.novelgen.derive.service.DerivePlanService;
 import com.zzdzz.novelgen.derive.service.DeriveQcService;
 import com.zzdzz.novelgen.derive.service.DeriveQueryService;
@@ -10,7 +11,10 @@ import com.zzdzz.novelgen.derive.service.DeriveWriteService;
 import com.zzdzz.novelgen.model.dto.derive.RunCreateDTO;
 import com.zzdzz.novelgen.model.dto.derive.RunQueryDTO;
 import com.zzdzz.novelgen.model.vo.derive.BeatVO;
+import com.zzdzz.novelgen.model.vo.derive.DraftProgressVO;
 import com.zzdzz.novelgen.model.vo.derive.DraftVO;
+import com.zzdzz.novelgen.model.vo.derive.GateVO;
+import com.zzdzz.novelgen.model.vo.derive.LlmTrailVO;
 import com.zzdzz.novelgen.model.vo.derive.PlanVO;
 import com.zzdzz.novelgen.model.vo.derive.QcReportVO;
 import com.zzdzz.novelgen.model.vo.derive.QcVO;
@@ -18,6 +22,7 @@ import com.zzdzz.novelgen.model.vo.derive.RunChapterVO;
 import com.zzdzz.novelgen.model.vo.derive.RunDetailVO;
 import com.zzdzz.novelgen.model.vo.derive.RunListItemVO;
 import com.zzdzz.novelgen.model.vo.derive.RunVO;
+import com.zzdzz.novelgen.model.vo.derive.WriteLoopVO;
 import com.zzdzz.novelgen.model.vo.derive.WriteVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,6 +47,7 @@ public class DeriveRunController {
     private final DeriveWriteService writeService;
     private final DeriveQcService qcService;
     private final DeriveQueryService queryService;
+    private final DeriveGateService gateService;
 
     @PostMapping
     public Result<RunVO> create(@RequestBody RunCreateDTO dto) {
@@ -89,10 +95,28 @@ public class DeriveRunController {
         return Result.success(planService.plan(id));
     }
 
-    /** ⑥b生成具体稿（逐拍填实+章纲+成品书登记，run→DRAFTING）。 */
+    /** ⑥b生成具体稿（v3.7 幂等单元制：每次只推进 HEAD/BATCH 一窗/RESET 回炉清稿/DONE，循环至 allDone）。 */
     @PostMapping("/{id}/draft")
     public Result<DraftVO> draft(@PathVariable long id) {
         return Result.success(draftService.draft(id));
+    }
+
+    /** ⑥b服务端进度（透明化轮询：phase/输出帧数/耗时/空闲毫秒——idle 持续增大=模型卡流）。 */
+    @GetMapping("/{id}/draft-progress")
+    public Result<DraftProgressVO> draftProgress(@PathVariable long id) {
+        return Result.success(draftService.progress(id));
+    }
+
+    /** 长任务实时活动（⑥b/闸/⑦/⑧ 共用，运行过程卡片轮询）。 */
+    @GetMapping("/{id}/activity")
+    public Result<DraftProgressVO> activity(@PathVariable long id) {
+        return Result.success(draftService.progress(id));
+    }
+
+    /** run 的 LLM 调用时间线（最新在前；node/tokens/耗时/成败——「到底在干什么」的账本）。 */
+    @GetMapping("/{id}/llm-trail")
+    public Result<List<LlmTrailVO>> llmTrail(@PathVariable long id) {
+        return Result.success(queryService.listLlmTrail(id));
     }
 
     /** ⑦写下一章正文（逐章调用断点续跑；全部完成后 run→QC）。 */
@@ -101,9 +125,33 @@ public class DeriveRunController {
         return Result.success(writeService.writeNext(id));
     }
 
+    /** ⑦服务端连跑启动（点一次→服务器逐章写到完，关页面不断；同 run 单飞）。 */
+    @PostMapping("/{id}/write-loop")
+    public Result<WriteLoopVO> writeLoopStart(@PathVariable long id) {
+        return Result.success(writeService.startLoop(id));
+    }
+
+    /** ⑦服务端连跑停止请求（当前章写完即停）。 */
+    @PostMapping("/{id}/write-loop/stop")
+    public Result<WriteLoopVO> writeLoopStop(@PathVariable long id) {
+        return Result.success(writeService.stopLoop(id));
+    }
+
+    /** ⑦服务端连跑状态（running/allDone/已写章数/当前章心跳/lastError——刷新页面也能看）。 */
+    @GetMapping("/{id}/write-progress")
+    public Result<WriteLoopVO> writeProgress(@PathVariable long id) {
+        return Result.success(writeService.loopStatus(id));
+    }
+
     /** ⑧质检（脚本 7 项硬判 + LLM 快检 4 项；PASS→PASSED，否则 REWORK/FAILED）。 */
     @PostMapping("/{id}/qc")
     public Result<QcVO> qc(@PathVariable long id) {
         return Result.success(qcService.qc(id));
+    }
+
+    /** P6 立项闸（⑥b 完成后、⑦ 前；GO 放行写正文，REWORK 回 ⑥b 重做，REJECT 熔断）。 */
+    @PostMapping("/{id}/gate")
+    public Result<GateVO> gate(@PathVariable long id) {
+        return Result.success(gateService.gate(id));
     }
 }

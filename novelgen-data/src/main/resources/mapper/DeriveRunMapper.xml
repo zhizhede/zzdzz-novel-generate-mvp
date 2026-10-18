@@ -46,4 +46,12 @@
         WHERE id = #{id}
     </update>
 
+    <!-- P6 立项闸：step_status 整列回写（调用方负责合并既有 steps 键，jsonb 显式 cast） -->
+    <update id="updateStepStatus">
+        UPDATE run
+        SET step_status  = #{stepStatus}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

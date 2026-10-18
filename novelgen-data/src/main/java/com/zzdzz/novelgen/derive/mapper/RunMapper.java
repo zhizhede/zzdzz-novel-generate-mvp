@@ -21,4 +21,7 @@ public interface RunMapper extends BaseMapper<RunDO> {
     /** 状态机推进（⑥b→DRAFTING、⑦→QC、⑧→PASSED/REWORK/FAILED）；qc_round 一并可改。 */
     int updateStatus(@Param("id") long id, @Param("status") String status,
                      @Param("qcRound") Integer qcRound);
+
+    /** L2 步状态回写（P6 立项闸 GATE 记录等；jsonb 显式 cast，AGENTS 坑 #13）。 */
+    int updateStepStatus(@Param("id") long id, @Param("stepStatus") String stepStatus);
 }

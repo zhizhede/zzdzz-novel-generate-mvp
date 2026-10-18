@@ -149,6 +149,10 @@ public class DeriveWriteService {
         if (!"DRAFTING".equals(run.getStatus())) {
             throw new BizException(ErrorCode.PARAM_ERROR, "run 状态应为 DRAFTING，当前 " + run.getStatus());
         }
+        if (!DeriveGateService.gatePassed(run.getStepStatus())) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "立项闸未过：先 POST /api/derive/runs/" + runId + "/gate 审大纲（GO 后才开写）");
+        }
         long novelId = run.getNovelId();
         List<ChapterDO> chapters = chapterMapper.selectList(new LambdaQueryWrapper<ChapterDO>()
                 .eq(ChapterDO::getNovelId, novelId)
@@ -181,6 +185,9 @@ public class DeriveWriteService {
         String best = null;
         String lastIssue = "";
         boolean lastWasLen = false;
+        DeriveActivity.begin(runId, "⑦ 第 " + target.getChapterNo() + " 章正文"
+                + (target.getTitle() == null || target.getTitle().isBlank() ? "" : "《" + target.getTitle() + "》"));
+        try {
         for (int attempt = 0; attempt < 3; attempt++) {
             List<LlmPort.Message> msgs = new ArrayList<>();
             String u;
@@ -203,7 +210,11 @@ public class DeriveWriteService {
                 u = b.toString();
             }
             msgs.add(LlmPort.Message.user(u));
-            LlmPort.ChatResult r = llm.chat(new LlmPort.ChatRequest(NODE_WRITE, runId, novelId, msgs, 0.7));
+            // 2026-10-18：⑦ 切流式——非流式干等 12 分钟会被链路 ~720s 绝对超时 RST_STREAM 掐死
+            //（run21 第3章 727s×2 实弹）；流式有增量保活，顺带把实时字数推进度。
+            LlmPort.ChatResult r = llm.chatStream(
+                    new LlmPort.ChatRequest(NODE_WRITE, runId, novelId, msgs, 0.7),
+                    (think, piece) -> DeriveActivity.touch(runId, piece));
             String text = r.content() == null ? "" : r.content();
             if (best == null || Math.abs(len(extractContent(text)) - budget)
                     < Math.abs(len(extractContent(best)) - budget)) {
@@ -226,6 +237,9 @@ public class DeriveWriteService {
             lastIssue = issue;
             lastWasLen = issue.startsWith("正文字数");
         }
+        } finally {
+            DeriveActivity.end(runId);
+        }
         // 3 轮都没过：采用最优稿落库（⑧ 会硬判并给 REWORK），不吞正文
         persist(target, chBeats, best);
         int remaining = (int) chapters.stream()
@@ -233,6 +247,138 @@ public class DeriveWriteService {
         log.warn("⑦正文：第{}章 3 轮未过 gate（末次：{}），按最优稿落库交⑧硬判", target.getChapterNo(), lastIssue);
         return new WriteVO(runId, novelId, target.getChapterNo(),
                 len(extractContent(best)), budget, remaining, false, false, lastIssue);
+    }
+
+    // ================= ⑦ 服务端连跑（2026-10-18 根修：按一次跑到底，关页面不断） =================
+
+    private static final java.util.concurrent.ConcurrentHashMap<Long, WriteLoop> LOOPS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    static final class WriteLoop {
+        final long runId;
+        final long startedMs = System.currentTimeMillis();
+        volatile boolean stop;
+        volatile boolean running = true;
+        volatile boolean allDone;
+        volatile int chaptersDone;
+        volatile Integer lastChapterNo;
+        volatile long lastChapterMs;
+        volatile String lastError = "";
+
+        WriteLoop(long runId) {
+            this.runId = runId;
+        }
+    }
+
+    /** 启动服务端连跑（单飞：同一 run 同时只许一个循环）。 */
+    public synchronized com.zzdzz.novelgen.model.vo.derive.WriteLoopVO startLoop(long runId) {
+        WriteLoop cur = LOOPS.get(runId);
+        if (cur != null && cur.running) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "该 run 的服务端连跑已在运行中（已写 " + cur.chaptersDone + " 章）——看进度或先停止");
+        }
+        RunDO run = runMapper.selectById(runId);
+        if (run == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
+        }
+        if (!"DRAFTING".equals(run.getStatus())) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "run 状态应为 DRAFTING，当前 " + run.getStatus());
+        }
+        if (!DeriveGateService.gatePassed(run.getStepStatus())) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "立项闸未过：先 POST /api/derive/runs/" + runId + "/gate 审大纲（GO 后才开写）");
+        }
+        WriteLoop loop = new WriteLoop(runId);
+        LOOPS.put(runId, loop);
+        Thread t = new Thread(() -> runLoop(loop), "derive-write-loop-" + runId);
+        t.setDaemon(true);
+        t.start();
+        log.info("⑦ 服务端连跑启动：runId={}", runId);
+        return loopVO(loop);
+    }
+
+    /** 请求停止：当前章写完即停（不打断进行中的 LLM 调用）。 */
+    public com.zzdzz.novelgen.model.vo.derive.WriteLoopVO stopLoop(long runId) {
+        WriteLoop l = LOOPS.get(runId);
+        if (l == null || !l.running) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "该 run 没有正在运行的服务端连跑");
+        }
+        l.stop = true;
+        log.info("⑦ 服务端连跑收到停止请求：runId={}（当前章写完即停）", runId);
+        return loopVO(l);
+    }
+
+    /** 连跑状态快照（含当前章实时心跳）。 */
+    public com.zzdzz.novelgen.model.vo.derive.WriteLoopVO loopStatus(long runId) {
+        WriteLoop l = LOOPS.get(runId);
+        if (l == null) {
+            var act = DeriveActivity.snapshot(runId);
+            return new com.zzdzz.novelgen.model.vo.derive.WriteLoopVO(runId, false, false, false,
+                    0, null, 0, "", 0, act.phase(), act.chars(), act.idleMs());
+        }
+        return loopVO(l);
+    }
+
+    void runLoop(WriteLoop loop) {
+        int transportRetries = 0;
+        try {
+            while (!loop.stop) {
+                long chStart = System.currentTimeMillis();
+                try {
+                    WriteVO w = writeNext(loop.runId);
+                    transportRetries = 0;
+                    loop.lastChapterMs = System.currentTimeMillis() - chStart;
+                    if (w.allDone() || w.chapterNo() < 0) {
+                        loop.allDone = true;
+                        log.info("⑦ 服务端连跑完成：runId={} 共写 {} 章 → 已转质检", loop.runId, loop.chaptersDone);
+                        return;
+                    }
+                    loop.chaptersDone++;
+                    loop.lastChapterNo = w.chapterNo();
+                } catch (BizException e) {
+                    String msg = e.getMessage() == null ? "" : e.getMessage();
+                    if (msg.contains("run 状态应为 DRAFTING")) {
+                        // 中途被外部改状态（如已转 QC）＝视同完成
+                        loop.allDone = true;
+                        return;
+                    }
+                    loop.lastError = msg;
+                    log.warn("⑦ 服务端连跑停止：runId={} 原因={}", loop.runId, msg);
+                    return;
+                } catch (Exception e) {
+                    String msg = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                    // 传输类错误（RST_STREAM/连接被掐）自动重试 1 次——链路偶发，不该整跑即死
+                    if (isTransportError(msg) && transportRetries < 1) {
+                        transportRetries++;
+                        log.warn("⑦ 传输类错误，连跑自动重试 {}/1：runId={} 原因={}",
+                                transportRetries, loop.runId, msg);
+                        continue;
+                    }
+                    loop.lastError = msg;
+                    log.warn("⑦ 服务端连跑中断：runId={} 原因={}", loop.runId, msg);
+                    return;
+                }
+            }
+            log.info("⑦ 服务端连跑按停止请求收尾：runId={} 已写 {} 章", loop.runId, loop.chaptersDone);
+        } finally {
+            loop.running = false;
+        }
+    }
+
+    /** 传输层偶发（HTTP/2 RST、连接重置）——区别于业务/解析类失败，允许连跑原地重试。 */
+    static boolean isTransportError(String msg) {
+        return msg.contains("RST_STREAM")
+                || msg.contains("传输失败")
+                || msg.contains("IOException")
+                || msg.contains("Connection reset")
+                || msg.contains("ConnectionReset");
+    }
+
+    com.zzdzz.novelgen.model.vo.derive.WriteLoopVO loopVO(WriteLoop l) {
+        var act = DeriveActivity.snapshot(l.runId);
+        return new com.zzdzz.novelgen.model.vo.derive.WriteLoopVO(l.runId, l.running, l.stop, l.allDone,
+                l.chaptersDone, l.lastChapterNo, l.lastChapterMs, l.lastError,
+                System.currentTimeMillis() - l.startedMs, act.phase(), act.chars(), act.idleMs());
     }
 
     // ---- 输入（状态包） ----

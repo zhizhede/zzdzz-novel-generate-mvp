@@ -91,8 +91,12 @@ public class DeriveQcService {
             5. logic：跨章一致与推理自洽——①关键数字/时间戳前后一致（金额、时刻、人数）；
                ②证据与结论挂钩（定性须有物证或已落实证言支撑，纯推测链不得作结案根据）；
                ③线索公平（谜面核心信息须在揭示前给到读者，不得用"没打听到"式省略堵死诡计）；
-               ④若输入带『真相卡』：按卡对账——真凶/动机/手法在结局章是否明确还原，
-               埋设线索是否按 planted_chapter 出现，禁止卡外新事实；无真相卡时按①②③判；
+               ④若输入带『真相卡』：按卡硬对账——reveal_chapter 及其后 1~2 章必须出现
+               solution 三要素（culprit/motive/method）的明确兑现动作（收押/判决/还原陈述/
+               尸体发现这类可查验事件），缺任何一项 → logic pass=false，note 点名缺哪项；
+               solution 专名与 timeline_anchors 数字必须在结局前找到对应事件，悬空 >1 处
+               → pass=false 并在 issues 逐条点名；「案情已闭合 + 判决后情绪余韵尾」判 pass
+               （余韵合法，悬空不合法）；无真相卡时按①②③判；
                ⑤剧透检查：若带 truth.reveal_chapter——reveal 之前的章节出现 solution 内容或
                暗示性写法（引号反讽、旁白剧透、角色提前知情）判 fail。
             输出 JSON 对象（只输出 JSON）：
@@ -354,9 +358,11 @@ public class DeriveQcService {
         List<String> hits = List.of();
         boolean pass = flow.isEmpty();
         if (antiRepro) {
-            // 词表黑名单（真实作品名/血缘词面）：防复刻原口径才硬判
+            // 词表黑名单（真实作品名/血缘词面）：防复刻原口径才硬判；grp='MOTIF' 是大纲层母题
+            // （P6 立项闸判据），不进正文 grep——语义比对在 derive_gate 提示词里做
             hits = wordlistMapper.selectList(new LambdaQueryWrapper<WordlistDO>()
-                            .eq(WordlistDO::getKind, "BLACKLIST"))
+                            .eq(WordlistDO::getKind, "BLACKLIST")
+                            .and(w -> w.isNull(WordlistDO::getGrp).or().ne(WordlistDO::getGrp, "MOTIF")))
                     .stream().map(WordlistDO::getWord).filter(w -> w != null && !w.isBlank())
                     .filter(full::contains).toList();
             pass = pass && hits.isEmpty();
@@ -458,11 +464,18 @@ public class DeriveQcService {
     JsonNode llmCheck(RunDO run, NovelDO novel, List<ChapterDO> chapters,
                       List<BeatInstanceDO> beats, List<String> issues) {
         String user = buildQcUser(run, novel, chapters, beats);
-        return llmJson.ask(
-                new LlmPort.ChatRequest(NODE_QC, run.getId(), novel.getId(),
-                        List.of(LlmPort.Message.system(QC_PROMPT), LlmPort.Message.user(user)),
-                        0.2),
-                root -> parseQc(root, issues), 2);
+        long runId = run.getId();
+        DeriveActivity.begin(runId, "⑧ AI 质检快检（五项）");
+        try {
+            return llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_QC, runId, novel.getId(),
+                            List.of(LlmPort.Message.system(QC_PROMPT), LlmPort.Message.user(user)),
+                            0.2),
+                    root -> parseQc(root, issues), 2,
+                    (think, piece) -> DeriveActivity.touch(runId, piece));
+        } finally {
+            DeriveActivity.end(runId);
+        }
     }
 
     JsonNode parseQc(JsonNode root, List<String> issues) {

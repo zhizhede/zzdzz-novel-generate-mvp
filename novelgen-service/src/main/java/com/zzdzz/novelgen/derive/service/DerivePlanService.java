@@ -13,6 +13,7 @@ import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.LabelIndexMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
+import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.AssetBeatDO;
@@ -22,6 +23,7 @@ import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
 import com.zzdzz.novelgen.model.entity.derive.LabelIndexDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
+import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
 import com.zzdzz.novelgen.model.vo.derive.PlanVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,7 +59,7 @@ public class DerivePlanService {
     static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
 
     static final String PLAN_PROMPT = """
-            你在为一部小说做章节计划。输入：字数区间、结局形状、目标节奏、主线（标签层焊接结果）、
+            你在为一部小说做章节计划。输入：字数区间、类别、结局形状、目标节奏、主线（标签层焊接结果）、
             拍清单（每拍含临时序号 seq、拍型、节奏锚点、弧位标签、标签层文案）。
             输出 JSON 对象：
             {"chapters":[{"no":1,"title_hint":"≤12字章题","budget":2500,"beats":[3,1,7]}]}
@@ -66,6 +68,9 @@ public class DerivePlanService {
             2. 拍清单的每个 seq 必须恰好出现一次（不许丢、不许重复）；每章≥1拍；beats 数组顺序=章内拍序；
             3. 拍按 arc_fit 与因果定序（弧位偏开头的靠前、收尾的靠后；同弧拍保持相对顺序）；
             4. 结局形状=闭合：末章必须包含收束拍；=开放/循环：末章可留悬念；
+            4b. 类别含「推理」或「悬疑」且结局形状=闭合时：末章的收束拍必须承载
+                「真相了结/罪责兑现」语义（真凶收押、还原陈述、判决落地、受害者安葬这类
+                可查验的动作），禁止用纯氛围收束拍充数——氛围余味只能出现在了结动作之后；
             5. 快热：前 3 章必须含拍型∈{事件,反转} 的拍；
             6. title_hint 不带"第N章"前缀、不带专名过露的剧透。
             只输出 JSON 对象，无其他文字。
@@ -78,6 +83,7 @@ public class DerivePlanService {
     private final AssetOutlineMapper outlineMapper;
     private final AssetBeatMapper beatMapper;
     private final LabelIndexMapper labelIndexMapper;
+    private final WorkFingerprintMapper fingerprintMapper;
     private final LlmJson llmJson;
 
     /** 拍清单条目（临时序号 = 输入给 LLM 的 seq）。 */
@@ -228,6 +234,10 @@ public class DerivePlanService {
         }
         runMapper.updateNovelId(runId, novelId);
 
+        // P6 伴随·指纹前移（2026-10-17）：抽中弧 BRIDGE 在⑥a 即登记——原仅⑧ PASS 时登记，
+        // 而 33 起无一过审，防复刻无数据可比（跨稿母题/弧复读死循环）。⑤ 阻断照旧只在 anti_repro=开 时生效。
+        registerBridgeFingerprints(run, novelId);
+
         int totalBudget = drafts.stream().mapToInt(PlanDraft::budget).sum();
         log.info("⑥a章节计划：runId={} novelId={} 章={} 拍={} 总预算={}",
                 runId, novelId, drafts.size(), finalSeq - 1, totalBudget);
@@ -236,11 +246,39 @@ public class DerivePlanService {
 
     // ---- 输入构造与解析校验 ----
 
+    /** 抽中弧 BRIDGE 指纹（与⑧ registerFingerprints 同口径；唯一键幂等，撞了忽略）。 */
+    void registerBridgeFingerprints(RunDO run, long novelId) {
+        for (long outlineId : DeriveQcService.parseIdArray(run.getPickedOutlineIds())) {
+            AssetOutlineDO arc = outlineMapper.selectById(outlineId);
+            if (arc == null) {
+                continue;
+            }
+            LabelIndexDO label = labelIndexMapper.selectOne(new LambdaQueryWrapper<LabelIndexDO>()
+                    .eq(LabelIndexDO::getEntryType, "OUTLINE")
+                    .eq(LabelIndexDO::getEntryTypeId, outlineId)
+                    .last("LIMIT 1"));
+            String fp = label == null ? null : DeriveQcService.fingerprintOf(arc.getFuncTag(), label.getCat());
+            String value = arc.getCode() != null ? arc.getCode()
+                    : (arc.getLabelText() == null ? "" : arc.getLabelText().substring(0, Math.min(32, arc.getLabelText().length())));
+            try {
+                WorkFingerprintDO row = new WorkFingerprintDO();
+                row.setNovelId(novelId);
+                row.setKind("BRIDGE");
+                row.setValue(value);
+                row.setFingerprint(fp);
+                fingerprintMapper.insert(row);
+            } catch (Exception e) {
+                log.debug("work_fingerprint 已存在（幂等）：{}", value);
+            }
+        }
+    }
+
     String buildUserInput(RunDO run, List<InvBeat> inventory, int expectedCh, int wordsPred) {
         ObjectNode root = STATIC_MAPPER.createObjectNode();
         root.put("章节数", expectedCh);
         root.put("wordsPred", wordsPred);
         root.put("字数区间", run.getParamWordsMin() + "~" + run.getParamWordsMax());
+        root.set("类别", DeriveWriteService.readTreeSafe(run.getParamTags()));
         root.put("目标节奏", run.getParamPace().toPlainString());
         root.put("结局形状", run.getParamOutcome());
         root.put("产品形态", run.getParamForm());
