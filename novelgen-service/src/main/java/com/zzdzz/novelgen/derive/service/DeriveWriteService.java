@@ -11,12 +11,15 @@ import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.QcReportMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
+import com.zzdzz.novelgen.derive.mapper.WorldStateMapper;
+import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.QcReportDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
+import com.zzdzz.novelgen.model.entity.derive.WorldStateDO;
 import com.zzdzz.novelgen.model.vo.derive.WriteVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,10 +33,12 @@ import java.util.regex.Pattern;
 /**
  * ⑦ 分章生成正文（v3.2 §⑦ + harness 化，2026-10-13）。
  *
- * <p><b>harness 三件套</b>（把 agent 在环时天然具备的状态工程化）：
+ * <p><b>harness 四件套</b>（把 agent 在环时天然具备的状态工程化）：
  * <ul>
  *   <li>状态包注入：全书 cast 表（⑥b 落 story_assets）+ 前章正文尾段 + 全书章纲概览
- *       + ⑧ 上轮 issues——每次调用等价于"看过前文再写"，孤立重写不再孤立；</li>
+ *       + ⑧ 上轮 issues + <b>世界状态账</b>（V119 world_states，⑦每章写完用 world_state
+ *       节点抽取 upsert，下一章注入——治跨章时间/位置/同一事件写两次）——每次调用等价于
+ *       "看过前文再写"，孤立重写不再孤立；</li>
  *   <li>字数修整轮：首稿超带不再整章重掷，改为"带上一稿+目标带+差值"定向增删
  *       （对应 agent 当场数字数增删，治篇幅惯性不收敛）；</li>
  *   <li>输出 gate：字数带/禁词/主角名出现，带结构化原因喂回重试 ≤3 轮，
@@ -51,12 +56,37 @@ public class DeriveWriteService {
 
     public static final String NODE_WRITE = "derive_write";
 
+    /** 世界状态抽取节点（V102 种子行，可路由快模型；V119 起真接⑦）。 */
+    public static final String NODE_WORLD_STATE = "world_state";
+
     static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
 
     /** 章注：<!-- 本章1234字，挂拍：1,2,3 --> */
     static final Pattern COMMENT_PATTERN = Pattern.compile("<!--\\s*本章(\\d+)字[^>]*?挂拍[:：]\\s*([\\d,，\\s]*)\\s*-->");
     /** 禁词：素材编号与工作流痕迹（工程卫生，与防复刻开关无关，恒开） */
     static final Pattern FORBIDDEN = Pattern.compile("O-P\\d|S-P\\d|W-P\\d|O-F\\d|素材来源|抽取稿|标签层");
+    /** 过程话泄漏（审稿实锤：字数自控笔记、「第十一章——」出戏台词）——恒开 gate */
+    static final Pattern META_LEAK = Pattern.compile(
+            "估算字数|目标字数带|正文字数|本章\\d+字|挂拍|第[一二三四五六七八九十百千零两\\d]+章[——\\-]");
+
+    /** 世界状态抽取（V119）：只认正文明确时间线索，禁反推总历时；失败 fail-open 不炸章。 */
+    static final String WORLD_STATE_PROMPT = """
+            你在从一章小说正文抽取「世界状态账」，供后续章节防时序/位置/人物矛盾。
+            只依据本章正文与上一章状态，禁止编造正文未写的事实。
+            规则：
+            1. time：只认本章正文明确写出的时间线索（钟点/次日/数日后等）；
+               局部时长（如「这半月掉的肉」）严禁反推总历时；
+               本章无线索则原样沿用上一章 time；上一章也无则写「未推进」；
+            2. locations：本章末仍主要在场的具名人物→地点；
+            3. present：本章末仍在一起的具名人物数组；
+            4. statuses：离场/被困/死亡/失联等关键人物状态对象（无则空 {}）；
+            5. key_facts：本章确立且后续不得推翻的事实 ≤8 条（物件下落/已发生事件/关系变化）；
+            6. open_loops：未闭合事件/悬念 ≤8 条（脱困与否、未找到的人或物）；
+            7. 上一章状态里已有、且本章未推翻的条目必须保留，禁止清空账本。
+            输出 JSON 对象：
+            {"time":"…","locations":{},"present":[],"statuses":{},"key_facts":[],"open_loops":[]}
+            只输出 JSON 对象，无其他文字。
+            """;
 
     /** 剧透禁令（v3.6 方案A）：揭示章前每章必注入——反暗示 + 无知之幕。 */
     static final String SPOILER_BAN =
@@ -89,8 +119,11 @@ public class DeriveWriteService {
             9. 叙事密度优先：每段须推进情节/人物/信息之一；前情仅供事实对齐，禁止复述与回顾式过渡；
             单处环境描写 ≤2 句；慢热=铺垫节奏，不等于注水；
             10. 若状态含『文风卡』或『目标文风』：句式/对话比/叙事密度/用语按卡执行，no_go 逐条规避；
-            11. 只输出正文本身；正文最后单独一行输出章注：
+            11. 若状态含『世界状态账』：time/地点/在场人物/未闭合事件以此为准——
+               禁止推翻已确立事实，禁止把已结束的脱困/已闭合事件再演一遍；
+            12. 只输出正文本身；正文最后单独一行输出章注：
                <!-- 本章X字，挂拍：seq,seq -->
+            禁止输出字数估算、预算核对、"第N章——"式出戏旁白等任何过程话。
             不要输出任何解释、标题行或 markdown 围栏。
             """;
 
@@ -118,8 +151,11 @@ public class DeriveWriteService {
             10. 叙事密度优先：每段须推进情节/人物/信息之一；前情仅供事实对齐，禁止复述与回顾式过渡；
             单处环境描写 ≤2 句；慢热=铺垫节奏，不等于注水；
             11. 若状态含『文风卡』或『目标文风』：句式/对话比/叙事密度/用语按卡执行，no_go 逐条规避；
-            12. 只输出正文本身；正文最后单独一行输出章注：
+            12. 若状态含『世界状态账』：time/地点/在场人物/未闭合事件以此为准——
+               禁止推翻已确立事实，禁止把已结束的脱困/已闭合事件再演一遍；
+            13. 只输出正文本身；正文最后单独一行输出章注：
                <!-- 本章X字，挂拍：seq,seq -->
+            禁止输出字数估算、预算核对、"第N章——"式出戏旁白等任何过程话。
             不要输出任何解释、标题行或 markdown 围栏。
             """;
 
@@ -139,6 +175,8 @@ public class DeriveWriteService {
     private final BeatInstanceMapper beatInstanceMapper;
     private final QcReportMapper qcReportMapper;
     private final LlmPort llm;
+    private final WorldStateMapper worldStateMapper;
+    private final LlmJson llmJson;
 
     /** ⑦：写下一章（无未写章则幂等返回 allDone）。 */
     public WriteVO writeNext(long runId) {
@@ -175,7 +213,10 @@ public class DeriveWriteService {
 
         boolean independent = Boolean.TRUE.equals(run.getAntiRepro());
         boolean lenCheck = Boolean.TRUE.equals(run.getLenCheck()); // V115：默认关=不做字数带校验（无修整轮）
-        String user = buildUser(run, novel, target, chBeats, chapters, independent);
+        WorldStateDO prevWs = worldStateMapper == null ? null
+                : worldStateMapper.findLatestBefore(novelId, target.getChapterNo());
+        String user = buildUser(run, novel, target, chBeats, chapters, independent,
+                prevWs == null ? null : prevWs.getState());
         int budget = target.getBudget();
         int lo = (int) Math.floor(budget * 0.9);
         int hi = (int) Math.ceil(budget * 1.1);
@@ -213,7 +254,7 @@ public class DeriveWriteService {
             // 2026-10-18：⑦ 切流式——非流式干等 12 分钟会被链路 ~720s 绝对超时 RST_STREAM 掐死
             //（run21 第3章 727s×2 实弹）；流式有增量保活，顺带把实时字数推进度。
             LlmPort.ChatResult r = llm.chatStream(
-                    new LlmPort.ChatRequest(NODE_WRITE, runId, novelId, msgs, 0.7),
+                    new LlmPort.ChatRequest(NODE_WRITE, novelId, null, runId, msgs, 0.7),
                     (think, piece) -> DeriveActivity.touch(runId, piece));
             String text = r.content() == null ? "" : r.content();
             if (best == null || Math.abs(len(extractContent(text)) - budget)
@@ -223,6 +264,7 @@ public class DeriveWriteService {
             String issue = validate(text, lo, hi, protagonist, lenCheck);
             if (issue == null) {
                 persist(target, chBeats, text);
+                refreshWorldState(runId, novelId, target, text);
                 int remaining = (int) chapters.stream()
                         .filter(c -> c.getContent() == null || c.getContent().isBlank()).count();
                 boolean allDone = remaining == 0;
@@ -242,6 +284,7 @@ public class DeriveWriteService {
         }
         // 3 轮都没过：采用最优稿落库（⑧ 会硬判并给 REWORK），不吞正文
         persist(target, chBeats, best);
+        refreshWorldState(runId, novelId, target, best);
         int remaining = (int) chapters.stream()
                 .filter(c -> c.getContent() == null || c.getContent().isBlank()).count();
         log.warn("⑦正文：第{}章 3 轮未过 gate（末次：{}），按最优稿落库交⑧硬判", target.getChapterNo(), lastIssue);
@@ -270,12 +313,16 @@ public class DeriveWriteService {
         }
     }
 
-    /** 启动服务端连跑（单飞：同一 run 同时只许一个循环）。 */
+    /** 启动服务端连跑（单飞：同一 run 同时只许一个循环；全流程主控在跑时不许另起）。 */
     public synchronized com.zzdzz.novelgen.model.vo.derive.WriteLoopVO startLoop(long runId) {
         WriteLoop cur = LOOPS.get(runId);
         if (cur != null && cur.running) {
             throw new BizException(ErrorCode.PARAM_ERROR,
                     "该 run 的服务端连跑已在运行中（已写 " + cur.chaptersDone + " 章）——看进度或先停止");
+        }
+        if (DeriveAutoFlowService.autoRunning(runId)) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "该 run 的全流程无人值守正在运行——⑦ 由它推进，无需另起连跑");
         }
         RunDO run = runMapper.selectById(runId);
         if (run == null) {
@@ -295,6 +342,12 @@ public class DeriveWriteService {
         t.start();
         log.info("⑦ 服务端连跑启动：runId={}", runId);
         return loopVO(loop);
+    }
+
+    /** ⑦ 连跑是否在跑（全流程主控启动前的互斥检查用）。 */
+    static boolean loopRunning(long runId) {
+        WriteLoop l = LOOPS.get(runId);
+        return l != null && l.running;
     }
 
     /** 请求停止：当前章写完即停（不打断进行中的 LLM 调用）。 */
@@ -406,6 +459,11 @@ public class DeriveWriteService {
 
     String buildUser(RunDO run, NovelDO novel, ChapterDO ch, List<BeatInstanceDO> beats,
                      List<ChapterDO> allChapters, boolean independent) {
+        return buildUser(run, novel, ch, beats, allChapters, independent, null);
+    }
+
+    String buildUser(RunDO run, NovelDO novel, ChapterDO ch, List<BeatInstanceDO> beats,
+                     List<ChapterDO> allChapters, boolean independent, String worldStateJson) {
         ObjectNode root = STATIC_MAPPER.createObjectNode();
         root.put("作品名", novel.getTitle());
         root.set("域", readTreeSafe(run.getDomainSnapshot()));
@@ -449,6 +507,12 @@ public class DeriveWriteService {
         // ---- 状态包：cast 人物表（harness 核心，任何模式都给——它不是"其他章原文"）----
         root.put("主角名", assets.path("protagonist").asText(""));
         root.set("cast人物表", assets.path("cast"));
+
+        // ---- 世界状态账（V119）：任何模式都给——结构化事实，不是前章原文 ----
+        if (worldStateJson != null && !worldStateJson.isBlank()) {
+            root.set("世界状态账（上一章快照；time/位置/在场/未闭合——禁止推翻、禁止同一事件写两次）",
+                    readTreeSafe(worldStateJson));
+        }
 
         // ---- 真相卡按章分段注入（v3.6 剧透门禁核心：揭示前只给埋设表+禁令，solution 不下凡）----
         JsonNode truth = assets.path("truth");
@@ -551,6 +615,10 @@ public class DeriveWriteService {
         if (f.find()) {
             return "正文含禁词「" + f.group() + "」（素材编号/来源痕迹），删除";
         }
+        Matcher m = META_LEAK.matcher(body);
+        if (m.find()) {
+            return "正文含过程话「" + m.group() + "」（字数估算/章号出戏旁白），删除只留故事本身";
+        }
         // 输出 gate：主角名必须出现（称谓漂移的最廉价硬信号；主角可被称为"他"的章也几乎必点名）
         if (protagonist != null && !protagonist.isBlank() && !body.contains(protagonist)) {
             return "正文未出现主角名「" + protagonist + "」（cast 锚点），人名与前文不一致，修正";
@@ -601,6 +669,49 @@ public class DeriveWriteService {
         for (BeatInstanceDO b : beats) {
             b.setStatus("WRITTEN");
             beatInstanceMapper.updateById(b);
+        }
+    }
+
+    /** ⑦ 落稿后抽取世界状态账（world_state 节点）；LLM 失败 fail-open，不拖垮正文。 */
+    void refreshWorldState(long runId, long novelId, ChapterDO ch, String rawText) {
+        if (worldStateMapper == null || llmJson == null) {
+            return;
+        }
+        try {
+            String body = extractContent(rawText);
+            WorldStateDO prev = worldStateMapper.findLatestBefore(novelId, ch.getChapterNo());
+            ObjectNode user = STATIC_MAPPER.createObjectNode();
+            user.put("chapter_no", ch.getChapterNo());
+            user.put("title", ch.getTitle() == null ? "" : ch.getTitle());
+            user.put("content", body.length() > 8000 ? body.substring(0, 8000) : body);
+            if (prev != null && prev.getState() != null && !prev.getState().isBlank()) {
+                user.set("prev_state", readTreeSafe(prev.getState()));
+            } else {
+                user.putObject("prev_state");
+            }
+            String state = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_WORLD_STATE, novelId, null, runId,
+                            List.of(LlmPort.Message.system(WORLD_STATE_PROMPT),
+                                    LlmPort.Message.user(user.toString())), 0.2),
+                    root -> {
+                        if (!root.isObject()) {
+                            throw new LlmJson.Bad("世界状态必须是 JSON 对象");
+                        }
+                        try {
+                            return STATIC_MAPPER.writeValueAsString(root);
+                        } catch (Exception e) {
+                            throw new LlmJson.Bad("世界状态序列化失败：" + e.getMessage());
+                        }
+                    }, 2);
+            WorldStateDO row = new WorldStateDO();
+            row.setNovelId(novelId);
+            row.setChapterNo(ch.getChapterNo());
+            row.setState(state);
+            worldStateMapper.upsert(row);
+            log.info("世界状态账：novelId={} ch{} 已 upsert", novelId, ch.getChapterNo());
+        } catch (Exception e) {
+            log.warn("世界状态抽取失败（fail-open）：novelId={} ch{} 原因={}",
+                    novelId, ch.getChapterNo(), e.getMessage());
         }
     }
 

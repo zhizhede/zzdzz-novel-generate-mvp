@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.derive.mapper.QcReportMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.WordlistMapper;
 import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
+import com.zzdzz.novelgen.derive.mapper.WorldStateMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
 import com.zzdzz.novelgen.model.entity.derive.WordlistDO;
@@ -35,7 +36,8 @@ class DeriveQcConcentrationTest {
             mock(RunMapper.class), mock(NovelMapper.class), mock(ChapterMapper.class),
             mock(BeatInstanceMapper.class), wordlistMapper, mock(QcReportMapper.class),
             mock(CalibrationMapper.class), mock(WorkFingerprintMapper.class),
-            mock(AssetOutlineMapper.class), mock(LabelIndexMapper.class), mock(LlmJson.class));
+            mock(AssetOutlineMapper.class), mock(LabelIndexMapper.class),
+            mock(WorldStateMapper.class), mock(LlmJson.class));
 
     private static ChapterDO ch(int no, String content) {
         ChapterDO c = new ChapterDO();

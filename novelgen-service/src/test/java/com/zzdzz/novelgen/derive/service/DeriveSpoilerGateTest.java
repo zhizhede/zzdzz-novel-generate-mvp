@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DeriveSpoilerGateTest {
 
     private final DeriveWriteService svc =
-            new DeriveWriteService(null, null, null, null, null, null);
+            new DeriveWriteService(null, null, null, null, null, null, null, null);
 
     private RunDO run() {
         RunDO run = new RunDO();

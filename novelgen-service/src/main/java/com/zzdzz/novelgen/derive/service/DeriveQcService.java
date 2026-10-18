@@ -17,6 +17,7 @@ import com.zzdzz.novelgen.derive.mapper.QcReportMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.WordlistMapper;
 import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
+import com.zzdzz.novelgen.derive.mapper.WorldStateMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.AssetOutlineDO;
@@ -29,6 +30,7 @@ import com.zzdzz.novelgen.model.entity.derive.QcReportDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.WordlistDO;
 import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
+import com.zzdzz.novelgen.model.entity.derive.WorldStateDO;
 import com.zzdzz.novelgen.model.vo.derive.QcVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -98,7 +100,12 @@ public class DeriveQcService {
                → pass=false 并在 issues 逐条点名；「案情已闭合 + 判决后情绪余韵尾」判 pass
                （余韵合法，悬空不合法）；无真相卡时按①②③判；
                ⑤剧透检查：若带 truth.reveal_chapter——reveal 之前的章节出现 solution 内容或
-               暗示性写法（引号反讽、旁白剧透、角色提前知情）判 fail。
+               暗示性写法（引号反讽、旁白剧透、角色提前知情）判 fail；
+               ⑥世界状态账对照（若输入带『世界状态账』时间线）：a. 各章正文的时刻/地点/在场
+               人物与账本及前后章不得矛盾；b. 账本 open_loops 已关闭的事件（如已脱困、已找到）
+               不得在后续章再演一遍——同一脱困/同一已结束事件重复叙述直接 fail 并点名章号；
+               c. key_facts 不得被后续正文推翻；发现矛盾 → logic pass=false，note 写「状态账冲突」，
+               issues 逐条写清「第X章 vs 第Y章/账本：…」。
             输出 JSON 对象（只输出 JSON）：
             {"fulfillment":{"pass":true,"note":"…"},
              "pacing":{"pass":true,"note":"…"},
@@ -118,6 +125,7 @@ public class DeriveQcService {
     private final WorkFingerprintMapper fingerprintMapper;
     private final AssetOutlineMapper outlineMapper;
     private final LabelIndexMapper labelIndexMapper;
+    private final WorldStateMapper worldStateMapper;
     private final LlmJson llmJson;
 
     /** ⑧：跑一轮质检。 */
@@ -163,7 +171,11 @@ public class DeriveQcService {
         List<String> llmIssues = new ArrayList<>();
         boolean llmPass = true;
         try {
-            llmResult = llmCheck(run, novel, chapters, beats, llmIssues);
+            List<WorldStateDO> ledger = worldStateMapper == null ? List.of()
+                    : worldStateMapper.selectList(new LambdaQueryWrapper<WorldStateDO>()
+                            .eq(WorldStateDO::getNovelId, novelId)
+                            .orderByAsc(WorldStateDO::getChapterNo));
+            llmResult = llmCheck(run, novel, chapters, beats, llmIssues, ledger);
             // v3.4 口径：判定只看五项 pass；issues 数组是建议清单，记录但不参与判定
             llmPass = true;
             for (String key : List.of("fulfillment", "pacing", "voice", "domain", "logic")) {
@@ -463,12 +475,18 @@ public class DeriveQcService {
 
     JsonNode llmCheck(RunDO run, NovelDO novel, List<ChapterDO> chapters,
                       List<BeatInstanceDO> beats, List<String> issues) {
-        String user = buildQcUser(run, novel, chapters, beats);
+        return llmCheck(run, novel, chapters, beats, issues, List.of());
+    }
+
+    JsonNode llmCheck(RunDO run, NovelDO novel, List<ChapterDO> chapters,
+                      List<BeatInstanceDO> beats, List<String> issues,
+                      List<WorldStateDO> ledger) {
+        String user = buildQcUser(run, novel, chapters, beats, ledger);
         long runId = run.getId();
         DeriveActivity.begin(runId, "⑧ AI 质检快检（五项）");
         try {
             return llmJson.ask(
-                    new LlmPort.ChatRequest(NODE_QC, runId, novel.getId(),
+                    new LlmPort.ChatRequest(NODE_QC, novel.getId(), null, runId,
                             List.of(LlmPort.Message.system(QC_PROMPT), LlmPort.Message.user(user)),
                             0.2),
                     root -> parseQc(root, issues), 2,
@@ -493,6 +511,11 @@ public class DeriveQcService {
     }
 
     String buildQcUser(RunDO run, NovelDO novel, List<ChapterDO> chapters, List<BeatInstanceDO> beats) {
+        return buildQcUser(run, novel, chapters, beats, List.of());
+    }
+
+    String buildQcUser(RunDO run, NovelDO novel, List<ChapterDO> chapters, List<BeatInstanceDO> beats,
+                       List<WorldStateDO> ledger) {
         ObjectNode root = STATIC_MAPPER.createObjectNode();
         root.put("作品名", novel.getTitle());
         root.put("主角", readProtagonist(novel));
@@ -539,6 +562,14 @@ public class DeriveQcService {
             n.put("title", c.getTitle());
             n.put("outline", c.getDraftOutline() == null ? "" : c.getDraftOutline());
             n.put("body", c.getContent() == null ? "" : c.getContent());
+        }
+        if (ledger != null && !ledger.isEmpty()) {
+            var wArr = root.putArray("世界状态账（逐章快照；logic⑥ 对照用）");
+            for (WorldStateDO w : ledger) {
+                var n = wArr.addObject();
+                n.put("chapter_no", w.getChapterNo());
+                n.set("state", DeriveWriteService.readTreeSafe(w.getState()));
+            }
         }
         return root.toString();
     }

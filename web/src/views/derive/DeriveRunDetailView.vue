@@ -23,36 +23,52 @@
 
           <template v-if="detail.status === 'PLANNING' && !detail.novelId">
             <el-button type="primary" :loading="acting === 'plan'"
-                       :disabled="!!acting" @click="actPlan">⑥a 章节计划</el-button>
+                       :disabled="!!acting || autoRunning" @click="actPlan">⑥a 章节计划</el-button>
           </template>
           <template v-else-if="detail.status === 'PLANNING'">
             <el-button type="primary" :loading="acting === 'draft'"
-                       :disabled="!!acting || !!serverDraft" @click="actDraft(false)">⑥b 生成具体稿</el-button>
+                       :disabled="!!acting || !!serverDraft || autoRunning" @click="actDraft(false)">⑥b 生成具体稿</el-button>
           </template>
           <template v-else-if="detail.status === 'DRAFTING'">
             <el-button v-if="!gatePassed" type="warning" :loading="acting === 'gate'"
-                       :disabled="!!acting" @click="actGate">P6 立项闸（大纲评审）</el-button>
+                       :disabled="!!acting || autoRunning" @click="actGate">P6 立项闸（大纲评审）</el-button>
             <el-tag v-else size="large" type="success">立项闸 PASS · 第 {{ gateInfo?.round ?? 1 }} 轮</el-tag>
-            <el-button :loading="acting === 'write'" :disabled="!!acting || writeBusy || !gatePassed"
+            <el-button :loading="acting === 'write'" :disabled="!!acting || writeBusy || autoRunning || !gatePassed"
                        @click="actWriteOne">⑦ 写下一章</el-button>
-            <el-button type="primary" :disabled="!!acting || writeBusy || !gatePassed"
+            <el-button type="primary" :disabled="!!acting || writeBusy || autoRunning || !gatePassed"
                        @click="actWriteAll">▶ 连续写完（服务端）</el-button>
           </template>
           <template v-else-if="detail.status === 'QC'">
             <el-button type="primary" :loading="acting === 'qc'"
-                       :disabled="!!acting" @click="actQc">⑧ 运行质检</el-button>
+                       :disabled="!!acting || autoRunning" @click="actQc">⑧ 运行质检</el-button>
           </template>
           <template v-else-if="detail.status === 'REWORK'">
             <el-button type="warning" :loading="acting === 'draft'"
-                       :disabled="!!acting || !!serverDraft" @click="actDraft(true)">⑥b 回炉重写具体稿</el-button>
+                       :disabled="!!acting || !!serverDraft || autoRunning" @click="actDraft(true)">⑥b 回炉重写具体稿</el-button>
+          </template>
+
+          <template v-if="serverAuto?.running">
+            <el-button type="warning" plain @click="stopAuto">
+              ■ 停全流程（当前步完成即停）
+            </el-button>
+            <el-button type="danger" plain @click="killAuto">
+              ⛔ 立即强停（不等返回）
+            </el-button>
+          </template>
+          <template v-else-if="!['PASSED', 'FAILED', 'SAMPLING'].includes(detail.status)">
+            <el-button type="success" :disabled="!!acting || writeBusy || !!serverDraft"
+                       @click="actAuto(false)">▶ 全流程无人值守</el-button>
+            <el-button type="danger" plain :disabled="!!acting || writeBusy || !!serverDraft"
+                       @click="actAuto(true)">⏭ 全程直通·免审</el-button>
           </template>
 
           <el-button v-if="writeBusy" type="danger" plain @click="stopWriteLoop">
             ■ 停止（当前章写完即停）
           </el-button>
-          <el-button :loading="loading" :disabled="writeBusy" @click="loadAll">刷新</el-button>
+          <el-button :loading="loading" :disabled="writeBusy || autoRunning" @click="loadAll">刷新</el-button>
         </div>
         <p v-if="draftLoopText" class="loop-text">{{ draftLoopText }}</p>
+        <p v-if="serverAutoText" class="loop-text loop-text--live">{{ serverAutoText }}</p>
         <p v-else-if="serverWriteText" class="loop-text loop-text--live">{{ serverWriteText }}</p>
         <p v-else-if="serverDraftText" class="loop-text loop-text--live">{{ serverDraftText }}</p>
       </el-card>
@@ -62,7 +78,7 @@
           运行过程
           <el-tag v-if="serverDraft" size="small" type="primary" style="margin-left: 8px">进行中</el-tag>
         </template>
-        <div v-if="serverWriteText || serverDraftText" class="process-live">{{ serverWriteText || serverDraftText }}</div>
+        <div v-if="serverAutoText || serverWriteText || serverDraftText" class="process-live">{{ serverAutoText || serverWriteText || serverDraftText }}</div>
         <div v-else class="process-idle">当前没有进行中的 LLM 任务；下表是本 run 最近的调用账本（服务端事实，刷新/换页都在）。</div>
         <DataTable :data="llmTrail" size="small" style="margin-top: 8px">
           <el-table-column label="时间" width="150">
@@ -87,8 +103,62 @@
           <el-table-column label="错误" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">{{ row.error || '—' }}</template>
           </el-table-column>
+          <el-table-column label="输入 / 输出" width="110" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" size="small" @click="openCall(row)">看详情</el-button>
+            </template>
+          </el-table-column>
         </DataTable>
       </el-card>
+
+      <el-drawer v-model="callDrawer" :title="callTitle" size="62%">
+        <div v-if="callDetail" class="call-body">
+          <el-descriptions :column="3" size="small" border>
+            <el-descriptions-item label="环节">{{ nodeLabel(callDetail.node) }}</el-descriptions-item>
+            <el-descriptions-item label="模型">{{ callDetail.model }}</el-descriptions-item>
+            <el-descriptions-item label="耗时">
+              {{ Math.round((callDetail.latencyMs || 0) / 1000) }}s
+            </el-descriptions-item>
+            <el-descriptions-item label="tokens（入/出/总）">
+              {{ callDetail.promptTokens }} / {{ callDetail.completionTokens }} / {{ callDetail.totalTokens }}
+            </el-descriptions-item>
+            <el-descriptions-item label="时间">{{ fmtTime(callDetail.createTime) }}</el-descriptions-item>
+            <el-descriptions-item label="归属">
+              run {{ callDetail.runId ?? '—' }} · 书 {{ callDetail.novelId ?? '—' }}
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-alert v-if="callDetail.error && callDetail.error !== '—'" class="call-alert"
+                    type="warning" :closable="false" show-icon title="本轮不合规原因 / 调用失败">
+            <div class="pre">{{ callDetail.error }}</div>
+          </el-alert>
+
+          <el-tabs v-model="callTab" class="call-tabs">
+            <el-tab-pane label="发出去的提示词" name="req">
+              <div v-for="(m, i) in (callDetail.request || [])" :key="i" class="call-msg">
+                <div class="call-msg-role">{{ m.role === 'system' ? '系统提示词' : '用户输入' }}</div>
+                <pre class="pre call-pre">{{ m.content }}</pre>
+              </div>
+              <p v-if="!(callDetail.request || []).length" class="process-idle">
+                该次调用没有可解析的 messages，原始请求见「原始 JSON」。
+              </p>
+            </el-tab-pane>
+            <el-tab-pane label="模型返回" name="resp">
+              <pre class="pre call-pre">{{ callDetail.content || '（空——模型把内容全写进了思考）' }}</pre>
+            </el-tab-pane>
+            <el-tab-pane label="思考" name="think">
+              <pre class="pre call-pre">{{ callDetail.reasoning || '（无）' }}</pre>
+            </el-tab-pane>
+            <el-tab-pane label="原始 JSON" name="raw">
+              <div class="call-msg-role">请求</div>
+              <pre class="pre call-pre">{{ prettyRaw(callDetail.requestRaw) }}</pre>
+              <div class="call-msg-role">响应</div>
+              <pre class="pre call-pre">{{ prettyRaw(callDetail.responseRaw) }}</pre>
+            </el-tab-pane>
+          </el-tabs>
+        </div>
+        <p v-else class="process-idle">读取中…</p>
+      </el-drawer>
 
       <el-row :gutter="12" class="stat-row">
         <el-col :span="6">
@@ -305,6 +375,35 @@ async function pollTrail() {
   }
 }
 
+/** 单次调用全文抽屉：发出去的提示词 + 模型返回 + 思考 + 本轮不合规原因。 */
+const callDrawer = ref(false)
+const callDetail = ref(null)
+const callTab = ref('req')
+const callTitle = computed(() => callDetail.value
+  ? `${nodeLabel(callDetail.value.node)} · #${callDetail.value.id}`
+  : 'AI 调用详情')
+
+async function openCall(row) {
+  callDetail.value = null
+  callTab.value = 'req'
+  callDrawer.value = true
+  try {
+    callDetail.value = await deriveApi.get(`/api/derive/runs/llm-calls/${row.id}`)
+  } catch (e) {
+    ElMessage.error(e.message || '读取调用详情失败')
+    callDrawer.value = false
+  }
+}
+
+function prettyRaw(raw) {
+  if (!raw) return '（无）'
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
 const serverDraftText = computed(() => {
   const p = serverDraft.value
   if (!p) return ''
@@ -406,6 +505,99 @@ function stopWritePoll() {
   if (writePollTimer) {
     clearInterval(writePollTimer)
     writePollTimer = null
+  }
+}
+
+/* ── 全流程无人值守（服务端主控：⑥a→⑥b→闸→⑦→⑧ 到终态） ─────────── */
+const serverAuto = ref(null)
+const autoRunning = computed(() => !!serverAuto.value?.running)
+let autoPollTimer = null
+
+const serverAutoText = computed(() => {
+  const a = serverAuto.value
+  if (!a) return ''
+  const s = Math.round((a.elapsedMs || 0) / 1000)
+  const time = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  const mode = a.direct ? '全程直通（免审）' : '全流程无人值守'
+  if (a.lastError) return `${mode}已停：${a.lastError}（断点保留，再点按钮续跑）`
+  if (!a.running && a.done) return `${mode}完成：${a.stage} · 共 ${a.steps} 步`
+  if (!a.running) return ''
+  return `${mode}中：${a.stage} · ${a.steps} 步 · 已耗时 ${time} —— 关页面不断`
+})
+
+async function pollAuto() {
+  try {
+    const prev = serverAuto.value
+    serverAuto.value = await deriveApi.get(`/api/derive/runs/${route.params.id}/auto-progress`)
+    const a = serverAuto.value
+    if (a?.done && (!prev || !prev.done)) {
+      ElMessage.success(`全流程完成：${a.stage}`)
+      await loadAll()
+    }
+    if (a?.lastError && (!prev || prev.lastError !== a.lastError)) {
+      ElMessage.error(`全流程停止：${a.lastError}`)
+      await loadAll()
+    }
+  } catch {
+    // 轮询失败静默
+  }
+}
+
+function startAutoPoll() {
+  stopAutoPoll()
+  autoPollTimer = setInterval(pollAuto, 2500)
+}
+
+function stopAutoPoll() {
+  if (autoPollTimer) {
+    clearInterval(autoPollTimer)
+    autoPollTimer = null
+  }
+}
+
+async function actAuto(direct) {
+  const conf = direct
+    ? '全程直通·免审：自动推进全流程，但 P6 立项闸与 ⑧ 质检的 AI 检测全部跳过——直接放行到 PASSED。'
+      + '生成环节（⑥a/⑥b/⑦）照常执行，质检报告不会产生。启动？'
+    : '全流程无人值守：从当前状态自动推进 ⑥a→⑥b→立项闸→⑦写正文→⑧质检，直到通过或熔断；'
+      + '中途打回按各步默认机制自动回炉重试。服务器上跑，关页面不断。启动？'
+  try {
+    await ElMessageBox.confirm(conf, direct ? '全程直通·免审' : '全流程无人值守',
+      { type: 'warning', confirmButtonText: '启动' })
+  } catch {
+    return
+  }
+  try {
+    await deriveApi.post(`/api/derive/runs/${route.params.id}/auto?direct=${direct ? 'true' : 'false'}`)
+    ElMessage.success(`${direct ? '全程直通（免审）' : '全流程'}已启动——进度看操作条横幅与「运行过程」，页面可关`)
+    await pollAuto()
+    startAutoPoll()
+  } catch (e) {
+    ElMessage.error(e.message)
+    await pollAuto()
+  }
+}
+
+async function stopAuto() {
+  try {
+    await deriveApi.post(`/api/derive/runs/${route.params.id}/auto/stop`)
+    ElMessage.info('已请求停止：当前步完成后收尾，断点保留')
+    await pollAuto()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+/** 无条件强停：打断服务端线程与在飞 LLM 调用，不等当前步返回。 */
+async function killAuto() {
+  try {
+    await deriveApi.post(`/api/derive/runs/${route.params.id}/auto/kill`)
+    ElMessage.warning('已强停：服务端线程已打断（不等返回）——断点保留，再点可续跑')
+    serverAuto.value = null
+    setTimeout(pollAuto, 1500)
+    await loadAll()
+  } catch (e) {
+    ElMessage.error(e.message)
   }
 }
 
@@ -542,7 +734,10 @@ async function actDraft(isRework) {
       if (d.unit === 'RESET') {
         draftLoopText.value = '已清稿（回炉），从全局头重做…'
       } else if (d.unit === 'HEAD') {
-        draftLoopText.value = `全局头完成：《${d.title}》主角=${d.protagonist} —— 下一步逐窗生成章纲…`
+        draftLoopText.value = `全局头 ${d.batchIndex}/3 段完成`
+          + (d.title ? `：《${d.title}》` : '')
+          + (d.protagonist ? ` 主角=${d.protagonist}` : '')
+          + ' —— 继续…'
       } else {
         draftLoopText.value = `窗 ${d.batchIndex}/${d.batchTotal} 完成（填实 ${d.filledCount} · 跳过 ${d.skippedCount}）—— 继续下一窗…`
       }
@@ -653,6 +848,8 @@ onMounted(() => {
   pollTrail()
   pollWriteProgress()
   startWritePoll()
+  pollAuto()
+  startAutoPoll()
   serverDraftTimer = setInterval(pollServerDraft, 3000)
   trailTimer = setInterval(pollTrail, 10000)
 })
@@ -661,6 +858,7 @@ onUnmounted(() => {
   if (trailTimer) clearInterval(trailTimer)
   stopWritePoll()
   stopDraftPoll()
+  stopAutoPoll()
 })
 </script>
 
@@ -746,6 +944,29 @@ onUnmounted(() => {
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
+  word-break: break-word;
+}
+.call-alert {
+  margin: 12px 0 4px;
+}
+.call-tabs {
+  margin-top: 8px;
+}
+.call-msg {
+  margin-bottom: 12px;
+}
+.call-msg-role {
+  margin-bottom: 4px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--el-color-primary);
+}
+.call-pre {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--el-fill-color-lighter);
   word-break: break-word;
 }
 </style>

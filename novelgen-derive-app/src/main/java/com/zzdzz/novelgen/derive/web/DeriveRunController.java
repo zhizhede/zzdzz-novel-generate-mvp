@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.derive.web;
 
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.derive.service.DeriveDraftService;
+import com.zzdzz.novelgen.derive.service.DeriveAutoFlowService;
 import com.zzdzz.novelgen.derive.service.DeriveGateService;
 import com.zzdzz.novelgen.derive.service.DerivePlanService;
 import com.zzdzz.novelgen.derive.service.DeriveQcService;
@@ -11,9 +12,11 @@ import com.zzdzz.novelgen.derive.service.DeriveWriteService;
 import com.zzdzz.novelgen.model.dto.derive.RunCreateDTO;
 import com.zzdzz.novelgen.model.dto.derive.RunQueryDTO;
 import com.zzdzz.novelgen.model.vo.derive.BeatVO;
+import com.zzdzz.novelgen.model.vo.derive.AutoVO;
 import com.zzdzz.novelgen.model.vo.derive.DraftProgressVO;
 import com.zzdzz.novelgen.model.vo.derive.DraftVO;
 import com.zzdzz.novelgen.model.vo.derive.GateVO;
+import com.zzdzz.novelgen.model.vo.derive.LlmCallDetailVO;
 import com.zzdzz.novelgen.model.vo.derive.LlmTrailVO;
 import com.zzdzz.novelgen.model.vo.derive.PlanVO;
 import com.zzdzz.novelgen.model.vo.derive.QcReportVO;
@@ -48,6 +51,7 @@ public class DeriveRunController {
     private final DeriveQcService qcService;
     private final DeriveQueryService queryService;
     private final DeriveGateService gateService;
+    private final DeriveAutoFlowService autoFlowService;
 
     @PostMapping
     public Result<RunVO> create(@RequestBody RunCreateDTO dto) {
@@ -119,6 +123,12 @@ public class DeriveRunController {
         return Result.success(queryService.listLlmTrail(id));
     }
 
+    /** 单次调用全文：发出去的提示词 / 返回正文 / 思考 / 本轮不合规原因。 */
+    @GetMapping("/llm-calls/{callId}")
+    public Result<LlmCallDetailVO> llmCall(@PathVariable long callId) {
+        return Result.success(queryService.getLlmCall(callId));
+    }
+
     /** ⑦写下一章正文（逐章调用断点续跑；全部完成后 run→QC）。 */
     @PostMapping("/{id}/write")
     public Result<WriteVO> write(@PathVariable long id) {
@@ -147,6 +157,32 @@ public class DeriveRunController {
     @PostMapping("/{id}/qc")
     public Result<QcVO> qc(@PathVariable long id) {
         return Result.success(qcService.qc(id));
+    }
+
+    /** 全流程无人值守启动（从当前状态自动推进 ⑥a→⑥b→闸→⑦→⑧ 直到终态；重试按各步默认口径）。
+     *  direct=true（直通免审）：P6 立项闸与 ⑧ 质检的 AI 检测全部跳过直接放行，生成环节照常。 */
+    @PostMapping("/{id}/auto")
+    public Result<AutoVO> autoStart(@PathVariable long id,
+                                    @RequestParam(defaultValue = "false") boolean direct) {
+        return Result.success(autoFlowService.start(id, direct));
+    }
+
+    /** 全流程停止请求（当前步完成后收尾，断点保留）。 */
+    @PostMapping("/{id}/auto/stop")
+    public Result<AutoVO> autoStop(@PathVariable long id) {
+        return Result.success(autoFlowService.stop(id));
+    }
+
+    /** 全流程无条件强停（不等当前步返回：打断主控线程与在飞 LLM 调用，立即返回）。 */
+    @PostMapping("/{id}/auto/kill")
+    public Result<AutoVO> autoKill(@PathVariable long id) {
+        return Result.success(autoFlowService.kill(id));
+    }
+
+    /** 全流程状态（stage/steps/lastError——刷新、换页都能看）。 */
+    @GetMapping("/{id}/auto-progress")
+    public Result<AutoVO> autoProgress(@PathVariable long id) {
+        return Result.success(autoFlowService.status(id));
     }
 
     /** P6 立项闸（⑥b 完成后、⑦ 前；GO 放行写正文，REWORK 回 ⑥b 重做，REJECT 熔断）。 */
