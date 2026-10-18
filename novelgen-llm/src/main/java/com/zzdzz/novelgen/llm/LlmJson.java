@@ -32,6 +32,8 @@ public class LlmJson {
     private final LlmPort llm;
     /** JSON 重试喂回句走提示词注册表（common/json_retry_feedback，库值优先可编辑）。 */
     private final com.zzdzz.novelgen.service.PromptTemplateService promptTemplates;
+    /** 校验不合规原因回写该次调用的 llm_call_log（否则账本行只有「成功」，失败原因只活在日志里）。 */
+    private final com.zzdzz.novelgen.service.data.LlmCallLogDataService callLogDAO;
     /** LLM 输出专用：容忍字符串内的裸换行/Tab 等控制字符 */
     private final ObjectMapper lenientMapper = JsonMapper.builder()
             .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
@@ -76,12 +78,32 @@ public class LlmJson {
                 feedback = "JSON 解析失败：" + e.getMessage();
                 last = e;
             }
+            markCall(r.callLogId(), feedback);
             log.warn("LLM JSON 输出不合规（第 {}/{} 轮）node={} 原因: {}", i, tries, request.node(), feedback);
         }
         throw new IllegalStateException("LLM JSON 输出连续 " + tries + " 轮不合规，末次原因：" + feedback, last);
     }
 
-    /** 容错解析：截取首个 { 到末个 }，失败逐级降级修复（字符串内裸引号 → 补齐漏写闭符）。 */
+    /** 把本轮不合规原因落到该次调用行：HTTP 成功但内容不合规，status 仍 ok，原因进 error_msg。 */
+    private void markCall(long callLogId, String reason) {
+        if (callLogId <= 0 || reason == null || reason.isBlank()) {
+            return;
+        }
+        try {
+            com.zzdzz.novelgen.model.entity.LlmCallLogDO row = new com.zzdzz.novelgen.model.entity.LlmCallLogDO();
+            row.setId(callLogId);
+            row.setErrorMsg(reason.length() <= 2000 ? reason : reason.substring(0, 2000));
+            callLogDAO.updateById(row);
+        } catch (Exception e) {
+            log.warn("回写校验原因失败 callLogId={}：{}", callLogId, e.getMessage());
+        }
+    }
+
+    /**
+     * 容错解析：截取首个 { 到末个 }，失败逐级降级修复
+     * （字符串内裸引号 → 缺逗号补插 → 补齐漏写闭符，及两两组合）。缺逗号是模型高频语法病
+     * （run20/22 实弹「was expecting comma to separate Object entries」），公共件一处修、全节点受益。
+     */
     public JsonNode read(String content) throws Exception {
         String s = content.strip();
         int start = s.indexOf('{');
@@ -91,8 +113,13 @@ public class LlmJson {
         try {
             return lenientMapper.readTree(json);
         } catch (Exception first) {
-            for (String candidate : List.of(repairStraightQuotes(json), closeUnclosed(json),
-                    closeUnclosed(repairStraightQuotes(json)))) {
+            for (String candidate : List.of(
+                    repairStraightQuotes(json),
+                    repairMissingCommas(json),
+                    closeUnclosed(json),
+                    closeUnclosed(repairMissingCommas(json)),
+                    closeUnclosed(repairStraightQuotes(json)),
+                    closeUnclosed(repairMissingCommas(repairStraightQuotes(json))))) {
                 try {
                     return lenientMapper.readTree(candidate);
                 } catch (Exception ignored) {
@@ -101,6 +128,79 @@ public class LlmJson {
             }
             throw first;
         }
+    }
+
+    /**
+     * 修复缺逗号：在「值结束（字符串/数字/true/false/null/}/]）」与「下一值起始（" { [ 数字…）」
+     * 之间且缺分隔符时补逗号（含数组元素间）。跳过字符串内部；数字/关键字整 token 消费
+     * （防把 1e+3 拆坏）；合法 JSON 输入原样返回。
+     */
+    static String repairMissingCommas(String json) {
+        StringBuilder sb = new StringBuilder(json.length() + 16);
+        boolean inStr = false;
+        // 0=起点 1=值结束(可补逗号) 2=逗号后 3=冒号后 4=开括号后
+        int state = 0;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inStr) {
+                sb.append(c);
+                if (c == '\\' && i + 1 < json.length()) {
+                    sb.append(json.charAt(++i));
+                } else if (c == '"') {
+                    inStr = false;
+                    state = 1;
+                }
+                continue;
+            }
+            switch (c) {
+                case '"' -> {
+                    if (state == 1) sb.append(',');
+                    sb.append(c);
+                    inStr = true;
+                }
+                case '{', '[' -> {
+                    if (state == 1) sb.append(',');
+                    sb.append(c);
+                    state = 4;
+                }
+                case ',' -> {
+                    sb.append(c);
+                    state = 2;
+                }
+                case ':' -> {
+                    sb.append(c);
+                    state = 3;
+                }
+                case '}', ']' -> {
+                    sb.append(c);
+                    state = 1;
+                }
+                case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' -> {
+                    if (state == 1) sb.append(',');
+                    sb.append(c);
+                    while (i + 1 < json.length()) {
+                        char n = json.charAt(i + 1);
+                        if ((n >= '0' && n <= '9') || n == '.' || n == 'e' || n == 'E'
+                                || n == '+' || n == '-') {
+                            sb.append(json.charAt(++i));
+                        } else {
+                            break;
+                        }
+                    }
+                    state = 1;
+                }
+                case 't', 'f', 'n' -> { // true / false / null
+                    if (state == 1) sb.append(',');
+                    sb.append(c);
+                    while (i + 1 < json.length() && (json.charAt(i + 1) >= 'a' && json.charAt(i + 1) <= 'z')) {
+                        sb.append(json.charAt(++i));
+                    }
+                    state = 1;
+                }
+                default -> sb.append(c); // 空白等原样
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -164,7 +264,7 @@ public class LlmJson {
                 java.util.Map.of("reason", feedback));
         ms.set(ms.size() - 1, new LlmPort.Message(lastMsg.role(), lastMsg.content() + "\n\n" + tail));
         return new LlmPort.ChatRequest(request.node(), request.novelId(), request.chapterId(),
-                ms, request.temperature());
+                request.runId(), ms, request.temperature());
     }
 
     /**

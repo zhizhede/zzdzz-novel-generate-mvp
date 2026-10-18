@@ -31,8 +31,17 @@ public interface LlmPort {
         public static Message user(String content)   { return new Message("user", content); }
     }
 
-    record ChatRequest(String node, Long novelId, Long chapterId,
-                       List<Message> messages, Double temperature) {}
+    /**
+     * 单次调用身份：runId 是衍生链路（derive_gen.run）的归属键，主站管线无此概念传 null。
+     * 5 参构造器保留给不区分 run 的调用点。
+     */
+    record ChatRequest(String node, Long novelId, Long chapterId, Long runId,
+                       List<Message> messages, Double temperature) {
+        public ChatRequest(String node, Long novelId, Long chapterId,
+                           List<Message> messages, Double temperature) {
+            this(node, novelId, chapterId, null, messages, temperature);
+        }
+    }
 
     record Usage(int promptTokens, int completionTokens, int totalTokens) {}
 

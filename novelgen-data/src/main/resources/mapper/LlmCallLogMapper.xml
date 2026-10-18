@@ -3,13 +3,29 @@
 <mapper namespace="com.zzdzz.novelgen.mapper.LlmCallLogMapper">
 
     <select id="insert" resultType="long">
-                INSERT INTO llm_call_log (node, novel_id, chapter_id, model, prompt_tokens, cached_tokens,
+                INSERT INTO llm_call_log (node, novel_id, chapter_id, run_id, model, prompt_tokens, cached_tokens,
                                           completion_tokens, total_tokens, latency_ms, status, error_msg,
                                           reasoning_text, request_json, response_json)
-                VALUES (#{node}, #{novelId}, #{chapterId}, #{model}, #{promptTokens}, #{cachedTokens},
+                VALUES (#{node}, #{novelId}, #{chapterId}, #{runId}, #{model}, #{promptTokens}, #{cachedTokens},
                         #{completionTokens}, #{totalTokens}, #{latencyMs}, #{status}, #{errorMsg},
                         #{reasoningText}::text, #{requestJson}::jsonb, #{responseJson}::jsonb)
                 RETURNING id
+    </select>
+
+    <!-- 老行把 run id 写进了 novel_id（ChatRequest 参数错位已修），这里一并兜住；node 按前缀过滤 -->
+    <select id="findPageByRun" resultType="com.zzdzz.novelgen.model.entity.LlmCallLogDO">
+                SELECT * FROM llm_call_log
+                WHERE (run_id = #{runId}
+                       OR (run_id IS NULL AND novel_id = #{runId}))
+                  AND (#{nodePrefix,jdbcType=VARCHAR} IS NULL OR node LIKE #{nodePrefix} || '%')
+                ORDER BY id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countByRun" resultType="long">
+                SELECT COUNT(*) FROM llm_call_log
+                WHERE (run_id = #{runId}
+                       OR (run_id IS NULL AND novel_id = #{runId}))
+                  AND (#{nodePrefix,jdbcType=VARCHAR} IS NULL OR node LIKE #{nodePrefix} || '%')
     </select>
 
     <select id="findPage" resultType="com.zzdzz.novelgen.model.entity.LlmCallLogDO">

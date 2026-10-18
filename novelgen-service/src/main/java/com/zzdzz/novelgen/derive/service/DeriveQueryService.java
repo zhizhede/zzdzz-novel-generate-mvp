@@ -83,23 +83,52 @@ public class DeriveQueryService {
 
     /**
      * run 的 LLM 调用时间线（最新在前 40 条）。
-     * derive 节点的 ChatRequest 把 runId 放在 novelId 槽位 → llm_call_log.novel_id 即 runId。
+     * 新行按 run_id 归属；历史行（run_id 列上线前把 runId 写进了 novel_id）由 SQL 一并兜住。
      */
     public List<com.zzdzz.novelgen.model.vo.derive.LlmTrailVO> listLlmTrail(long runId) {
-        return llmCallLogMapper.selectList(new LambdaQueryWrapper<com.zzdzz.novelgen.model.entity.LlmCallLogDO>()
-                        .eq(com.zzdzz.novelgen.model.entity.LlmCallLogDO::getNovelId, runId)
-                        .likeRight(com.zzdzz.novelgen.model.entity.LlmCallLogDO::getNode, "derive_")
-                        .orderByDesc(com.zzdzz.novelgen.model.entity.LlmCallLogDO::getId)
-                        .last("LIMIT 40"))
-                .stream()
+        return llmCallLogMapper.findPageByRun(runId, "derive_", 40, 0).stream()
                 .map(r -> new com.zzdzz.novelgen.model.vo.derive.LlmTrailVO(
                         r.getId(), r.getNode(), r.getStatus(),
                         r.getPromptTokens(), r.getCompletionTokens(), r.getTotalTokens(),
                         r.getLatencyMs(),
-                        r.getErrorMsg() == null ? "" :
-                                (r.getErrorMsg().length() > 160 ? r.getErrorMsg().substring(0, 160) + "…" : r.getErrorMsg()),
+                        r.getErrorMsg() == null ? "" : abbreviate(r.getErrorMsg(), 400),
                         r.getCreatedTime()))
                 .toList();
+    }
+
+    /** 单次调用全文：提示词全文、模型返回正文与思考、本轮不合规原因。 */
+    public com.zzdzz.novelgen.model.vo.derive.LlmCallDetailVO getLlmCall(long id) {
+        com.zzdzz.novelgen.model.entity.LlmCallLogDO row = llmCallLogMapper.findById(id);
+        if (row == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "调用记录不存在: " + id);
+        }
+        JsonNode req = readJson(row.getRequestJson());
+        List<com.zzdzz.novelgen.model.vo.derive.LlmCallDetailVO.Msg> messages = new java.util.ArrayList<>();
+        for (JsonNode m : req.path("messages")) {
+            messages.add(new com.zzdzz.novelgen.model.vo.derive.LlmCallDetailVO.Msg(
+                    m.path("role").asText(""), m.path("content").asText("")));
+        }
+        JsonNode message = readJson(row.getResponseJson()).path("choices").path(0).path("message");
+        String reasoning = row.getReasoningText() != null && !row.getReasoningText().isBlank()
+                ? row.getReasoningText() : message.path("reasoning_content").asText("");
+        return new com.zzdzz.novelgen.model.vo.derive.LlmCallDetailVO(
+                row.getId(), row.getRunId(), row.getNovelId(), row.getNode(), row.getModel(),
+                row.getStatus(), row.getPromptTokens(), row.getCachedTokens(), row.getCompletionTokens(),
+                row.getTotalTokens(), row.getLatencyMs(), row.getErrorMsg(), reasoning, messages,
+                row.getRequestJson(), message.path("content").asText(""), row.getResponseJson(),
+                row.getCreatedTime());
+    }
+
+    private JsonNode readJson(String json) {
+        try {
+            return objectMapper.readTree(json == null || json.isBlank() ? "{}" : json);
+        } catch (Exception e) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private static String abbreviate(String text, int max) {
+        return text.length() <= max ? text : text.substring(0, max) + "…";
     }
 
     /** run 列表（带筛选；novelTitle 回填成品书名供 keyword 命中与展示）。 */

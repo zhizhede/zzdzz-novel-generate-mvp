@@ -10,6 +10,7 @@ public class LlmCallLogDO extends BaseDO {
     private String node;
     private Long novelId;
     private Long chapterId;
+    private Long runId;
     private String model;
     private int promptTokens;
     private int cachedTokens;
