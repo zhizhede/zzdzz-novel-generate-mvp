@@ -62,7 +62,10 @@ public class DeriveBookService {
         NovelDO novel = new NovelDO();
         novel.setTitle(dto.title().strip());
         novel.setSourceType("SOURCE");
-        novel.setCategoryTags(blankToNull(dto.categoryTags()));
+        // novels.category_tags 是 NOT NULL DEFAULT '{}'，而 insertFull 显式插值绕过 DEFAULT——空标签必须补 '{}'
+        String tagsJson = dto.categoryTags() == null || dto.categoryTags().isBlank()
+                ? "{}" : dto.categoryTags().strip();
+        novel.setCategoryTags(tagsJson);
         novel.setAuthor(blankToNull(dto.author()));
         novel.setPlatform(blankToNull(dto.platform()));
         long novelId = novelMapper.insertFull(novel);
