@@ -2,6 +2,24 @@
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
 
+## ⑥a 章节计划逐窗化：章数由 AI 判 + 单次输出封顶（2026-10-18 深夜，未提交未部署）
+
+**用户两条定调**（连续两轮）：「每章字数按节奏定死太极端」「不设字数的初衷是让 AI 自己判篇幅」「为什么不能让 AI 多次请求」。
+
+**改前的两个硬除数（已废）**：`chapterAvg` 只按 pace 定 2500/3200/4000，`expectedCh = wordsPred / chapterAvg`，且 `buildUserInput` 把「章节数 = expectedCh」写进提示词、`parsePlan` 校验「章节数必须 = N」——AI 完全没有分章自由；另一套 `B0_TABLE` 每拍字数 1100~2500 又独立反推拍数，两套除数互不联动。字数一放到轻小说档 8–16 万，章数被除成 32–64，⑥a 单次输出翻三五倍，必然撞模型输出上限（run22 那次 plan 已 19417 tokens / 思考 41297 字 / 357 秒）。
+
+**本批落地**：
+- `PLAN_SCALE_PROMPT`（⑥a-0）：AI 自己判 `chapterCount` 与 `chapterAvg`，系统只验合理带（章 6~80、章均 1500~6000）与「章数×章均落在字数区间」，输出几十 tokens。
+- `PLAN_WINDOW_PROMPT`（⑥a-1..n）：每窗 ≤10 章，只做「把拍分到章」；输入「本章号范围 + 剩余拍清单 + 前窗章概览」，校验章号连续齐全、拍只取自剩余且不跨窗重复、累计预算不超上限、快热前 3 章（首窗）、张力密度（含 `complete` 参数：中途窗不判「最后 30%」反转后移，避免拿不完整章表误报）。
+- 幂等状态：`run.step_status.steps.PLAN = {chapterCount, chapterAvg, usedSeqs, drafts[]}`（`readPlanState` / `mergePlanState`），`plan()` 改成「推进一个单元」，客户端循环至 `allDone`。
+- `PlanVO` 加 `unit/windowIndex/windowTotal/plannedChapters/usedBeats/allDone`，旧五参构造保留。
+- 前端 `actPlan` 改循环（SCALE → 窗… → DONE），复用 ⑥b 的循环文案模式。
+- 删掉旧的一次性 `parsePlan`；`DeriveClosureContractTest` 改盯 `PLAN_WINDOW_PROMPT`。
+- **防重复规划**：读到 `PLAN` 段为空但 `novel_id` 非空（老的一次性计划书）直接拒绝，避免重复建章。
+- 测试：新增 `DerivePlanWindowTest` 5 条（规模带/窗内章节与拍校验/跨窗重复拍/状态往返/窗数）；全量 `mvn -o test` **403+3+4 全绿**；`npm run build` 过。jar 已打（41557684 字节），**未部署**。
+
+**待验证**：新建一个长档 run（如轻小说 8–16 万）看 ⑥a 是否分出 30+ 章、窗间拍是否不重不漏；老 run（22/23）已计划过，按下发保护会被拒绝，不影响存量。
+
 ## AI 调用监测可点开看输入输出 + run22 卡点定位（2026-10-18 夜，未提交未部署）
 
 **用户三问的事实答案**（均已查证，勿再从记忆猜）：
