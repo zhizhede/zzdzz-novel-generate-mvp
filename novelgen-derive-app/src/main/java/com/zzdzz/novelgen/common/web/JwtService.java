@@ -18,7 +18,8 @@ import java.util.Date;
 public class JwtService {
 
     /** 登录态 Cookie 名（HttpOnly，前端无需感知）。 */
-    public static final String TOKEN_COOKIE = "novelgen_token";
+    /** 与主站同域共存（web/ 并入 /derive 页组，2026-10-17）：cookie 名独立，避免互相覆盖登录态。 */
+    public static final String TOKEN_COOKIE = "derive_token";
 
     private final SecretKey key;
     private final long ttlMs;

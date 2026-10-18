@@ -1,30 +1,23 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { api } from './api'
 
+// 随机衍生专用前端（2026-10-17 用户定调：主站小说生成系统前端整体下线，只留 /derive 页组）。
+// 登录态由 DeriveShell 的衍生登录门自理（derive_token），不再走主站 /login 与 /api/auth/me 守卫。
 const routes = [
-  { path: '/login', component: () => import('./views/LoginView.vue'), meta: { public: true } },
-  { path: '/', component: () => import('./views/WorkbenchView.vue') },
-  { path: '/wizard', component: () => import('./views/WizardView.vue') },
-  { path: '/books', component: () => import('./views/BooksView.vue') },
-  { path: '/chapters', component: () => import('./views/ChaptersView.vue') },
-  { path: '/planning', component: () => import('./views/PlanningView.vue') },
-  { path: '/logs', component: () => import('./views/LogsView.vue') },
-  { path: '/library', component: () => import('./views/LibraryView.vue') },
-  { path: '/fingerprints', component: () => import('./views/FingerprintView.vue') },
-  { path: '/plans', component: () => import('./views/PlanAssetView.vue') }
+  { path: '/', redirect: '/derive/runs' },
+  {
+    path: '/derive',
+    component: () => import('./views/derive/DeriveShell.vue'),
+    children: [
+      { path: '', redirect: '/derive/runs' },
+      { path: 'runs', component: () => import('./views/derive/DeriveRunsView.vue') },
+      { path: 'runs/:id', component: () => import('./views/derive/DeriveRunDetailView.vue') },
+      { path: 'books', component: () => import('./views/derive/DeriveBooksView.vue') },
+      { path: 'books/:id', component: () => import('./views/derive/DeriveBookDetailView.vue') }
+    ]
+  },
+  { path: '/:pathMatch(.*)*', redirect: '/derive/runs' }
 ]
 
 const router = createRouter({ history: createWebHashHistory(), routes })
-
-router.beforeEach(async (to) => {
-  if (to.matched.length === 0) return '/'
-  if (to.meta.public) return true
-  try {
-    await api.get('/api/auth/me')
-    return true
-  } catch {
-    return '/login'
-  }
-})
 
 export default router
