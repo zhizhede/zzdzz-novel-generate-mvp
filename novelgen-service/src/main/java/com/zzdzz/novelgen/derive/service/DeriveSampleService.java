@@ -112,6 +112,25 @@ public class DeriveSampleService {
     /** 输入思路 AI 优化（intakeOptimize 开关，V114；默认关）。 */
     public static final String NODE_INTAKE = "derive_intake_review";
 
+    /** AI 估档节点（2026-10-17 用户定调：字数带留空=AI 判篇幅与带宽，不是按形态套默认档）。 */
+    public static final String NODE_WORD_BAND = "derive_word_band";
+
+    static final String WORD_BAND_PROMPT = """
+            你在做「篇幅估档」：根据题材标签与创作思路，判定成品小说的产品形态与合理总字数带。
+            可选形态（只能选一个）：
+            LONG=长篇；SHORT_STANDALONE=独立短篇；LIGHT_NOVEL=轻小说；
+            LONG_INNER_SHORT=长中带短；LN_INNER_SHORT=轻中带短。
+            输入：类别标签、节奏、创作思路、文风、（若给出）用户指定形态。
+            规则：
+            - 按题材自然体量与思路复杂度判断：长线阴谋/群像升级流/多卷本给大体量；
+              单一事件闭环/单元短故事给小体量；轻小说语态或二次元设定倾向 LIGHT_NOVEL；
+            - AI 天然贪大，宁小勿大：能用短篇讲清的不要给长篇；
+            - wordsMin/wordsMax = 该形态下合理总字数（正整数，max>min），只估带宽不写章节结构；
+            - 用户已指定形态时，form 必须原样返回该形态，只估字数。
+            只输出 JSON 对象：
+            {"form":"LONG","wordsMin":100000,"wordsMax":200000,"reason":"≤30字判断依据"}
+            """;
+
     /** v1 思路预审提示词：审思路本身（非成稿），保留骨架只修硬伤，输出可直接使用的优化稿。 */
     static final String INTAKE_PROMPT = """
             你在做「创作思路预审」：开写之前鉴定用户的思路是否符合目标成品小说需求，
@@ -169,27 +188,49 @@ public class DeriveSampleService {
             throw new BizException(ErrorCode.PARAM_ERROR, "素材池为空或未打标，先走完 ②③④");
         }
 
-        // ---- 5.1 规模预测 ----
+        // ---- form/outcome 缺省：字数带空=AI 估档（连形态一起判，2026-10-17 用户定调）；
+        //      字数带给了才走 seed 抽 form。outcome 恒 seed 抽。 ----
+        List<String> forms = List.of("LONG", "SHORT_STANDALONE", "LIGHT_NOVEL", "LONG_INNER_SHORT", "LN_INNER_SHORT");
+        List<String> outcomes = List.of("循环", "开放", "闭合");
+        boolean bandUnspecified = dto.wordsMin() == null && dto.wordsMax() == null;
+        String userForm = dto.form() != null && !dto.form().isBlank() ? dto.form() : null;
+        String form;
+        int[] band;
+        if (bandUnspecified) {
+            BandEstimate est = aiEstimateBand(dto, effectiveIntent, userForm);
+            if (est != null) {
+                form = userForm != null ? userForm : est.form();
+                band = clampBand(est.wordsMin(), est.wordsMax(), form);
+                log.info("⑤AI估档：form={} band={}~{}（钳入档内） reason={}",
+                        form, band[0], band[1], est.reason());
+            } else {
+                // fail-open：估档失败=用户形态或 seed 抽 + 形态默认带（v3.7 短期档口径退守）
+                form = userForm != null ? userForm : forms.get(rnd.nextInt(forms.size()));
+                band = resolveWordBand(dto, form);
+                log.info("⑤AI估档失败回退：form={} band={}~{}", form, band[0], band[1]);
+            }
+        } else {
+            form = userForm != null ? userForm : forms.get(rnd.nextInt(forms.size()));
+            band = resolveWordBand(dto, form);
+        }
+        String outcome = dto.outcome() != null && !dto.outcome().isBlank() ? dto.outcome()
+                : outcomes.get(rnd.nextInt(outcomes.size()));
+        // P2 裁决：推理/悬疑题材禁开放结局（真相卡闭合义务优先；33/50 号合同打架教训）
+        outcome = coerceMysteryOutcome(outcome, dto.tags());
+        int wordsMin = band[0];
+        int wordsMax = band[1];
         BigDecimal pace = new BigDecimal(dto.pace());
         int b0 = B0_TABLE.entrySet().stream()
                 .filter(e -> e.getKey().compareTo(pace) == 0)
                 .map(Map.Entry::getValue)
                 .findFirst()
                 .orElseThrow(() -> new BizException(ErrorCode.PARAM_ERROR, "pace 必须是五锚点"));
-        double pMaxD = (double) dto.wordsMax() / b0;
-        int pMin = (int) Math.ceil((double) dto.wordsMin() / b0);
+        double pMaxD = (double) wordsMax / b0;
+        int pMin = (int) Math.ceil((double) wordsMin / b0);
         int pMax = (int) Math.ceil(pMaxD);
         int kTarget = Math.max(1, Math.min(4, (int) Math.ceil(pMaxD / 7)));
         int mTarget = Math.max(0, pMax - kTarget * 6);
-        int wordsPred = Math.max(dto.wordsMin(), Math.min(dto.wordsMax(), b0 * (int) Math.ceil(pMaxD)));
-
-        // ---- form/outcome 缺省 seed 抽（固定最先，调用序确定）----
-        List<String> forms = List.of("LONG", "SHORT_STANDALONE", "LIGHT_NOVEL", "LONG_INNER_SHORT", "LN_INNER_SHORT");
-        List<String> outcomes = List.of("循环", "开放", "闭合");
-        String form = dto.form() != null && !dto.form().isBlank() ? dto.form()
-                : forms.get(rnd.nextInt(forms.size()));
-        String outcome = dto.outcome() != null && !dto.outcome().isBlank() ? dto.outcome()
-                : outcomes.get(rnd.nextInt(outcomes.size()));
+        int wordsPred = Math.max(wordsMin, Math.min(wordsMax, b0 * (int) Math.ceil(pMaxD)));
 
         ObjectNode trace = om.createObjectNode();
 
@@ -320,7 +361,8 @@ public class DeriveSampleService {
 
         // ---- 5.2.4+5 弧桶分配（同构弧登记跳过、run 内唯一）+ 补差拍 ----
         // 防复刻开关：默认关=不按历史指纹阻断（一致性优先），开=九轮原口径
-        boolean antiRepro = Boolean.TRUE.equals(dto.antiRepro());
+        // 2026-10-17 用户拍板：衍生新书 anti_repro 默认开（显式 false 才关）——配合指纹前移断跨稿复读
+        boolean antiRepro = antiReproDefaulted(dto.antiRepro());
         Set<String> registered = antiRepro
                 ? fingerprintMapper.selectList(new LambdaQueryWrapper<>())
                         .stream().map(WorkFingerprintDO::getFingerprint).collect(Collectors.toSet())
@@ -352,8 +394,8 @@ public class DeriveSampleService {
         // ---- 插档（SAMPLING；jsonb 七列走 insertFull）----
         RunDO run = new RunDO();
         run.setSeed(seed);
-        run.setParamWordsMin(dto.wordsMin());
-        run.setParamWordsMax(dto.wordsMax());
+        run.setParamWordsMin(wordsMin);
+        run.setParamWordsMax(wordsMax);
         run.setParamTags(tagsJson(tags));
         run.setParamPace(pace);
         run.setParamForm(form);
@@ -721,7 +763,12 @@ public class DeriveSampleService {
     }
 
     void validate(RunCreateDTO dto) {
-        if (dto.wordsMin() <= 0 || dto.wordsMax() <= dto.wordsMin()) {
+        if (dto.wordsMin() == null && dto.wordsMax() == null) {
+            // 留空=AI 估档（判形态与带宽；2026-10-17 用户定调），失败 fail-open 回退形态默认带
+        } else if (dto.wordsMin() == null || dto.wordsMax() == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "wordsMin/wordsMax 要么都传、要么都不传（不传=AI 估档定篇幅与带宽）");
+        } else if (dto.wordsMin() <= 0 || dto.wordsMax() <= dto.wordsMin()) {
             throw new BizException(ErrorCode.PARAM_ERROR, "字数区间非法（wordsMin < wordsMax 且 >0）");
         }
         if (dto.tags() == null || dto.tags().isEmpty()) {
@@ -753,6 +800,54 @@ public class DeriveSampleService {
             sb.append('"').append(tags.get(i)).append("\":1");
         }
         return sb.append('}').toString();
+    }
+
+    /**
+     * P2 裁决：推理/悬疑题材禁开放与循环结局——真相卡（⑥b 对该两标签必出）承诺结局章
+     * 还原三要素，与「开放/循环=末章可留悬念」的规划规则互斥（33/50/51 号合同教训，
+     * run18 实弹：循环抽中即漏网）；命中即改判闭合。
+     */
+    /** anti_repro 缺省口径（2026-10-17 拍板）：不传=开，显式 false 才关。 */
+    static boolean antiReproDefaulted(Boolean v) {
+        return !Boolean.FALSE.equals(v);
+    }
+
+    static String coerceMysteryOutcome(String outcome, List<String> tags) {
+        if (tags == null || (!"开放".equals(outcome) && !"循环".equals(outcome))) {
+            return outcome;
+        }
+        return (tags.contains("推理") || tags.contains("悬疑")) ? "闭合" : outcome;
+    }
+
+    /** v3.7 字数短期档：各形态默认字数带 {min,max}（wordsMin/Max 不传时的确定性回退；AI 估档见 P6 方案）。 */
+    static final Map<String, int[]> FORM_WORDS = Map.of(
+            "LONG", new int[]{100000, 200000},
+            "SHORT_STANDALONE", new int[]{10000, 30000},
+            "LIGHT_NOVEL", new int[]{80000, 160000},
+            "LONG_INNER_SHORT", new int[]{100000, 200000},
+            "LN_INNER_SHORT", new int[]{60000, 120000});
+
+    /**
+     * 字数带解析：显式入参原样（validate 已验区间）；全缺省按 form 默认带宽；
+     * 只传一半报错；未知形态报错（不猜——DB CHECK 也会拒）。
+     */
+    static int[] resolveWordBand(RunCreateDTO dto, String form) {
+        Integer min = dto.wordsMin();
+        Integer max = dto.wordsMax();
+        if (min != null && max != null) {
+            return new int[]{min, max};
+        }
+        if (min != null || max != null) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "wordsMin/wordsMax 要么都传、要么都不传（不传=按形态默认带宽）");
+        }
+        int[] d = FORM_WORDS.get(form);
+        if (d == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "未知形态 " + form + "，不传字数时无法定带宽——请显式传 wordsMin/wordsMax，或用形态 "
+                            + String.join("/", FORM_WORDS.keySet()));
+        }
+        return new int[]{d[0], d[1]};
     }
 
     /** 归一化映射一步（落 run.tags_norm.steps；v3.5）。 */
@@ -796,6 +891,75 @@ public class DeriveSampleService {
         }
     }
 
+    /**
+     * AI 估档（字数带两头都空时）：LLM 按 tags/intent/style 定 form+带宽；用户已指定 form 则只估带宽。
+     * 估出的带宽一律钳入该形态 FORM_WORDS 档内（AI 贪大护栏）。重试耗尽 fail-open 返回 null。
+     */
+    BandEstimate aiEstimateBand(RunCreateDTO dto, String effectiveIntent, String fixedForm) {
+        try {
+            JsonNode out = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_WORD_BAND, null, null,
+                            List.of(LlmPort.Message.system(WORD_BAND_PROMPT),
+                                    LlmPort.Message.user(wordBandUser(dto, effectiveIntent, fixedForm))),
+                            0.3),
+                    root -> parseWordBand(root, fixedForm), 3);
+            return new BandEstimate(out.path("form").asText("").trim(),
+                    out.path("wordsMin").asInt(0), out.path("wordsMax").asInt(0),
+                    out.path("reason").asText(""));
+        } catch (Exception e) {
+            log.warn("⑤AI估档失败（fail-open，回退形态默认带）：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 估档校验（不过喂回重试）：form 合法（或原样返回用户指定形态）、带宽为正整数且 max>min、有 reason。 */
+    static JsonNode parseWordBand(JsonNode root, String fixedForm) {
+        String form = root.path("form").asText("").trim();
+        if (fixedForm != null) {
+            if (!fixedForm.equals(form)) {
+                throw new LlmJson.Bad("form 必须原样返回用户指定的「" + fixedForm + "」，当前「" + form + "」");
+            }
+        } else if (!FORM_WORDS.containsKey(form)) {
+            throw new LlmJson.Bad("form 必须是 " + String.join("/", FORM_WORDS.keySet()) + "，当前「" + form + "」");
+        }
+        int min = root.path("wordsMin").asInt(0);
+        int max = root.path("wordsMax").asInt(0);
+        if (min <= 0 || max <= min) {
+            throw new LlmJson.Bad("wordsMin/wordsMax 须为正整数且 max>min，当前 " + min + "~" + max);
+        }
+        if (!root.has("reason")) {
+            throw new LlmJson.Bad("缺 reason（≤30字判断依据）");
+        }
+        return root;
+    }
+
+    /** 估档钳位：把 AI 估计夹进该形态默认档 [lo,hi]（AI 天然贪大，档位护栏必须保留）。 */
+    static int[] clampBand(int estMin, int estMax, String form) {
+        int[] d = FORM_WORDS.get(form);
+        if (d == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "未知形态 " + form + "，合法形态：" + String.join("/", FORM_WORDS.keySet()));
+        }
+        int min = Math.max(d[0], Math.min(estMin, d[1]));
+        int max = Math.max(min, Math.min(estMax, d[1]));
+        return new int[]{min, max};
+    }
+
+    String wordBandUser(RunCreateDTO dto, String effectiveIntent, String fixedForm) {
+        ObjectNode root = om.createObjectNode();
+        root.put("类别", String.join("、", dto.tags()));
+        root.put("节奏", dto.pace());
+        root.put("形态", fixedForm == null ? "未指定（由你判定）" : fixedForm + "（用户已指定，只估字数）");
+        root.put("文风", dto.style() == null || dto.style().isBlank() ? "未指定" : dto.style());
+        String intent = effectiveIntent == null || effectiveIntent.isBlank() ? "（未提供）" : effectiveIntent;
+        root.put("创作思路", intent);
+        return root.toString();
+    }
+
+    /** AI 估档结果（form 可能被用户指定形态覆盖；带宽经 clampBand 钳定后才落 run）。 */
+    record BandEstimate(String form, int wordsMin, int wordsMax, String reason) {
+    }
+
     /** 思路预审校验（不过喂回重试）：optimized_intent 非空、score∈[0,10]、holes/changes 为数组。 */
     static JsonNode parseIntake(JsonNode root) {
         if (root.path("optimized_intent").asText("").trim().isEmpty()) {
@@ -813,7 +977,10 @@ public class DeriveSampleService {
 
     String intakeUser(RunCreateDTO dto) {
         ObjectNode root = om.createObjectNode();
-        root.put("字数区间", dto.wordsMin() + "~" + dto.wordsMax());
+        String band = dto.wordsMin() != null && dto.wordsMax() != null
+                ? dto.wordsMin() + "~" + dto.wordsMax()
+                : "未指定（稍后 AI 估档定篇幅与带宽）";
+        root.put("字数区间", band);
         root.put("类别", String.join("、", dto.tags()));
         root.put("节奏", dto.pace());
         root.put("形态", dto.form() == null || dto.form().isBlank() ? "未指定（系统抽）" : dto.form());
