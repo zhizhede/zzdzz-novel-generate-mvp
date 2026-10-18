@@ -2,6 +2,62 @@
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
 
+## AI 调用监测可点开看输入输出 + run22 卡点定位（2026-10-18 夜，未提交未部署）
+
+**用户三问的事实答案**（均已查证，勿再从记忆猜）：
+- **「全流程监测」没有独立入口**：10-17 主站 UI 整体删除后只剩衍生四视图；监测只存在于 run 详情「运行过程」卡片内的 `llm-trail` 表格（`GET /api/derive/runs/{id}/llm-trail`），且**只给摘要**（节点/耗时/tokens/成败），点不开、看不到提示词与返回。
+- **关联键一直是错的**：`LlmPort.ChatRequest` 只有 `(node, novelId, chapterId, …)`，derive 侧 6 处按 `(node, runId, novelId, …)` 调用，类型都是 `Long` 编译能过 → `llm_call_log.novel_id` 存的是 **run id**、`chapter_id` 存的是 novel id、`run_id` 列恒 NULL。
+- **run 22 卡在 ⑥b「全局头」**：`headDone()` 判 `story_assets.protagonist` 非空，而全局头是原子写（全过才落库），每次 3 轮全不合规 → 无任何产物 → 点一次从头重来。线上日志 18:29–18:31、18:45–18:48 两批各 3 轮：`cast persona 缺 speech` / 三次 JSON 语法错 / `clue 直接出现 solution 内容`。
+- **坏 JSON 的真实畸形点**（取 run22 的 899 号调用原文验证）：`"flade":"怕什么":"怕发现自己一直信任的人在说谎"` —— 键名错拼 + 值与值的边界错乱（对象内出现 `"k":"v1":"v2"`）。现有 `LlmJson` 修复器覆盖「漏逗号/漏闭符/裸引号」三类，**覆盖不到这一类**；6 次调用 6 次坏，输出长度集中在 3000–5200 字符（非 max_tokens 截断，`derive_plan` 曾一次吐 11457 tokens）。
+
+**本批落地（代码已改，未部署）**：
+- `ChatRequest` 补 `runId` 分量（保留 5 参构造器给主站），derive 6 处调用点归位（plan/qc/write×2/draft×2/gate）；`llm_call_log` insert 补 `run_id` 列（DO/接口/实现/XML 全套）。
+- `GET /api/derive/runs/llm-calls/{callId}` 新读端点（`LlmCallDetailVO`：messages 分段 + 返回正文 + 思考 + 原始 request/response）；`findPageByRun` 兼容历史行（`run_id IS NULL AND novel_id = runId`）。
+- `LlmJson.ask` 每轮校验失败回写该次调用 `error_msg` —— 账本行终于能看到「为什么不合规」，不再只活在进程日志里。
+- 前端 run 详情账本加「看详情」→ 抽屉四页签（提示词/模型返回/思考/原始 JSON）。
+- 单测：`LlmJson` 三处构造改三参；全量 `mvn -o test` 480 条 0 失败；`npm run build` 过。
+
+**未决**：坏 JSON 治本三选一（拆小单次输出 / 加畸形修复器 / 换更强模型——线上 chat 只有 `mimo-v2.6-flash` 一个 provider）；以上代码**未部署**（需用户授权）。
+
+**同日深夜追加（用户当轮授权部署 + 选定「拆小单次输出」）**：
+- **⑥b 全局头拆三段**（`DeriveDraftService`）：`HEAD_A_PROMPT` 定名+人物表（title/summary/protagonist/cast name/role/gender）、`HEAD_B_PROMPT` 人设卡（`persona[{name,五键}]`，只准名单内、不得漏人）、`HEAD_C_PROMPT` brief+真相卡。单次输出从 3000–5200 字符降到 ~500–1000。
+- 幂等改按段判定：`headStage(novel, reasoning)` → 0 未定名 / 1 缺人设卡 / 2 缺 brief（推理体裁还缺 truth）/ 3 齐；`headStep` 每次只推进一段并立刻落库（`updateMeta+updateCast` / `updateCast(mergePersona)` / `updateBrief+updateTruth`），返回 `unit=HEAD, batchIndex=1..3, batchTotal=3`。`headDone` 改为 `headStage>=3`（旧口径只看 protagonist，拆段后会把缺人设卡的书误判成完成）。
+- 新增纯函数：`parseHeadBasic` / `parsePersona` / `parseBriefTruth` / `mergePersona`；单测 `DeriveDraftBatchTest` 补 `headStageWalksThreeSegments`、`parseHeadBasic_requiresCoreFieldsOnly`、`parsePersona_coversWholeCastExactly`、`mergePersonaKeepsCastOrder`（删掉旧的 `headDoneRequiresProtagonist`）。
+- `findPageByRun` 加 node 前缀过滤（`derive_`），避免 runId 与 novelId 撞车时捞到主站节点行。
+- **已部署**（19:12 CST）：`mvn -pl novelgen-derive-app -am clean package` → 备份旧 jar → 覆盖 → `systemctl restart novelgen-derive`（PID 变更、active）；`web/dist` 覆盖 `/www/wwwroot/novelgen-ui/`（备份 `novelgen-ui.bak-*`）。验收：`systemctl is-active`=active、`/derive/api/derive/ping` 401（未登录预期）、站点 `/` 200；全量 `mvn -o test` 398+3+4 全绿、`npm run build` 过。
+- **待实弹**：run22 的 `novels.story_assets` 为空 → 下次点⑥b 会从 A 段（定名）开始；三段能否一次过、`llm_call_log.run_id` 是否落值、账本「看详情」能否读出提示词/返回，需点一次后用 psql 复核。
+
+## 宝塔部署：衍生 V119 世界状态账 + 前端（2026-10-18 午后，用户当轮授权，未 commit）
+
+**授权**：用户当轮明说「把新的前后端部署上宝塔环境」。
+
+- **包**：本机 `mvn -pl novelgen-derive-app -am clean package`；首包嵌的是旧 `novelgen-data`（无 V119，MD5 曾与线上撞成同值），**clean 重打后** fat jar 内确认含 `V119__derive_world_states.sql`。本地/线上 MD5=`c5a0b3aa457f0410239352da2e02137c`。
+- **后端**：`systemctl stop novelgen-derive` → 备份 `novelgen-derive-app.jar.bak-20261018-v119` → scp → start。Flyway **20 migrations validated，成功应用 119**；`world_states` 表在线上 derive_gen 已建（unique novel_id+chapter_no，ON DELETE CASCADE）。
+- **前端**：`web/dist` 整目录覆盖 `/www/wwwroot/novelgen-ui/`。
+- **验收**：`GET /` 200；`GET /derive/api/derive/ping` 带 Origin 未登录 **401 JSON A0003**（非 CORS 403）；`GET /derive/api/derive/runs` 401；`systemctl is-active novelgen-derive`=active。
+- **主站 novelgen jar 未动**（本批改动只在 derive 链路）。
+- **踩坑**：`-pl … -am package` 可能嵌入未刷新的 data jar——升级含 Flyway 新迁移的包前，必须核 fat jar 内 `BOOT-INF/lib/novelgen-data-*.jar` 是否含新 SQL，否则线上「Schema up to date」假成功。
+
+## 衍生⑧状态账注入 + ⑥a张力密度闸（2026-10-18，已随后批部署宝塔）
+
+**接续 V119 世界状态账**，补审稿结构伤的两道闸：
+
+- **⑧**：`DeriveQcService` 注入 `world_states` 逐章时间线；`QC_PROMPT` logic 增⑥——时刻/地点/在场矛盾、open_loops 已关闭事件再演（酒窖脱困两次）、key_facts 被推翻 → fail 并点名章号。
+- **⑥a**：`PLAN_PROMPT` 规则 7/8（张力沉淀 + 反转后移）；`checkTensionDensity` 硬校验——连续 ≥3 章整章只有{事件,反转}拒；推理/悬疑且反转 ≥2 时最后 30% 章必须还有 ≥1 反转。`PlanContext` 增 `tags`（兼容旧 7 参构造器）。
+- **测试**：`DeriveTensionGateTest` 7 条；`DeriveLenCheckTest`/`DeriveQcConcentrationTest` 构造器补 WorldStateMapper；`Derive*` 全套绿。
+- **仍未做**：线上部署、V119 实弹（本地 Docker 未起）、⑥b 窗级时间锚。
+
+## 衍生侧世界状态账落地：V119 + world_state 节点接进⑦（2026-10-18，已随后批部署宝塔）
+
+**背景**：用户指出「重点应是把没真正落地的东西落地」——`world_state` 节点自 V102 起只在 `llm_node_config` 里躺种子，derive 写链从未消费；⑦ 前情只有正文尾 300 字，时序/同一事件重复无账本。
+
+- **表**：derive V119 `world_states`（novel_id+chapter_no 唯一，jsonb `state`，物理删；一章一份 upsert）。
+- **⑦**：落稿后 `refreshWorldState` 走 `NODE_WORLD_STATE=world_state` 抽取（time 防呆对齐 AGENTS #22：只认明确时间线索、禁反推总历时、无线索沿用上一章）；`buildUser` 任何模式注入最新快照键「世界状态账」；抽取失败 fail-open 不炸章。
+- **REWORK**：⑥b 回炉 `worldStateMapper.deleteByNovel` 整本清账。
+- **META_LEAK gate**（审稿实锤回归钉）：拦「估算字数/本章N字/挂拍/第N章——」等过程话，与 FORBIDDEN 同级硬校验。
+- **测试**：`DeriveWorldStateInjectTest` 4 条 + 既有 `Derive*` 全套绿。
+- **未做**：⑧ QC 注入全账、⑥a 张力密度闸、线上部署。本地 Docker 未起，V119 待下次 derive 应用启动 Flyway 自动执行。
+
 ## 字数留空改 AI 估档 + 前端对齐三件套（2026-10-17 深夜，未提交未部署）
 
 **背景**：用户实弹 run20 建 run 转圈 3.5 分钟（AI 预审 181s+焊接 36s，非卡死后端正常落库），随后指出字数带留空的产品本意是 **AI 自己判字数与篇幅**，不是按形态套默认档——推翻 P7 短期档口径。
