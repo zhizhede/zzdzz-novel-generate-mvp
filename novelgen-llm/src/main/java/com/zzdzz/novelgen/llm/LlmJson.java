@@ -53,7 +53,20 @@ public class LlmJson {
         Exception last = null;
         for (int i = 1; i <= tries; i++) {
             LlmPort.ChatRequest req = withFeedback(request, feedback);
-            LlmPort.ChatResult r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
+            LlmPort.ChatResult r;
+            try {
+                r = onDelta == null ? llm.chat(req) : llm.chatStream(req, onDelta);
+            } catch (LlmException e) {
+                // 空 content（模型把整段写进思考、正文一个字没吐）＝可重试：喂回原因再来，别直接炸穿调用方
+                if (e.getMessage() != null && e.getMessage().contains("响应缺少 content")) {
+                    feedback = "上一轮响应 content 为空（整段输出进了思考）——不要只输出思考，"
+                            + "必须直接输出 JSON 对象正文";
+                    last = e;
+                    log.warn("LLM 空 content（第 {}/{} 轮）node={}，喂回重试", i, tries, request.node());
+                    continue;
+                }
+                throw e;
+            }
             try {
                 return parse.apply(read(r.content()));
             } catch (Bad e) {
@@ -91,13 +104,15 @@ public class LlmJson {
     }
 
     /**
-     * 补齐未收口的容器：模型偶发漏写末尾若干个 } / ]（症状是报错点落在输出末尾的
-     * 「expecting ',' delimiter」），正文本身完好时补上闭符即可解析。
-     * 字符串未收口一律不动——那多半是被 max_tokens 截断，半截事实账必须显性失败，不许悄悄放行。
+     * 修复容器收口：模型偶发漏写末尾若干个 } / ]，或把闭符种类写错（ } 写成 ]，run20 实弹
+     * 「Unexpected close marker ']': expected '}'」）。前者在末尾补齐；后者按栈顶应有闭符就地纠正，
+     * 栈空时的多余闭符直接丢弃——正文本身完好时都能解析。字符串未收口一律不动——那多半是被
+     * max_tokens 截断，半截事实账必须显性失败，不许悄悄放行。
      */
     static String closeUnclosed(String json) {
         Deque<Character> open = new ArrayDeque<>();
         boolean inStr = false;
+        StringBuilder fixed = null;
         for (int i = 0; i < json.length(); i++) {
             char c = json.charAt(i);
             if (inStr) {
@@ -113,16 +128,27 @@ public class LlmJson {
             } else if (c == '{' || c == '[') {
                 open.push(c);
             } else if (c == '}' || c == ']') {
-                if (open.isEmpty() || open.peek() != (c == '}' ? '{' : '[')) {
-                    return json; // 括号种类都对不上，不是「漏写收口」：不动，交给上层报错
+                if (open.isEmpty()) {
+                    // 栈空还来闭符＝多写的：丢弃
+                    if (fixed == null) fixed = new StringBuilder(json).deleteCharAt(i);
+                    else fixed.deleteCharAt(i--);
+                } else {
+                    char want = open.peek() == '{' ? '}' : ']';
+                    if (c != want) {
+                        if (fixed == null) fixed = new StringBuilder(json);
+                        fixed.setCharAt(i, want);
+                    }
+                    open.pop();
                 }
-                open.pop();
             }
         }
-        if (inStr || open.isEmpty()) {
+        if (inStr) {
             return json;
         }
-        StringBuilder sb = new StringBuilder(json);
+        if (fixed == null && open.isEmpty()) {
+            return json;
+        }
+        StringBuilder sb = fixed != null ? fixed : new StringBuilder(json);
         while (!open.isEmpty()) {
             sb.append(open.pop() == '{' ? '}' : ']');
         }

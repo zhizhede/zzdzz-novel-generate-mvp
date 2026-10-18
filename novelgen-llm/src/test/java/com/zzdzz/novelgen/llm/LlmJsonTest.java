@@ -129,9 +129,19 @@ class LlmJsonTest {
     }
 
     @Test
-    void mismatchedCloserUntouched() {
-        // 种类都对不上（多写的 }、结构错乱）：不猜，原样返回让上层报错
-        assertThat(LlmJson.closeUnclosed("{\"a\":1}}")).isEqualTo("{\"a\":1}}");
+    void mismatchedCloserDroppedWhenStackEmpty() {
+        // 栈空后的多余 }：丢弃，保住可解析的正文（run20 同族）
+        assertThat(LlmJson.closeUnclosed("{\"a\":1}}")).isEqualTo("{\"a\":1}");
+    }
+
+    @Test
+    void mismatchedCloserCorrectedByStackTop() {
+        //  } 误写成 ]（run20 实弹：Unexpected close marker ']' expected '}'）：按栈顶纠正
+        assertThat(LlmJson.closeUnclosed("{\"cast\":[{\"name\":\"甲\"]," +
+                "{\"name\":\"乙\"}],\"truth\":{}}"))
+                .isEqualTo("{\"cast\":[{\"name\":\"甲\"},{\"name\":\"乙\"}],\"truth\":{}}");
+        //  ] 误写成 }
+        assertThat(LlmJson.closeUnclosed("{\"a\":{\"b\":1}]")).isEqualTo("{\"a\":{\"b\":1}}");
     }
 
     @Test
