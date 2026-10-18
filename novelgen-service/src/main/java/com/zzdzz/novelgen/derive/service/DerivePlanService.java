@@ -65,25 +65,61 @@ public class DerivePlanService {
 
     static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
 
-    static final String PLAN_PROMPT = """
-            你在为一部小说做章节计划。输入：字数区间、类别、结局形状、目标节奏、主线（标签层焊接结果）、
-            拍清单（每拍含临时序号 seq、拍型、节奏锚点、弧位标签、标签层文案）。
+    /** ⑥a 每窗章数（2026-10-18 夜：单次输出规模封顶，章数放大到 60 也不撞模型输出上限）。 */
+    static final int PLAN_WINDOW_CHAPTERS = 10;
+
+    /** 每章字数与章数的合理带（AI 自定，系统只夹区间——旧的"字数÷硬常量算章数"已废）。 */
+    static final int CHAPTER_AVG_MIN = 2000;
+    static final int CHAPTER_AVG_MAX = 6000;
+    static final int CHAPTER_COUNT_MIN = 6;
+    static final int CHAPTER_COUNT_MAX = 80;
+
+    /**
+     * ⑥a-0 定规模：章数由 AI 判（用户定调「不设字数的初衷就是让 AI 自己判篇幅」），
+     * 系统只验「章数 × 章均落在字数区间 + 各自在合理带内」。输出极小。
+     */
+    static final String PLAN_SCALE_PROMPT = """
+            你在为一部小说判断"篇幅规模"（不是写章纲，也不是写正文）。输入：字数区间、类别、
+            结局形状、目标节奏、产品形态、主线、拍清单规模。
+            要求：
+            1. 自己判断这部书合理的章数与每章字数：快热/短篇偏短章，舒缓/长篇偏长章；
+            2. 章数 × 每章字数必须落在输入的字数区间内，并且至少要覆盖区间上限的 80%
+               （别只贴着下限交差——要给到目标字数，章数就得多）；
+            3. 章数 6~80，每章字数 2000~6000（低于 2000 的薄章不要给）；
+            4. 章数不得超过输入的拍数——每章至少要分到 1 拍，拍不够就减章（宁可章长一点）；
+            5. 只输出规模判断，不写章题、不分配拍。
             输出 JSON 对象：
-            {"chapters":[{"no":1,"title_hint":"≤12字章题","budget":2500,"beats":[3,1,7]}]}
+            {"chapterCount":12,"chapterAvg":2500,"reason":"一句话说明为何是这个篇幅"}
+            只输出 JSON 对象，无其他文字。
+            """;
+
+    /**
+     * ⑥a-1..n 逐窗分章：每次只做这一段连续的章（章数固定、只能从"剩余拍清单"取拍），
+     * 单次输出与思考量都封顶；跨窗一致性靠「前窗章概览 + 剩余拍清单」衔接。
+     */
+    static final String PLAN_WINDOW_PROMPT = """
+            你在为一部小说做"章节计划·单窗分配"（不是写正文，也不是写详细章纲，只是把拍分到章）。
+            输入：字数区间、类别、结局形状、节奏、产品形态、主线、本窗章号范围、每章目标字数、
+            剩余拍清单（临时序号 seq/拍型/节奏/弧位/文案）、前面各窗已定章概览。
+            输出 JSON 对象：
+            {"chapters":[{"no":11,"title_hint":"≤12字章题","budget":2500,"beats":[23,24]}]}
             规则：
-            1. 章节数必须等于系统给出的"章节数"；每章 budget>0 且总和在字数区间内；
-            2. 拍清单的每个 seq 必须恰好出现一次（不许丢、不许重复）；每章≥1拍；beats 数组顺序=章内拍序；
-            3. 拍按 arc_fit 与因果定序（弧位偏开头的靠前、收尾的靠后；同弧拍保持相对顺序）；
-            4. 结局形状=闭合：末章必须包含收束拍；=开放/循环：末章可留悬念；
-            4b. 类别含「推理」或「悬疑」且结局形状=闭合时：末章的收束拍必须承载
-                「真相了结/罪责兑现」语义（真凶收押、还原陈述、判决落地、受害者安葬这类
-                可查验的动作），禁止用纯氛围收束拍充数——氛围余味只能出现在了结动作之后；
-            5. 快热：前 3 章必须含拍型∈{事件,反转} 的拍；
-            6. title_hint 不带"第N章"前缀、不带专名过露的剧透；
-            7. 张力沉淀：禁止连续 ≥3 章整章拍型全是 {事件,反转}——重击之间必须插入
-                铺垫/情绪/抉择章，让情绪有落点；
-            8. 类别含「推理」或「悬疑」且反转拍 ≥2 时：不要把全部反转都压在前半——
-                至少保留 1 个反转给最后 30% 的章，防止终局前掏空、末章只剩机械收尾。
+            1. 只能输出本窗章号范围内的章，章号连续、每章都要出现，章数必须等于范围内章数；
+            2. beats 只能从"剩余拍清单"取 seq，同一个 seq 只能用一次，每章至少 1 拍；
+            2b. 本窗不要贪多把拍用光：后面的章还等着分拍，本窗用完后剩余拍数必须 ≥ 剩余章数；
+            3. 每章 budget 要贴着输入的「每章目标字数」给（上下浮动不超过 30%），本窗合计不要超过
+               字数区间上限；全书各章预算合计必须达到字数下限，别把书写短了；
+            4. 拍按 arc_fit 与因果定序：弧位偏开头的靠前、收尾的靠后，同弧拍保持相对顺序；
+            5. 结局形状=闭合：本窗若含末章，末章必须含收束拍；类别含「推理」或「悬疑」且闭合时，
+               末章的收束拍要承载「真相了结/罪责兑现」这类可查验的动作（真凶收押、还原陈述、
+               判决落地），禁止用纯氛围收束拍充数，氛围余味只能出现在了结动作之后；
+            6. 快热（节奏≥0.75）：开头三章必须含拍型∈{事件,反转} 的拍；
+            7. 张力沉淀：不要连续 ≥3 章整章拍型全是 {事件,反转}——重击之间插入铺垫/情绪/抉择章；
+               跨窗也算：若输入「前窗末两章拍型」已经是连续两章 {事件,反转}，本窗第一章必须改用
+               非 {事件,反转} 的拍，否则就凑成三连；
+            8. 类别含「推理」或「悬疑」且反转拍多时，本窗别把反转全用掉，给后面的窗留反转；
+            9. title_hint 不带"第N章"前缀，不写专名过露的剧透；
+            10. 与前窗衔接：不推翻前窗已定章里的人物关系与已发生事件。
             只输出 JSON 对象，无其他文字。
             """;
 
@@ -105,7 +141,10 @@ public class DerivePlanService {
     record PlanDraft(int no, String titleHint, int budget, List<Integer> beats) {
     }
 
-    /** ⑥a：对 run 做章节计划并落 novel(GENERATED)/chapters/beat_instance，回填 run.novel_id。 */
+    /**
+     * ⑥a：幂等推进一个单元（SCALE 定规模 → WINDOW 逐窗分配拍 → DONE 收尾）。
+     * 每次只发一次 LLM 请求，客户端循环调用至 allDone。
+     */
     @Transactional
     public PlanVO plan(long runId) {
         RunDO run = runMapper.selectById(runId);
@@ -113,10 +152,7 @@ public class DerivePlanService {
             throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
         }
         if (!"PLANNING".equals(run.getStatus())) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "run 状态应为 PLANNING，当前 " + run.getStatus());
-        }
-        if (run.getNovelId() != null) {
-            throw new BizException(ErrorCode.PARAM_ERROR, "run 已计划过（novelId=" + run.getNovelId() + "）");
+            throw new BizException(ErrorCode.PARAM_ERROR, "⑥a 需要 run 处于 PLANNING（当前 " + run.getStatus() + "）");
         }
 
         // ---- 拍清单（原生拍链 + 直采补差）----
@@ -161,98 +197,169 @@ public class DerivePlanService {
             throw new BizException(ErrorCode.PARAM_ERROR, "拍清单为空，run 抽样异常");
         }
 
-        // ---- 规模参数 ----
-        BigDecimal pace = run.getParamPace();
-        int b0 = DeriveSampleService.B0_TABLE.entrySet().stream()
-                .filter(e -> e.getKey().compareTo(pace) == 0)
-                .map(Map.Entry::getValue).findFirst().orElse(1500);
-        int wordsPred = Math.max(run.getParamWordsMin(), Math.min(run.getParamWordsMax(),
-                b0 * (int) Math.ceil((double) run.getParamWordsMax() / b0)));
-        int chapterAvg = pace.compareTo(new BigDecimal("0.75")) >= 0 ? 2500
-                : pace.compareTo(new BigDecimal("0.25")) <= 0 ? 4000 : 3200;
-        int expectedCh = Math.max(1, (int) Math.round((double) wordsPred / chapterAvg));
-
-        // ---- LLM 分章（校验不过喂回重试）----
-        PlanContext ctx = new PlanContext(expectedCh, run.getParamWordsMin(), run.getParamWordsMax(),
-                pace, run.getParamForm(), run.getParamOutcome(), inventory, run.getParamTags());
-        String user = buildUserInput(run, inventory, expectedCh, wordsPred);
-        List<PlanDraft> drafts = llmJson.ask(
-                new LlmPort.ChatRequest(NODE_PLAN, run.getNovelId(), null, runId,
-                        List.of(LlmPort.Message.system(PLAN_PROMPT), LlmPort.Message.user(user)),
-                        0.3),
-                root -> parsePlan(root, ctx), 3);
-
-        // ---- 落库：novel(GENERATED) → chapters → beat_instance → run.novel_id ----
-        NovelDO novel = new NovelDO();
-        novel.setTitle("未命名·RUN-" + runId);
-        novel.setSourceType("GENERATED");
-        novel.setCategoryTags(run.getParamTags());
-        novel.setForm(run.getParamForm());
-        novel.setRunId(runId);
-        // 文风卡传播（v3.6 方案B，用户定调⑥a 建书时从源书复制）：取第一本抽中弧所在源书
-        String styleCard = pickedOutlineStyleCard(arcIds);
-        if (styleCard != null) {
-            novel.setStorySettings(styleCard);
+        // ---- 幂等推进：先定规模（AI 判章数），再逐窗分章 ----
+        PlanState state = readPlanState(run.getStepStatus());
+        if (state == null) {
+            if (run.getNovelId() != null) {
+                // 老的一次性计划留下的书：没有 PLAN 段，重跑会重复建章，明确拒绝
+                throw new BizException(ErrorCode.PARAM_ERROR,
+                        "run 已计划过（novelId=" + run.getNovelId() + "），⑥a 不能重复规划");
+            }
+            return planScale(run, inventory, arcIds);
         }
-        long novelId = novelMapper.insertFull(novel);
+        return planNextWindow(run, inventory, state);
+    }
 
-        // tempSeq → 最终 seq / chapter 映射（按 LLM 章序+章内拍序定序）
-        Map<Integer, Integer> finalSeqByTemp = new HashMap<>();
-        Map<Integer, Integer> chapterByTemp = new HashMap<>();
-        int finalSeq = 1;
-        List<PlanVO.ChapterPlanItem> items = new ArrayList<>();
-        Map<Integer, List<InvBeat>> byChapter = new HashMap<>();
-        for (PlanDraft d : drafts) {
+    // ---- 单元推进 ----
+
+    /** ⑥a-0：定规模（章数由 AI 判），落成品书骨架与 PLAN 状态。 */
+    private PlanVO planScale(RunDO run, List<InvBeat> inventory, List<Long> arcIds) {
+        long runId = run.getId();
+        DeriveActivity.begin(runId, "⑥a-0 定篇幅规模");
+        try {
+            String user = buildScaleUser(run, inventory);
+            JsonNode out = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_PLAN, run.getNovelId(), null, runId,
+                            List.of(LlmPort.Message.system(PLAN_SCALE_PROMPT), LlmPort.Message.user(user)),
+                            0.3),
+                    root -> parseScale(root, run, inventory.size()), 3);
+            int chapterCount = out.path("chapterCount").asInt();
+            int chapterAvg = out.path("chapterAvg").asInt();
+            long novelId = run.getNovelId() == null ? createNovel(run, arcIds) : run.getNovelId();
+            PlanState st = new PlanState(chapterCount, chapterAvg, new ArrayList<>(), new ArrayList<>());
+            runMapper.updateStepStatus(runId, mergePlanState(run.getStepStatus(), st));
+            log.info("⑥a-0 定规模：runId={} novelId={} 章={} 章均={} 理由={}",
+                    runId, novelId, chapterCount, chapterAvg, out.path("reason").asText(""));
+            return new PlanVO(runId, novelId, chapterCount, 0, 0, List.of(),
+                    "SCALE", 0, totalWindows(chapterCount), 0, 0, false);
+        } finally {
+            DeriveActivity.end(runId);
+        }
+    }
+
+    /** ⑥a-1..n：分配下一窗的拍并落库；全部完成后返回 DONE（客户端循环调用）。 */
+    private PlanVO planNextWindow(RunDO run, List<InvBeat> inventory, PlanState state) {
+        long runId = run.getId();
+        Long novelId = run.getNovelId();
+        if (novelId == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "⑥a 状态与成品书不一致（novel_id 为空）——请重新建 run");
+        }
+        int totalW = totalWindows(state.chapterCount());
+        List<Integer> usedSeqs = new ArrayList<>(state.usedSeqs());
+        List<PlanDraft> drafts = new ArrayList<>(state.drafts());
+        if (drafts.size() >= state.chapterCount()) {
+            int totalBudget = drafts.stream().mapToInt(PlanDraft::budget).sum();
+            if (usedSeqs.size() < inventory.size()) {
+                log.warn("⑥a 收尾：章已排满但还有 {} 个拍未分配（runId={} 已用 {}/{}）",
+                        inventory.size() - usedSeqs.size(), runId, usedSeqs.size(), inventory.size());
+            }
+            log.info("⑥a 全部窗完成：runId={} novelId={} 章={} 拍={} 总预算={}",
+                    runId, novelId, drafts.size(), usedSeqs.size(), totalBudget);
+            return new PlanVO(runId, novelId, drafts.size(), usedSeqs.size(), totalBudget,
+                    List.of(), "DONE", totalW, totalW, drafts.size(), usedSeqs.size(), true);
+        }
+        int from = drafts.size() + 1;
+        int to = Math.min(state.chapterCount(), from + PLAN_WINDOW_CHAPTERS - 1);
+        List<InvBeat> remain = inventory.stream().filter(b -> !usedSeqs.contains(b.tempSeq())).toList();
+        int windowNo = (from - 1) / PLAN_WINDOW_CHAPTERS + 1;
+        List<PlanDraft> win;
+        DeriveActivity.begin(runId, "⑥a 分章 第" + windowNo + "/" + totalW + " 窗（章 " + from + "-" + to + "）");
+        try {
+            PlanContext planCtx = new PlanContext(state.chapterCount(), run.getParamWordsMin(),
+                    run.getParamWordsMax(), run.getParamPace(), run.getParamForm(),
+                    run.getParamOutcome(), inventory, run.getParamTags(),
+                    Boolean.TRUE.equals(run.getLenCheck()));
+            WindowContext ctx = new WindowContext(planCtx, state, from, to, remain);
+            String user = buildWindowUser(run, inventory, remain, drafts, from, to, state.chapterAvg());
+            win = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_PLAN, novelId, null, runId,
+                            List.of(LlmPort.Message.system(PLAN_WINDOW_PROMPT), LlmPort.Message.user(user)),
+                            0.3),
+                    root -> parseWindow(root, ctx), 3);
+            persistWindow(runId, novelId, win, inventory);
+        } finally {
+            DeriveActivity.end(runId);
+        }
+        drafts.addAll(win);
+        for (PlanDraft d : win) {
+            usedSeqs.addAll(d.beats());
+        }
+        PlanState next = new PlanState(state.chapterCount(), state.chapterAvg(), usedSeqs, drafts);
+        runMapper.updateStepStatus(runId, mergePlanState(run.getStepStatus(), next));
+        int assigned = win.stream().mapToInt(d -> d.beats().size()).sum();
+        int totalBudget = drafts.stream().mapToInt(PlanDraft::budget).sum();
+        log.info("⑥a 分章窗：runId={} novelId={} 窗{}/{} 章{}-{} 分配拍{}（拍累计 {}/{}，章累计 {}/{}）",
+                runId, novelId, windowNo, totalW, from, to, assigned,
+                usedSeqs.size(), inventory.size(), drafts.size(), state.chapterCount());
+        return new PlanVO(runId, novelId, state.chapterCount(), usedSeqs.size(), totalBudget,
+                List.of(), "WINDOW", windowNo, totalW, drafts.size(), usedSeqs.size(), false);
+    }
+
+    /** 窗落库：chapters + beat_instance（每窗独立提交，失败不回滚已完成窗）。 */
+    void persistWindow(long runId, long novelId, List<PlanDraft> win, List<InvBeat> inventory) {
+        int nextSeq = nextBeatSeq(runId);
+        for (PlanDraft d : win) {
             ChapterDO ch = new ChapterDO();
             ch.setNovelId(novelId);
             ch.setChapterNo(d.no());
             ch.setTitle(d.titleHint() == null || d.titleHint().isBlank() ? "第" + d.no() + "章" : d.titleHint());
             ch.setBudget(d.budget());
             ch.setStatus("PLANNED");
-            List<InvBeat> chBeats = new ArrayList<>();
             BigDecimal paceSum = BigDecimal.ZERO;
             for (Integer tempSeq : d.beats()) {
-                InvBeat ib = inventory.get(tempSeq - 1);
-                finalSeqByTemp.put(tempSeq, finalSeq++);
-                chapterByTemp.put(tempSeq, d.no());
-                chBeats.add(ib);
-                paceSum = paceSum.add(ib.pacing());
+                paceSum = paceSum.add(inventory.get(tempSeq - 1).pacing());
             }
-            BigDecimal pacePlan = chBeats.isEmpty() ? BigDecimal.ZERO
-                    : paceSum.divide(BigDecimal.valueOf(chBeats.size()), 2, RoundingMode.HALF_UP);
-            ch.setPacePlan(pacePlan);
+            ch.setPacePlan(d.beats().isEmpty() ? BigDecimal.ZERO
+                    : paceSum.divide(BigDecimal.valueOf(d.beats().size()), 2, RoundingMode.HALF_UP));
             chapterMapper.insert(ch);
-            byChapter.put(d.no(), chBeats);
-            items.add(new PlanVO.ChapterPlanItem(d.no(), ch.getTitle(), d.budget(), chBeats.size(), pacePlan.doubleValue()));
-        }
-
-        for (PlanDraft d : drafts) {
             for (Integer tempSeq : d.beats()) {
                 InvBeat ib = inventory.get(tempSeq - 1);
                 BeatInstanceDO bi = new BeatInstanceDO();
                 bi.setRunId(runId);
-                bi.setSeq(finalSeqByTemp.get(tempSeq));
+                bi.setSeq(nextSeq++);
                 bi.setSource(ib.source());
                 bi.setAssetId(ib.assetId());
                 bi.setArcId(ib.arcId());
                 bi.setArcSegNo(ib.arcSegNo());
                 bi.setBeatType(ib.beatType());
                 bi.setPacing(ib.pacing());
-                bi.setChapterNo(chapterByTemp.get(tempSeq));
+                bi.setChapterNo(d.no());
                 bi.setStatus("PLANNED");
                 beatInstanceMapper.insert(bi);
             }
         }
-        runMapper.updateNovelId(runId, novelId);
+    }
 
-        // P6 伴随·指纹前移（2026-10-17）：抽中弧 BRIDGE 在⑥a 即登记——原仅⑧ PASS 时登记，
-        // 而 33 起无一过审，防复刻无数据可比（跨稿母题/弧复读死循环）。⑤ 阻断照旧只在 anti_repro=开 时生效。
+    /** 成品书骨架（⑥a-0 建一次；文风卡从抽中弧的源书复制，v3.6 方案B）。 */
+    private long createNovel(RunDO run, List<Long> arcIds) {
+        NovelDO novel = new NovelDO();
+        novel.setTitle("未命名·RUN-" + run.getId());
+        novel.setSourceType("GENERATED");
+        novel.setCategoryTags(run.getParamTags());
+        novel.setForm(run.getParamForm());
+        novel.setRunId(run.getId());
+        String styleCard = pickedOutlineStyleCard(arcIds);
+        if (styleCard != null) {
+            novel.setStorySettings(styleCard);
+        }
+        long novelId = novelMapper.insertFull(novel);
+        runMapper.updateNovelId(run.getId(), novelId);
         registerBridgeFingerprints(run, novelId);
+        return novelId;
+    }
 
-        int totalBudget = drafts.stream().mapToInt(PlanDraft::budget).sum();
-        log.info("⑥a章节计划：runId={} novelId={} 章={} 拍={} 总预算={}",
-                runId, novelId, drafts.size(), finalSeq - 1, totalBudget);
-        return new PlanVO(runId, novelId, drafts.size(), finalSeq - 1, totalBudget, items);
+    /** 拍实例下一个可用 seq（跨窗递增，避免撞号）。 */
+    int nextBeatSeq(long runId) {
+        List<BeatInstanceDO> tail = beatInstanceMapper.selectList(new LambdaQueryWrapper<BeatInstanceDO>()
+                .eq(BeatInstanceDO::getRunId, runId)
+                .orderByDesc(BeatInstanceDO::getSeq)
+                .last("LIMIT 1"));
+        return tail.isEmpty() || tail.get(0).getSeq() == null ? 1 : tail.get(0).getSeq() + 1;
+    }
+
+    static int totalWindows(int chapterCount) {
+        return (chapterCount + PLAN_WINDOW_CHAPTERS - 1) / PLAN_WINDOW_CHAPTERS;
     }
 
     // ---- 输入构造与解析校验 ----
@@ -284,18 +391,46 @@ public class DerivePlanService {
         }
     }
 
-    String buildUserInput(RunDO run, List<InvBeat> inventory, int expectedCh, int wordsPred) {
+    /** ⑥a-0 输入：只给判断篇幅所需的信息（不给章数，章数由 AI 判）。 */
+    String buildScaleUser(RunDO run, List<InvBeat> inventory) {
         ObjectNode root = STATIC_MAPPER.createObjectNode();
-        root.put("章节数", expectedCh);
-        root.put("wordsPred", wordsPred);
         root.put("字数区间", run.getParamWordsMin() + "~" + run.getParamWordsMax());
         root.set("类别", DeriveWriteService.readTreeSafe(run.getParamTags()));
         root.put("目标节奏", run.getParamPace().toPlainString());
         root.put("结局形状", run.getParamOutcome());
         root.put("产品形态", run.getParamForm());
         root.put("主线", run.getWelded() == null ? "" : run.getWelded());
-        var arr = root.putArray("拍清单");
-        for (InvBeat ib : inventory) {
+        root.put("拍数", inventory.size());
+        return root.toString();
+    }
+
+    /** ⑥a-1 输入：本窗章号范围 + 剩余拍 + 前窗章概览（衔接用）。 */
+    String buildWindowUser(RunDO run, List<InvBeat> inventory, List<InvBeat> remain,
+                           List<PlanDraft> drafts, int from, int to, int chapterAvg) {
+        ObjectNode root = STATIC_MAPPER.createObjectNode();
+        root.put("字数区间", run.getParamWordsMin() + "~" + run.getParamWordsMax());
+        root.set("类别", DeriveWriteService.readTreeSafe(run.getParamTags()));
+        root.put("目标节奏", run.getParamPace().toPlainString());
+        root.put("结局形状", run.getParamOutcome());
+        root.put("产品形态", run.getParamForm());
+        root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+        root.put("本窗章号范围", from + "~" + to);
+        root.put("本窗章数", to - from + 1);
+        root.put("每章目标字数", chapterAvg);
+        root.put("剩余拍数", remain.size());
+        var prev = root.putArray("前窗章概览");
+        for (PlanDraft d : drafts) {
+            var n = prev.addObject();
+            n.put("no", d.no());
+            n.put("title_hint", d.titleHint());
+            n.put("budget", d.budget());
+            var types = n.putArray("beat_types");
+            for (Integer s : d.beats()) {
+                types.add(inventory.get(s - 1).beatType());
+            }
+        }
+        var arr = root.putArray("剩余拍清单");
+        for (InvBeat ib : remain) {
             var n = arr.addObject();
             n.put("seq", ib.tempSeq());
             n.put("beat_type", ib.beatType());
@@ -305,85 +440,170 @@ public class DerivePlanService {
                 n.put("label", ib.labelText());
             }
         }
+        // 跨窗张力衔接：把上一窗最后两章的拍型摊开，避免本窗开头又凑成三连高张力
+        var tail = root.putArray("前窗末两章拍型");
+        for (int i = Math.max(0, drafts.size() - 2); i < drafts.size(); i++) {
+            PlanDraft d = drafts.get(i);
+            var n = tail.addObject();
+            n.put("no", d.no());
+            var types = n.putArray("beat_types");
+            for (Integer s : d.beats()) {
+                types.add(inventory.get(s - 1).beatType());
+            }
+        }
         return root.toString();
     }
 
-    static List<PlanDraft> parsePlan(JsonNode root, PlanContext ctx) {
+    /**
+     * ⑥a-0 校验：章数与章均由 AI 定。字数带（区间 / 80% 下限 / 章均带）只在开了字数审计
+     * （run.len_check）时卡；不开审计直接放行，只保留机械必备项（章数≥1、章数≤拍数）。
+     */
+    static JsonNode parseScale(JsonNode root, RunDO run, int beatCount) {
+        int ch = root.path("chapterCount").asInt(0);
+        int avg = root.path("chapterAvg").asInt(0);
+        if (ch < 1) {
+            throw new LlmJson.Bad("章数必须 ≥1（当前 " + ch + "）");
+        }
+        if (avg < 1) {
+            throw new LlmJson.Bad("每章字数必须 >0（当前 " + avg + "）");
+        }
+        if (ch > beatCount) {
+            throw new LlmJson.Bad("章数 " + ch + " 超过拍数 " + beatCount
+                    + "——每章至少分到 1 拍，章数不得超过拍数（宁可把章写长）");
+        }
+        if (!Boolean.TRUE.equals(run.getLenCheck())) {
+            return root;
+        }
+        if (ch > CHAPTER_COUNT_MAX) {
+            throw new LlmJson.Bad("章数必须在 " + CHAPTER_COUNT_MIN + "~" + CHAPTER_COUNT_MAX
+                    + "（当前 " + ch + "）");
+        }
+        if (avg < CHAPTER_AVG_MIN || avg > CHAPTER_AVG_MAX) {
+            throw new LlmJson.Bad("每章字数必须在 " + CHAPTER_AVG_MIN + "~" + CHAPTER_AVG_MAX
+                    + "（当前 " + avg + "）");
+        }
+        long total = (long) ch * avg;
+        if (total < run.getParamWordsMin() || total > run.getParamWordsMax()) {
+            throw new LlmJson.Bad("章数×每章字数=" + total + " 超出字数区间 ["
+                    + run.getParamWordsMin() + "," + run.getParamWordsMax() + "]——调整章数或每章字数");
+        }
+        // 不能只贴着区间下限交差：总量至少要覆盖上限的 80%，否则章数配不上字数
+        long floor = (long) Math.ceil(run.getParamWordsMax() * 0.8);
+        if (total < floor) {
+            throw new LlmJson.Bad("章数×每章字数=" + total + " 只够上限的 "
+                    + Math.round(total * 100.0 / run.getParamWordsMax()) + "%，至少要到 " + floor
+                    + "——这部书要写到 " + run.getParamWordsMax() + " 字，请增加章数或提高每章字数");
+        }
+        return root;
+    }
+
+    /** ⑥a-1 校验：本窗章号连续齐全、拍只取自剩余清单且不跨窗重复、预算与累计预算在区间内。 */
+    static List<PlanDraft> parseWindow(JsonNode root, WindowContext ctx) {
         JsonNode arr = root.path("chapters");
-        if (!arr.isArray() || arr.isEmpty()) {
-            throw new LlmJson.Bad("chapters 必须是非空数组");
+        int expect = ctx.to() - ctx.from() + 1;
+        if (!arr.isArray() || arr.size() != expect) {
+            throw new LlmJson.Bad("本窗必须输出 " + expect + " 章（第 " + ctx.from() + "-" + ctx.to()
+                    + " 章），当前 " + (arr.isArray() ? arr.size() : 0));
         }
-        if (arr.size() != ctx.expectedCh()) {
-            throw new LlmJson.Bad("章节数必须 = " + ctx.expectedCh() + "，当前 " + arr.size());
+        Set<Integer> remainSeqs = new HashSet<>();
+        for (InvBeat b : ctx.remain()) {
+            remainSeqs.add(b.tempSeq());
         }
+        Set<Integer> usedBefore = new HashSet<>(ctx.state().usedSeqs());
         List<PlanDraft> out = new ArrayList<>();
         Set<Integer> used = new HashSet<>();
         Set<Integer> nos = new HashSet<>();
-        int budgetSum = 0;
-        for (int i = 0; i < arr.size(); i++) {
-            JsonNode c = arr.get(i);
-            int no = c.path("no").asInt(i + 1);
+        int winBudget = 0;
+        for (JsonNode c : arr) {
+            int no = c.path("no").asInt(0);
             int budget = c.path("budget").asInt(0);
-            JsonNode beats = c.path("beats");
+            if (no < ctx.from() || no > ctx.to()) {
+                throw new LlmJson.Bad("章号越界: " + no + "（本窗只做 " + ctx.from() + "-" + ctx.to() + "）");
+            }
             if (!nos.add(no)) {
                 throw new LlmJson.Bad("章号重复: " + no);
             }
-            if (budget <= 0) {
-                throw new LlmJson.Bad("第" + no + "章 budget 必须 >0");
+            if (ctx.plan().lenCheck()
+                    && Math.abs(budget - ctx.state().chapterAvg()) > ctx.state().chapterAvg() * 0.3) {
+                throw new LlmJson.Bad("第" + no + "章 budget=" + budget + " 与目标章均 "
+                        + ctx.state().chapterAvg() + " 偏差超过 30%——按章均给量，总量才对得上字数区间");
             }
+            JsonNode beats = c.path("beats");
             if (!beats.isArray() || beats.isEmpty()) {
                 throw new LlmJson.Bad("第" + no + "章 beats 必须非空（每章≥1拍）");
             }
             List<Integer> beatList = new ArrayList<>();
             for (JsonNode b : beats) {
                 int s = b.asInt(0);
-                if (s < 1 || s > ctx.inventory().size()) {
-                    throw new LlmJson.Bad("beats 含非法 seq: " + s);
+                if (usedBefore.contains(s)) {
+                    throw new LlmJson.Bad("拍 seq " + s + " 已在前面的窗用过（每拍全书恰好一次）");
+                }
+                if (!remainSeqs.contains(s)) {
+                    throw new LlmJson.Bad("拍 seq " + s + " 不在剩余拍清单里");
                 }
                 if (!used.add(s)) {
-                    throw new LlmJson.Bad("拍 seq " + s + " 重复出现（每拍恰好一次）");
+                    throw new LlmJson.Bad("拍 seq " + s + " 在本窗重复出现");
                 }
                 beatList.add(s);
             }
-            budgetSum += budget;
+            winBudget += budget;
             out.add(new PlanDraft(no, c.path("title_hint").asText(""), budget, beatList));
         }
-        // 每拍恰好一次：全覆盖
-        if (used.size() != ctx.inventory().size()) {
-            Set<Integer> missing = new HashSet<>();
-            for (InvBeat ib : ctx.inventory()) {
-                if (!used.contains(ib.tempSeq())) {
-                    missing.add(ib.tempSeq());
-                }
+        Set<Integer> missingNos = new HashSet<>();
+        for (int n = ctx.from(); n <= ctx.to(); n++) {
+            if (!nos.contains(n)) {
+                missingNos.add(n);
             }
-            throw new LlmJson.Bad("拍未全覆盖，缺 seq: " + missing);
         }
-        if (budgetSum < ctx.minWords() || budgetSum > ctx.maxWords()) {
-            throw new LlmJson.Bad("Σbudget=" + budgetSum + " 超出字数区间 [" + ctx.minWords() + "," + ctx.maxWords() + "]");
+        if (!missingNos.isEmpty()) {
+            throw new LlmJson.Bad("本窗章号不连续，缺: " + missingNos);
         }
-        // 快热：前3章必须含 {事件,反转}
-        if (ctx.pace().compareTo(new BigDecimal("0.75")) >= 0) {
+        int cumBudget = ctx.state().drafts().stream().mapToInt(PlanDraft::budget).sum() + winBudget;
+        if (ctx.plan().lenCheck() && cumBudget > ctx.plan().maxWords()) {
+            throw new LlmJson.Bad("预算累计 " + cumBudget + " 已超出字数上限 "
+                    + ctx.plan().maxWords() + "——本章窗把 budget 往小调");
+        }
+        int restChapters = ctx.state().chapterCount() - ctx.to();
+        int restBeats = ctx.remain().size() - used.size();
+        if (restBeats < restChapters) {
+            throw new LlmJson.Bad("本窗用掉 " + used.size() + " 拍后只剩 " + restBeats
+                    + " 拍，而后面还有 " + restChapters + " 章——每章至少 1 拍，本窗请少用拍");
+        }
+        if (restChapters == 0 && restBeats != 0) {
+            List<Integer> left = ctx.remain().stream().map(InvBeat::tempSeq)
+                    .filter(s -> !used.contains(s)).toList();
+            throw new LlmJson.Bad("这是最后一窗，还剩拍未分配: " + left
+                    + "——拍清单每个 seq 必须恰好用一次，请把它们分进本窗各章");
+        }
+        if (ctx.plan().lenCheck() && restChapters == 0 && cumBudget < ctx.plan().minWords()) {
+            throw new LlmJson.Bad("全部章预算合计 " + cumBudget + " 低于字数下限 "
+                    + ctx.plan().minWords() + "——各章 budget 往上调，别把书写短了");
+        }
+        List<PlanDraft> all = new ArrayList<>(ctx.state().drafts());
+        all.addAll(out);
+        if (ctx.from() == 1 && ctx.plan().pace().compareTo(new BigDecimal("0.75")) >= 0) {
             boolean hot = false;
-            for (int i = 0; i < Math.min(3, out.size()); i++) {
-                for (Integer s : out.get(i).beats()) {
-                    InvBeat ib = ctx.inventory().get(s - 1);
-                    if ("事件".equals(ib.beatType()) || "反转".equals(ib.beatType())) {
+            for (PlanDraft d : out) {
+                if (d.no() > 3) {
+                    break;
+                }
+                for (Integer s : d.beats()) {
+                    String t = ctx.plan().inventory().get(s - 1).beatType();
+                    if ("事件".equals(t) || "反转".equals(t)) {
                         hot = true;
                     }
                 }
             }
             if (!hot) {
                 if (Boolean.TRUE.equals(DIRECT_PASS.get())) {
-                    log.warn("直通免审：快热前3章规则降级留痕（不拦）——pace={} 前3章无{事件,反转}拍", ctx.pace());
+                    log.warn("直通免审：快热前3章规则降级留痕（不拦）——pace={} 前3章无{事件,反转}拍",
+                            ctx.plan().pace());
                 } else {
                     throw new LlmJson.Bad("快热：前 3 章必须含拍型∈{事件,反转} 的拍");
                 }
             }
         }
-        checkTensionDensity(out, ctx);
-        // 独立短篇"末章闭合"不在此硬卡（解释留痕）：池结构可能既无收束拍也无收尾位弧
-        // （⑤弧桶轮转可能只抽到 开头/中段/转折）——⑥a 硬卡会死锁。闭合语义由
-        // PLAN_PROMPT 规则 4 约束 + ⑥b 结局形状落地 + ⑧LLM 快检兑底。
+        checkTensionDensity(all, ctx.plan(), all.size() >= ctx.state().chapterCount());
         return out;
     }
 
@@ -393,6 +613,14 @@ public class DerivePlanService {
      * ②推理/悬疑且反转拍 ≥2 → 最后 30% 章内至少还有 1 个反转（防过早泄底掏空终局）。
      */
     static void checkTensionDensity(List<PlanDraft> drafts, PlanContext ctx) {
+        checkTensionDensity(drafts, ctx, true);
+    }
+
+    /**
+     * @param complete 是否已含全部章（逐窗推进中途为 false：此时不判"最后 30%"的反转后移，
+     *                 否则拿不完整章表算出的尾段会误报）
+     */
+    static void checkTensionDensity(List<PlanDraft> drafts, PlanContext ctx, boolean complete) {
         int consecutive = 0;
         for (PlanDraft d : drafts) {
             boolean allHigh = !d.beats().isEmpty();
@@ -416,7 +644,7 @@ public class DerivePlanService {
         }
         String tags = ctx.tags() == null ? "" : ctx.tags();
         boolean reasoning = tags.contains("推理") || tags.contains("悬疑");
-        if (!reasoning || drafts.isEmpty()) {
+        if (!complete || !reasoning || drafts.isEmpty()) {
             return;
         }
         int reverseTotal = 0;
@@ -456,11 +684,84 @@ public class DerivePlanService {
 
     record PlanContext(int expectedCh, int minWords, int maxWords,
                        BigDecimal pace, String form, String outcome, List<InvBeat> inventory,
-                       String tags) {
+                       String tags, boolean lenCheck) {
         PlanContext(int expectedCh, int minWords, int maxWords,
                     BigDecimal pace, String form, String outcome, List<InvBeat> inventory) {
-            this(expectedCh, minWords, maxWords, pace, form, outcome, inventory, null);
+            this(expectedCh, minWords, maxWords, pace, form, outcome, inventory, null, false);
         }
+
+        PlanContext(int expectedCh, int minWords, int maxWords,
+                    BigDecimal pace, String form, String outcome, List<InvBeat> inventory,
+                    String tags) {
+            this(expectedCh, minWords, maxWords, pace, form, outcome, inventory, tags, false);
+        }
+    }
+
+    /** ⑥a 幂等推进状态（落 run.step_status.steps.PLAN）：AI 定的章数/章均 + 已完成窗的拍与章快照。 */
+    record PlanState(int chapterCount, int chapterAvg, List<Integer> usedSeqs, List<PlanDraft> drafts) {
+    }
+
+    record WindowContext(PlanContext plan, PlanState state, int from, int to, List<InvBeat> remain) {
+    }
+
+    /** 读 ⑥a 状态；未开始定规模返回 null。 */
+    static PlanState readPlanState(String stepStatus) {
+        try {
+            JsonNode plan = DeriveWriteService.readTreeSafe(stepStatus).path("steps").path("PLAN");
+            if (!plan.path("chapterCount").isNumber()) {
+                return null;
+            }
+            List<Integer> used = new ArrayList<>();
+            for (JsonNode s : plan.path("usedSeqs")) {
+                used.add(s.asInt());
+            }
+            List<PlanDraft> drafts = new ArrayList<>();
+            for (JsonNode d : plan.path("drafts")) {
+                List<Integer> beats = new ArrayList<>();
+                for (JsonNode b : d.path("beats")) {
+                    beats.add(b.asInt());
+                }
+                drafts.add(new PlanDraft(d.path("no").asInt(), d.path("titleHint").asText(""),
+                        d.path("budget").asInt(), beats));
+            }
+            return new PlanState(plan.path("chapterCount").asInt(), plan.path("chapterAvg").asInt(),
+                    used, drafts);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 把 PLAN 段写回 step_status（保留 GATE/WELD/SAMPLE 等其它段）。 */
+    static String mergePlanState(String stepStatus, PlanState st) {
+        ObjectNode root;
+        try {
+            JsonNode parsed = DeriveWriteService.readTreeSafe(stepStatus);
+            root = parsed.isObject() ? (ObjectNode) parsed.deepCopy() : STATIC_MAPPER.createObjectNode();
+        } catch (Exception e) {
+            root = STATIC_MAPPER.createObjectNode();
+        }
+        root.put("v", 1);
+        ObjectNode steps = root.path("steps").isObject()
+                ? (ObjectNode) root.path("steps") : root.putObject("steps");
+        ObjectNode plan = steps.putObject("PLAN");
+        plan.put("chapterCount", st.chapterCount());
+        plan.put("chapterAvg", st.chapterAvg());
+        var used = plan.putArray("usedSeqs");
+        for (Integer s : st.usedSeqs()) {
+            used.add(s);
+        }
+        var drafts = plan.putArray("drafts");
+        for (PlanDraft d : st.drafts()) {
+            var n = drafts.addObject();
+            n.put("no", d.no());
+            n.put("titleHint", d.titleHint());
+            n.put("budget", d.budget());
+            var beats = n.putArray("beats");
+            for (Integer s : d.beats()) {
+                beats.add(s);
+            }
+        }
+        return root.toString();
     }
 
     // ---- 辅助 ----

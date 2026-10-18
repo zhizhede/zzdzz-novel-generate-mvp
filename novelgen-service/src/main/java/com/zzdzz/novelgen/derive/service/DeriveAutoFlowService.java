@@ -6,6 +6,7 @@ import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.vo.derive.AutoVO;
 import com.zzdzz.novelgen.model.vo.derive.DraftVO;
+import com.zzdzz.novelgen.model.vo.derive.PlanVO;
 import com.zzdzz.novelgen.model.vo.derive.WriteVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -160,16 +161,20 @@ public class DeriveAutoFlowService {
                             return;
                         }
                         case "PLANNING" -> {
-                            if (run.getNovelId() == null) {
-                                auto.stage = "⑥a 章节计划（LLM，2-10 分钟）";
-                                planService.plan(auto.runId);
+                            // ⑥a 单元制：SCALE 段就会建书（novel_id 非空），所以不能用 novel_id 判 ⑥a 完成，
+                            // 必须看 plan() 的 allDone；未完成时本轮只推进一步，下一轮继续。
+                            PlanVO plan = planService.plan(auto.runId);
+                            if (!plan.allDone()) {
+                                auto.stage = "⑥a 章节计划 窗 " + plan.windowIndex() + "/" + plan.windowTotal()
+                                        + "（已排 " + plan.plannedChapters() + "/" + plan.chapterCount() + " 章）";
                             } else {
                                 auto.stage = "⑥b 具体稿（逐单元推进）";
                                 DraftVO d = draftService.draft(auto.runId);
                                 if ("RESET".equals(d.unit())) {
                                     auto.stage = "回炉清稿完成，从全局头重做";
                                 } else if ("HEAD".equals(d.unit())) {
-                                    auto.stage = "⑥b 全局头完成《" + d.title() + "》，逐窗生成章纲";
+                                    auto.stage = "⑥b 全局头 " + d.batchIndex() + "/" + d.batchTotal()
+                                            + "（《" + d.title() + "》）";
                                 } else if ("BATCH".equals(d.unit())) {
                                     auto.stage = "⑥b 窗 " + d.batchIndex() + "/" + d.batchTotal() + " 完成";
                                 }

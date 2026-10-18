@@ -694,13 +694,34 @@ async function actGate() {
 }
 
 async function actPlan() {
+  if (acting.value) return
   acting.value = 'plan'
+  draftLoopText.value = '⑥a 开始：先让 AI 判篇幅…'
+  let guard = 0
   try {
-    await deriveApi.post(`/api/derive/runs/${route.params.id}/plan`)
-    ElMessage.success('章节计划完成：成品书 + 章行 + 拍实例已建')
-    await loadAll()
+    // ⑥a 幂等单元制：SCALE 定规模 → 逐窗分章（每窗 ≤10 章），循环至 allDone
+    while (guard < 20) {
+      guard += 1
+      const d = await deriveApi.post(`/api/derive/runs/${route.params.id}/plan`)
+      if (d.allDone) {
+        draftLoopText.value = ''
+        ElMessage.success(`章节计划完成：${d.chapterCount} 章 / ${d.beatCount} 拍，预算合计 ${d.totalBudget} 字`)
+        await loadAll()
+        return
+      }
+      if (d.unit === 'SCALE') {
+        draftLoopText.value = `AI 定篇幅：${d.chapterCount} 章（分 ${d.windowTotal} 窗，每窗 ≤10 章）——开始逐窗分章…`
+      } else {
+        draftLoopText.value = `⑥a 分章 第 ${d.windowIndex}/${d.windowTotal} 窗完成`
+          + `（已排 ${d.plannedChapters}/${d.chapterCount} 章 · 用拍 ${d.usedBeats}）—— 继续下一窗…`
+      }
+      await loadAll()
+    }
+    draftLoopText.value = ''
+    ElMessage.warning('已达单次 20 单元保护上限——再点一次会从断点续跑（幂等）')
   } catch (e) {
-    ElMessage.error(e.message)
+    draftLoopText.value = ''
+    ElMessage.error(`⑥a 中断：${e.message}。已完成的窗已落库，再点一次从断点续跑。`)
     await loadAll()
   } finally {
     acting.value = ''

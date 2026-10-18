@@ -191,6 +191,11 @@ public class DeriveDraftService {
                 .eq(ChapterDO::getNovelId, novelId)
                 .orderByAsc(ChapterDO::getChapterNo));
         List<Integer> chapterNos = chapters.stream().map(ChapterDO::getChapterNo).toList();
+        if (chapterNos.isEmpty()) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "⑥b 需要先完成 ⑥a 章节计划（这本书还没有任何章行，真相卡也没章号可对）"
+                            + "——先把⑥a 跑到「章节计划完成」再点⑥b");
+        }
         List<List<Integer>> wins = windows(chapterNos, WINDOW_CHAPTERS);
 
         if ("REWORK".equals(run.getStatus())) {

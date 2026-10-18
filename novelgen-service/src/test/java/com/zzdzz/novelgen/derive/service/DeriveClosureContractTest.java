@@ -6,17 +6,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * P2 收尾：闭合义务从 ⑥a 规划传到 ⑧ 清算——
- * 规划规则 4b（推理/悬疑+闭合 ⇒ 末章收束拍承载真相了结）与 ⑧ logic④ 硬条件不被删。
+ * 逐窗分章规则 5（推理/悬疑+闭合 ⇒ 末章收束拍承载真相了结）与 ⑧ logic④ 硬条件不被删。
  */
 class DeriveClosureContractTest {
 
     @Test
     void planPrompt_requiresVerdictSemanticsForMysteryClosedEndings() {
-        String p = DerivePlanService.PLAN_PROMPT;
-        assertTrue(p.contains("4b"), "规则 4b 存在");
-        assertTrue(p.contains("推理"), "按推理标签分支");
+        String p = DerivePlanService.PLAN_WINDOW_PROMPT;
         assertTrue(p.contains("真相了结"), "收束拍须承载真相了结语义");
         assertTrue(p.contains("纯氛围收束拍充数"), "禁氛围拍充数");
+        assertTrue(p.contains("推理"), "按推理标签分支");
+        assertTrue(p.contains("末章"), "末章闭合义务在场");
     }
 
     @Test
