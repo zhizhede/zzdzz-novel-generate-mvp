@@ -2,7 +2,52 @@
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
 
-## 随机衍生补读端点：进度/结果展示 + 带筛选列表（2026-10-17，未提交、未部署）
+## 字数留空改 AI 估档 + 前端对齐三件套（2026-10-17 深夜，未提交未部署）
+
+**背景**：用户实弹 run20 建 run 转圈 3.5 分钟（AI 预审 181s+焊接 36s，非卡死后端正常落库），随后指出字数带留空的产品本意是 **AI 自己判字数与篇幅**，不是按形态套默认档——推翻 P7 短期档口径。
+
+- **后端**：`derive_word_band` 节点——wordsMin/Max 都空时 LLM 按 tags/intent/style 判 form+带宽（form 已指定则只估带宽），`clampBand` 钳入 FORM_WORDS 档内（贪大护栏），fail-open 回退 seed 抽 form+默认带；**字数空且 form 空时不再 seed 抽 form**。单测 `DeriveWordBandEstimateTest`（parse/clamp 10 用例）+ 旧 `DeriveWordsDefaultTest` 全过。
+- **前端**（同轮已改）：①run 详情「P6 立项闸」按钮+结果卡（GATE 未 PASS 禁用⑦）；②建 run 字数带可选、防复刻默认开；③估档/形态提示文案对齐新语义。`npm run build` 过。
+- **未部署**：jar 与 dist 都在本地。run20 仍是旧语义产物（SHORT 1~3万 默认带）。
+- 遗留：run19 过闸、闸 REWORK 无快照丢稿、force 越闸、derive_plan 流式化，见方案文档。
+
+## 衍生前端 v2：动作层落地，纯前端可走完全流程（2026-10-17 深夜，未提交，已部署见文末）
+
+**部署补记（同晚，用户授权「把新前端更新到宝塔环境」）**：`web/dist`（含动作层+computed 修复）覆盖 `/www/wwwroot/novelgen-ui/`，旧版备份 `novelgen-ui.bak-20261017-v2`；**只推前端未动 jar**——线上 jar（上午版）自带读端点与 derive_token，ingest 空标签 bug 由前端默认发 `'{}'` 绕开（后端补丁已落本地 jar，待下次随批上线）。验收：首页200/标题✓、新 chunk200✓、`GET /derive/api/derive/runs` 200✓、浏览器生产实测 run19 详情状态机操作条（写作中→⑦/连续写完）✓。
+
+**目标（用户定调）**：「其他前端部分也开始设计和编写，要有能让人靠纯前端就能走完全流程的完整性」——①入库→②③④素材链→⑤采样→⑥⑦⑧跑书全部按钮化。
+
+**落地**：
+- 书库页「入库新书」对话框（书名/作者/平台/标签/粘贴正文→①）；详情页自动回跳。
+- 书详情「素材处理流水线」操作条：②抽取/③无指向化/④a扫查/④b打标/④c域格/④d文风，AI 步骤二次确认（标注计费耗时）；✓ 完成态按读数推断（outlineCount/outlineLabeledCount/labelCount/hasStyleProfile）；④a 结果带命中数与「黑名单命中回③」提示。
+- 任务页「新建 run」对话框（字数带/tags/pace 必填 + seed/form/outcome/防复刻/字数校验/intent/思路预审/文风 高级折叠）；创建后跳详情。
+- **run 详情状态机操作条（签名交互）**：按 status 永远只亮一个下一步——PLANNING→⑥a/⑥b、DRAFTING→⑦写下一章/**连续写完**（自动逐章循环，allDone 终止、60 章保护、可停止、gateCleared=false 提示 lastIssue）、QC→⑧质检（确认框提示 10 分钟级）、REWORK→⑥b 回炉（清稿归档提示）、PASSED/FAILED 完成态文案；顶部引导语随状态切换。
+- `deriveApi`：POST 失败/中断追加「服务端可能仍在执行，稍后刷新」韧性文案（nginx /derive/ 已是 600s，确认无需改）。
+- **顺手修后端潜伏 bug**：`DeriveBookService.ingest` 空标签写 NULL 撞 `novels.category_tags NOT NULL DEFAULT '{}'`（insertFull 显式插值绕过 DEFAULT）→ 空标签补 `'{}'`；前端同步默认发 `'{}'`（线上旧 jar 也立即可用）。
+
+**验证**（本地 5173+8091，LLM 步骤只验按钮/确认框不实跑烧钱）：入库 UI验收小书→自动切2章跳详情✓；书4 点④a→确认框→POST grep 200+读数刷新✓；新建 run（tags=推理恒等归一化免 LLM）→跳 run16 详情→⑥a→自动切「⑥b 生成具体稿」✓；实测抓出并修复 `computed` 未导入导致详情页崩的 bug；`npm run build` 过。**线上未部署本批**（线上跑的是上午的只读版 jar+dist；注意线上 jar 仍带 ingest 空标签 bug——前端已发 `'{}'` 绕开）。遗留：FAILED 重开仍无端点；LLM 步骤（②③④b④c④d⑥b⑦⑧）未做端到端烧钱实测，链路与已验步骤同构。
+
+## 随机衍生前端+derive 新 jar 已部署宝塔（2026-10-17 晚，用户当轮授权「推前端」，未提交）
+
+**部署内容**（打包=当日工作树，前端+衍生后端成套，主站 novelgen jar 未动）：
+1. **前端**：`web/dist`（纯衍生版，标题「随机衍生」）整目录覆盖 `/www/wwwroot/novelgen-ui/`；旧版备份 `/www/wwwroot/novelgen-ui.bak-20261017`（含被下线的主站 UI）。
+2. **derive 新 jar**（新前端依赖的 7 个读端点 + `derive_token` cookie 改名必须随行）：MD5 本地=线上 `507c0b3d…`；旧 jar 备份 `novelgen-derive-app.jar.bak-20261017`；流程 stop→scp→chown→start，服务 active。
+
+**验收**：`https://zzdzz.cn:8888/` 200 且 `<title>随机衍生</title>`；未登录 `GET /derive/api/derive/ping`→401；登录 200（**线上 derive 口令≠本地 admin123，哈希 `16c32b9…` vs 本地 `bf6b5b…`；本轮用户提供线上口令完成验收，未改库**）；`GET /derive/api/derive/runs` 返 19 个 run（线上今日新增 16-19）；浏览器生产实测：`/#/derive/runs` → 登录门 → 登录 → 列表含 run17《环泽七日》。
+
+**连带生效**：线上主站 UI 已被替换（用户定调预期）；旧 `novelgen_token` 形态的 derive curl 脚本全部失效，须用 `derive_token`/重新 login；`docs/deploy-bt.md`/skill 里「API-only/主站 UI 不显示」的描述已过时待改口。**代码仍全部未 commit。**
+
+## web/ 前端只剩随机衍生：主站 UI 整体下线 + 衍生只读监控台（2026-10-17，未提交，已部署见上节）
+
+**背景两步**（同日用户两次定调）：①「并入 web/ + 只读监控台优先」→ 衍生页组落地；②「主站前端都给删了，只留随机衍生，我说的」→ 主站 UI 整体下线。
+
+**衍生页组（保留的全部前端）**：路由 `/derive` 嵌套组（runs / runs:id / books / books:id，`/` 与未知路径 redirect 到 `/derive/runs`）；`DeriveShell.vue` 衍生登录门（cookie `derive_token`，与主站分名防同域互覆盖——配套改了 derive-app `JwtService.TOKEN_COOKIE` 一行，**既有 curl 旧 cookie 失效需重新 login**）+ 任务/书库页签；四视图 Runs/RunDetail（进度卡+章/拍表+质检折叠 JSON）/Books/BookDetail；`deriveApi.js`（`/derive` 前缀）；vite 代理 `/derive`→8091（rewrite 剥前缀，本地 jar 无 context-path）。**依赖后端 2026-10-17 补的 7 个读端点 + books 列表筛选**（见下一条流水）。
+
+**主站下线删除 22 文件**：Login/Workbench/Wizard/Books/Chapters/Planning/PlanAsset/Library/Fingerprint/Logs 十视图 + TextFileDropZone/SceneStream/SampleImportDialog/ReadingPane/ImportAnalyzeDialog/FingerprintMetricTable/FingerprintDraftDialog 七组件 + api/labels/novelSelection/importAnalyze/readingSettings 五模块。router 砍主站守卫（/api/auth/me 不再调用）、App.vue 砍侧栏、标题改「随机衍生」。**后端 8090 未动**；部署新 dist 会替换线上主站 UI，需用户授权。
+
+**验证**：衍生读端点——`DeriveQueryServiceTest` 13 条绿 + 全量 mvn test 绿 + 本地 8091 实弹（run5 全量读出）；前端——`npm run build` 过、Playwright 黄金路径全通（主站登录已删后：`/`→derive runs→run5 详情→书 31 详情；标题「随机衍生」）。**未 commit、未部署**。第二批候选：动作按钮、FAILED 重开、draft_history 读端点。
+
+## 随机衍生补读端点：进度/结果展示 + 带筛选列表（2026-10-17，未提交，已随新 jar 部署见上节）
 
 **动机**：用户要求「补一批读端点展示进度和结果 + 带筛选的列表接口」——此前 derive-app 18 个端点几乎全是动作型 POST，查询型只有 `GET /books` 一个，前端无从展示。本轮 **新增 7 个 GET + 增强 1 个**（总端点 18→25）：
 
@@ -1144,6 +1189,35 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - **背景**：书 33（run 15，《月潮盐崖塔》，审稿 69/66 分）与书 50（run 16，《重蹈覆辙的人们》，审稿 43 分）对证——两本 `param_outcome` 均为「开放」且均带真相卡（合同打架：「末章可留悬念」vs「结局须还原三要素」）；33 号 QC 已判 REWORK（logic/voice/domain 全 false）仍被导出投稿；33 号 content ch7–44 残留 LLM 章注回声（ch18 占位符 `本章X字`；`COMMENT_PATTERN` 吞不下 `seq` 前缀变体；提示词仍令 LLM 输出章注，与 P0「机器合成」矛盾）；50 号五标签拼贴、125 拍、DRAFTING 中。
 - **方案**：`docs/改造方案-衍生管线质量闸.md`（P1 清稿断供+兜底剥离·降报告不重写 / P2 推理·悬疑+真相卡强制闭合裁决 / P3 元素回收账 element_ledger（⑥b→⑦ 建账、⑧ 清算） / P4 前情瘦身+结尾禁复读 / P5 REWORK 禁导出 / P6 ⑥b 出口立项评审闸）。落地顺序 P1→P5→P2→P4→P6→P3；P3 动表结构，实施前需用户确认。
 - **本次仅产出方案文档，未改任何代码/库表**。未提交、未部署。
+
+## 衍生⑥b 分批改造已落码（2026-10-17，未提交未部署）
+
+- **契约**：`随机衍生工作流/小说随机衍生工作流-v3.7.md`（v3.6 升版副本）——⑥b 拆 ⑥b-0 全局头（书名/主角/cast/truth/brief，落 story_assets，路径不变）+ ⑥b-1..n 连续章段窗（默认 8 章一窗，确定性切窗不耗 seed）；`POST /runs/{id}/draft` 改幂等单元制（RESET/HEAD/BATCH/DONE，循环至 allDone，与 /write 同款 harness）；REWORK 仍整本重做（入口清正文+纲+头产物后回 PLANNING）。
+- **代码**：`DeriveDraftService` 重写（HEAD_PROMPT/BATCH_PROMPT、parseHead/parseBatch、windows/windowDone/headDone/globalReconcile 纯函数）；`DraftVO` 扩 unit/batchIndex/batchTotal/allDone；`ChapterMapper.clearDraftOutlines` + `NovelMapper.clearDraftAssets`（XML 显式 SQL）；`DeriveRunController` 注释同步。节点名仍 `derive_draft`（llm_node_config 路由兼容）。
+- **验证**：`DeriveDraftBatchTest` 6 条（切窗/头判定/窗判定/窗体对账含漏覆盖·窗外章·新造人名拒/终局对账点名）+ 既有 DeriveDraftArchiveTest/DeriveSpoilerGateTest/DeriveSampleServiceOutcomeTest 全绿；`mvn -q test` 全量绿。**未部署**——线上 derive jar 仍是 P2 版（run17 旧单次 draft 还在飞）；上线需用户明示。
+- **遗留**：批内人名只有 prompt 约束 + new_names 禁字段，无正文级人名扫描；窗间并行与按窗精准回炉留二期。
+
+## P2 收尾两刀已落码（2026-10-17，未提交未部署）
+
+- **⑥a 规划规则 4b**（`DerivePlanService.PLAN_PROMPT`）：类别含推理/悬疑且结局形状=闭合时，末章收束拍必须承载「真相了结/罪责兑现」可查验动作，禁纯氛围收束拍充数；`buildUserInput` 补注入「类别」字段（否则该规则无输入可判）。
+- **⑧ logic④ 硬对账**（`DeriveQcService.QC_PROMPT`）：三要素兑现动作缺失即 `pass=false` 并点名；solution 专名/anchors 悬空 >1 处即 fail（次级钩子暂用真相卡内元素兜底，P3 建成前的过渡口径）；「案情已闭合+判决后情绪余韵尾」明确判 pass（防误杀51号 ch56 型结尾）。
+- **验证**：`DeriveClosureContractTest` 2 条 + 关联 3 个测试类全绿。**未部署**。工作流 v3.7 副本已补 changelog 第 6 条。
+
+## P6 六判据方案 + P7 字数短期档已落（2026-10-17，未提交未部署）
+
+- **P6 方案细化**（`docs/改造方案-衍生管线质量闸.md` P6 节重写）：六判据=规则单轨/体量预算（**人命≤4**、支线≤2、拍数上限）/动机链/闭合/ **职能锁定**（照夜行新增：只记不断者禁肉搏）/ **母题查重**（wordlist 新增 grp='MOTIF' 黑名单：抱遗骸疯唱、色相求饶、鞋印嫁祸、替身伏法等四稿复读项）+ 融梗信号只报不拦；落点头后（⑥b-0 之后）；伴随补丁=**指纹登记前移**（⑥a 抽中弧即登记 BRIDGE——现只在 ⑧ PASSED 登记而 33 起无一过审，防复刻死循环）+ MOTIF 黑名单 + anti_repro 默认值（**待用户拍板**）。
+- **P7 字数短期档（已落码）**：`RunCreateDTO.wordsMin/Max` 改 `Integer` 可选——都传=显式、都不传=`FORM_WORDS` 按形态默认（LONG 10–20万/SHORT_STANDALONE 1–3万/LIGHT_NOVEL 8–16万/LONG_INNER_SHORT 10–20万/LN_INNER_SHORT 6–12万）确定性落 run 可复现、半传/未知形态报错；`resolveWordBand` 静态纯函数；规模预测块移到 form 抽签后（rnd 消费序不变）。AI 估档留 P6 同期（须钳 form 区间，防 AI 贪大加剧超载）。
+- **验证**：`DeriveWordsDefaultTest` 4 条 + 关联测试绿；`mvn -q test` 全量绿。**未部署**。遗留：run 18/19 两本 PLANNING/DRAFTING 测试书待处置；⑥a plan 非流式 RST 风险记待办（下次给 derive_plan 加流式）。
+
+## P6 立项闸代码已落（2026-10-17，未提交未部署；jar 已打好待部署令）
+
+- **新端点** `POST /api/derive/runs/{id}/gate`（`DeriveGateService`，节点 derive_gate）：⑥b 全窗完成后跑 LLM 立项评审（六判据提示词：规则单轨/体量预算〔人命≤4、支线≤1-2〕/动机链/闭合/职能锁定/母题查重 vs wordlist grp=MOTIF）。GO→step_status GATE=PASS 放行；REWORK→run→REWORK 回 ⑥b 整本重做（prevRound<2，否则熔断 FAILED）；REJECT→FAILED。记录落 `run.step_status.steps.GATE`（L2 层，无 DDL；`RunMapper.updateStepStatus` 新增 XML 显式 ::jsonb）。
+- **⑦ 硬闸**：`DeriveWriteService.writeNext` 要求 GATE=PASS，否则报「先 POST /gate」——烂大纲写不出正文；⑥b REWORK 清稿时同步 `gateReset` 作废旧 PASS（重做大纲必须重新过闸）。
+- **V118** `motif_blacklist`：wordlist 7 条母题（抱遗骸疯唱/色相求饶/鞋印嫁祸/替身伏法等，kind=BLACKLIST, grp='MOTIF'）；⑧ `checkBlacklist` 排除 grp='MOTIF'（母题不进正文 grep 硬判）。
+- **指纹前移**：`DerivePlanService.registerBridgeFingerprints`——⑥a 抽中弧即登记 BRIDGE（原仅⑧ PASS 登记，33 起无一过审致防复刻死循环）；与 QC `fingerprintOf` 同口径、唯一键幂等。
+- **anti_repro 默认开（2026-10-17 用户拍板）**：`antiReproDefaulted()` 不传=开、显式 false 才关。**⚠ 连带效应**：anti_repro=ON 同时把⑦ 会话切到独立干净会话口径（v3.3 既有耦合）+⑧ 词表类改硬判——如只想弧阻断不要独立会话，需后续解耦（另立项）。
+- **验证**：`DeriveGateServiceTest` 6 条（verdict→动作熔断/step 合并读写/回炉作废/解析校验/坏 JSON 安全/anti_repro 缺省）全绿；`mvn -q test` 全量绿；derive jar 23:00 打好（含 V118）。**未部署**——上线需明示；部署后 Flyway 自动跑 V118。
+- **遗留**：derive_gate 未插 llm_node_config 行（走全局默认模型回退）；run19 若 /write 需先 /gate；AI 字数估档仍待 P6 后期。
 
 ## 未提交改动
 
