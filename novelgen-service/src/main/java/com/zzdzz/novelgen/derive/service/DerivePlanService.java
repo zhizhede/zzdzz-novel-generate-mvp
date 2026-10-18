@@ -56,6 +56,13 @@ public class DerivePlanService {
 
     public static final String NODE_PLAN = "derive_plan";
 
+    /**
+     * 直通免审上下文（2026-10-18 用户定调：全程直通=评审类规则全部留痕不拦，只有落不了库的
+     * 机械完整性硬保）。由 DeriveAutoFlowService 在 direct 模式下于本线程设置；普通调用恒 false。
+     * 受控降级的三条：快热前3章、张力沉淀①、反转留尾②——都是品味/节奏判断，非机械必需。
+     */
+    static final ThreadLocal<Boolean> DIRECT_PASS = ThreadLocal.withInitial(() -> false);
+
     static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
 
     static final String PLAN_PROMPT = """
@@ -72,7 +79,11 @@ public class DerivePlanService {
                 「真相了结/罪责兑现」语义（真凶收押、还原陈述、判决落地、受害者安葬这类
                 可查验的动作），禁止用纯氛围收束拍充数——氛围余味只能出现在了结动作之后；
             5. 快热：前 3 章必须含拍型∈{事件,反转} 的拍；
-            6. title_hint 不带"第N章"前缀、不带专名过露的剧透。
+            6. title_hint 不带"第N章"前缀、不带专名过露的剧透；
+            7. 张力沉淀：禁止连续 ≥3 章整章拍型全是 {事件,反转}——重击之间必须插入
+                铺垫/情绪/抉择章，让情绪有落点；
+            8. 类别含「推理」或「悬疑」且反转拍 ≥2 时：不要把全部反转都压在前半——
+                至少保留 1 个反转给最后 30% 的章，防止终局前掏空、末章只剩机械收尾。
             只输出 JSON 对象，无其他文字。
             """;
 
@@ -163,10 +174,10 @@ public class DerivePlanService {
 
         // ---- LLM 分章（校验不过喂回重试）----
         PlanContext ctx = new PlanContext(expectedCh, run.getParamWordsMin(), run.getParamWordsMax(),
-                pace, run.getParamForm(), run.getParamOutcome(), inventory);
+                pace, run.getParamForm(), run.getParamOutcome(), inventory, run.getParamTags());
         String user = buildUserInput(run, inventory, expectedCh, wordsPred);
         List<PlanDraft> drafts = llmJson.ask(
-                new LlmPort.ChatRequest(NODE_PLAN, runId, run.getNovelId(),
+                new LlmPort.ChatRequest(NODE_PLAN, run.getNovelId(), null, runId,
                         List.of(LlmPort.Message.system(PLAN_PROMPT), LlmPort.Message.user(user)),
                         0.3),
                 root -> parsePlan(root, ctx), 3);
@@ -362,17 +373,94 @@ public class DerivePlanService {
                 }
             }
             if (!hot) {
-                throw new LlmJson.Bad("快热：前 3 章必须含拍型∈{事件,反转} 的拍");
+                if (Boolean.TRUE.equals(DIRECT_PASS.get())) {
+                    log.warn("直通免审：快热前3章规则降级留痕（不拦）——pace={} 前3章无{事件,反转}拍", ctx.pace());
+                } else {
+                    throw new LlmJson.Bad("快热：前 3 章必须含拍型∈{事件,反转} 的拍");
+                }
             }
         }
+        checkTensionDensity(out, ctx);
         // 独立短篇"末章闭合"不在此硬卡（解释留痕）：池结构可能既无收束拍也无收尾位弧
         // （⑤弧桶轮转可能只抽到 开头/中段/转折）——⑥a 硬卡会死锁。闭合语义由
         // PLAN_PROMPT 规则 4 约束 + ⑥b 结局形状落地 + ⑧LLM 快检兑底。
         return out;
     }
 
+    /**
+     * 张力密度硬闸（2026-10-18，审稿实锤：中段三连命案 + 终局前掏空）：
+     * ①连续 ≥3 章整章只有 {事件,反转} → 拒（无情绪沉淀）；
+     * ②推理/悬疑且反转拍 ≥2 → 最后 30% 章内至少还有 1 个反转（防过早泄底掏空终局）。
+     */
+    static void checkTensionDensity(List<PlanDraft> drafts, PlanContext ctx) {
+        int consecutive = 0;
+        for (PlanDraft d : drafts) {
+            boolean allHigh = !d.beats().isEmpty();
+            for (Integer s : d.beats()) {
+                InvBeat ib = ctx.inventory().get(s - 1);
+                if (!"事件".equals(ib.beatType()) && !"反转".equals(ib.beatType())) {
+                    allHigh = false;
+                    break;
+                }
+            }
+            consecutive = allHigh ? consecutive + 1 : 0;
+            if (consecutive >= 3) {
+                String msg = "张力沉淀：第 " + (d.no() - 2) + "–" + d.no()
+                        + " 章连续 3 章整章拍型全是 {事件,反转}——重击之间必须插入铺垫/情绪/抉择章";
+                if (Boolean.TRUE.equals(DIRECT_PASS.get())) {
+                    log.warn("直通免审：{}（降级留痕，不拦）", msg);
+                    return;
+                }
+                throw new LlmJson.Bad(msg);
+            }
+        }
+        String tags = ctx.tags() == null ? "" : ctx.tags();
+        boolean reasoning = tags.contains("推理") || tags.contains("悬疑");
+        if (!reasoning || drafts.isEmpty()) {
+            return;
+        }
+        int reverseTotal = 0;
+        for (PlanDraft d : drafts) {
+            for (Integer s : d.beats()) {
+                if ("反转".equals(ctx.inventory().get(s - 1).beatType())) {
+                    reverseTotal++;
+                }
+            }
+        }
+        if (reverseTotal < 2) {
+            return;
+        }
+        int tailFrom = (int) Math.floor(drafts.size() * 0.7);
+        if (tailFrom >= drafts.size()) {
+            return;
+        }
+        boolean tailHasReverse = false;
+        for (int i = tailFrom; i < drafts.size(); i++) {
+            for (Integer s : drafts.get(i).beats()) {
+                if ("反转".equals(ctx.inventory().get(s - 1).beatType())) {
+                    tailHasReverse = true;
+                }
+            }
+        }
+        if (!tailHasReverse) {
+            String msg = "反转后移：推理/悬疑且反转拍=" + reverseTotal
+                    + "，最后 30% 章（第 " + (drafts.get(tailFrom).no()) + " 章起）没有任何反转——"
+                    + "至少保留 1 个反转给终局段，防止过早掏空悬念";
+            if (Boolean.TRUE.equals(DIRECT_PASS.get())) {
+                log.warn("直通免审：{}（降级留痕，不拦）", msg);
+                return;
+            }
+            throw new LlmJson.Bad(msg);
+        }
+    }
+
     record PlanContext(int expectedCh, int minWords, int maxWords,
-                       BigDecimal pace, String form, String outcome, List<InvBeat> inventory) {
+                       BigDecimal pace, String form, String outcome, List<InvBeat> inventory,
+                       String tags) {
+        PlanContext(int expectedCh, int minWords, int maxWords,
+                    BigDecimal pace, String form, String outcome, List<InvBeat> inventory) {
+            this(expectedCh, minWords, maxWords, pace, form, outcome, inventory, null);
+        }
     }
 
     // ---- 辅助 ----

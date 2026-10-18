@@ -22,7 +22,7 @@ class DeriveDraftArchiveTest {
 
     private final DraftHistoryMapper mapper = mock(DraftHistoryMapper.class);
     private final DeriveDraftService svc = new DeriveDraftService(
-            null, null, null, null, null, null, null, mapper, null);
+            null, null, null, null, null, null, null, null, mapper, null);
 
     private static ChapterDO ch(long id, int no, String content) {
         ChapterDO c = new ChapterDO();

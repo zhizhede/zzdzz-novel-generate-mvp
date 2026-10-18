@@ -13,6 +13,7 @@ import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.DraftHistoryMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
+import com.zzdzz.novelgen.derive.mapper.WorldStateMapper;
 import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -57,39 +58,61 @@ public class DeriveDraftService {
 
     static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
 
-    static final String HEAD_PROMPT = """
-            你在为一部小说生成"具体稿·全局头"（不是正文）。输入含：域格、类别与目标节奏、结局形状、
-            世界观条目、标签层主线、全书章节计划（章号/章题/预算，只作规模参考）。
+    /**
+     * 全局头三段式（2026-10-18 夜）：原先一次要模型吐 title+summary+cast(每人五键 persona)+brief+truth，
+     * 输出 3000–5200 字符，run22 六次调用六次畸形（如 {@code "flade":"怕什么":"怕发现…"} 键值边界错乱）。
+     * 现拆成 A 定名与人物表 / B 人设卡 / C 摘要与真相卡，单次输出 ≤1000 字符；每段落库即幂等（headStage）。
+     */
+    static final String HEAD_A_PROMPT = """
+            你在为一部小说写"全局头 A：定名与人物表"（不是正文，不写章纲）。输入含：域格、类别与节奏、
+            结局形状、世界观、主线、题材意图、章节计划（只作规模参考）。
             要求：
-            1. 起作品名、主角与配角人名、地名；结局形状落地；事件必须在域格内成立；
-            2. 主角名不得出现在禁用名单里，不得用"沈X"式单姓+单字套路名；
-            3. 输出 cast 全书人物表（主角排首，含配角与关键路人）：name=定名人名（2~3字）、
-               role=身份一句话、gender=性别、persona={temperament性格底色, conduct行为准则
-               （什么绝不会做/什么一定做）, speech说话方式, desire核心欲望, flaw缺陷或恐惧}
-               ——persona 优先从『题材意图』已有抽取、禁止与意图矛盾；此表是全书唯一合法人名
-               来源，后续分批只许用表内人名；
-            4. 类别含「推理」或「悬疑」时必须额外输出『真相卡』truth=
-               {reveal_chapter真相揭示章, clues:[{clue现象级线索, planted_chapter}],
-                timeline_anchors:[{fact纯数字或时刻事实, chapter}],
-                solution:{culprit,motive,method}}——
-               reveal_chapter 不得早于 max(planted_chapter)；clue 只写可观测现象，
-               禁止写成解释或出现 solution 核心内容；anchors 不得含因果结论；非推理体裁省略 truth；
-            5. 所有体裁必须输出『brief』拆分：{"premise":"人物设定/世界观/氛围/描写红线
-               （全程可用，≤300字）","ending":"结局与真相相关段落（无结局信息给空串）"}
-               ——premise 不得含结局答案，ending 集中放 twist/真凶/动机/结局走向；
-            6. 若输入带『题材意图』：人物设定、走向与描写红线以它为准；意图若指明世界观前提，
-               人名/称谓/器物/礼俗按该体系取名，全程禁止混入异文化元素；
-            7. 只输出全局头结构，不写正文与章纲，不提素材来源与编号。
+            1. 起作品名、一句话概括、主角名，并给出 cast 全书人物表（主角排首，含配角与关键路人）；
+            2. 人名 2~3 字；主角名不得出现在禁用名单里，不得用"沈X"式单姓+单字套路名；
+            3. role=身份一句话（≤20字），gender=男或女；
+            4. 此表是全书唯一合法人名来源，后续步骤不得再新增任何名字（含路人）；
+            5. 若输入带『题材意图』：人名/称谓/器物/礼俗按该体系取名，禁止混入异文化元素。
             输出 JSON 对象：
             {"title":"作品名","summary":"一句话概括","protagonist":"主角名",
-             "cast":[{"name":"…","role":"…","gender":"…",
-                      "persona":{"temperament":"…","conduct":"…","speech":"…","desire":"…","flaw":"…"}}],
-             "brief":{"premise":"…","ending":"…"},
-             "truth":{"reveal_chapter":12,
-                      "clues":[{"clue":"…","planted_chapter":3}],
+             "cast":[{"name":"…","role":"…","gender":"…"}]}
+            只输出 JSON 对象，无其他文字。
+            """;
+
+    static final String HEAD_B_PROMPT = """
+            你在为一部小说写"全局头 B：人物人设卡"（不是正文）。输入含：已定人名表（name/role/gender）、
+            题材意图、域格、类别与节奏。
+            要求：
+            1. 给名单内每一个人各出一张五人设卡：禁止新增人名、禁止改名、禁止漏人；
+            2. 五键必填且互不重复：temperament性格底色、conduct行为准则（什么绝不会做/什么一定做）、
+            speech说话方式、desire核心欲望、flaw缺陷或恐惧；
+            3. 每键 8~25 字，写具体可演的倾向，不写"善良勇敢"这类空话；
+            4. 与『题材意图』已有的性格与描写红线一致，禁止矛盾。
+            输出 JSON 对象：
+            {"persona":[{"name":"名单内人名","temperament":"…","conduct":"…","speech":"…",
+                         "desire":"…","flaw":"…"}]}
+            只输出 JSON 对象，无其他文字。
+            """;
+
+    static final String HEAD_C_PROMPT = """
+            你在为一部小说写"全局头 C：叙述摘要与真相卡"（不是正文，不写章纲）。输入含：已定书名/
+            主角/cast 人名表、域格、类别与节奏、结局形状、主线、章节计划（章号与预算）。
+            要求：
+            1. brief 拆分：{"premise":"人物设定/世界观/氛围/描写红线（全程可用，≤300字）",
+            "ending":"结局与真相相关段落（无结局信息给空串）"}——premise 不得含结局答案，
+            ending 集中放 twist/真凶/动机/结局走向；
+            2. 类别含「推理」或「悬疑」时必须额外输出真相卡 truth（其余体裁省略 truth 键）：
+            {"reveal_chapter":揭示章, "clues":[{"clue":"可观测现象","planted_chapter":章号}],
+            "timeline_anchors":[{"fact":"纯数字或时刻事实","chapter":章号}],
+            "solution":{"culprit":"凶手（必须是 cast 名单内人名）","motive":"…","method":"…"}}
+            —— reveal_chapter 不得早于最晚 planted_chapter；clues 至少 3 条；clue 只写可观测现象，
+            禁止写成解释，禁止出现 culprit 姓名与 solution 内容；anchors 不得含因果结论；
+            3. 所有章号必须是输入章节计划里出现过的章号。
+            输出 JSON 对象：
+            {"brief":{"premise":"…","ending":"…"},
+             "truth":{"reveal_chapter":12,"clues":[{"clue":"…","planted_chapter":3}],
                       "timeline_anchors":[{"fact":"…","chapter":5}],
                       "solution":{"culprit":"…","motive":"…","method":"…"}}}
-            truth 仅推理/悬疑体裁输出。只输出 JSON 对象，无其他文字。
+            只输出 JSON 对象，无其他文字。
             """;
 
     static final String BATCH_PROMPT = """
@@ -118,6 +141,7 @@ public class DeriveDraftService {
     private final AssetWorldMapper worldMapper;
     private final AssetBeatMapper beatMapper;
     private final WorkFingerprintMapper fingerprintMapper;
+    private final WorldStateMapper worldStateMapper;
     private final DraftHistoryMapper draftHistoryMapper;
     private final LlmJson llmJson;
 
@@ -148,9 +172,15 @@ public class DeriveDraftService {
         if (run == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
         }
-        if (!("PLANNING".equals(run.getStatus()) || "REWORK".equals(run.getStatus())) || run.getNovelId() == null) {
+        if (!("PLANNING".equals(run.getStatus()) || "REWORK".equals(run.getStatus()))) {
             throw new BizException(ErrorCode.PARAM_ERROR,
-                    "run 应处于 PLANNING/REWORK 且已计划（当前 " + run.getStatus() + "，novelId=" + run.getNovelId() + "）");
+                    "⑥b 具体稿需要 run 处于 PLANNING/REWORK（当前 " + run.getStatus()
+                            + "）——先让 ⑥a 章节计划完成");
+        }
+        if (run.getNovelId() == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "该 run 还没有成品书骨架（novel_id 为空＝⑥a 章节计划尚未完成）——"
+                            + "先点「⑥a 生成章节计划」，成功后再做⑥b具体稿");
         }
         long novelId = run.getNovelId();
 
@@ -168,6 +198,9 @@ public class DeriveDraftService {
             chapterMapper.clearForRewrite(novelId);
             chapterMapper.clearDraftOutlines(novelId);
             novelMapper.clearDraftAssets(novelId);
+            if (worldStateMapper != null) {
+                worldStateMapper.deleteByNovel(novelId);
+            }
             for (BeatInstanceDO b : beats) {
                 b.setFilledText(null);
                 b.setStatus("PLANNED");
@@ -184,26 +217,9 @@ public class DeriveDraftService {
         boolean reasoning = reasoningGenre(run.getParamTags());
         String gateDirective = DeriveGateService.gateDirective(run.getStepStatus());
 
-        if (!headDone(novel)) {
-            List<String> banned = bannedNames(run);
-            HeadContext ctx = new HeadContext(chapterNos, banned, reasoning);
-            String user = buildHeadUser(run, chapters, worldLabel(run), banned, gateDirective);
-            beginProgress(runId, "全局头");
-            JsonNode out = llmJson.ask(
-                    new LlmPort.ChatRequest(NODE_DRAFT, runId, novelId,
-                            List.of(LlmPort.Message.system(HEAD_PROMPT), LlmPort.Message.user(user)), 0.4),
-                    root -> parseHead(root, ctx), 3, (think, piece) -> touchProgress(runId, piece));
-            novelMapper.updateMeta(novelId, out.path("title").asText(""), out.path("summary").asText(""));
-            novelMapper.updateCast(novelId, out.path("protagonist").asText(""), out.path("cast").toString());
-            novelMapper.updateBrief(novelId, out.path("brief").toString());
-            if (out.path("truth").isObject()) {
-                novelMapper.updateTruth(novelId, out.path("truth").toString());
-            }
-            log.info("⑥b-0 全局头：runId={} novelId={} 书名={} 主角={} cast={}",
-                    runId, novelId, out.path("title").asText(""), out.path("protagonist").asText(""),
-                    out.path("cast").size());
-            return new DraftVO(runId, novelId, out.path("title").asText(""), out.path("protagonist").asText(""),
-                    0, 0, 0, "HEAD", 0, wins.size(), false);
+        int stage = headStage(novel, reasoning);
+        if (stage < 3) {
+            return headStep(run, novel, stage, chapters, chapterNos, reasoning, gateDirective);
         }
 
         JsonNode assets = readTreeSafe(novel.getStoryAssets());
@@ -225,7 +241,7 @@ public class DeriveDraftService {
             beginProgress(runId, "窗 " + (i + 1) + "/" + wins.size()
                     + "（章 " + win.get(0) + "-" + win.get(win.size() - 1) + "）");
             JsonNode out = llmJson.ask(
-                    new LlmPort.ChatRequest(NODE_DRAFT, runId, novelId,
+                    new LlmPort.ChatRequest(NODE_DRAFT, novelId, null, runId,
                             List.of(LlmPort.Message.system(BATCH_PROMPT), LlmPort.Message.user(user)), 0.4),
                     root -> parseBatch(root, ctx), 3, (think, piece) -> touchProgress(runId, piece));
             Map<Integer, String> filled = new HashMap<>();
@@ -272,6 +288,117 @@ public class DeriveDraftService {
         log.info("⑥b 全部窗完成：runId={} novelId={} 窗数={} → DRAFTING", runId, novelId, wins.size());
         return new DraftVO(runId, novelId, novel.getTitle(), assets.path("protagonist").asText(""),
                 chapters.size(), 0, 0, "DONE", wins.size(), wins.size(), true);
+    }
+
+    /** 全局头人设卡五键（顺序即提示词顺序）。 */
+    static final List<String> PERSONA_KEYS =
+            List.of("temperament", "conduct", "speech", "desire", "flaw");
+
+    /**
+     * 全局头完成度：0=未定名 1=缺人设卡 2=缺摘要（推理体裁还缺真相卡）3=齐。
+     * 每段独立落库，故按缺失段续跑，不会因某段失败而把已成的段落重做。
+     */
+    static int headStage(NovelDO novel, boolean reasoning) {
+        JsonNode assets = readTreeSafe(novel.getStoryAssets());
+        if (assets.path("protagonist").asText("").trim().isEmpty()) {
+            return 0;
+        }
+        JsonNode cast = assets.path("cast");
+        if (!cast.isArray() || cast.isEmpty()) {
+            return 1;
+        }
+        for (JsonNode c : cast) {
+            JsonNode persona = c.path("persona");
+            if (!persona.isObject()) {
+                return 1;
+            }
+            for (String k : PERSONA_KEYS) {
+                if (persona.path(k).asText("").trim().isEmpty()) {
+                    return 1;
+                }
+            }
+        }
+        if (assets.path("brief").path("premise").asText("").trim().isEmpty()) {
+            return 2;
+        }
+        if (reasoning && assets.path("truth").path("solution").path("culprit").asText("").trim().isEmpty()) {
+            return 2;
+        }
+        return 3;
+    }
+
+    /** 推进一步全局头：A 定名与人物表 → B 人设卡 → C 摘要与真相卡（单次输出小，畸形率低）。 */
+    private DraftVO headStep(RunDO run, NovelDO novel, int stage, List<ChapterDO> chapters,
+                             List<Integer> chapterNos, boolean reasoning, String gateDirective) {
+        long runId = run.getId();
+        long novelId = novel.getId();
+        String worldLabel = worldLabel(run);
+        if (stage == 0) {
+            List<String> banned = bannedNames(run);
+            HeadContext ctx = new HeadContext(chapterNos, banned, reasoning);
+            String user = buildHeadUser(run, chapters, worldLabel, banned, gateDirective);
+            beginProgress(runId, "全局头A 定名与人物表");
+            JsonNode out = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_DRAFT, novelId, null, runId,
+                            List.of(LlmPort.Message.system(HEAD_A_PROMPT), LlmPort.Message.user(user)), 0.4),
+                    root -> parseHeadBasic(root, ctx), 3, (think, piece) -> touchProgress(runId, piece));
+            novelMapper.updateMeta(novelId, out.path("title").asText(""), out.path("summary").asText(""));
+            novelMapper.updateCast(novelId, out.path("protagonist").asText(""), out.path("cast").toString());
+            log.info("⑥b-0a 定名：runId={} novelId={} 书名={} 主角={} cast={}",
+                    runId, novelId, out.path("title").asText(""), out.path("protagonist").asText(""),
+                    out.path("cast").size());
+            return new DraftVO(runId, novelId, out.path("title").asText(""), out.path("protagonist").asText(""),
+                    0, 0, 0, "HEAD", 1, 3, false);
+        }
+        JsonNode assets = readTreeSafe(novel.getStoryAssets());
+        String protagonist = assets.path("protagonist").asText("");
+        if (stage == 1) {
+            String user = buildPersonaUser(run, assets, worldLabel, gateDirective);
+            beginProgress(runId, "全局头B 人物人设卡");
+            JsonNode out = llmJson.ask(
+                    new LlmPort.ChatRequest(NODE_DRAFT, novelId, null, runId,
+                            List.of(LlmPort.Message.system(HEAD_B_PROMPT), LlmPort.Message.user(user)), 0.5),
+                    root -> parsePersona(root, assets), 3, (think, piece) -> touchProgress(runId, piece));
+            String merged = mergePersona(assets.path("cast"), out);
+            novelMapper.updateCast(novelId, protagonist, merged);
+            log.info("⑥b-0b 人设卡：runId={} novelId={} 人数={}", runId, novelId, out.size());
+            return new DraftVO(runId, novelId, assets.path("title").asText(""), protagonist,
+                    0, 0, 0, "HEAD", 2, 3, false);
+        }
+        HeadContext ctx = new HeadContext(chapterNos, List.of(), reasoning);
+        String user = buildBriefUser(run, assets, chapters, worldLabel, gateDirective);
+        beginProgress(runId, "全局头C 摘要与真相卡");
+        JsonNode out = llmJson.ask(
+                new LlmPort.ChatRequest(NODE_DRAFT, novelId, null, runId,
+                        List.of(LlmPort.Message.system(HEAD_C_PROMPT), LlmPort.Message.user(user)), 0.3),
+                root -> parseBriefTruth(root, ctx), 3, (think, piece) -> touchProgress(runId, piece));
+        novelMapper.updateBrief(novelId, out.path("brief").toString());
+        if (out.path("truth").isObject()) {
+            novelMapper.updateTruth(novelId, out.path("truth").toString());
+        }
+        log.info("⑥b-0c 摘要与真相卡：runId={} novelId={} 有真相卡={}",
+                runId, novelId, out.path("truth").isObject());
+        return new DraftVO(runId, novelId, assets.path("title").asText(""), protagonist,
+                0, 0, 0, "HEAD", 3, 3, false);
+    }
+
+    /** 人设卡回填进已有 cast（按 name 对齐，保持原顺序与字段）。 */
+    static String mergePersona(JsonNode cast, JsonNode personas) {
+        Map<String, JsonNode> byName = new HashMap<>();
+        for (JsonNode p : personas) {
+            byName.put(p.path("name").asText(""), p);
+        }
+        var merged = STATIC_MAPPER.createArrayNode();
+        for (JsonNode c : cast) {
+            ObjectNode copy = c.deepCopy();
+            JsonNode p = byName.get(c.path("name").asText(""));
+            ObjectNode persona = copy.putObject("persona");
+            for (String k : PERSONA_KEYS) {
+                persona.put(k, p.path(k).asText(""));
+            }
+            merged.add(copy);
+        }
+        return merged.toString();
     }
 
     /**
@@ -384,6 +511,42 @@ public class DeriveDraftService {
         root.put("主线", run.getWelded() == null ? "" : run.getWelded());
     }
 
+    /** 头 B 输入：已定人名表 + 意图/域格（不带章节计划，避免模型顺手写章纲）。 */
+    String buildPersonaUser(RunDO run, JsonNode assets, String worldLabel, String gateDirective) {
+        ObjectNode root = STATIC_MAPPER.createObjectNode();
+        fillCommon(root, run, worldLabel);
+        if (gateDirective != null && !gateDirective.isBlank()) {
+            root.put("上轮立项闸减法指令（重做时必须逐条执行）", gateDirective);
+        }
+        root.put("主角", assets.path("protagonist").asText(""));
+        root.set("已定人名表", assets.path("cast"));
+        return root.toString();
+    }
+
+    /** 头 C 输入：书名/主角/cast 人名 + 章节计划（真相卡的 reveal/planted 必须落在这些章号里）。 */
+    String buildBriefUser(RunDO run, JsonNode assets, List<ChapterDO> chapters,
+                          String worldLabel, String gateDirective) {
+        ObjectNode root = STATIC_MAPPER.createObjectNode();
+        fillCommon(root, run, worldLabel);
+        if (gateDirective != null && !gateDirective.isBlank()) {
+            root.put("上轮立项闸减法指令（重做时必须逐条执行）", gateDirective);
+        }
+        root.put("书名", assets.path("title").asText(""));
+        root.put("主角", assets.path("protagonist").asText(""));
+        var names = root.putArray("cast 人名表");
+        for (JsonNode c : assets.path("cast")) {
+            names.add(c.path("name").asText(""));
+        }
+        var chArr = root.putArray("章节计划");
+        for (ChapterDO c : chapters) {
+            var n = chArr.addObject();
+            n.put("no", c.getChapterNo());
+            n.put("title", c.getTitle());
+            n.put("budget", c.getBudget());
+        }
+        return root.toString();
+    }
+
     String worldLabel(RunDO run) {
         if (run.getPickedWorldId() == null) {
             return "";
@@ -444,7 +607,8 @@ public class DeriveDraftService {
     record BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters) {
     }
 
-    static JsonNode parseHead(JsonNode root, HeadContext ctx) {
+    /** 头 A：定名与人物表（人名表是全书唯一合法名源，人设卡留到 B 段）。 */
+    static JsonNode parseHeadBasic(JsonNode root, HeadContext ctx) {
         String title = root.path("title").asText("").trim();
         String summary = root.path("summary").asText("").trim();
         String protagonist = root.path("protagonist").asText("").trim();
@@ -471,19 +635,50 @@ public class DeriveDraftService {
             if (nm.equals(protagonist)) {
                 castHasProtagonist = true;
             }
-            JsonNode persona = c.path("persona");
-            if (!persona.isObject()) {
-                throw new LlmJson.Bad("cast 成员「" + nm + "」缺 persona 人设卡（五键对象）");
-            }
-            for (String k : List.of("temperament", "conduct", "speech", "desire", "flaw")) {
-                if (persona.path(k).asText("").trim().isEmpty()) {
-                    throw new LlmJson.Bad("cast 成员「" + nm + "」persona 缺 " + k);
-                }
+            if (c.path("role").asText("").trim().isEmpty()) {
+                throw new LlmJson.Bad("cast 成员「" + nm + "」缺 role（身份一句话）");
             }
         }
         if (!castHasProtagonist) {
             throw new LlmJson.Bad("cast 必须包含 protagonist「" + protagonist + "」");
         }
+        return root;
+    }
+
+    /** 头 B：人设卡（只准名单内的人，五键全填，不得漏人）。 */
+    static JsonNode parsePersona(JsonNode root, JsonNode assets) {
+        JsonNode arr = root.path("persona");
+        if (!arr.isArray() || arr.isEmpty()) {
+            throw new LlmJson.Bad("必须输出 persona 数组");
+        }
+        Set<String> allowed = new LinkedHashSet<>();
+        for (JsonNode c : assets.path("cast")) {
+            allowed.add(c.path("name").asText(""));
+        }
+        Set<String> seen = new HashSet<>();
+        for (JsonNode p : arr) {
+            String nm = p.path("name").asText("").trim();
+            if (!allowed.contains(nm)) {
+                throw new LlmJson.Bad("persona 出现名单外人名「" + nm + "」——只许用 cast 表内人名");
+            }
+            if (!seen.add(nm)) {
+                throw new LlmJson.Bad("persona 人名重复: " + nm);
+            }
+            for (String k : PERSONA_KEYS) {
+                if (p.path(k).asText("").trim().isEmpty()) {
+                    throw new LlmJson.Bad("「" + nm + "」缺 " + k);
+                }
+            }
+        }
+        List<String> missing = allowed.stream().filter(n -> !seen.contains(n)).toList();
+        if (!missing.isEmpty()) {
+            throw new LlmJson.Bad("persona 漏了名单内的人：" + missing);
+        }
+        return arr;
+    }
+
+    /** 头 C：brief 拆分 + 推理体裁真相卡。 */
+    static JsonNode parseBriefTruth(JsonNode root, HeadContext ctx) {
         JsonNode brief = root.path("brief");
         if (!brief.isObject() || brief.path("premise").asText("").trim().isEmpty()) {
             throw new LlmJson.Bad("必须输出 brief.premise（人物/世界观/氛围/红线摘要，≤300字）");
@@ -607,9 +802,9 @@ public class DeriveDraftService {
     }
 
     /** 头完成判定 = story_assets.protagonist 非空（REWORK 清头后逼 ⑥b-0 重跑）。 */
+    /** 全局头是否齐（三段全成；REWORK 清头产物后自然回到 0 段）。 */
     static boolean headDone(NovelDO novel) {
-        JsonNode assets = readTreeSafe(novel.getStoryAssets());
-        return !assets.path("protagonist").asText("").trim().isEmpty();
+        return headStage(novel, false) >= 3;
     }
 
     /** 终局对账：全拍 filled 或 SKIPPED、全章有纲。 */

@@ -45,17 +45,6 @@ class DeriveDraftBatchTest {
     }
 
     @Test
-    void headDoneRequiresProtagonist() {
-        NovelDO empty = new NovelDO();
-        empty.setStoryAssets("{\"v\":1}");
-        assertFalse(DeriveDraftService.headDone(empty));
-
-        NovelDO done = new NovelDO();
-        done.setStoryAssets("{\"v\":1,\"protagonist\":\"林深\"}");
-        assertTrue(DeriveDraftService.headDone(done));
-    }
-
-    @Test
     void windowDoneNeedsEveryOutline() {
         List<ChapterDO> chapters = List.of(ch(1, "纲一"), ch(2, ""), ch(3, "纲三"));
         assertFalse(DeriveDraftService.windowDone(List.of(1, 2), chapters), "窗内第2章无纲");
@@ -122,15 +111,116 @@ class DeriveDraftBatchTest {
     }
 
     @Test
-    void parseHead_requiresCastPersonaAndBrief() throws Exception {
-        String bad = """
-                {"title":"书","summary":"介","protagonist":"甲",
-                 "cast":[{"name":"甲"},{"name":"乙"},{"name":"丙"}],
-                 "brief":{"premise":"…"}}
-                """;
+    void headStageWalksThreeSegments() {
+        NovelDO empty = new NovelDO();
+        empty.setStoryAssets("{\"v\":1}");
+        assertEquals(0, DeriveDraftService.headStage(empty, false), "无主角=未定名");
+
+        NovelDO named = new NovelDO();
+        named.setStoryAssets("""
+                {"v":1,"protagonist":"甲","title":"书",
+                 "cast":[{"name":"甲","role":"会"},{"name":"乙","role":"医"},{"name":"丙","role":"船"}]}
+                """);
+        assertEquals(1, DeriveDraftService.headStage(named, false), "有人名表但缺人设卡");
+        assertFalse(DeriveDraftService.headDone(named));
+
+        NovelDO persona = new NovelDO();
+        persona.setStoryAssets("""
+                {"v":1,"protagonist":"甲","title":"书",
+                 "cast":[{"name":"甲","role":"会","persona":{"temperament":"冷","conduct":"必记","speech":"短句",
+                                                          "desire":"复原","flaw":"低估恨"}},
+                         {"name":"乙","role":"医","persona":{"temperament":"稳","conduct":"必救","speech":"慢",
+                                                          "desire":"活命","flaw":"怕水"}},
+                         {"name":"丙","role":"船","persona":{"temperament":"粗","conduct":"必泊","speech":"土话",
+                                                          "desire":"还债","flaw":"贪杯"}}]}
+                """);
+        assertEquals(2, DeriveDraftService.headStage(persona, false), "人设卡齐但缺 brief");
+
+        NovelDO reasoning = new NovelDO();
+        reasoning.setStoryAssets("""
+                {"v":1,"protagonist":"甲","title":"书","brief":{"premise":"…","ending":""},
+                 "cast":[{"name":"甲","role":"会","persona":{"temperament":"冷","conduct":"必记","speech":"短句",
+                                                          "desire":"复原","flaw":"低估恨"}},
+                         {"name":"乙","role":"医","persona":{"temperament":"稳","conduct":"必救","speech":"慢",
+                                                          "desire":"活命","flaw":"怕水"}},
+                         {"name":"丙","role":"船","persona":{"temperament":"粗","conduct":"必泊","speech":"土话",
+                                                          "desire":"还债","flaw":"贪杯"}}]}
+                """);
+        assertEquals(3, DeriveDraftService.headStage(reasoning, false));
+        assertEquals(2, DeriveDraftService.headStage(reasoning, true), "推理体裁还缺真相卡");
+        assertTrue(DeriveDraftService.headDone(reasoning));
+    }
+
+    @Test
+    void parseHeadBasic_requiresCoreFieldsOnly() throws Exception {
         DeriveDraftService.HeadContext ctx = new DeriveDraftService.HeadContext(
                 List.of(1, 2, 3), List.of(), false);
-        assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseHead(M.readTree(bad), ctx),
-                "缺 persona 必须拒");
+        String ok = """
+                {"title":"书","summary":"介","protagonist":"甲",
+                 "cast":[{"name":"甲","role":"会长"},{"name":"乙","role":"医生"},{"name":"丙","role":"船夫"}]}
+                """;
+        assertEquals("书", DeriveDraftService.parseHeadBasic(M.readTree(ok), ctx).path("title").asText());
+
+        String noRole = """
+                {"title":"书","summary":"介","protagonist":"甲",
+                 "cast":[{"name":"甲"},{"name":"乙","role":"医"},{"name":"丙","role":"船"}]}
+                """;
+        assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseHeadBasic(M.readTree(noRole), ctx),
+                "cast 缺 role 必须拒");
+
+        String banned = """
+                {"title":"书","summary":"介","protagonist":"甲",
+                 "cast":[{"name":"甲","role":"会"},{"name":"乙","role":"医"},{"name":"丙","role":"船"}]}
+                """;
+        DeriveDraftService.HeadContext ban = new DeriveDraftService.HeadContext(List.of(1), List.of("甲"), false);
+        assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseHeadBasic(M.readTree(banned), ban),
+                "禁用主角名必须拒");
+    }
+
+    @Test
+    void parsePersona_coversWholeCastExactly() throws Exception {
+        var assets = M.readTree("""
+                {"protagonist":"甲","cast":[{"name":"甲"},{"name":"乙"}]}
+                """);
+        String ok = """
+                {"persona":[{"name":"甲","temperament":"冷","conduct":"必记","speech":"短",
+                             "desire":"复原","flaw":"低估"},
+                            {"name":"乙","temperament":"稳","conduct":"必救","speech":"慢",
+                             "desire":"活命","flaw":"怕水"}]}
+                """;
+        assertEquals(2, DeriveDraftService.parsePersona(M.readTree(ok), assets).size());
+
+        String alien = """
+                {"persona":[{"name":"甲","temperament":"冷","conduct":"必记","speech":"短",
+                             "desire":"复原","flaw":"低估"},
+                            {"name":"丁","temperament":"稳","conduct":"必救","speech":"慢",
+                             "desire":"活命","flaw":"怕水"}]}
+                """;
+        assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parsePersona(M.readTree(alien), assets),
+                "名单外人名必须拒");
+
+        String missingKey = """
+                {"persona":[{"name":"甲","temperament":"冷","conduct":"必记","speech":"短",
+                             "desire":"复原"},
+                            {"name":"乙","temperament":"稳","conduct":"必救","speech":"慢",
+                             "desire":"活命","flaw":"怕水"}]}
+                """;
+        assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parsePersona(M.readTree(missingKey), assets),
+                "缺 flaw 必须拒");
+    }
+
+    @Test
+    void mergePersonaKeepsCastOrder() throws Exception {
+        var cast = M.readTree("""
+                [{"name":"甲","role":"会"},{"name":"乙","role":"医"}]
+                """);
+        var persona = M.readTree("""
+                [{"name":"乙","temperament":"稳","conduct":"必救","speech":"慢","desire":"活命","flaw":"怕水"},
+                 {"name":"甲","temperament":"冷","conduct":"必记","speech":"短","desire":"复原","flaw":"低估"}]
+                """);
+        var merged = M.readTree(DeriveDraftService.mergePersona(cast, persona));
+        assertEquals("甲", merged.path(0).path("name").asText(), "顺序沿用 cast");
+        assertEquals("冷", merged.path(0).path("persona").path("temperament").asText());
+        assertEquals("怕水", merged.path(1).path("persona").path("flaw").asText());
     }
 }

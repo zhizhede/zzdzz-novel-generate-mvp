@@ -116,7 +116,7 @@ public class DeriveGateService {
         DeriveActivity.begin(runId, "P6 立项闸评审（六判据）");
         try {
             out = llmJson.ask(
-                    new LlmPort.ChatRequest(NODE_GATE, runId, novelId,
+                    new LlmPort.ChatRequest(NODE_GATE, novelId, null, runId,
                             List.of(LlmPort.Message.system(GATE_PROMPT), LlmPort.Message.user(user)), 0.2),
                     DeriveGateService::parseGate, 3, (think, piece) -> DeriveActivity.touch(runId, piece));
         } finally {
