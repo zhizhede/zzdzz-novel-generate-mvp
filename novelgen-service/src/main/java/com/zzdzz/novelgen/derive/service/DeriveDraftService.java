@@ -100,6 +100,9 @@ public class DeriveDraftService {
             1. brief 拆分：{"premise":"人物设定/世界观/氛围/描写红线（全程可用，≤300字）",
             "ending":"结局与真相相关段落（无结局信息给空串）"}——premise 不得含结局答案，
             ending 集中放 twist/真凶/动机/结局走向；
+            1b. 若输入带『目标文风』：premise 里的氛围与描写红线必须服从该文风——不许把腔调写成
+                冷硬文书/卷宗/文言体，除非目标文风本身就是那个调子；premise 只约束"写什么可信"，
+                不负责指定"用什么语体写"；
             2. 类别含「推理」或「悬疑」时必须额外输出真相卡 truth（其余体裁省略 truth 键）：
             {"reveal_chapter":揭示章, "clues":[{"clue":"可观测现象","planted_chapter":章号}],
             "timeline_anchors":[{"fact":"纯数字或时刻事实","chapter":章号}],
@@ -117,7 +120,8 @@ public class DeriveDraftService {
 
     static final String BATCH_PROMPT = """
             你在为一部小说生成"具体稿·分批章纲"（不是正文）。输入含：全局头（protagonist/cast 人名表
-            /brief/truth）、域格、类别与节奏、世界观、主线、前批章纲概览、本窗章节计划与本窗拍清单。
+            /brief/truth）、域格、类别与节奏、世界观、主线、前批章纲概览、已发生不可逆状态、
+            本窗章节计划与本窗拍清单。
             要求：
             1. 每个本窗拍实例填实成具体情节点（1~2 句，写 filled）；确实用不上的拍放进 skipped 数组；
             2. 本窗每章给 draft_outline（本章具体大纲 2~3 句）与 title 定稿（≤12字，可沿用或改）；
@@ -126,11 +130,21 @@ public class DeriveDraftService {
             4. 写纲无知之幕：章号 < reveal_chapter 的章（若输入带 truth），draft_outline 与 title
                只写在场角色认知内的情节走向，禁写 solution/真凶身份/解法/视角反转；
             5. 与前批章纲衔接：不推翻前批已定事实（人物关系、已发生事件、关键物件）；
+            5b. 已发生不可逆状态是硬约束：其中记为死亡/离场/被囚/失去身份的人，本窗不得给他安排
+               现场戏份（出场说话、行动、被当面拜访）；回忆、梦境、遗体、遗物、他人转述、信件引用
+               不受此限，但必须在 draft_outline 里写明是哪种形式；
+            5c. 每章必须给 time（本章时间跨度，如"当晚""三日后"）与 state_changes
+               （本章造成、后续不可回退的变更；没有就给空数组）；
             6. 若输入带『题材意图』：走向与红线以它为准，拍清单只作结构骨架；
             7. 只输出本窗章纲结构，不写正文，不提素材来源与编号（对外只出现 seq）。
             输出 JSON 对象：
-            {"chapters":[{"no":1,"title":"…","draft_outline":"…","beats":[{"seq":1,"filled":"…"}]}],
+            {"chapters":[{"no":1,"title":"…","draft_outline":"…","time":"当晚",
+                          "state_changes":[{"who":"布兰","what":"死亡"},
+                                           {"who":"薇拉","what":"得知","detail":"布兰与卧房案有关"}],
+                          "beats":[{"seq":1,"filled":"…"}]}],
              "skipped":[…]}
+            state_changes.what 只允许：死亡 / 离场 / 被囚 / 失去身份 / 关系改变 / 物件易主 / 得知
+            （得知须用 detail 写知道了什么）。who 必须是 cast 名单内人名。
             只输出 JSON 对象，无其他文字。
             """;
 
@@ -212,7 +226,8 @@ public class DeriveDraftService {
                 beatInstanceMapper.updateById(b);
             }
             runMapper.updateStatus(runId, "PLANNING", null);
-            runMapper.updateStepStatus(runId, DeriveGateService.gateReset(run.getStepStatus()));
+            runMapper.updateStepStatus(runId,
+                    DeriveGateService.gateReset(clearDraftState(run.getStepStatus())));
             log.info("⑥b REWORK 回炉清稿：runId={} novelId={} 窗数={}（GATE 作废，客户端续调从头跑）",
                     runId, novelId, wins.size());
             return new DraftVO(runId, novelId, "", "", 0, 0, 0, "RESET", 0, wins.size(), false);
@@ -241,8 +256,14 @@ public class DeriveDraftService {
             for (BeatInstanceDO b : winBeats) {
                 winSeqs.add(b.getSeq());
             }
-            BatchContext ctx = new BatchContext(new ArrayList<>(winSeqs), win);
-            String user = buildBatchUser(run, chapters, win, winBeats, labelBySeq, worldLabel(run), assets, gateDirective);
+            Set<String> castNames = new LinkedHashSet<>();
+            for (JsonNode c : assets.path("cast")) {
+                castNames.add(c.path("name").asText(""));
+            }
+            BatchContext ctx = new BatchContext(new ArrayList<>(winSeqs), win, castNames);
+            JsonNode priorChanges = readDraftState(run.getStepStatus());
+            String user = buildBatchUser(run, chapters, win, winBeats, labelBySeq, worldLabel(run),
+                    assets, gateDirective, priorChanges);
             beginProgress(runId, "窗 " + (i + 1) + "/" + wins.size()
                     + "（章 " + win.get(0) + "-" + win.get(win.size() - 1) + "）");
             JsonNode out = llmJson.ask(
@@ -282,8 +303,10 @@ public class DeriveDraftService {
                 ch.setDraftOutline(c.path("draft_outline").asText(""));
                 chapterMapper.updateById(ch);
             }
-            log.info("⑥b-1 分批窗：runId={} novelId={} 窗{}/{} 章{}-{} 填实{} 跳过{}",
-                    runId, novelId, i + 1, wins.size(), win.get(0), win.get(win.size() - 1), filledCount, skippedCount);
+            runMapper.updateStepStatus(runId, appendDraftState(run.getStepStatus(), out.path("chapters")));
+            log.info("⑥b-1 分批窗：runId={} novelId={} 窗{}/{} 章{}-{} 填实{} 跳过{} 状态变更{}",
+                    runId, novelId, i + 1, wins.size(), win.get(0), win.get(win.size() - 1),
+                    filledCount, skippedCount, countChanges(out.path("chapters")));
             return new DraftVO(runId, novelId, "", assets.path("protagonist").asText(""),
                     win.size(), filledCount, skippedCount, "BATCH", i + 1, wins.size(), false);
         }
@@ -459,11 +482,16 @@ public class DeriveDraftService {
 
     String buildBatchUser(RunDO run, List<ChapterDO> chapters, List<Integer> window,
                           List<BeatInstanceDO> winBeats, Map<Integer, String> labelBySeq,
-                          String worldLabel, JsonNode assets, String gateDirective) {
+                          String worldLabel, JsonNode assets, String gateDirective,
+                          JsonNode priorChanges) {
         ObjectNode root = STATIC_MAPPER.createObjectNode();
         fillCommon(root, run, worldLabel);
         if (gateDirective != null && !gateDirective.isBlank()) {
             root.put("上轮立项闸减法指令（重做时必须逐条执行）", gateDirective);
+        }
+        if (priorChanges != null && priorChanges.isArray() && !priorChanges.isEmpty()) {
+            root.set("已发生不可逆状态（硬约束：这些人不得再有现场戏份，回忆/遗体/转述除外）",
+                    priorChanges);
         }
         var head = root.putObject("全局头");
         head.put("protagonist", assets.path("protagonist").asText(""));
@@ -538,6 +566,9 @@ public class DeriveDraftService {
         }
         root.put("书名", assets.path("title").asText(""));
         root.put("主角", assets.path("protagonist").asText(""));
+        if (run.getParamStyle() != null && !run.getParamStyle().isBlank()) {
+            root.put("目标文风（premise 的氛围与描写红线必须服从它，不得另立腔调）", run.getParamStyle());
+        }
         var names = root.putArray("cast 人名表");
         for (JsonNode c : assets.path("cast")) {
             names.add(c.path("name").asText(""));
@@ -609,8 +640,15 @@ public class DeriveDraftService {
     record HeadContext(List<Integer> chapterNos, List<String> banned, boolean reasoning) {
     }
 
-    record BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters) {
+    record BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters, Set<String> castNames) {
+        BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters) {
+            this(windowSeqs, windowChapters, Set.of());
+        }
     }
+
+    /** state_changes.what 的封闭集合（不可逆变更，才需要跨窗传递）。 */
+    static final Set<String> STATE_WHAT = Set.of(
+            "死亡", "离场", "被囚", "失去身份", "关系改变", "物件易主", "得知");
 
     /** 头 A：定名与人物表（人名表是全书唯一合法名源，人设卡留到 B 段）。 */
     static JsonNode parseHeadBasic(JsonNode root, HeadContext ctx) {
@@ -709,6 +747,31 @@ public class DeriveDraftService {
             if (c.path("draft_outline").asText("").trim().isEmpty()) {
                 throw new LlmJson.Bad("第" + no + "章缺 draft_outline");
             }
+            if (c.path("time").asText("").trim().isEmpty()) {
+                throw new LlmJson.Bad("第" + no + "章缺 time（本章时间跨度，如\"当晚\"\"三日后\"）");
+            }
+            JsonNode changes = c.path("state_changes");
+            if (!changes.isArray()) {
+                throw new LlmJson.Bad("第" + no + "章 state_changes 必须是数组（没有就写空数组）");
+            }
+            for (JsonNode ch : changes) {
+                String who = ch.path("who").asText("").trim();
+                String what = ch.path("what").asText("").trim();
+                if (who.isEmpty() || what.isEmpty()) {
+                    throw new LlmJson.Bad("第" + no + "章 state_changes 有条目缺 who/what");
+                }
+                if (!ctx.castNames().isEmpty() && !ctx.castNames().contains(who)) {
+                    throw new LlmJson.Bad("第" + no + "章 state_changes 的 who「" + who
+                            + "」不在 cast 名单内");
+                }
+                if (!STATE_WHAT.contains(what)) {
+                    throw new LlmJson.Bad("第" + no + "章 state_changes.what「" + what
+                            + "」不在允许集合 " + STATE_WHAT);
+                }
+                if ("得知".equals(what) && ch.path("detail").asText("").trim().isEmpty()) {
+                    throw new LlmJson.Bad("第" + no + "章 state_changes「得知」必须用 detail 写知道了什么");
+                }
+            }
             for (JsonNode b : c.path("beats")) {
                 int seq = b.path("seq").asInt(0);
                 if (!ctx.windowSeqs().contains(seq) || !filled.add(seq)) {
@@ -737,6 +800,62 @@ public class DeriveDraftService {
             throw new LlmJson.Bad("禁止新造人名（new_names 必须为空）——改用全局头 cast 表内人名或把该拍放进 skipped");
         }
         return root;
+    }
+
+    /** 统计本窗产出的状态变更条数（日志用）。 */
+    static int countChanges(JsonNode chapterArr) {
+        int n = 0;
+        for (JsonNode c : chapterArr) {
+            n += c.path("state_changes").size();
+        }
+        return n;
+    }
+
+    /** ⑥b 已发生不可逆状态（跨窗硬约束）：读 run.step_status.steps.DRAFT.changes。 */
+    static JsonNode readDraftState(String stepStatus) {
+        JsonNode arr = readTreeSafe(stepStatus).path("steps").path("DRAFT").path("changes");
+        return arr.isArray() ? arr : STATIC_MAPPER.createArrayNode();
+    }
+
+    /** 把本窗的 time/state_changes 累加进 step_status（保留 GATE/PLAN 等其它段）。 */
+    static String appendDraftState(String stepStatus, JsonNode chapterArr) {
+        JsonNode parsed = readTreeSafe(stepStatus);
+        ObjectNode root = parsed.isObject() ? (ObjectNode) parsed.deepCopy() : STATIC_MAPPER.createObjectNode();
+        root.put("v", 1);
+        ObjectNode steps = root.path("steps").isObject()
+                ? (ObjectNode) root.path("steps") : root.putObject("steps");
+        ObjectNode draft = steps.path("DRAFT").isObject()
+                ? (ObjectNode) steps.path("DRAFT") : steps.putObject("DRAFT");
+        com.fasterxml.jackson.databind.node.ArrayNode arr = draft.path("changes").isArray()
+                ? (com.fasterxml.jackson.databind.node.ArrayNode) draft.path("changes")
+                : draft.putArray("changes");
+        for (JsonNode c : chapterArr) {
+            int no = c.path("no").asInt(0);
+            String time = c.path("time").asText("");
+            for (JsonNode ch : c.path("state_changes")) {
+                ObjectNode n = arr.addObject();
+                n.put("no", no);
+                n.put("time", time);
+                n.put("who", ch.path("who").asText(""));
+                n.put("what", ch.path("what").asText(""));
+                if (!ch.path("detail").asText("").isBlank()) {
+                    n.put("detail", ch.path("detail").asText(""));
+                }
+            }
+        }
+        return root.toString();
+    }
+
+    /** 清空 ⑥b 已发生状态（REWORK 回炉时整本重做，旧事实作废）。 */
+    static String clearDraftState(String stepStatus) {
+        JsonNode parsed = readTreeSafe(stepStatus);
+        ObjectNode root = parsed.isObject() ? (ObjectNode) parsed.deepCopy() : STATIC_MAPPER.createObjectNode();
+        root.put("v", 1);
+        ObjectNode steps = root.path("steps").isObject()
+                ? (ObjectNode) root.path("steps") : root.putObject("steps");
+        ObjectNode draft = steps.putObject("DRAFT");
+        draft.putArray("changes");
+        return root.toString();
     }
 
     static void validateTruth(JsonNode truth, List<Integer> chapterNos) {

@@ -54,8 +54,10 @@ class DeriveDraftBatchTest {
     @Test
     void parseBatch_coversWindowExactly() throws Exception {
         String json = """
-                {"chapters":[{"no":1,"title":"a","draft_outline":"…","beats":[{"seq":1,"filled":"x"}]},
-                             {"no":2,"title":"b","draft_outline":"…","beats":[{"seq":2,"filled":"y"}]}],
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"}]},
+                             {"no":2,"title":"b","draft_outline":"…","time":"次日","state_changes":[],
+                              "beats":[{"seq":2,"filled":"y"}]}],
                  "skipped":[3]}
                 """;
         DeriveDraftService.BatchContext ctx =
@@ -64,27 +66,103 @@ class DeriveDraftBatchTest {
     }
 
     @Test
+    void parseBatch_requiresTimeAndLegalStateChanges() throws Exception {
+        DeriveDraftService.BatchContext ctx = new DeriveDraftService.BatchContext(
+                List.of(1), List.of(1), java.util.Set.of("布兰", "薇拉"));
+
+        String noTime = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"}]}], "skipped":[]}
+                """;
+        assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseBatch(M.readTree(noTime), ctx),
+                "缺 time 必须拒");
+
+        String alienWho = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚",
+                              "state_changes":[{"who":"路人甲","what":"死亡"}],
+                              "beats":[{"seq":1,"filled":"x"}]}], "skipped":[]}
+                """;
+        assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseBatch(M.readTree(alienWho), ctx),
+                "state_changes 的 who 不在 cast 内必须拒");
+
+        String badWhat = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚",
+                              "state_changes":[{"who":"布兰","what":"心情不好"}],
+                              "beats":[{"seq":1,"filled":"x"}]}], "skipped":[]}
+                """;
+        assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseBatch(M.readTree(badWhat), ctx),
+                "what 不在封闭集合必须拒");
+
+        String knowWithoutDetail = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚",
+                              "state_changes":[{"who":"薇拉","what":"得知"}],
+                              "beats":[{"seq":1,"filled":"x"}]}], "skipped":[]}
+                """;
+        assertThrows(LlmJson.Bad.class,
+                () -> DeriveDraftService.parseBatch(M.readTree(knowWithoutDetail), ctx),
+                "得知必须带 detail");
+
+        String ok = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚",
+                              "state_changes":[{"who":"布兰","what":"死亡"},
+                                               {"who":"薇拉","what":"得知","detail":"布兰与卧房案有关"}],
+                              "beats":[{"seq":1,"filled":"x"}]}], "skipped":[]}
+                """;
+        assertEquals(2, DeriveDraftService.countChanges(
+                DeriveDraftService.parseBatch(M.readTree(ok), ctx).path("chapters")));
+    }
+
+    @Test
+    void draftState_accumulatesAcrossWindowsAndClearsOnRework() throws Exception {
+        String base = "{\"v\":1,\"steps\":{\"WELD\":{\"status\":\"DONE\"}}}";
+        String win1 = """
+                [{"no":1,"time":"当晚","state_changes":[{"who":"布兰","what":"死亡"}]}]
+                """;
+        String after1 = DeriveDraftService.appendDraftState(base, M.readTree(win1));
+        assertEquals(1, DeriveDraftService.readDraftState(after1).size());
+        assertTrue(after1.contains("WELD"), "其它段保留");
+
+        String win2 = """
+                [{"no":11,"time":"三日后","state_changes":[{"who":"薇拉","what":"得知","detail":"旧图在塔内"}]}]
+                """;
+        String after2 = DeriveDraftService.appendDraftState(after1, M.readTree(win2));
+        var all = DeriveDraftService.readDraftState(after2);
+        assertEquals(2, all.size(), "跨窗累加");
+        assertEquals("布兰", all.get(0).path("who").asText());
+        assertEquals("当晚", all.get(0).path("time").asText());
+        assertEquals("旧图在塔内", all.get(1).path("detail").asText());
+
+        String cleared = DeriveDraftService.clearDraftState(after2);
+        assertEquals(0, DeriveDraftService.readDraftState(cleared).size(), "回炉后清空");
+        assertTrue(cleared.contains("WELD"));
+    }
+
+    @Test
     void parseBatch_rejectsLeakOrGapOrNewNames() throws Exception {
         DeriveDraftService.BatchContext ctx =
                 new DeriveDraftService.BatchContext(List.of(1, 2), List.of(1, 2));
 
         String gap = """
-                {"chapters":[{"no":1,"title":"a","draft_outline":"…","beats":[{"seq":1,"filled":"x"}]}],
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"}]}],
                  "skipped":[]}
                 """;
         assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseBatch(M.readTree(gap), ctx),
                 "窗内 seq2 未覆盖必须拒");
 
         String alien = """
-                {"chapters":[{"no":9,"title":"a","draft_outline":"…","beats":[{"seq":1,"filled":"x"}]}],
+                {"chapters":[{"no":9,"title":"a","draft_outline":"…","time":"当晚","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"}]}],
                  "skipped":[2]}
                 """;
         assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseBatch(M.readTree(alien), ctx),
                 "窗外表必须拒");
 
         String named = """
-                {"chapters":[{"no":1,"title":"a","draft_outline":"…","beats":[{"seq":1,"filled":"x"}]},
-                             {"no":2,"title":"b","draft_outline":"…","beats":[{"seq":2,"filled":"y"}]}],
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"}]},
+                             {"no":2,"title":"b","draft_outline":"…","time":"次日","state_changes":[],
+                              "beats":[{"seq":2,"filled":"y"}]}],
                  "skipped":[], "new_names":["路人甲"]}
                 """;
         assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseBatch(M.readTree(named), ctx),

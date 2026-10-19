@@ -2,6 +2,22 @@
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
 
+## 深夜四改：thinking 参数 / ⑥a 逐窗 / auto 判据 / ⑥b 状态增量（2026-10-19 凌晨，已部署宝塔）
+
+**这次最值钱的是一条配置事实**：MiMo 关思考的官方参数是 **`thinking.type=disabled`**，不是 `enable_thinking`（后者官方不认，模型继续默认开思考，`max_tokens` 被思考吃光后正文为空）。实测（`derive_draft` 节点）：关思考后单次 **19–31 秒 / 思考 0 字 / 不再空 content**，之前是 100–340 秒 / 思考 5000+ 字 / 频繁「响应缺少 content」。另两条口径：`mimo-v2.6-flash` **默认开思考**；预算字段是 `max_completion_tokens`（限思考+正文总长），只调大 `max_tokens` 而不关思考，单次失败会从 200 秒拖到 339 秒。**线上已改 `derive_draft`**（`extra_json={"thinking":{"type":"disabled"}}`、`max_tokens=8192`、`updated_time`——注意本库列名是 `updated_time` 不是 `update_time`）；`derive_write`/`derive_plan`/`derive_qc`/`world_state` **仍开思考**（⑦ 每章 260–586 秒就是它）。
+
+**⑥a 章节计划逐窗化**（`DerivePlanService`）：废弃「章数 = 总字数 ÷ 硬常量（快热 2500/中 3200/慢 4000）」，`PLAN_SCALE_PROMPT` 让 **AI 自己判章数与章均**，系统只夹区间（章 6~80、章均 2000~6000、总量 ≥ 上限 80%、**章数 ≤ 拍数**——run24 实弹：AI 判 18 章而拍只 24 个，首窗就把拍吃光）；`PLAN_WINDOW_PROMPT` 每窗 ≤10 章分拍，跨窗带「剩余拍 + 前窗章概览 + 前窗末两章拍型」，校验章号连续、拍不跨窗重复、最后一窗必须用完剩余拍。状态存 `steps.PLAN`，`plan()` 单元推进至 `allDone`。字数带校验**全部按 `run.len_check` 门控**（不开审计只留机械项）。
+
+**auto 判据回归修复**（`DeriveAutoFlowService`）：原「`novel_id` 非空 = ⑥a 完成」，而 SCALE 段就建书 → auto 拿到第一段就跳 ⑥b（run27 因此 0 章跑 ⑥b，真相卡 `reveal_chapter` 全越界、3 轮全废）。改看 `plan()` 的 `allDone`；`DeriveDraftService` 另加硬闸：0 章直接拒绝 ⑥b。
+
+**⑥b 章末状态增量**（用户定调：死人可以出现在回忆里，不能建「死者名单」硬闸；也不能只做生死账，覆盖不了全类型）：`BATCH_PROMPT` 每章多出 `time` + `state_changes`（who 必须在 cast；what 限死亡/离场/被囚/失去身份/关系改变/物件易主/得知，得知须 detail）；`parseBatch` 校验；`buildBatchUser` 把跨窗累加的「已发生不可逆状态」喂下一窗，并写明**回忆/梦境/遗体/遗物/他人转述/信件引用不受此限（但要写明形式）**；累计值存 `steps.DRAFT.changes`，REWORK 清空。run27 实弹证据：布兰第 2 章被刺身亡、第 9 章又「登门拜访」并活到第 11 章再死一次——闸判得对，根因是第 3 窗输入只带章号/章题/预算/拍型，没带「布兰已死」。
+
+**文风优先级**（run28 实弹：`param_style="轻小说"` 却写成冷硬卷宗腔）：根因是 ⑥b 全程没读过 `param_style`（grep 零命中），`brief.premise` 自己长成「可核查痕迹/证词/名册/时间窗」的文书体，而 ⑦ 虽写了「目标文风优先于源书文风卡」却没说与 premise 描写红线冲突时怎么办。已补：⑥b C 段输入带目标文风并要求 premise 服从；⑦ 两个 prompt 都加「目标文风 > 文风卡 > 前提里的描写红线」优先级。
+
+**测试与部署**：`DerivePlanWindowTest` 7 条 + `DeriveDraftBatchTest` 11 条新增/改写；全量 403+3+4 绿；已推宝塔（`ActiveEnterTimestamp 2026-10-19 02:39:58`、进程 819686、`/` 200、ping 401）。
+
+**未做**：把 `thinking.type=disabled` 配到四个节点（⑦ 提速关键）；⑥b 状态只做「传递+提示词约束」，未加 LLM 互斥校验（P6 闸仍是第二道防线）；卷级弧光锚点未成为一等产出。
+
 ## ⑥a 章节计划逐窗化：章数由 AI 判 + 单次输出封顶（2026-10-18 深夜，未提交未部署）
 
 **用户两条定调**（连续两轮）：「每章字数按节奏定死太极端」「不设字数的初衷是让 AI 自己判篇幅」「为什么不能让 AI 多次请求」。
