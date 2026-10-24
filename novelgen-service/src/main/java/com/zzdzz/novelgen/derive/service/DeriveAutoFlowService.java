@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.model.vo.derive.PlanVO;
 import com.zzdzz.novelgen.model.vo.derive.WriteVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -38,6 +39,9 @@ public class DeriveAutoFlowService {
     private final DeriveDraftService draftService;
     private final DeriveGateService gateService;
     private final DeriveWriteService writeService;
+    private final DeriveResetService resetService;
+    @Autowired(required = false)
+    private DeriveBeatRouteService beatRouteService;
     private final DeriveQcService qcService;
 
     static final class Auto {
@@ -181,7 +185,25 @@ public class DeriveAutoFlowService {
                             }
                         }
                         case "REWORK" -> {
-                            auto.stage = "回炉：清稿并按上轮指令重做具体稿";
+                            String target = DeriveGateService.repairTarget(run.getStepStatus());
+                            if ("NONE".equals(target) || target.isBlank()) {
+                                target = DeriveQcService.repairTarget(run.getStepStatus());
+                            }
+                            if (target.startsWith("PLAN_VOLUME:")) {
+                                int volumeNo = Integer.parseInt(target.substring("PLAN_VOLUME:".length()));
+                                if (beatRouteService == null) {
+                                    auto.lastError = "结构返工需要 BeatRouteService，当前未装配";
+                                    return;
+                                }
+                                auto.stage = "结构回炉：重排第" + volumeNo + "卷拍路由";
+                                beatRouteService.replanVolume(auto.runId, volumeNo);
+                            } else if ("SPINE".equals(target) || "SCALE".equals(target)) {
+                                auto.stage = "根因回炉：从 " + target + " 重建故事规划";
+                                resetService.replanFrom(auto.runId, target);
+                                auto.steps++;
+                                continue;
+                            }
+                            auto.stage = "回炉：清稿并按规划合同重做具体稿";
                             draftService.draft(auto.runId);
                         }
                         case "DRAFTING" -> {
@@ -212,9 +234,12 @@ public class DeriveAutoFlowService {
                         }
                         case "QC" -> {
                             if (auto.direct) {
-                                // 直通免审：不跑质检（脚本+AI 快检），直接判 PASSED
-                                runMapper.updateStatus(auto.runId, "PASSED", null);
-                                auto.stage = "直通：跳过 ⑧ 质检 → PASSED ✅";
+                                // 直通=只跳 AI 快检五项；脚本硬判照跑、qc_report 落档、章升 QC_PASS
+                                // （2026-10-19 修：原整段跳过致无档 PASSED，run29 审稿硬伤全漏）
+                                auto.stage = "⑧ 直通质检（脚本硬判，跳过 AI 快检）";
+                                var qc = qcService.qc(auto.runId, true);
+                                auto.stage = "直通质检 " + qc.verdict()
+                                        + "（script " + qc.scriptPassed() + "/" + qc.scriptTotal() + "）";
                             } else {
                                 auto.stage = "⑧ 质检（脚本硬判 + AI 快检，10 分钟级）";
                                 qcService.qc(auto.runId);

@@ -32,8 +32,10 @@ import com.zzdzz.novelgen.model.entity.derive.WordlistDO;
 import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
 import com.zzdzz.novelgen.model.entity.derive.WorldStateDO;
 import com.zzdzz.novelgen.model.vo.derive.QcVO;
+import com.zzdzz.novelgen.model.vo.derive.PlanValidationVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -127,9 +129,20 @@ public class DeriveQcService {
     private final LabelIndexMapper labelIndexMapper;
     private final WorldStateMapper worldStateMapper;
     private final LlmJson llmJson;
+    @Autowired(required = false)
+    private DerivePlanValidationService planValidationService;
 
     /** ⑧：跑一轮质检。 */
     public QcVO qc(long runId) {
+        return qc(runId, false);
+    }
+
+    /**
+     * ⑧：跑一轮质检。skipLlm=直通口径（2026-10-19）：只跳 AI 五项快检，
+     * 脚本硬判、qc_report 落档、章升 QC_PASS 与回炉熔断照常——对齐全流程
+     * 直通语义「跳过闸与质检的 AI 检测」，治 run29 直通整个⑧被跳过致无档 PASSED。
+     */
+    public QcVO qc(long runId, boolean skipLlm) {
         RunDO run = runMapper.selectById(runId);
         if (run == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
@@ -163,6 +176,9 @@ public class DeriveQcService {
         script.add(checkFingerprint(run, novel, chapters, antiRepro));
 
         boolean scriptPass = script.stream().allMatch(CheckItem::pass);
+        PlanValidationVO planCheck = planValidationService == null
+                ? null : planValidationService.validateBook(runId);
+        boolean planPass = planCheck == null || planCheck.passed();
 
         // ---- LLM 快检 5 项（修4，2026-10-16：script 未过也跑——原「全过才跑」让 run10 三轮
         //      REWORK 的 logic⑤ 剧透检查全程不可达；判定口径不变：pass = scriptPass && llmPass，
@@ -170,31 +186,36 @@ public class DeriveQcService {
         JsonNode llmResult = null;
         List<String> llmIssues = new ArrayList<>();
         boolean llmPass = true;
-        try {
-            List<WorldStateDO> ledger = worldStateMapper == null ? List.of()
-                    : worldStateMapper.selectList(new LambdaQueryWrapper<WorldStateDO>()
-                            .eq(WorldStateDO::getNovelId, novelId)
-                            .orderByAsc(WorldStateDO::getChapterNo));
-            llmResult = llmCheck(run, novel, chapters, beats, llmIssues, ledger);
-            // v3.4 口径：判定只看五项 pass；issues 数组是建议清单，记录但不参与判定
-            llmPass = true;
-            for (String key : List.of("fulfillment", "pacing", "voice", "domain", "logic")) {
-                if (!llmResult.path(key).path("pass").asBoolean(true)) {
-                    llmPass = false;
+        if (skipLlm) {
+            llmIssues.add("直通模式：跳过 AI 快检五项（脚本硬判照跑）");
+        } else {
+            try {
+                List<WorldStateDO> ledger = worldStateMapper == null ? List.of()
+                        : worldStateMapper.selectList(new LambdaQueryWrapper<WorldStateDO>()
+                                .eq(WorldStateDO::getNovelId, novelId)
+                                .orderByAsc(WorldStateDO::getChapterNo));
+                llmResult = llmCheck(run, novel, chapters, beats, llmIssues, ledger);
+                // v3.4 口径：判定只看五项 pass；issues 数组是建议清单，记录但不参与判定
+                llmPass = true;
+                for (String key : List.of("fulfillment", "pacing", "voice", "domain", "logic")) {
+                    if (!llmResult.path(key).path("pass").asBoolean(true)) {
+                        llmPass = false;
+                    }
                 }
+            } catch (Exception e) {
+                log.warn("⑧LLM 快检异常（fail-open，记入 issues）：{}", e.getMessage());
+                llmIssues.add("LLM 快检失败：" + e.getMessage());
+                llmPass = false;
             }
-        } catch (Exception e) {
-            log.warn("⑧LLM 快检异常（fail-open，记入 issues）：{}", e.getMessage());
-            llmIssues.add("LLM 快检失败：" + e.getMessage());
-            llmPass = false;
         }
 
         // ---- 汇总问题清单 ----
         List<String> issues = new ArrayList<>();
         script.stream().filter(c -> !c.pass()).forEach(c -> issues.add(c.name() + "：" + c.detail()));
         issues.addAll(llmIssues);
+        issues.addAll(planIssueMessages(planCheck));
 
-        boolean pass = scriptPass && llmPass;
+        boolean pass = scriptPass && llmPass && planPass;
         int prevRound = run.getQcRound() == null ? 0 : run.getQcRound();
         String verdict;
         if (pass) {
@@ -204,6 +225,8 @@ public class DeriveQcService {
         } else {
             verdict = "FAIL";
         }
+        String repairTarget = pass ? "NONE"
+                : (planPass ? "DRAFT" : DeriveGateService.repairTarget(planCheck));
 
         // ---- 落 qc_report ----
         ObjectNode scriptJson = STATIC_MAPPER.createObjectNode();
@@ -249,15 +272,16 @@ public class DeriveQcService {
             for (BeatInstanceDO b : beats) {
                 if (!"SKIPPED".equals(b.getStatus())) {
                     b.setStatus("VERIFIED");
-                    beatInstanceMapper.updateById(b);
+                    beatInstanceMapper.updateStatus(b.getId(), b.getStatus());
                 }
             }
             for (ChapterDO c : chapters) {
                 c.setStatus("QC_PASS");
-                chapterMapper.updateById(c);
+                chapterMapper.updateStatus(c.getId(), c.getStatus());
             }
             runMapper.updateStatus(runId, "PASSED", roundNo);
         } else if ("REWORK".equals(verdict)) {
+            runMapper.updateStepStatus(runId, withQcRepairTarget(run.getStepStatus(), repairTarget));
             runMapper.updateStatus(runId, "REWORK", roundNo);
         } else {
             runMapper.updateStatus(runId, "FAILED", roundNo);
@@ -266,10 +290,33 @@ public class DeriveQcService {
         int scriptPassedCount = (int) script.stream().filter(CheckItem::pass).count();
         log.info("⑧质检：runId={} round={} script={}/{} llm={} verdict={} issues={}",
                 runId, roundNo, scriptPassedCount, script.size(),
-                scriptPass ? (llmPass ? "5/5" : "fail") : "skip", verdict, issues.size());
+                skipLlm ? "直通跳过" : (scriptPass ? (llmPass ? "5/5" : "fail") : "skip"),
+                verdict, issues.size());
         return new QcVO(runId, novelId, roundNo, verdict,
-                scriptPassedCount, script.size(), scriptPass, llmPass,
-                issues, wordsActual, chapterAvg, pActual);
+                scriptPassedCount, script.size(), !skipLlm, llmPass,
+                issues, wordsActual, chapterAvg, pActual, repairTarget);
+    }
+
+    static List<String> planIssueMessages(PlanValidationVO validation) {
+        if (validation == null || validation.passed()) {
+            return List.of();
+        }
+        return validation.hardErrors().stream()
+                .map(e -> e.code() + "：" + e.message()).toList();
+    }
+
+    static String repairTarget(String stepStatus) {
+        return DeriveWriteService.readTreeSafe(stepStatus)
+                .path("steps").path("QC_REPAIR_TARGET").asText("NONE");
+    }
+
+    static String withQcRepairTarget(String stepStatus, String repairTarget) {
+        ObjectNode root = (ObjectNode) DeriveWriteService.readTreeSafe(stepStatus).deepCopy();
+        root.put("v", 1);
+        ObjectNode steps = root.path("steps").isObject()
+                ? (ObjectNode) root.path("steps") : root.putObject("steps");
+        steps.put("QC_REPAIR_TARGET", repairTarget == null ? "NONE" : repairTarget);
+        return root.toString();
     }
 
     // ================= 脚本 7 项 =================

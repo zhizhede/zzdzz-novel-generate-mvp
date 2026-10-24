@@ -9,31 +9,43 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
+import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
+import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
+import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.derive.mapper.WordlistMapper;
+import com.zzdzz.novelgen.derive.plan.PlanJsonViews;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
+import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
+import com.zzdzz.novelgen.model.entity.derive.StoryThreadDO;
+import com.zzdzz.novelgen.model.entity.derive.VolumePlanDO;
 import com.zzdzz.novelgen.model.entity.derive.WordlistDO;
+import com.zzdzz.novelgen.model.vo.derive.GateCriterionVO;
 import com.zzdzz.novelgen.model.vo.derive.GateVO;
+import com.zzdzz.novelgen.model.vo.derive.PlanValidationVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * P6 立项闸（⑥b 全窗完成后、⑦ 开写前的 LLM 立项评审，六判据）。
  *
- * <p>入口 {@code POST /runs/{id}/gate}：GO=放行（step GATE=PASS，⑦ 可写）；
- * REWORK=带减法指令回 ⑥b 整本重做（run→REWORK，复用回炉链，prevRound&lt;2 才允许）；
- * REJECT=熔断（run→FAILED）。评审记录落 run.step_status.steps.GATE（L2 层，无 DDL）；
- * ⑦ writeNext 要求 GATE=PASS 才开写——烂大纲写不出正文。
+ * <p>模型只输出六项结构化审稿，不再拥有终态决定权。Java 按严重度统一裁决：
+ * 只有 ADVISORY 时放行；存在 HARD/FIXABLE 则前两轮回炉，第三轮才熔断。
+ * 评审记录落 run.step_status.steps.GATE（L2 层，无 DDL）；⑦ writeNext 要求 GATE=PASS 才开写。
  */
 @Service
 @RequiredArgsConstructor
@@ -43,12 +55,18 @@ public class DeriveGateService {
     public static final String NODE_GATE = "derive_gate";
 
     static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
+    static final List<String> CRITERION_KEYS = List.of(
+            "single_rule", "budget", "motive_chain", "closure", "function_lock", "motif_dedup");
+    private static final Set<String> SEVERITIES = Set.of("HARD", "FIXABLE", "ADVISORY");
+    private static final Pattern PLAN_VOLUME_TARGET =
+            Pattern.compile("PLAN_VOLUME:[1-9]\\d*");
 
     static final String GATE_PROMPT = """
             你是小说大纲立项评审员。输入含：类别/产品形态/字数带/结局形状/主线、人物表（cast 含 persona）、
             真相卡（若有）、brief、全书章纲（每章 no/title/outline）、拍清单（seq/拍型/归属章/状态/filled 情节点）、
             母题黑名单（跨稿复读母题，命中要换写）。
-            只依据给出材料评审，六判据逐条给 pass 与 note（note ≤40字）：
+            只依据给出材料评审。你的职责是“诊断”，不是决定放行或熔断；最终动作由系统按结构化结果计算。
+            六判据逐项输出 pass、severity、note、issues、repairTarget：
             1. 规则单轨：真相卡存在时，诡计/手法层只允许一套可理性化规则——超自然只能做氛围，
                不得进入解释通道；两套规则并存判 fail；
             2. 体量预算：主线 ≤1 条；支线（独立人物线/赌局/复仇/私奔类）≤1（中篇）或 ≤2（长篇）；
@@ -63,13 +81,54 @@ public class DeriveGateService {
                亲自潜入/肉搏/夺人质）；侦探与被卷入者职能重叠到读者会认错主视角判 fail；
             6. 母题查重：章纲与母题黑名单逐条比对，命中 ≥3 处（或核心转折母题命中 ≥2 处）
                则 fail——要求 directive 给出替换方向（换动机载体/换收尾动作/换嫁祸手段）。
-            verdict 口径：六判据全 pass → GO；仅 2/3/5/6 类可修复问题（给得出减法指令）→ REWORK；
-            1 规则双轨无法自洽、或问题多到重构 → REJECT。
+
+            severity 口径：
+            - pass=true 时 severity 固定 ADVISORY、repairTarget 固定 NONE；note 写通过依据；
+            - fail 且是局部可改问题时 severity=FIXABLE；
+            - fail 且存在根本矛盾、规则无解、人物状态无法闭合时 severity=HARD；
+            - 只有真正会让当前计划写出硬伤时才判 fail；仅仅“还能更好、可以更精彩”要 pass，
+              在 note 里提醒，不要把审美偏好升级成阻断项。
+
+            repairTarget 只许四类：
+            - SCALE：卷数/章数/字数规模本身不成立；
+            - SPINE：主谜、最终真相、真相阶梯、角色功能弧光或全局线程合同有根本错误；
+            - PLAN_VOLUME:n：第 n 卷局部问题、章功能、拍路由、角色高光或卷闭合有错；
+            - DRAFT：仅章纲文字与 filled 情节点的局部表达需要重写。
+
+            issues 必须引用可核对事实（章号、角色名、拍号或规则），禁止“逻辑不够好”这类空话。
             输出 JSON 对象：
-            {"verdict":"GO|REWORK|REJECT","issues":["逐条问题，无则空数组"],
-             "directive":"REWORK 时给可执行减法指令（砍什么/留什么/改什么），无则空串"}
+            {"criteria":{
+              "single_rule":{"pass":true,"severity":"ADVISORY","note":"只采用一套可解释规则",
+                "issues":[],"repairTarget":"NONE"},
+              "budget":{"pass":false,"severity":"FIXABLE","note":"第2卷事件过密",
+                "issues":["第18-21章连续4章命案，超出中篇预算"],"repairTarget":"PLAN_VOLUME:2"},
+              "motive_chain":{"pass":true,"severity":"ADVISORY","note":"阵营变化有铺垫",
+                "issues":[],"repairTarget":"NONE"},
+              "closure":{"pass":true,"severity":"ADVISORY","note":"真相三要素有兑现",
+                "issues":[],"repairTarget":"NONE"},
+              "function_lock":{"pass":true,"severity":"ADVISORY","note":"职能未串线",
+                "issues":[],"repairTarget":"NONE"},
+              "motif_dedup":{"pass":true,"severity":"ADVISORY","note":"未命中黑名单",
+                "issues":[],"repairTarget":"NONE"}
+             },
+             "issues":["汇总需要处理的硬问题，无则空数组"],
+             "directive":"给出可执行减法指令（砍什么/留什么/改什么），无则空串"}
             只输出 JSON 对象，无其他文字。
             """;
+
+    record GateReview(
+            List<GateCriterionVO> criteria,
+            List<String> issues,
+            String directive) {
+    }
+
+    record GateDecision(
+            String verdict,
+            String action,
+            String repairTarget,
+            List<String> issues,
+            List<GateCriterionVO> criteria) {
+    }
 
     private final RunMapper runMapper;
     private final NovelMapper novelMapper;
@@ -77,6 +136,14 @@ public class DeriveGateService {
     private final BeatInstanceMapper beatInstanceMapper;
     private final WordlistMapper wordlistMapper;
     private final LlmJson llmJson;
+    @Autowired(required = false)
+    private DerivePlanValidationService planValidationService;
+    @Autowired(required = false)
+    private VolumePlanMapper volumePlanMapper;
+    @Autowired(required = false)
+    private CharacterPlanMapper characterPlanMapper;
+    @Autowired(required = false)
+    private StoryThreadMapper storyThreadMapper;
 
     /** ⑥b→⑦ 之间跑一次立项评审。 */
     public GateVO gate(long runId) {
@@ -112,10 +179,10 @@ public class DeriveGateService {
                 .stream().map(WordlistDO::getWord).filter(w -> w != null && !w.isBlank()).toList();
         String user = buildUser(run, novel, chapters, beats, motifs);
 
-        JsonNode out;
+        GateReview review;
         DeriveActivity.begin(runId, "P6 立项闸评审（六判据）");
         try {
-            out = llmJson.ask(
+            review = llmJson.ask(
                     new LlmPort.ChatRequest(NODE_GATE, novelId, null, runId,
                             List.of(LlmPort.Message.system(GATE_PROMPT), LlmPort.Message.user(user)), 0.2),
                     DeriveGateService::parseGate, 3, (think, piece) -> DeriveActivity.touch(runId, piece));
@@ -123,23 +190,26 @@ public class DeriveGateService {
             DeriveActivity.end(runId);
         }
 
-        String verdict = out.path("verdict").asText("");
-        List<String> issues = new ArrayList<>();
-        out.path("issues").forEach(n -> issues.add(n.asText("")));
-        String directive = out.path("directive").asText("");
-        String action = gateAction(verdict, prevRound);
+        PlanValidationVO planCheck = planValidationService == null
+                ? null : planValidationService.validateBook(runId);
+        GateDecision decision = decideGate(review, planCheck, prevRound);
 
-        run.setStepStatus(withGate(run.getStepStatus(), action, round, issues, directive));
+        run.setStepStatus(withGate(
+                run.getStepStatus(), decision.action(), round, decision.issues(),
+                review.directive(), decision.repairTarget(), decision.criteria()));
         runMapper.updateStepStatus(runId, run.getStepStatus());
-        if ("REWORK".equals(action)) {
+        if ("REWORK".equals(decision.action())) {
             runMapper.updateStatus(runId, "REWORK", null);
-        } else if ("FAILED".equals(action)) {
+        } else if ("FAILED".equals(decision.action())) {
             runMapper.updateStatus(runId, "FAILED", null);
         }
         log.info("P6立项闸：runId={} round={} verdict={} action={} issues={} directive={}",
-                runId, round, verdict, action, issues.size(),
-                directive.length() > 80 ? directive.substring(0, 80) + "…" : directive);
-        return new GateVO(runId, novelId, verdict, action, round, issues, directive);
+                runId, round, decision.verdict(), decision.action(), decision.issues().size(),
+                review.directive().length() > 80
+                        ? review.directive().substring(0, 80) + "…" : review.directive());
+        return new GateVO(runId, novelId, decision.verdict(), decision.action(), round,
+                decision.issues(), review.directive(), decision.repairTarget(),
+                decision.criteria());
     }
 
     // ---- 输入构造 ----
@@ -159,6 +229,24 @@ public class DeriveGateService {
             root.set("真相卡", assets.path("truth"));
         }
         root.set("brief", assets.path("brief"));
+        if (volumePlanMapper != null) {
+            root.set("卷合同", PlanJsonViews.volumes(volumePlanMapper.selectList(
+                    new LambdaQueryWrapper<VolumePlanDO>()
+                            .eq(VolumePlanDO::getRunId, run.getId())
+                            .orderByAsc(VolumePlanDO::getVolumeNo))));
+        }
+        if (characterPlanMapper != null) {
+            root.set("角色叙事计划", PlanJsonViews.characters(characterPlanMapper.selectList(
+                    new LambdaQueryWrapper<CharacterPlanDO>()
+                            .eq(CharacterPlanDO::getRunId, run.getId())
+                            .orderByAsc(CharacterPlanDO::getCharacterKey))));
+        }
+        if (storyThreadMapper != null) {
+            root.set("线程计划", PlanJsonViews.threads(storyThreadMapper.selectList(
+                    new LambdaQueryWrapper<StoryThreadDO>()
+                            .eq(StoryThreadDO::getRunId, run.getId())
+                            .orderByAsc(StoryThreadDO::getThreadKey))));
+        }
         var chArr = root.putArray("章纲");
         for (ChapterDO c : chapters) {
             var n = chArr.addObject();
@@ -182,28 +270,97 @@ public class DeriveGateService {
 
     // ---- 解析与判定（纯函数，单测覆盖） ----
 
-    static JsonNode parseGate(JsonNode root) {
-        String verdict = root.path("verdict").asText("").trim();
-        if (!"GO".equals(verdict) && !"REWORK".equals(verdict) && !"REJECT".equals(verdict)) {
-            throw new LlmJson.Bad("verdict 必须是 GO|REWORK|REJECT，当前「" + verdict + "」");
-        }
+    static GateReview parseGate(JsonNode root) {
         if (!root.path("issues").isArray()) {
             throw new LlmJson.Bad("issues 必须是数组（可为空）");
         }
         if (!root.has("directive")) {
             throw new LlmJson.Bad("缺 directive（可为空串，但键必须在）");
         }
-        return root;
+        JsonNode criteriaNode = root.path("criteria");
+        if (!criteriaNode.isObject()) {
+            throw new LlmJson.Bad("criteria 必须是对象");
+        }
+        List<GateCriterionVO> criteria = new ArrayList<>();
+        for (String key : CRITERION_KEYS) {
+            JsonNode node = criteriaNode.path(key);
+            if (!node.isObject()) {
+                throw new LlmJson.Bad("criteria." + key + " 必须是对象");
+            }
+            if (!node.path("pass").isBoolean()) {
+                throw new LlmJson.Bad("criteria." + key + ".pass 必须是布尔值");
+            }
+            boolean pass = node.path("pass").asBoolean();
+            String severity = node.path("severity").asText("").trim();
+            if (!SEVERITIES.contains(severity)) {
+                throw new LlmJson.Bad("criteria." + key
+                        + ".severity 必须是 HARD|FIXABLE|ADVISORY");
+            }
+            String note = node.path("note").asText("").trim();
+            if (note.isEmpty()) {
+                throw new LlmJson.Bad("criteria." + key + ".note 不能为空");
+            }
+            if (!node.path("issues").isArray()) {
+                throw new LlmJson.Bad("criteria." + key + ".issues 必须是数组");
+            }
+            List<String> issues = new ArrayList<>();
+            node.path("issues").forEach(n -> {
+                String issue = n.asText("").trim();
+                if (!issue.isEmpty()) {
+                    issues.add(issue);
+                }
+            });
+            String target = node.path("repairTarget").asText("").trim();
+            if (!isValidTarget(target)) {
+                throw new LlmJson.Bad("criteria." + key
+                        + ".repairTarget 必须是 NONE|DRAFT|SPINE|SCALE|PLAN_VOLUME:n");
+            }
+            if (!pass && !"ADVISORY".equals(severity) && "NONE".equals(target)) {
+                throw new LlmJson.Bad("criteria." + key
+                        + " 未通过时必须给非 NONE 回炉目标");
+            }
+            if (pass && !"ADVISORY".equals(severity)) {
+                throw new LlmJson.Bad("criteria." + key
+                        + " 通过时 severity 必须为 ADVISORY");
+            }
+            criteria.add(new GateCriterionVO(key, pass, severity, note, issues, target));
+        }
+        List<String> issues = new ArrayList<>();
+        root.path("issues").forEach(n -> {
+            String issue = n.asText("").trim();
+            if (!issue.isEmpty()) {
+                issues.add(issue);
+            }
+        });
+        return new GateReview(criteria, issues, root.path("directive").asText(""));
     }
 
-    /** LLM verdict + 既有轮次 → 落地动作：GO→PASS；REWORK 限 prevRound<2 否则熔断；REJECT→FAILED。 */
-    static String gateAction(String verdict, int prevRound) {
-        return switch (verdict) {
-            case "GO" -> "PASS";
-            case "REJECT" -> "FAILED";
-            case "REWORK" -> prevRound < 2 ? "REWORK" : "FAILED";
-            default -> throw new BizException(ErrorCode.PARAM_ERROR, "未知 verdict: " + verdict);
-        };
+    /** Java 统一裁决：模型只报问题，放行/回炉/熔断与目标层级都在这里决定。 */
+    static GateDecision decideGate(GateReview review, PlanValidationVO planCheck, int prevRound) {
+        LinkedHashSet<String> issues = new LinkedHashSet<>(review.issues());
+        List<String> targets = new ArrayList<>();
+        for (GateCriterionVO criterion : review.criteria()) {
+            criterion.issues().forEach(issue -> issues.add(
+                    criterionLabel(criterion.key()) + "：" + issue));
+            if (!criterion.pass() && !"ADVISORY".equals(criterion.severity())) {
+                targets.add(criterion.repairTarget());
+            }
+        }
+        if (planCheck != null && !planCheck.passed()) {
+            for (PlanValidationVO.Issue issue : planCheck.hardErrors()) {
+                issues.add(issue.code() + "：" + issue.message());
+                targets.add(issue.repairTarget());
+            }
+        }
+        if (targets.isEmpty()) {
+            return new GateDecision("GO", "PASS", "NONE",
+                    new ArrayList<>(issues), review.criteria());
+        }
+        String repairTarget = mostUpstreamTarget(targets);
+        boolean exhausted = prevRound >= 2;
+        return new GateDecision(exhausted ? "REJECT" : "REWORK",
+                exhausted ? "FAILED" : "REWORK", repairTarget,
+                new ArrayList<>(issues), review.criteria());
     }
 
     // ---- step_status.steps.GATE 读写（合并既有键，L2 层） ----
@@ -216,14 +373,49 @@ public class DeriveGateService {
         return "PASS".equals(readGate(stepStatus).path("status").asText(""));
     }
 
-    static String withGate(String stepStatus, String status, int round, List<String> issues, String directive) {
+    static String withGate(String stepStatus, String status, int round,
+                           List<String> issues, String directive) {
+        return withGate(stepStatus, status, round, issues, directive, "NONE");
+    }
+
+    static String withGate(String stepStatus, String status, int round,
+                           List<String> issues, String directive, String repairTarget) {
+        return withGate(stepStatus, status, round, issues, directive, repairTarget, List.of());
+    }
+
+    static String withGate(String stepStatus, String status, int round,
+                           List<String> issues, String directive, String repairTarget,
+                           List<GateCriterionVO> criteria) {
+        ObjectNode criteriaNode = STATIC_MAPPER.createObjectNode();
+        for (GateCriterionVO criterion : criteria == null ? List.<GateCriterionVO>of() : criteria) {
+            ObjectNode node = criteriaNode.putObject(criterion.key());
+            node.put("pass", criterion.pass());
+            node.put("severity", criterion.severity());
+            node.put("note", criterion.note());
+            ArrayNode issueArr = node.putArray("issues");
+            criterion.issues().forEach(issueArr::add);
+            node.put("repairTarget", criterion.repairTarget());
+        }
+        return withGateNode(stepStatus, status, round, issues, directive,
+                repairTarget, criteriaNode);
+    }
+
+    private static String withGateNode(String stepStatus, String status, int round,
+                                       List<String> issues, String directive,
+                                       String repairTarget, JsonNode criteria) {
         ObjectNode root = stepsRoot(stepStatus);
         ObjectNode gate = root.with("steps").putObject("GATE");
         gate.put("status", status);
         gate.put("round", round);
         gate.put("directive", directive == null ? "" : directive);
+        gate.put("repairTarget", repairTarget == null ? "NONE" : repairTarget);
         ArrayNode arr = gate.putArray("issues");
         issues.forEach(arr::add);
+        if (criteria != null && criteria.isObject()) {
+            gate.set("criteria", criteria.deepCopy());
+        } else {
+            gate.putObject("criteria");
+        }
         return root.toString();
     }
 
@@ -233,9 +425,11 @@ public class DeriveGateService {
         ObjectNode gate = root.with("steps").withObject("GATE");
         int round = gate.path("round").asInt(0);
         String directive = gate.path("directive").asText("");
+        String repairTarget = gate.path("repairTarget").asText("NONE");
         List<String> issues = new ArrayList<>();
         gate.path("issues").forEach(n -> issues.add(n.asText("")));
-        return withGate(root.toString(), "PENDING", round, issues, directive);
+        return withGateNode(root.toString(), "PENDING", round, issues, directive,
+                repairTarget, gate.path("criteria"));
     }
 
     /** 回炉重做时要喂回模型的减法指令（无则空串）。 */
@@ -243,8 +437,57 @@ public class DeriveGateService {
         return readGate(stepStatus).path("directive").asText("");
     }
 
+    static String repairTarget(String stepStatus) {
+        return readGate(stepStatus).path("repairTarget").asText("NONE");
+    }
+
+    static String repairTarget(PlanValidationVO validation) {
+        if (validation == null || validation.passed()
+                || validation.hardErrors().isEmpty()) {
+            return "DRAFT";
+        }
+        return validation.hardErrors().get(0).repairTarget();
+    }
+
     private static JsonNode readGate(String stepStatus) {
         return stepsRoot(stepStatus).path("steps").path("GATE");
+    }
+
+    private static boolean isValidTarget(String target) {
+        return "NONE".equals(target) || "DRAFT".equals(target) || "SPINE".equals(target)
+                || "SCALE".equals(target) || PLAN_VOLUME_TARGET.matcher(target).matches();
+    }
+
+    private static String mostUpstreamTarget(List<String> targets) {
+        String best = "DRAFT";
+        int bestRank = -1;
+        for (String target : targets) {
+            String normalized = isValidTarget(target) ? target : "DRAFT";
+            int rank = switch (normalized) {
+                case "SCALE" -> 4;
+                case "SPINE" -> 3;
+                case "DRAFT" -> 1;
+                case "NONE" -> 0;
+                default -> 2;
+            };
+            if (rank > bestRank) {
+                best = normalized;
+                bestRank = rank;
+            }
+        }
+        return best;
+    }
+
+    private static String criterionLabel(String key) {
+        return switch (key) {
+            case "single_rule" -> "规则单轨";
+            case "budget" -> "体量预算";
+            case "motive_chain" -> "动机链";
+            case "closure" -> "闭合";
+            case "function_lock" -> "职能锁定";
+            case "motif_dedup" -> "母题查重";
+            default -> key;
+        };
     }
 
     private static ObjectNode stepsRoot(String stepStatus) {

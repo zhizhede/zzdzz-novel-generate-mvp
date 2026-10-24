@@ -201,6 +201,27 @@ flowchart LR
 
 验收口径：①生大纲即落库，书籍管理页立即可见（状态=草稿）；②克隆样本资产时 AI 大纲必须贴合克隆世界（derive_outline/world 段，PromptCatalog 可编辑）——否则卷规划审校必打回（书 9 实证）；③克隆预设的章长带约束卷规划预算；④掺水量/POV/标签/每卷章数/目标/无人续跑全参数书级可改（PUT derive-config，fail-open）。**已知约束**：克隆世界观与 AI 自创大纲是组合风险，向导须提示（TODO：勾选联动警告）。
 
+### 流 P6：衍生故事规划质量闸（2026-10-21 增补）
+
+⑥b 完成、⑦ 开写前，`derive_gate` 只输出六项结构化诊断：
+
+```text
+single_rule / budget / motive_chain / closure / function_lock / motif_dedup
+每项 = {pass, severity: HARD|FIXABLE|ADVISORY, note, issues[], repairTarget}
+```
+
+**模型不决定终态**。Java 统一裁决：全通过或仅 `ADVISORY` → `GATE=PASS`；存在
+`HARD/FIXABLE` → 第 1~2 轮 `REWORK`、第 3 轮 `FAILED`。回炉目标固定按
+`SCALE > SPINE > PLAN_VOLUME:n > DRAFT` 取最上游项：
+
+- `DRAFT`：⑥b 具体稿回炉；
+- `PLAN_VOLUME:n`：只重排第 n 卷章功能与拍路由；
+- `SPINE`：保留规模，重建卷合同、角色计划、线程、章与拍；
+- `SCALE`：从规模/卷数重新判断。
+
+结构化判据、聚合问题、减法指令、轮次与 `repairTarget` 一并落
+`run.step_status.steps.GATE`；根因回炉保留 GATE 轮次，防止无限循环。
+
 **复刻防线契约（2026-09-26 增补，书 9/10/11 源主角换名复刻实证）**：
 
 - **cloneAssets 全路径生效**：AI 大纲异步路径与直接创建路径都必须传 cloneAssets（此前 buildOutlinePayload 丢弃勾选，后端 null 一律全克隆）；`plotOutline`（骨架预填）默认**关**。
