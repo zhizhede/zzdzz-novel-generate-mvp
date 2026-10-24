@@ -21,9 +21,9 @@
           <span class="guide">{{ guide }}</span>
           <span class="action-bar__spacer" />
 
-          <template v-if="detail.status === 'PLANNING' && !detail.novelId">
+          <template v-if="detail.status === 'PLANNING' && (!detail.novelId || (storyPlan?.planState?.currentUnit && storyPlan.planState.currentUnit !== 'DONE'))">
             <el-button type="primary" :loading="acting === 'plan'"
-                       :disabled="!!acting || autoRunning" @click="actPlan">⑥a 章节计划</el-button>
+                       :disabled="!!acting || autoRunning" @click="actPlan">继续 ⑥a 故事规划</el-button>
           </template>
           <template v-else-if="detail.status === 'PLANNING'">
             <el-button type="primary" :loading="acting === 'draft'"
@@ -56,6 +56,10 @@
             </el-button>
           </template>
           <template v-else-if="!['PASSED', 'FAILED', 'SAMPLING'].includes(detail.status)">
+            <el-button plain :disabled="!!acting || writeBusy || !!serverDraft"
+                       @click="actTrial">试跑一步</el-button>
+            <el-button plain :disabled="!!acting || writeBusy || !!serverDraft"
+                       @click="resumeTask">↻ 续跑任务</el-button>
             <el-button type="success" :disabled="!!acting || writeBusy || !!serverDraft"
                        @click="actAuto(false)">▶ 全流程无人值守</el-button>
             <el-button type="danger" plain :disabled="!!acting || writeBusy || !!serverDraft"
@@ -66,6 +70,9 @@
             ■ 停止（当前章写完即停）
           </el-button>
           <el-button :loading="loading" :disabled="writeBusy || autoRunning" @click="loadAll">刷新</el-button>
+          <el-button type="danger" plain
+                     :disabled="!!acting || writeBusy || autoRunning"
+                     @click="clearPlanning">清空⑥+数据</el-button>
         </div>
         <p v-if="draftLoopText" class="loop-text">{{ draftLoopText }}</p>
         <p v-if="serverAutoText" class="loop-text loop-text--live">{{ serverAutoText }}</p>
@@ -201,6 +208,29 @@
               字数校验 <el-tag size="small" :type="detail.lenCheck ? 'warning' : 'info'">{{ detail.lenCheck ? '开' : '关' }}</el-tag>
             </div>
           </el-card>
+
+      <el-card v-if="volumes.length" shadow="never" class="block">
+        <template #header>
+          卷结构（{{ volumes.length }} 卷）
+        </template>
+        <DataTable :data="volumes" size="small">
+          <el-table-column prop="volumeNo" label="卷" width="50" />
+          <el-table-column label="章范围" width="100">
+            <template #default="{ row }">{{ row.fromChapter }}–{{ row.toChapter }}</template>
+          </el-table-column>
+          <el-table-column prop="arc" label="卷名" min-width="110" show-overflow-tooltip />
+          <el-table-column prop="localEvent" label="本卷事件" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="localClosure" label="本卷闭合" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="nextHook" label="下一卷钩子" min-width="160" show-overflow-tooltip />
+          <el-table-column label="角色" width="80">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.globalRole === 'FINAL' ? 'success' : 'info'">
+                {{ row.globalRole === 'FINAL' ? '终卷' : '普通' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </DataTable>
+      </el-card>
         </el-col>
       </el-row>
 
@@ -210,6 +240,103 @@
         <p v-if="detail.style" class="pre">文风：{{ detail.style }}</p>
       </el-card>
 
+      <el-card v-if="storyPlan?.planState?.currentUnit" shadow="never" class="block">
+        <template #header>
+          故事规划
+          <el-tag size="small" type="primary" style="margin-left: 8px">
+            {{ statusTag(PLAN_UNIT, storyPlan.planState.currentUnit).label }}
+          </el-tag>
+        </template>
+        <el-descriptions v-if="storyPlan.scope" :column="4" size="small" border>
+          <el-descriptions-item label="规模判断">{{ storyPlan.scope.decision || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="卷数">{{ storyPlan.scope.volumeCount ?? '—' }}</el-descriptions-item>
+          <el-descriptions-item label="章数">{{ storyPlan.scope.chapterCount ?? '—' }}</el-descriptions-item>
+          <el-descriptions-item label="章均">{{ storyPlan.scope.chapterAvg ?? '—' }}</el-descriptions-item>
+        </el-descriptions>
+
+        <template v-if="storyPlan.storySpine?.mainMystery">
+          <h4>故事脊柱</h4>
+          <p><b>背景大案：</b>{{ storyPlan.storySpine.mainMystery }}</p>
+          <p><b>最终真相：</b>{{ storyPlan.storySpine.finalTruth }}</p>
+          <p><b>最终选择：</b>{{ storyPlan.storySpine.finalChoice }}</p>
+          <DataTable :data="storyPlan.storySpine.truthLadder || []" size="small">
+            <el-table-column prop="volumeNo" label="卷" width="50" />
+            <el-table-column label="本卷揭晓" min-width="220">
+              <template #default="{ row }">{{ (row.reveals || []).join('；') }}</template>
+            </el-table-column>
+            <el-table-column label="仍禁止" min-width="220">
+              <template #default="{ row }">{{ (row.forbidden || []).join('；') || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="证据线程" min-width="180">
+              <template #default="{ row }">{{ (row.evidenceThreads || []).join('、') || '—' }}</template>
+            </el-table-column>
+          </DataTable>
+        </template>
+
+        <template v-if="(storyPlan.volumes || []).length">
+          <h4>卷合同</h4>
+          <DataTable :data="storyPlan.volumes" size="small">
+            <el-table-column prop="volumeNo" label="卷" width="50" />
+            <el-table-column label="章范围" width="86">
+              <template #default="{ row }">{{ row.fromChapter }}–{{ row.toChapter }}</template>
+            </el-table-column>
+            <el-table-column prop="arc" label="卷名" min-width="110" show-overflow-tooltip />
+            <el-table-column prop="contract.localQuestion" label="本卷问题" min-width="160" show-overflow-tooltip />
+            <el-table-column prop="contract.mainMysteryAdvance" label="大案增量" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="localClosure" label="局部闭合" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="nextHook" label="下一卷钩子" min-width="160" show-overflow-tooltip />
+            <el-table-column label="操作" width="84" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="warning" size="small" :disabled="!!acting" @click="replanVolume(row.volumeNo)">
+                  重规划
+                </el-button>
+              </template>
+            </el-table-column>
+          </DataTable>
+        </template>
+
+        <template v-if="(storyPlan.characters || []).length">
+          <h4>角色功能与弧光</h4>
+          <DataTable :data="storyPlan.characters" size="small">
+            <el-table-column prop="characterKey" label="Key" width="62" />
+            <el-table-column prop="displayNameHint" label="名字提示" width="100" />
+            <el-table-column prop="functionCode" label="功能" width="110" />
+            <el-table-column prop="spotlightVolume" label="高光卷" width="72" />
+            <el-table-column prop="conflictVolume" label="冲突卷" width="72" />
+            <el-table-column prop="contract.functionalConflict" label="功能冲突" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="contract.highlightChoice" label="高光选择" min-width="180" show-overflow-tooltip />
+          </DataTable>
+        </template>
+
+        <template v-if="(storyPlan.threads || []).length">
+          <h4>故事线程</h4>
+          <DataTable :data="storyPlan.threads" size="small">
+            <el-table-column prop="threadKey" label="线程" width="150" />
+            <el-table-column prop="kind" label="类型" width="100" />
+            <el-table-column prop="title" label="标题" min-width="180" />
+            <el-table-column prop="openedVolume" label="起始卷" width="72" />
+            <el-table-column prop="payoffVolume" label="兑现卷" width="72" />
+            <el-table-column prop="status" label="状态" width="90" />
+          </DataTable>
+        </template>
+
+        <el-collapse v-if="(storyPlan.chapterSlots || []).length" style="margin-top: 14px">
+          <el-collapse-item :title="`章功能槽（${storyPlan.chapterSlots.length} 章）`">
+            <DataTable :data="storyPlan.chapterSlots" size="small">
+              <el-table-column prop="chapterNo" label="章" width="50" />
+              <el-table-column prop="volumeNo" label="卷" width="50" />
+              <el-table-column prop="planContract.chapterFunction" label="章功能" min-width="170" />
+              <el-table-column prop="planContract.localCaseGoal" label="本卷案件目标" min-width="220" show-overflow-tooltip />
+              <el-table-column label="必需拍功能" min-width="180">
+                <template #default="{ row }">
+                  {{ (row.planContract?.requiredBeatRoles || []).join('、') }}
+                </template>
+              </el-table-column>
+            </DataTable>
+          </el-collapse-item>
+        </el-collapse>
+      </el-card>
+
       <el-card v-if="gateInfo && gateInfo.status !== 'PENDING'" shadow="never" class="block">
         <template #header>
           P6 立项闸
@@ -217,6 +344,29 @@
             {{ gateStatusLabel(gateInfo.status) }}
           </el-tag>
           <span class="stat-inline" style="margin-left: 8px">第 {{ gateInfo.round ?? 1 }} 轮评审</span>
+        </template>
+        <template v-if="gateCriteriaRows.length">
+          <div class="stat-label">六判据审稿（终态由系统裁决）</div>
+          <DataTable :data="gateCriteriaRows" size="small">
+            <el-table-column prop="label" label="判据" width="110" />
+            <el-table-column label="结果" width="80">
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.pass ? 'success' : 'danger'">
+                  {{ row.pass ? '通过' : '有问题' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="级别" width="90">
+              <template #default="{ row }">{{ gateSeverityLabel(row.severity) }}</template>
+            </el-table-column>
+            <el-table-column label="回炉层级" width="120">
+              <template #default="{ row }">{{ gateRepairTargetLabel(row.repairTarget) }}</template>
+            </el-table-column>
+            <el-table-column prop="note" label="系统审稿依据" min-width="220" show-overflow-tooltip />
+            <el-table-column label="具体问题" min-width="280" show-overflow-tooltip>
+              <template #default="{ row }">{{ (row.issues || []).join('；') || '—' }}</template>
+            </el-table-column>
+          </DataTable>
         </template>
         <template v-if="(gateInfo.issues || []).length">
           <div class="stat-label">问题清单（{{ gateInfo.issues.length }}）</div>
@@ -321,7 +471,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '../../components/PageHeader.vue'
 import DataTable from '../../components/DataTable.vue'
 import { deriveApi } from '../../deriveApi'
-import { BEAT_STATUS, CHAPTER_STATUS, RUN_STATUS, VERDICT, fmtTime, statusTag } from './deriveLabels'
+import { BEAT_STATUS, CHAPTER_STATUS, PLAN_UNIT, RUN_STATUS, VERDICT, fmtTime, statusTag } from './deriveLabels'
 
 /** run 详情：进度聚合卡 + 章/拍表 + 质检报告折叠面板（只读监控核心页）。 */
 const route = useRoute()
@@ -332,6 +482,8 @@ const detail = ref(null)
 const chapters = ref([])
 const beats = ref([])
 const reports = ref([])
+const volumes = ref([])
+const storyPlan = ref(null)
 const withText = ref(false)
 const serverDraft = ref(null)
 const llmTrail = ref([])
@@ -429,16 +581,20 @@ async function loadAll() {
   loading.value = true
   const id = route.params.id
   try {
-    const [d, c, b, q] = await Promise.all([
+    const [d, c, b, q, v, sp] = await Promise.all([
       deriveApi.get(`/api/derive/runs/${id}`),
       deriveApi.get(`/api/derive/runs/${id}/chapters${withText.value ? '?includeText=true' : ''}`),
       deriveApi.get(`/api/derive/runs/${id}/beats`),
-      deriveApi.get(`/api/derive/runs/${id}/qc-reports`)
+      deriveApi.get(`/api/derive/runs/${id}/qc-reports`),
+      deriveApi.get(`/api/derive/runs/${id}/volumes`),
+      deriveApi.get(`/api/derive/runs/${id}/story-plan`)
     ])
     detail.value = d
     chapters.value = c
     beats.value = b
     reports.value = q
+    volumes.value = v
+    storyPlan.value = sp
   } catch (e) {
     ElMessage.error(e.message)
   } finally {
@@ -578,6 +734,78 @@ async function actAuto(direct) {
   }
 }
 
+/** 试跑一步：只推进当前状态机的一个单元，便于低成本验证当前配置。 */
+async function actTrial() {
+  const id = route.params.id
+  let action = ''
+  if (detail.value.status === 'PLANNING' && !detail.value.novelId) {
+    action = '⑥a 定篇幅规模'
+  } else if (detail.value.status === 'PLANNING') {
+    action = '⑥b 一个具体稿单元'
+  } else if (detail.value.status === 'REWORK') {
+    action = '⑥b 回炉一个单元'
+  } else if (detail.value.status === 'DRAFTING') {
+    action = gatePassed.value ? '⑦ 写一章正文' : 'P6 立项闸'
+  } else if (detail.value.status === 'QC') {
+    action = '⑧ 一轮质检'
+  } else {
+    ElMessage.warning('当前状态没有可试跑的单元')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`只执行「${action}」，完成后停下；不会自动进入下一步。继续？`,
+      '试跑一步', { type: 'info', confirmButtonText: '试跑' })
+  } catch {
+    return
+  }
+  acting.value = 'trial'
+  try {
+    if (detail.value.status === 'PLANNING' && !detail.value.novelId) {
+      const d = await deriveApi.post(`/api/derive/runs/${id}/plan`)
+      ElMessage.success(d.unit === 'SCALE' ? `试跑完成：定规模 ${d.chapterCount} 章` : '⑥a 单元完成')
+    } else if (detail.value.status === 'PLANNING' || detail.value.status === 'REWORK') {
+      const d = await deriveApi.post(`/api/derive/runs/${id}/draft`)
+      ElMessage.success(`⑥b 单元完成：${d.unit}${d.title ? ` · ${d.title}` : ''}`)
+    } else if (detail.value.status === 'DRAFTING' && !gatePassed.value) {
+      const g = await deriveApi.post(`/api/derive/runs/${id}/gate`)
+      ElMessage.success(`立项闸试跑完成：${g.verdict}`)
+    } else if (detail.value.status === 'DRAFTING') {
+      const w = await deriveApi.post(`/api/derive/runs/${id}/write`)
+      ElMessage.success(w.chapterNo < 0 ? '正文已全部完成' : `试跑完成：第 ${w.chapterNo} 章`)
+    } else if (detail.value.status === 'QC') {
+      const q = await deriveApi.post(`/api/derive/runs/${id}/qc`)
+      ElMessage.success(`质检试跑完成：${q.verdict}`)
+    }
+    await loadAll()
+  } catch (e) {
+    ElMessage.error(`试跑失败：${e.message}`)
+    await loadAll()
+  } finally {
+    acting.value = ''
+  }
+}
+
+/** 从断点续跑全流程：与全流程无人值守同一入口，但使用更明确的续跑提示。 */
+async function resumeTask() {
+  try {
+    await ElMessageBox.confirm(
+      '从当前断点继续执行全流程，已完成单元会跳过；不会清空已有规划或正文。继续？',
+      '续跑任务', { type: 'warning', confirmButtonText: '续跑' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await deriveApi.post(`/api/derive/runs/${route.params.id}/auto?direct=false`)
+    ElMessage.success('已从断点续跑，进度看运行过程')
+    await pollAuto()
+    startAutoPoll()
+  } catch (e) {
+    ElMessage.error(e.message)
+    await pollAuto()
+  }
+}
+
 async function stopAuto() {
   try {
     await deriveApi.post(`/api/derive/runs/${route.params.id}/auto/stop`)
@@ -598,6 +826,30 @@ async function killAuto() {
     await loadAll()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+/** 清空⑥及之后的规划/正文；⑤采样、焊接和 run 参数保留。 */
+async function clearPlanning() {
+  try {
+    await ElMessageBox.confirm(
+      '将删除本书的章节、拍实例、具体稿、正文、质检报告和成品书骨架，run 回到 PLANNING；'
+      + '⑤采样、焊接、参数和 LLM 调用账本保留。已有完整正文的 run 会被后端拒绝。继续？',
+      '清空⑥+数据',
+      { type: 'warning', confirmButtonText: '清空' }
+    )
+  } catch {
+    return
+  }
+  try {
+    acting.value = 'clear'
+    const r = await deriveApi.post(`/api/derive/runs/${route.params.id}/clear-planning`)
+    ElMessage.success(r.message || '已清空规划数据')
+    await loadAll()
+  } catch (e) {
+    ElMessage.error(e.message || '清空失败')
+  } finally {
+    acting.value = ''
   }
 }
 
@@ -661,18 +913,46 @@ const gateInfo = computed(() => {
   }
 })
 const gatePassed = computed(() => gateInfo.value?.status === 'PASS')
+const GATE_CRITERION_LABELS = {
+  single_rule: '规则单轨',
+  budget: '体量预算',
+  motive_chain: '动机链',
+  closure: '闭合',
+  function_lock: '职能锁定',
+  motif_dedup: '母题查重'
+}
+const gateCriteriaRows = computed(() => {
+  const criteria = gateInfo.value?.criteria
+  if (!criteria || typeof criteria !== 'object' || Array.isArray(criteria)) return []
+  return Object.entries(GATE_CRITERION_LABELS)
+    .filter(([key]) => criteria[key])
+    .map(([key, label]) => ({ key, label, ...criteria[key] }))
+})
 
 function gateTagType(status) {
   return { PASS: 'success', REWORK: 'warning', FAILED: 'danger', PENDING: 'info' }[status] || 'info'
 }
 function gateStatusLabel(status) {
-  return { PASS: '放行 GO', REWORK: '打回 REWORK', FAILED: '熔断 REJECT', PENDING: '待评审' }[status] || status
+  return {
+    PASS: '放行 GO',
+    REWORK: '打回 REWORK',
+    FAILED: '三轮未过',
+    PENDING: '待评审'
+  }[status] || status
+}
+function gateSeverityLabel(severity) {
+  return { HARD: '硬矛盾', FIXABLE: '可修复', ADVISORY: '建议项' }[severity] || severity || '—'
+}
+function gateRepairTargetLabel(target) {
+  if (!target || target === 'NONE') return '无需回炉'
+  if (target.startsWith('PLAN_VOLUME:')) return `第 ${target.split(':')[1]} 卷`
+  return { DRAFT: '⑥b 具体稿', SPINE: '故事脊柱', SCALE: '规模/卷数' }[target] || target
 }
 
 async function actGate() {
   try {
     await ElMessageBox.confirm(
-      '立项闸 = LLM 对全书章纲/拍清单做六判据评审（规则单轨/体量/动机链/闭合/职能/母题），一次数分钟。GO 放行 ⑦；REWORK 打回 ⑥b 整本重做；REJECT 熔断。继续？',
+      '立项闸 = LLM 对全书章纲/拍清单做六判据审稿（规则单轨/体量/动机链/闭合/职能/母题），再由系统按严重度裁决，一次数分钟。无硬伤放行 ⑦；可修复问题前两轮打回对应规划层；三轮仍未过才熔断。继续？',
       'P6 立项闸', { type: 'warning', confirmButtonText: '评审' }
     )
   } catch {
@@ -684,7 +964,7 @@ async function actGate() {
     await loadAll()
     if (g.verdict === 'GO') ElMessage.success(`立项闸 GO（第 ${g.round} 轮），⑦ 已放行`)
     else if (g.verdict === 'REWORK') ElMessage.warning(`立项闸 REWORK（${g.issues?.length ?? 0} 个问题）——按减法指令回炉 ⑥b`)
-    else ElMessage.error('立项闸 REJECT——run 已熔断 FAILED')
+    else ElMessage.error('立项闸三轮仍未过——run 已熔断 FAILED')
   } catch (e) {
     ElMessage.error(e.message)
     await loadAll()
@@ -709,8 +989,33 @@ async function actPlan() {
         await loadAll()
         return
       }
+      if (d.unit === 'NEED_SCOPE') {
+        const suggested = storyPlan.value?.scope?.volumeCount || 1
+        const { value } = await ElMessageBox.prompt(
+          '当前创作框架无法安全判断单卷还是多卷。请输入最终卷数；输入大于 1 即允许系统扩卷。',
+          '确认故事规模',
+          {
+            inputValue: String(suggested),
+            inputPattern: /^[1-9]\d*$/,
+            inputErrorMessage: '请输入大于 0 的整数',
+            confirmButtonText: '确认并继续'
+          }
+        )
+        const volumeCount = Number(value)
+        await deriveApi.post(`/api/derive/runs/${route.params.id}/plan/confirm-scope`, {
+          volumeCount,
+          allowExpansion: volumeCount > 1
+        })
+        draftLoopText.value = `已确认 ${volumeCount} 卷——继续生成故事脊柱…`
+        await loadAll()
+        continue
+      }
       if (d.unit === 'SCALE') {
         draftLoopText.value = `AI 定篇幅：${d.chapterCount} 章（分 ${d.windowTotal} 窗，每窗 ≤10 章）——开始逐窗分章…`
+      } else if (['SPINE', 'VOLUMES', 'CHARACTERS', 'SLOT_ROUTE', 'VALIDATE'].includes(d.unit)) {
+        draftLoopText.value = `⑥a 规划单元 ${d.unit} 完成`
+          + (d.volumeNo ? `（第 ${d.volumeNo} 卷，路由 ${d.routedBeats} 拍）` : '')
+          + '——继续下一单元…'
       } else {
         draftLoopText.value = `⑥a 分章 第 ${d.windowIndex}/${d.windowTotal} 窗完成`
           + `（已排 ${d.plannedChapters}/${d.chapterCount} 章 · 用拍 ${d.usedBeats}）—— 继续下一窗…`
@@ -723,6 +1028,24 @@ async function actPlan() {
     draftLoopText.value = ''
     ElMessage.error(`⑥a 中断：${e.message}。已完成的窗已落库，再点一次从断点续跑。`)
     await loadAll()
+  } finally {
+    acting.value = ''
+  }
+}
+
+async function replanVolume(volumeNo) {
+  try {
+    await ElMessageBox.confirm(
+      `只重做第 ${volumeNo} 卷的章功能槽和拍路由；已有正文卷会被后端拒绝。继续？`,
+      '单卷重规划',
+      { type: 'warning', confirmButtonText: '重规划' }
+    )
+    acting.value = 'plan'
+    await deriveApi.post(`/api/derive/runs/${route.params.id}/volumes/${volumeNo}/replan`)
+    ElMessage.success(`第 ${volumeNo} 卷拍路由已重排`)
+    await loadAll()
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') ElMessage.error(e.message || '单卷重规划失败')
   } finally {
     acting.value = ''
   }

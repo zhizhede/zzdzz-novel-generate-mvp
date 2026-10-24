@@ -29,6 +29,18 @@ export const VERDICT = {
   FAIL: { label: '熔断', type: 'danger' }
 }
 
+export const PLAN_UNIT = {
+  SCALE: { label: '定规模', type: 'primary' },
+  NEED_SCOPE: { label: '待确认规模', type: 'warning' },
+  SPINE: { label: '故事脊柱', type: 'primary' },
+  VOLUMES: { label: '卷合同', type: 'primary' },
+  CHARACTERS: { label: '角色计划', type: 'primary' },
+  SLOT_ROUTE: { label: '拍路由', type: 'warning' },
+  VALIDATE: { label: '闭环校验', type: 'warning' },
+  DONE: { label: '规划完成', type: 'success' },
+  LEGACY: { label: '旧版计划', type: 'info' }
+}
+
 export const BOOK_SOURCE = {
   SOURCE: { label: '源书', type: 'info' },
   GENERATED: { label: '系统生成', type: 'success' }
