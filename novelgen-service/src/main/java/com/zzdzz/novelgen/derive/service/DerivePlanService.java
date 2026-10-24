@@ -164,6 +164,7 @@ public class DerivePlanService {
     private final DeriveBeatRouteService beatRouteService;
     private final DerivePlanValidationService planValidationService;
     private final DeriveFactService factService;
+    private final DeriveThreadService threadService;
 
     /** 拍清单条目（临时序号 = 输入给 LLM 的 seq）。 */
     record InvBeat(int tempSeq, String source, Long assetId, Long arcId, Integer arcSegNo,
@@ -315,6 +316,7 @@ public class DerivePlanService {
         if (run.getNovelId() != null) {
             factService.rebuild(run.getId(), run.getNovelId());
         }
+        threadService.syncFromBeats(run.getId());
         var validation = planValidationService.validateBook(run.getId());
         for (int repairRound = 0; !validation.passed() && repairRound < 2; repairRound++) {
             List<Integer> volumes = repairVolumes(validation);

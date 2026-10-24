@@ -1680,3 +1680,13 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - 修复 `DeriveFactService.rebuild` 对不可变列表原地排序的问题，改为复制 mapper 结果后再排序。
 - `DeriveFactServiceTest` 增加 Mockito 集成测试：route_contract 重建事实、fact upsert、修复审计写入。
 - 定向测试通过。
+
+## P1 ThreadLedger 状态同步（2026-10-24，本地已实现，未部署）
+
+- 新增 `DeriveThreadService`：根据已落库拍合同同步 `derive_story_thread.status`：
+  - payoff 拍引用 → `PAYOFF`
+  - 普通拍引用 → `ECHOED`
+  - 无引用 → `OPEN`
+- `DerivePlanService.finishBookValidation` 在事实账重建后调用线程状态同步。
+- 新增 `DeriveThreadServiceTest`，验证 CLUE_PAYOFF 拍可把线程标为 PAYOFF。
+- `mvn -q compile`、定向测试通过；未部署线上。
