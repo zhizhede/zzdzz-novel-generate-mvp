@@ -96,10 +96,10 @@ public final class StoryPlanningPrompts {
             输入含卷合同、角色计划、线程账、剩余无指向拍和本卷章功能模板。
             要求：
             1. chapters 必须覆盖本卷全部章号，每章给功能目标、主案推进和必需 beatRole；
-            2. assignments 和 skipped 合起来必须恰好覆盖输入的全部剩余拍 seq，每拍只能出现一次；
+            2. assignments 和 skipped 合起来必须恰好覆盖输入的全部剩余拍 seq，每拍只能出现一次；forcedSkips 中的 seq 禁止出现在 assignments，系统会自动写入 skipped；
             3. 每章分配1~4拍；无关拍进 skipped 并写非空 reason；
             4. focusCharacters 只能使用输入角色 key；threadRefs 只能使用输入线程 key；
-            5. 结构与功能缺失时可给 syntheticSlots，系统会生成 SYNTHETIC 补拍；
+            5. 结构与功能缺失时可给 syntheticSlots，系统会生成 SYNTHETIC 补拍；syntheticSlots 与 assignments 共用 focusCharacters/threadRefs/dependsOn/payoffTarget/appearanceMode/requiresKnowledge/writesKnowledge/requiresState/changesState，建立前置知识的补拍必须写 writesKnowledge；
             6. 每卷末章必须有 LOCAL_CLOSURE；非末卷还要有 NEXT_HOOK，最终卷用 FINAL_CLOSURE；
             7. appearanceMode 只能取 LIVE/MEMORY/DREAM/CORPSE/RELIC/TESTIMONY/LETTER/RECORDING；
             8. storyLayer、beatRole 只能取合同枚举值；

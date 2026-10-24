@@ -240,6 +240,33 @@ public class DeriveBeatRouteService {
         return issues;
     }
 
+    /** assignments 与 syntheticSlots 共用的扁平 route_contract 字段，避免两类补拍漏读契约。 */
+    record RouteContractFields(
+            List<String> focusCharacters,
+            List<String> threadRefs,
+            List<Integer> dependsOn,
+            String payoffTarget,
+            PlanContracts.AppearanceMode appearanceMode,
+            List<String> requiresKnowledge,
+            List<String> writesKnowledge,
+            Map<String, Object> requiresState,
+            Map<String, Object> changesState) {
+    }
+
+    static RouteContractFields routeContract(JsonNode node) {
+        return new RouteContractFields(
+                strings(node.path("focusCharacters")),
+                strings(node.path("threadRefs")),
+                ints(node.path("dependsOn")),
+                node.path("payoffTarget").asText(""),
+                enumValue(PlanContracts.AppearanceMode.class,
+                        node.path("appearanceMode").asText("LIVE"), "appearanceMode"),
+                strings(node.path("requiresKnowledge")),
+                strings(node.path("writesKnowledge")),
+                map(node.path("requiresState")),
+                map(node.path("changesState")));
+    }
+
     static PlanContracts.RoutePlan parseRoute(JsonNode root, RouteContext ctx) {
         int volumeNo = root.path("volumeNo").asInt(0);
         if (volumeNo != ctx.volume().volumeNo()) {
@@ -264,22 +291,26 @@ public class DeriveBeatRouteService {
         }
         List<PlanContracts.BeatAssignment> assignments = new ArrayList<>();
         for (JsonNode node : root.path("assignments")) {
+            RouteContractFields fields = routeContract(node);
             assignments.add(new PlanContracts.BeatAssignment(
                     node.path("seq").asInt(0),
                     node.path("chapterNo").asInt(0),
                     enumValue(PlanContracts.StoryLayer.class, node.path("storyLayer").asText(""), "storyLayer"),
                     enumValue(PlanContracts.BeatRole.class, node.path("beatRole").asText(""), "beatRole"),
-                    strings(node.path("focusCharacters")),
-                    strings(node.path("threadRefs")),
-                    ints(node.path("dependsOn")),
-                    node.path("payoffTarget").asText(""),
-                    enumValue(PlanContracts.AppearanceMode.class,
-                            node.path("appearanceMode").asText("LIVE"), "appearanceMode"),
-                    strings(node.path("requiresKnowledge")),
-                    strings(node.path("writesKnowledge")),
-                    map(node.path("requiresState")),
-                    map(node.path("changesState"))));
+                    fields.focusCharacters(),
+                    fields.threadRefs(),
+                    fields.dependsOn(),
+                    fields.payoffTarget(),
+                    fields.appearanceMode(),
+                    fields.requiresKnowledge(),
+                    fields.writesKnowledge(),
+                    fields.requiresState(),
+                    fields.changesState()));
         }
+
+        // 强制跳过是确定性红线：模型即使把它写回 assignments 也丢弃，
+        // 后续统一由 forcedSkips 回填 skipped，避免 ROUTE_SKIP_DUP。
+        assignments.removeIf(a -> ctx.forcedSkips().containsKey(a.seq()));
         List<PlanContracts.SyntheticAssignment> synthetic = new ArrayList<>();
         for (JsonNode node : root.path("syntheticSlots")) {
             int chapterNo = node.path("chapterNo").asInt(0);
@@ -297,17 +328,24 @@ public class DeriveBeatRouteService {
             if (goal.isEmpty()) {
                 goal = "补齐第" + chapterNo + "章 " + role.name() + " 结构功能，服务本卷合同与闭环";
             }
+            RouteContractFields fields = routeContract(node);
             synthetic.add(new PlanContracts.SyntheticAssignment(
                     chapterNo,
                     storyLayer,
                     role,
                     beatType,
                     goal,
-                    strings(node.path("focusCharacters")),
-                    strings(node.path("threadRefs")),
-                    enumValue(PlanContracts.AppearanceMode.class,
-                            node.path("appearanceMode").asText("LIVE"), "appearanceMode")));
+                    fields.focusCharacters(),
+                    fields.threadRefs(),
+                    fields.appearanceMode(),
+                    fields.dependsOn(),
+                    fields.payoffTarget(),
+                    fields.requiresKnowledge(),
+                    fields.writesKnowledge(),
+                    fields.requiresState(),
+                    fields.changesState()));
         }
+
         List<PlanContracts.SkipAssignment> skipped = new ArrayList<>();
         for (JsonNode node : root.path("skipped")) {
             skipped.add(new PlanContracts.SkipAssignment(
@@ -323,6 +361,7 @@ public class DeriveBeatRouteService {
         });
         synthetic.addAll(synthesizeMissingRoles(chapters, assignments, synthetic,
                 ctx.volume().requiredThreads(), ctx.threadKeys()));
+        ensureRequiredThreadPayoffs(assignments, synthetic, ctx);
         PlanContracts.RoutePlan plan = new PlanContracts.RoutePlan(
                 volumeNo, chapters, assignments, synthetic, skipped);
         List<PlanContracts.PlanIssue> issues = validateRoute(plan, ctx);
@@ -330,6 +369,110 @@ public class DeriveBeatRouteService {
             throw new PlanJson.Bad(issues.get(0).message());
         }
         return plan;
+    }
+
+    /** 确定性补齐 requiredThreads 的兑现拍，避免把纯结构缺口留给 P6。 */
+    static void ensureRequiredThreadPayoffs(
+            List<PlanContracts.BeatAssignment> assignments,
+            List<PlanContracts.SyntheticAssignment> synthetic,
+            RouteContext ctx) {
+        Set<String> required = new LinkedHashSet<>(ctx.volume().requiredThreads());
+        if (required.isEmpty()) {
+            return;
+        }
+        Set<String> paid = new LinkedHashSet<>();
+        for (PlanContracts.BeatAssignment assignment : assignments) {
+            if (isPayoffRole(assignment.beatRole().name())) {
+                paid.addAll(assignment.threadRefs());
+            }
+        }
+        for (PlanContracts.SyntheticAssignment item : synthetic) {
+            if (isPayoffRole(item.beatRole().name())) {
+                paid.addAll(item.threadRefs());
+            }
+        }
+        List<String> missing = required.stream().filter(key -> !paid.contains(key)).toList();
+        if (missing.isEmpty()) {
+            return;
+        }
+        int finalChapter = ctx.volume().toChapter();
+        for (String threadKey : missing) {
+            boolean repaired = false;
+            for (int i = 0; i < assignments.size(); i++) {
+                PlanContracts.BeatAssignment assignment = assignments.get(i);
+                if (assignment.chapterNo() != null && assignment.chapterNo() == finalChapter
+                        && isPayoffRole(assignment.beatRole().name())) {
+                    assignments.set(i, withThreadRef(assignment, threadKey));
+                    repaired = true;
+                    break;
+                }
+            }
+            if (!repaired) {
+                for (int i = 0; i < synthetic.size(); i++) {
+                    PlanContracts.SyntheticAssignment item = synthetic.get(i);
+                    if (item.chapterNo() == finalChapter && isPayoffRole(item.beatRole().name())) {
+                        synthetic.set(i, withThreadRef(item, threadKey));
+                        repaired = true;
+                        break;
+                    }
+                }
+            }
+            if (!repaired) {
+                long chapterBeats = assignments.stream()
+                        .filter(a -> a.chapterNo() != null && a.chapterNo() == finalChapter).count()
+                        + synthetic.stream().filter(s -> s.chapterNo() == finalChapter).count();
+                if (chapterBeats < 4) {
+                    synthetic.add(finalClosureForThread(ctx, finalChapter, threadKey));
+                }
+            }
+        }
+    }
+
+    private static PlanContracts.BeatAssignment withThreadRef(
+            PlanContracts.BeatAssignment assignment, String threadKey) {
+        List<String> refs = new ArrayList<>(assignment.threadRefs());
+        if (!refs.contains(threadKey)) {
+            refs.add(threadKey);
+        }
+        return new PlanContracts.BeatAssignment(
+                assignment.seq(), assignment.chapterNo(), assignment.storyLayer(),
+                assignment.beatRole(), assignment.focusCharacters(), refs,
+                assignment.dependsOn(), assignment.payoffTarget(), assignment.appearanceMode(),
+                assignment.requiresKnowledge(), assignment.writesKnowledge(),
+                assignment.requiresState(), assignment.changesState());
+    }
+
+    private static PlanContracts.SyntheticAssignment withThreadRef(
+            PlanContracts.SyntheticAssignment item, String threadKey) {
+        List<String> refs = new ArrayList<>(item.threadRefs());
+        if (!refs.contains(threadKey)) {
+            refs.add(threadKey);
+        }
+        return new PlanContracts.SyntheticAssignment(
+                item.chapterNo(), item.storyLayer(), item.beatRole(), item.beatType(),
+                item.goal(), item.focusCharacters(), refs, item.appearanceMode(),
+                item.dependsOn(), item.payoffTarget(), item.requiresKnowledge(),
+                item.writesKnowledge(), item.requiresState(), item.changesState());
+    }
+
+    private static boolean isPayoffRole(String role) {
+        return "CLUE_PAYOFF".equals(role)
+                || "LOCAL_CLOSURE".equals(role)
+                || "FINAL_REVEAL".equals(role)
+                || "FINAL_CLOSURE".equals(role);
+    }
+    private static PlanContracts.SyntheticAssignment finalClosureForThread(
+            RouteContext ctx, int chapterNo, String threadKey) {
+        List<String> focus = ctx.characterKeys().isEmpty()
+                ? List.of("C1") : List.of(ctx.characterKeys().iterator().next());
+        PlanContracts.BeatRole role = "FINAL".equals(ctx.volume().globalRole())
+                ? PlanContracts.BeatRole.FINAL_CLOSURE
+                : PlanContracts.BeatRole.CLUE_PAYOFF;
+        return new PlanContracts.SyntheticAssignment(
+                chapterNo, PlanContracts.StoryLayer.LOCAL_CASE, role, "收束",
+                "补齐线程兑现：" + threadKey, focus, List.of(threadKey),
+                PlanContracts.AppearanceMode.LIVE, List.of(), threadKey,
+                List.of(), List.of(), Map.of(), Map.of());
     }
 
     /**
@@ -746,6 +889,12 @@ public class DeriveBeatRouteService {
         root.set("threads", PlanJsonViews.threads(storyThreadMapper.selectList(
                 new LambdaQueryWrapper<StoryThreadDO>()
                         .eq(StoryThreadDO::getRunId, run.getId()))));
+        ArrayNode forced = root.putArray("forcedSkips");
+        ctx.forcedSkips().forEach((seq, reason) -> {
+            ObjectNode item = forced.addObject();
+            item.put("seq", seq);
+            item.put("reason", reason);
+        });
         ArrayNode beats = root.putArray("remainingBeats");
         for (DerivePlanService.InvBeat beat : ctx.inventory()) {
             if (ctx.forcedSkips().containsKey(beat.tempSeq())) {

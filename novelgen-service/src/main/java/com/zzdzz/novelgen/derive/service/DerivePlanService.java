@@ -3,6 +3,7 @@ package com.zzdzz.novelgen.derive.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
@@ -44,6 +45,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * ⑥a 章节计划（v3.2 §⑥a：LLM 分章 + 脚本校验 ≤2 轮）。
@@ -349,6 +351,56 @@ public class DerivePlanService {
                 null, beats, warnings);
     }
 
+    private static final Pattern FACT_CHARACTER = Pattern.compile("^C\\d+");
+
+    /** 知识事实的粗粒度归一，仅用于寻找此前已经写入的相近事实。 */
+    static String factCore(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String value = FACT_CHARACTER.matcher(text.trim()).replaceAll("");
+        value = value.replaceAll("(内容|详情|证据|事实|结果|情况|成型|完成)$", "");
+        value = value.replaceAll("的", "");
+        return value.replaceAll("[^\\p{L}\\p{N}]", "");
+    }
+
+    static boolean factMatches(String writerFact, String requiredFact) {
+        String required = factCore(requiredFact);
+        String writer = factCore(writerFact);
+        return required.length() >= 4 && writer.contains(required);
+    }
+
+    private static BeatInstanceDO findEarlierFactWriter(
+            List<BeatInstanceDO> rows,
+            BeatInstanceDO target,
+            String fact,
+            Map<String, ObjectNode> routeByBeatId) {
+        if (target.getChapterNo() == null) {
+            return null;
+        }
+        for (BeatInstanceDO prior : rows) {
+            if (prior.getId() == target.getId()
+                    || prior.getStatus() == null || "SKIPPED".equals(prior.getStatus())
+                    || prior.getChapterNo() == null
+                    || prior.getSeq() == null
+                    || prior.getChapterNo() > target.getChapterNo()
+                    || (prior.getChapterNo().equals(target.getChapterNo())
+                            && prior.getSeq() >= target.getSeq())) {
+                continue;
+            }
+            ObjectNode priorRoute = routeByBeatId.get(String.valueOf(prior.getId()));
+            if (priorRoute == null) {
+                continue;
+            }
+            for (JsonNode write : priorRoute.path("writesKnowledge")) {
+                if (factMatches(write.asText(""), fact)) {
+                    return prior;
+                }
+            }
+        }
+        return null;
+    }
+
     /** 对已落库路由做知识传播修复：只补到已有获知拍，找不到来源时不伪造。 */
     private void repairPersistedKnowledge(long runId) {
         List<BeatInstanceDO> rows = new ArrayList<>(beatInstanceMapper.selectList(
@@ -377,6 +429,9 @@ public class DerivePlanService {
                         .filter(character -> !known.contains(character))
                         .toList();
                 BeatInstanceDO writer = firstWriter.get(fact);
+                if (writer == null) {
+                    writer = findEarlierFactWriter(rows, beat, fact, routeByBeatId);
+                }
                 if (writer == null || missing.isEmpty()) {
                     if (!missing.isEmpty()) {
                         log.warn("落库知识缺口：fact={} 在早于 seq={} 的拍中无获知来源，缺口={}",
@@ -385,6 +440,20 @@ public class DerivePlanService {
                     continue;
                 }
                 ObjectNode writerRoute = routeByBeatId.get(String.valueOf(writer.getId()));
+                if (writerRoute == null) {
+                    continue;
+                }
+                ArrayNode writerWrites = writerRoute.withArray("writesKnowledge");
+                boolean hasExactFact = false;
+                for (JsonNode write : writerWrites) {
+                    if (fact.equals(write.asText(""))) {
+                        hasExactFact = true;
+                        break;
+                    }
+                }
+                if (!hasExactFact) {
+                    writerWrites.add(fact);
+                }
                 var writerFocus = writerRoute.withArray("focusCharacters");
                 Set<String> existing = new LinkedHashSet<>();
                 writerFocus.forEach(node -> existing.add(node.asText("")));

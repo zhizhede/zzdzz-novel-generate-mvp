@@ -1557,3 +1557,78 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - run39 新中断根因：模型第 3 轮把 seq7/8/23/24/29/30 同时写进 `beats.filled` 与 `skipped`；旧校验把 `filled.contains(seq)` 视为非法，连续 3 轮后停止。此前只处理过 `skipped=0`，没有处理 filled/skipped 重叠。
 - 系统性收口：`BATCH_PROMPT` 明确 skipped 只能放未出现在 beats 的 seq；`parseBatch` 把 skipped 当辅助标注而不是第二份真源——忽略 0、越界、重复、已填实项，最终仍由 `filled ∪ skipped` 覆盖校验硬拦缺拍。
 - 新增 `parseBatch_ignoresContradictorySkippedAnnotations` 回归测试；全量 `mvn -q test` 通过；derive jar 打包通过。未重启/部署线上。
+
+## ⑥b skipped 冲突容错已上线宝塔（2026-10-24，已授权部署）
+
+- 部署范围：仅 `novelgen-derive` jar；前端与主站 `novelgen` 未改动、未重启。
+- 构建：`mvn -q -pl novelgen-derive-app -am package -DskipTests`；全量 `mvn -q test` 已通过。
+- 远端备份：`/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-skippedconflict`。
+- 线上 jar SHA256=`21e711580b6aedbd18c35a193b923ca3d477cb081620d3bee02e4711aaa68f7c`，与本地产物一致。
+- `novelgen-derive` active，PID 1829916，8091/context-path `/derive` 正常；Flyway schema v123 validate 通过。
+- 出口验收：根路径 200；带 Origin 的 `/derive/api/derive/ping` 返回 401 `A0003` JSON。
+- 本次未推送 Git，未迁移数据库。
+
+## ⑥a 拍路由 forced-skip 冲突收口（2026-10-24，本地已修、未部署）
+
+- run39 在上一修复后已跑完 ⑥b（11:18:24 全部窗完成→DRAFTING）并进入 P6；P6 打回后自动回到 ⑥a 重排，随后出现新的 `skip seq 重复或已分配: 1`。
+- 根因：run39 的 seq1~6 因“无死亡/无超自然”红线被 `DeriveBeatRouteService` 标为 forcedSkips；模型第3轮又把 seq1~8 写回 assignments，`parseRoute` 再回填 forced skip1，触发 `ROUTE_SKIP_DUP`。
+- 收口：`parseRoute` 丢弃模型对 forced-skip seq 的 assignments；路由提示输入显式增加 `forcedSkips`，并禁止模型分配这些 seq；新增 forced-skip echo 回归测试。
+- 全量 `mvn -q test` 通过；本次未部署线上。
+
+## ⑥a forced-skip 路由容错已上线宝塔（2026-10-24，已授权部署）
+
+- 部署范围：仅 `novelgen-derive` jar；前端与主站 `novelgen` 未改动、未重启。
+- 构建：`mvn -q -pl novelgen-derive-app -am package -DskipTests`；全量 `mvn -q test` 已通过。
+- 远端备份：`/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-forcedskip`。
+- 线上 jar SHA256=`cec0855fa863415dadbe6627dd8d94d421370ffa1ffeaced71100aa63da6a384`，与本地产物一致。
+- `novelgen-derive` active，PID 1838454，8091/context-path `/derive` 正常；Flyway schema v123 validate 通过。
+- 出口验收：根路径 200；带 Origin 的 `/derive/api/derive/ping` 返回 401 `A0003` JSON。
+- 本次未推送 Git，未迁移数据库。
+
+## synthetic 补拍知识/状态契约补齐（2026-10-24，本地已修、未部署）
+
+- run39 第三次停止根因：模型在 `syntheticSlots` 中写入 `writesKnowledge`，但旧 `SyntheticAssignment` 没有知识/状态字段，`parseRoute` 解析后丢弃，落库 `route_contract` 缺少知识来源，`DerivePlanValidationService` 再校验时报“焦点角色均尚未获得知识”。
+- 结构收口：`SyntheticAssignment` 补齐 `dependsOn/payoffTarget/requiresKnowledge/writesKnowledge/requiresState/changesState`；新增共享 `RouteContractFields` 解析器，assignments 与 syntheticSlots 统一读取扁平 route_contract，避免两类拍再次漏字段。
+- 提示词同步：`ROUTE` 明确 syntheticSlots 与 assignments 共用知识/状态契约，建立前置知识的补拍必须写 `writesKnowledge`。
+- 新增回归：synthetic 补拍保留知识/状态并可 JSON 落库；全量 `mvn -q test` 通过。未提交、未部署。
+
+## synthetic 知识契约修复已上线宝塔（2026-10-24，已授权部署）
+
+- 部署前确认 run39 的自动流程已于 13:02 停止，未在运行中重启服务。
+- 部署范围：仅 `novelgen-derive` jar；前端与主站 `novelgen` 未改动、未重启。
+- 构建：`mvn -q -pl novelgen-derive-app -am package -DskipTests`；全量 `mvn -q test` 已通过。
+- 远端备份：`/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-syntheticknowledge`。
+- 线上 jar SHA256=`ed67b0d7fd0df0b822b7a54f04857d54f2f3febb450e43d0f0466a2abc51dbe5`，与本地产物一致。
+- `novelgen-derive` active，PID 1844859，8091/context-path `/derive` 正常；Flyway schema v123 validate 通过。
+- 出口验收：根路径 200；带 Origin 的 `/derive/api/derive/ping` 返回 401 `A0003` JSON。
+- 本次未推送 Git，未迁移数据库；run39 仍需人工点续跑以验证 synthetic 知识来源修复。
+
+## run40 全流程实跑记录（2026-10-24，线上只读实跑）
+
+- 目标：从⑤建 run 开始跑随机衍生全流程，原书提取直接使用 derive_gen 已有素材池；入口 `POST /api/derive/runs` + `/auto?direct=false`。
+- 输入参数：seed=450045、tags=[悬疑,推理]、pace=0.75、form=SHORT_STANDALONE、outcome=闭合、words=12000~18000、intent=现代都市旧楼失踪单案短篇。
+- ⑤结果：runId=40，domain=归途公路，weldedCode=O-F01，PLANNING；weld LLM 调用 id=1732，完整 request/response 已落 `var/run40-llm-calls.jsonl`。
+- ⑥a/⑥b 第一轮：18章、约25拍；书名《归途公路》、主角陆征；5 个 ⑥b 窗全部完成，进入 DRAFTING。
+- P6 round1：`derive_gate` id=1749 先因 issues 数组格式失败，id=1750 成功判 REWORK/SPINE，发现主线、真相卡、章纲、人物生死/职能多处不一致。
+- SPINE 回炉后第二轮：书名《旧楼第七层》、主角顾迟；18章、约25拍；5 个 ⑥b 窗全部完成。
+- P6 round2：`derive_gate` id=1766 判 REWORK/PLAN_VOLUME:1，指出角色职能、动机链、线索植入章、结局兑现仍有硬伤。
+- 最终停止：第三轮规划校验于 14:02:24 报 `故事规划校验失败：焦点角色均尚未获得知识：C2完成的详细报告内容`；run 40 保持 `PLANNING`、novelId=87、`GATE.repairTarget=PLAN_VOLUME:1`，未进入⑦/⑧。
+- 记录文件：`var/run40-trace.md`、`var/run40-llm-calls.jsonl`、`var/run40-detail-final.json`、`var/run40-beats-final.json`、`var/run40-qc-final.json`。
+
+## 随机衍生链路数据库备份与修复计划（2026-10-24）
+
+- 已备份 `derive_gen` 相关表结构+数据到 `var/db-backup-20261024-144541/`：
+  - `derive_gen-involved.dump`（pg_dump -F c，SHA256=`00BF2B842C5CD1E373EA2940A1B2213AB1097FB46C0C8223E74E036160EE80C4`）
+  - `derive_gen-involved.sql`（pg_dump -F p，SHA256=`BE5D6912403787E6DCC1D4ED2C75583D35AA624DE9105EC672F98318DD379A8E`）
+  - `derive_gen-involved.restore-list.txt`
+  - `MANIFEST.txt`
+- 备份表包含 run、规划/角色/线程表、beat_instance、chapters、novels、draft/qc/world state、llm_call_log、素材池与采样表、calibration/work_fingerprint、flyway_schema_history。
+- 新增修复计划：`docs/design/derive-flow-v2-repair-plan.md`，覆盖 RouteContractCodec、FactLedger、ThreadLedger、PlanRepairEngine、PlanPrecheck、StageRunner、错误分类、提示词小步化、trace/replay、迁移与上线阶段。
+
+## DeriveFlow v2 P0 确定性修复（2026-10-24，本地已实现，未部署）
+
+- 新增修复计划：`docs/superpowers/plans/2026-10-24-derive-flow-v2-p0.md`，对应设计文档 `docs/design/derive-flow-v2-repair-plan.md`。
+- `DeriveBeatRouteService.ensureRequiredThreadPayoffs`：requiredThreads 缺少兑现拍时，自动追加到已有 FINAL/CLUE payoff 拍，必要时生成 final-closure synthetic；避免把纯线程闭环缺口留给 P6。
+- `DerivePlanService` 新增事实粗归一 `factCore/factMatches`；`repairPersistedKnowledge` 可把“C2完成的详细报告内容”这类相近事实匹配到更早的 writer，并把精确 fact 补回 writer 的 `writesKnowledge`。
+- 新增回归测试：`DeriveBeatRouteServiceTest.requiredThreadPayoffIsAddedToSyntheticClosure`、`DerivePlanKnowledgeRepairTest.factMatchesReportVariants`。
+- 验证：`mvn -q compile`、全量 `mvn -q test`、`mvn -q -pl novelgen-derive-app -am package -DskipTests` 均通过；未启动/重启服务，未部署线上。

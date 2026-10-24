@@ -213,7 +213,21 @@ public final class PlanContracts {
             String goal,
             List<String> focusCharacters,
             List<String> threadRefs,
-            AppearanceMode appearanceMode) {
+            AppearanceMode appearanceMode,
+            List<Integer> dependsOn,
+            String payoffTarget,
+            List<String> requiresKnowledge,
+            List<String> writesKnowledge,
+            Map<String, Object> requiresState,
+            Map<String, Object> changesState) {
+
+        /** 兼容系统自动补拍：没有知识/状态契约时使用空值。 */
+        public SyntheticAssignment(Integer chapterNo, StoryLayer storyLayer, BeatRole beatRole,
+                                   String beatType, String goal, List<String> focusCharacters,
+                                   List<String> threadRefs, AppearanceMode appearanceMode) {
+            this(chapterNo, storyLayer, beatRole, beatType, goal, focusCharacters, threadRefs,
+                    appearanceMode, List.of(), "", List.of(), List.of(), Map.of(), Map.of());
+        }
     }
 
     public record RoutePlan(
