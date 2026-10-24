@@ -1632,3 +1632,19 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - `DerivePlanService` 新增事实粗归一 `factCore/factMatches`；`repairPersistedKnowledge` 可把“C2完成的详细报告内容”这类相近事实匹配到更早的 writer，并把精确 fact 补回 writer 的 `writesKnowledge`。
 - 新增回归测试：`DeriveBeatRouteServiceTest.requiredThreadPayoffIsAddedToSyntheticClosure`、`DerivePlanKnowledgeRepairTest.factMatchesReportVariants`。
 - 验证：`mvn -q compile`、全量 `mvn -q test`、`mvn -q -pl novelgen-derive-app -am package -DskipTests` 均通过；未启动/重启服务，未部署线上。
+
+## DeriveFlow v2 P1 数据账本基础（2026-10-24，本地已实现，未部署）
+
+- 新增 Flyway derive 迁移：
+  - `V124__derive_fact.sql`
+  - `V125__derive_repair_log.sql`
+- 新增实体：
+  - `DeriveFactDO`
+  - `DeriveRepairLogDO`
+- 新增 Mapper/XML：
+  - `DeriveFactMapper`
+  - `DeriveRepairLogMapper`
+- 表结构：
+  - `derive_fact`：fact_key、canonical_text、writers/readers、planted/revealed chapter、status、contract；
+  - `derive_repair_log`：stage、repair_type、before_json、after_json、reason、target。
+- `mvn -q compile`、全量 `mvn -q test`、derive jar 打包通过；未部署线上。
