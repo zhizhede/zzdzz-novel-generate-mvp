@@ -163,6 +163,7 @@ public class DerivePlanService {
     private final DeriveStoryPlanService storyPlanService;
     private final DeriveBeatRouteService beatRouteService;
     private final DerivePlanValidationService planValidationService;
+    private final DeriveFactService factService;
 
     /** 拍清单条目（临时序号 = 输入给 LLM 的 seq）。 */
     record InvBeat(int tempSeq, String source, Long assetId, Long arcId, Integer arcSegNo,
@@ -311,6 +312,9 @@ public class DerivePlanService {
 
     private PlanVO finishBookValidation(RunDO run) {
         repairPersistedKnowledge(run.getId());
+        if (run.getNovelId() != null) {
+            factService.rebuild(run.getId(), run.getNovelId());
+        }
         var validation = planValidationService.validateBook(run.getId());
         for (int repairRound = 0; !validation.passed() && repairRound < 2; repairRound++) {
             List<Integer> volumes = repairVolumes(validation);
@@ -453,6 +457,13 @@ public class DerivePlanService {
                 }
                 if (!hasExactFact) {
                     writerWrites.add(fact);
+                    factService.recordRepair(runId, "PLAN_VALIDATE",
+                            "KNOWLEDGE_WRITER_MATCH",
+                            Map.of("fact", fact),
+                            Map.of("writerSeq", writer.getSeq(),
+                                    "writerRoute", writerRoute.toString()),
+                            "相近事实匹配到已有 writer 并回填精确知识",
+                            "PLAN_VOLUME");
                 }
                 var writerFocus = writerRoute.withArray("focusCharacters");
                 Set<String> existing = new LinkedHashSet<>();

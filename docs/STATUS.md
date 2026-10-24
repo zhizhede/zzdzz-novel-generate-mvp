@@ -1648,3 +1648,29 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
   - `derive_fact`：fact_key、canonical_text、writers/readers、planted/revealed chapter、status、contract；
   - `derive_repair_log`：stage、repair_type、before_json、after_json、reason、target。
 - `mvn -q compile`、全量 `mvn -q test`、derive jar 打包通过；未部署线上。
+
+## 宝塔 derive_gen 全库备份与 P1 迁移测试（2026-10-24）
+
+- 远端备份目录：`/www/backup/novelgen-derive/20261024-154919/`
+- 备份文件：`derive_gen-full.dump`（pg_dump -F c，结构+数据，34MB）
+- SHA256：`07428adecce19842160fc7436f546917c7e3877e22078c934101eca55de96dd9`
+- 已生成 `derive_gen-full.restore-list.txt` 与 `SHA256SUMS.txt`。
+- 测试方式：用全库备份创建临时库 `derive_gen_test_20261024_154919`，应用 V124/V125，插入并删除 `derive_fact`、`derive_repair_log` 测试行。
+- 结果：V124/V125 均执行成功；JSONB 插入、唯一键、外键和删除均通过；临时测试库已删除。
+- 生产 `derive_gen` 未修改，derive 服务未重启。
+
+## P1 FactLedger 服务接入（2026-10-24，本地已实现，未部署）
+
+- 新增 `DeriveFactService`：从 `beat_instance.route_contract` 重建 `derive_fact`，按 `factKey` 幂等 upsert writers/readers/planted/revealed。
+- `DerivePlanService.finishBookValidation` 在规划校验前调用 `factService.rebuild`。
+- `repairPersistedKnowledge` 匹配到相近 writer 后，会写入 `derive_repair_log`（`KNOWLEDGE_WRITER_MATCH`）。
+- 新增 `DeriveFactServiceTest` 覆盖 factKey 稳定性与区分度。
+- `mvn -q compile`、`mvn -q test -Dtest=DeriveFactServiceTest` 已通过；未部署线上。
+
+## P1 FactLedger 服务接入（2026-10-24，本地已实现，未部署）
+
+- 新增 `DeriveFactService`：从 `beat_instance.route_contract` 重建 `derive_fact`，按 `factKey` 幂等 upsert writers/readers/planted/revealed。
+- `DerivePlanService.finishBookValidation` 在规划校验前调用 `factService.rebuild`。
+- `repairPersistedKnowledge` 匹配到相近 writer 后，会写入 `derive_repair_log`（`KNOWLEDGE_WRITER_MATCH`）。
+- 新增 `DeriveFactServiceTest` 覆盖 factKey 稳定性与区分度。
+- 全量 `mvn -q test` 与 derive jar 打包通过；未部署线上。
