@@ -2,6 +2,7 @@ package com.zzdzz.novelgen.llm;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +38,7 @@ public class LlmJson {
     /** LLM 输出专用：容忍字符串内的裸换行/Tab 等控制字符 */
     private final ObjectMapper lenientMapper = JsonMapper.builder()
             .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .build();
 
 
@@ -114,6 +116,7 @@ public class LlmJson {
             return lenientMapper.readTree(json);
         } catch (Exception first) {
             for (String candidate : List.of(
+                    repairDuplicateBeatObjects(json),
                     repairStraightQuotes(json),
                     repairMissingCommas(json),
                     closeUnclosed(json),
@@ -126,8 +129,186 @@ public class LlmJson {
                     // 逐级降级，全败抛首轮原因——它最贴近真实畸形点
                 }
             }
+            if (isDuplicateField(first)) {
+                throw new Bad("JSON 对象存在重复键：" + duplicateFieldName(first)
+                        + "；同一对象内每个 seq/filled 必须写成独立对象");
+            }
             throw first;
         }
+    }
+
+    /**
+     * 修复模型把两个拍塞进同一对象的畸形：
+     * {@code {"seq":5,"filled":"A","seq":41,"filled":"B"}}。
+     * 仅在 beats 数组顶层对象出现第二个 seq 时拆成两个对象，其他重复键保持失败。
+     */
+    static String repairDuplicateBeatObjects(String json) {
+        StringBuilder out = new StringBuilder(json.length() + 32);
+        boolean inStr = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inStr) {
+                out.append(c);
+                if (c == '\\' && i + 1 < json.length()) {
+                    out.append(json.charAt(++i));
+                } else if (c == '"') {
+                    inStr = false;
+                }
+                continue;
+            }
+            if (c != '"') {
+                out.append(c);
+                continue;
+            }
+            int endQuote = findStringEnd(json, i + 1);
+            if (endQuote < 0) {
+                out.append(json.substring(i));
+                break;
+            }
+            String token = json.substring(i + 1, endQuote);
+            int next = skipWhitespace(json, endQuote + 1);
+            if ("beats".equals(token) && next < json.length() && json.charAt(next) == ':') {
+                int arrayStart = skipWhitespace(json, next + 1);
+                if (arrayStart < json.length() && json.charAt(arrayStart) == '[') {
+                    int arrayEnd = findMatchingArrayEnd(json, arrayStart);
+                    if (arrayEnd > arrayStart) {
+                        out.append(json, i, arrayStart + 1);
+                        out.append(splitDuplicateSeqObjects(
+                                json.substring(arrayStart + 1, arrayEnd)));
+                        out.append(']');
+                        i = arrayEnd;
+                        continue;
+                    }
+                }
+            }
+            out.append(json, i, endQuote + 1);
+            i = endQuote;
+        }
+        return out.toString();
+    }
+
+    private static String splitDuplicateSeqObjects(String arrayBody) {
+        StringBuilder out = new StringBuilder(arrayBody.length() + 16);
+        boolean inStr = false;
+        int objectDepth = 0;
+        boolean seenSeq = false;
+        for (int i = 0; i < arrayBody.length(); i++) {
+            char c = arrayBody.charAt(i);
+            if (inStr) {
+                out.append(c);
+                if (c == '\\' && i + 1 < arrayBody.length()) {
+                    out.append(arrayBody.charAt(++i));
+                } else if (c == '"') {
+                    inStr = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                int endQuote = findStringEnd(arrayBody, i + 1);
+                if (endQuote < 0) {
+                    out.append(arrayBody.substring(i));
+                    break;
+                }
+                String token = arrayBody.substring(i + 1, endQuote);
+                int next = skipWhitespace(arrayBody, endQuote + 1);
+                boolean key = next < arrayBody.length() && arrayBody.charAt(next) == ':';
+                if (objectDepth == 1 && key && "seq".equals(token) && seenSeq) {
+                    int comma = lastNonWhitespace(out);
+                    if (comma >= 0 && out.charAt(comma) == ',') {
+                        out.setCharAt(comma, '}');
+                        out.setLength(comma + 1);
+                        out.append(",{");
+                        seenSeq = false;
+                    }
+                }
+                if (objectDepth == 1 && key && "seq".equals(token)) {
+                    seenSeq = true;
+                }
+                out.append(arrayBody, i, endQuote + 1);
+                i = endQuote;
+                continue;
+            }
+            if (c == '{') {
+                if (objectDepth == 0) {
+                    seenSeq = false;
+                }
+                objectDepth++;
+            } else if (c == '}') {
+                objectDepth = Math.max(0, objectDepth - 1);
+            }
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    private static int findStringEnd(String json, int from) {
+        for (int i = from; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '\\') {
+                i++;
+            } else if (c == '"') {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int findMatchingArrayEnd(String json, int start) {
+        int depth = 0;
+        boolean inStr = false;
+        for (int i = start; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inStr) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    inStr = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inStr = true;
+            } else if (c == '[') {
+                depth++;
+            } else if (c == ']' && --depth == 0) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int skipWhitespace(String text, int from) {
+        int i = from;
+        while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
+            i++;
+        }
+        return i;
+    }
+
+    private static int lastNonWhitespace(StringBuilder text) {
+        for (int i = text.length() - 1; i >= 0; i--) {
+            if (!Character.isWhitespace(text.charAt(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isDuplicateField(Exception e) {
+        String message = e.getMessage();
+        return message != null && (message.contains("Duplicate field")
+                || message.contains("重复键"));
+    }
+
+    private static String duplicateFieldName(Exception e) {
+        String message = e.getMessage() == null ? "" : e.getMessage();
+        int start = message.indexOf("Duplicate field '");
+        if (start < 0) {
+            return "未知";
+        }
+        int from = start + "Duplicate field '".length();
+        int end = message.indexOf('\'', from);
+        return end > from ? message.substring(from, end) : "未知";
     }
 
     /**

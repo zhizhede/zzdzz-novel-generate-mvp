@@ -197,6 +197,34 @@ class LlmJsonTest {
     }
 
     @Test
+    void duplicateBeatSeqPairsAreSplitIntoObjects() throws Exception {
+        String raw = """
+                {"chapters":[{"no":5,"beats":[
+                  {"seq":5,"filled":"第一拍","seq":41,"filled":"第二拍"}
+                ]},{"no":6,"beats":[
+                  {"seq":6,"filled":"第三拍","seq":42,"filled":"第四拍"}
+                ]}]}
+                """;
+
+        JsonNode root = llmJson.read(raw);
+
+        assertThat(root.path("chapters").get(0).path("beats")).hasSize(2);
+        assertThat(root.path("chapters").get(0).path("beats").get(0).path("seq").asInt())
+                .isEqualTo(5);
+        assertThat(root.path("chapters").get(0).path("beats").get(1).path("seq").asInt())
+                .isEqualTo(41);
+        assertThat(root.path("chapters").get(1).path("beats").get(1).path("seq").asInt())
+                .isEqualTo(42);
+    }
+
+    @Test
+    void duplicateNonBeatKeyStaysLoud() {
+        assertThatThrownBy(() -> llmJson.read("{\"a\":1,\"a\":2}"))
+                .isInstanceOf(LlmJson.Bad.class)
+                .hasMessageContaining("重复键");
+    }
+
+    @Test
     void validJsonUntouchedByMissingCommaRepair() {
         String valid = "{\"a\":[1,2],\"b\":{\"c\":true},\"d\":null,\"e\":\"x\"}";
         assertThat(LlmJson.repairMissingCommas(valid)).isEqualTo(valid);
