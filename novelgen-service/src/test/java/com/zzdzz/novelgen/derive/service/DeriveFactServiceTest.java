@@ -1,28 +1,67 @@
 package com.zzdzz.novelgen.derive.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveFactMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveRepairLogMapper;
+import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveFactDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveRepairLogDO;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.List;
+import java.util.Map;
 
-/** FactLedger 纯函数测试。 */
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/** FactLedger 重建与修复审计测试。 */
+@ExtendWith(MockitoExtension.class)
 class DeriveFactServiceTest {
 
-    @Test
-    void factKeyIsStableAndPrefixed() {
-        String first = DeriveFactService.factKey("C2完成详细报告");
-        String second = DeriveFactService.factKey("C2完成详细报告");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
-        assertEquals(first, second);
-        assertTrue(first.startsWith("F-"));
-        assertEquals(26, first.length());
+    @Mock
+    private BeatInstanceMapper beatInstanceMapper;
+    @Mock
+    private DeriveFactMapper factMapper;
+    @Mock
+    private DeriveRepairLogMapper repairLogMapper;
+    @InjectMocks
+    private DeriveFactService service;
+
+    @Test
+    void rebuildUpsertsFactsFromRouteContract() throws Exception {
+        BeatInstanceDO beat = new BeatInstanceDO();
+        beat.setId(1L);
+        beat.setRunId(40L);
+        beat.setChapterNo(2);
+        beat.setSeq(2);
+        beat.setStatus("PLANNED");
+        beat.setRouteContract(MAPPER.writeValueAsString(Map.of(
+                "focusCharacters", List.of("C2"),
+                "writesKnowledge", List.of("C2完成详细报告"),
+                "requiresKnowledge", List.of())));
+
+        when(beatInstanceMapper.selectList(any())).thenReturn(List.of(beat));
+        when(factMapper.selectList(any())).thenReturn(List.of());
+
+        service.rebuild(40L, 87L);
+
+        verify(factMapper).insertFull(any(DeriveFactDO.class));
+        verify(factMapper).updateFull(any(DeriveFactDO.class));
     }
 
     @Test
-    void factKeyDiffersForDifferentFacts() {
-        assertNotEquals(
-                DeriveFactService.factKey("C2完成详细报告"),
-                DeriveFactService.factKey("C3确认监控缺帧"));
+    void recordRepairWritesAuditRow() {
+        service.recordRepair(40L, "PLAN_VALIDATE", "TEST_REPAIR",
+                Map.of("before", 1), Map.of("after", 2), "测试", "PLAN_VOLUME");
+
+        verify(repairLogMapper).insertFull(any(DeriveRepairLogDO.class));
     }
 }

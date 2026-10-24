@@ -1674,3 +1674,9 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - `repairPersistedKnowledge` 匹配到相近 writer 后，会写入 `derive_repair_log`（`KNOWLEDGE_WRITER_MATCH`）。
 - 新增 `DeriveFactServiceTest` 覆盖 factKey 稳定性与区分度。
 - 全量 `mvn -q test` 与 derive jar 打包通过；未部署线上。
+
+## P1 FactLedger 测试收口（2026-10-24）
+
+- 修复 `DeriveFactService.rebuild` 对不可变列表原地排序的问题，改为复制 mapper 结果后再排序。
+- `DeriveFactServiceTest` 增加 Mockito 集成测试：route_contract 重建事实、fact upsert、修复审计写入。
+- 定向测试通过。

@@ -42,10 +42,10 @@ public class DeriveFactService {
 
     /** 按 run/novel 重建事实账；同一 factKey 幂等更新。 */
     public void rebuild(long runId, long novelId) {
-        List<BeatInstanceDO> beats = beatInstanceMapper.selectList(
+        List<BeatInstanceDO> beats = new ArrayList<>(beatInstanceMapper.selectList(
                 new LambdaQueryWrapper<BeatInstanceDO>()
                         .eq(BeatInstanceDO::getRunId, runId)
-                        .eq(BeatInstanceDO::getStatus, "PLANNED"));
+                        .eq(BeatInstanceDO::getStatus, "PLANNED")));
         beats.sort(java.util.Comparator
                 .comparingInt((BeatInstanceDO beat) ->
                         beat.getChapterNo() == null ? Integer.MAX_VALUE : beat.getChapterNo())
