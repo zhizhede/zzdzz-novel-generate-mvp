@@ -26,7 +26,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -68,6 +70,9 @@ public class DeriveWriteService {
     /** 过程话泄漏（审稿实锤：字数自控笔记、「第十一章——」出戏台词）——恒开 gate */
     static final Pattern META_LEAK = Pattern.compile(
             "估算字数|目标字数带|正文字数|本章\\d+字|挂拍|第[一二三四五六七八九十百千零两\\d]+章[——\\-]");
+    /** 输出层章契约：每拍必须给出正文原句证据，末章闭合时必须交出收束表。 */
+    static final Pattern CONTRACT_PATTERN = Pattern.compile(
+            "<!--\\s*拍兑现契约\\s*[:：]\\s*(\\{.*?\\})\\s*-->", Pattern.DOTALL);
 
     /** 世界状态抽取（V119）：只认正文明确时间线索，禁反推总历时；失败 fail-open 不炸章。 */
     static final String WORLD_STATE_PROMPT = """
@@ -77,14 +82,17 @@ public class DeriveWriteService {
             1. time：只认本章正文明确写出的时间线索（钟点/次日/数日后等）；
                局部时长（如「这半月掉的肉」）严禁反推总历时；
                本章无线索则原样沿用上一章 time；上一章也无则写「未推进」；
-            2. locations：本章末仍主要在场的具名人物→地点；
-            3. present：本章末仍在一起的具名人物数组；
-            4. statuses：离场/被困/死亡/失联等关键人物状态对象（无则空 {}）；
+            2. characters：本章末角色状态对象。若输入含 characterKey 映射，以 key 为键；
+               否则以正式姓名为键。每人包含 name/alive/presence/location/knowledge/
+               relationships/lastSeenChapter；
+            3. locations：本章末仍主要在场的具名人物→地点（兼容旧读路径）；
+            4. present：本章末仍在一起的具名人物数组（兼容旧读路径）；
             5. key_facts：本章确立且后续不得推翻的事实 ≤8 条（物件下落/已发生事件/关系变化）；
             6. open_loops：未闭合事件/悬念 ≤8 条（脱困与否、未找到的人或物）；
             7. 上一章状态里已有、且本章未推翻的条目必须保留，禁止清空账本。
             输出 JSON 对象：
-            {"time":"…","locations":{},"present":[],"statuses":{},"key_facts":[],"open_loops":[]}
+            {"time":"…","characters":{},"locations":{},"present":[],
+             "key_facts":[],"open_loops":[]}
             只输出 JSON 对象，无其他文字。
             """;
 
@@ -126,6 +134,10 @@ public class DeriveWriteService {
                禁止推翻已确立事实，禁止把已结束的脱困/已闭合事件再演一遍；
             12. 只输出正文本身；正文最后单独一行输出章注：
                <!-- 本章X字，挂拍：seq,seq -->
+            13. 章注之后必须单独输出一行机器可读的「拍兑现契约」：
+               <!-- 拍兑现契约：{"beats":[{"seq":1,"evidence":"正文原句"}],"open_threads":["未解决悬念"],"closed_threads":["本章解决的悬念"]} -->
+               beats 必须与输入拍实例完全一致（不多不少）；每个 evidence 必须从本章正文逐字摘录一句，
+               不得改写、概括或编造；open_threads/closed_threads 没有时必须给空数组。
             禁止输出字数估算、预算核对、"第N章——"式出戏旁白等任何过程话。
             不要输出任何解释、标题行或 markdown 围栏。
             """;
@@ -161,6 +173,9 @@ public class DeriveWriteService {
                禁止推翻已确立事实，禁止把已结束的脱困/已闭合事件再演一遍；
             13. 只输出正文本身；正文最后单独一行输出章注：
                <!-- 本章X字，挂拍：seq,seq -->
+            14. 章注之后必须单独输出一行机器可读的「拍兑现契约」：
+               <!-- 拍兑现契约：{"beats":[{"seq":1,"evidence":"正文原句"}],"open_threads":[],"closed_threads":[]} -->
+               beats 与输入拍实例完全一致；evidence 从正文逐字摘录；无悬念时数组给空。
             禁止输出字数估算、预算核对、"第N章——"式出戏旁白等任何过程话。
             不要输出任何解释、标题行或 markdown 围栏。
             """;
@@ -172,6 +187,8 @@ public class DeriveWriteService {
             2. 不足则扩写细节/动作/环境描写，超出则删冗余描写与重复句，不得删任何拍对应情节；
             3. 中文字数 = 预算 ±10%（不含章注）；
             4. 只输出修改后全文，最后单独一行章注：<!-- 本章X字，挂拍：seq,seq -->
+            5. 保留并重新输出拍兑现契约：<!-- 拍兑现契约：{"beats":[{"seq":1,"evidence":"正文原句"}],"open_threads":[],"closed_threads":[]} -->
+               evidence 仍须逐字来自修改后的正文，拍号不得增删。
             不要输出任何解释、标题行或 markdown 围栏。
             """;
 
@@ -225,6 +242,8 @@ public class DeriveWriteService {
                 prevWs == null ? null : prevWs.getState());
         int budget = target.getBudget();
         int lo = (int) Math.floor(budget * 0.9);
+        int lastNo = chapters.isEmpty() ? target.getChapterNo() : chapters.get(chapters.size() - 1).getChapterNo();
+        boolean requireClosure = "闭合".equals(run.getParamOutcome()) && target.getChapterNo() == lastNo;
         int hi = (int) Math.ceil(budget * 1.1);
         String protagonist = DeriveQcService.readProtagonist(novel);
         String qcIssues = latestQcIssues(runId);
@@ -267,7 +286,7 @@ public class DeriveWriteService {
                     < Math.abs(len(extractContent(best)) - budget)) {
                 best = text;
             }
-            String issue = validate(text, lo, hi, protagonist, lenCheck);
+            String issue = validate(text, lo, hi, protagonist, lenCheck, chBeats, requireClosure);
             if (issue == null) {
                 persist(target, chBeats, text);
                 refreshWorldState(runId, novelId, target, text);
@@ -609,10 +628,21 @@ public class DeriveWriteService {
      *  章注存在性不再校验（P0：persist 机器合成，LLM 输出与否均剥离重拼）。
      *  lenCheck（V115，默认关）：关=跳过字数带校验（不做修整轮），禁词/主角名仍硬校验。 */
     static String validate(String text, int lo, int hi, String protagonist, boolean lenCheck) {
+        return validate(text, lo, hi, protagonist, lenCheck, List.of(), false);
+    }
+
+    static String validate(String text, int lo, int hi, String protagonist, boolean lenCheck,
+                           List<BeatInstanceDO> beats, boolean requireClosure) {
         if (text == null || text.isBlank()) {
             return "正文为空";
         }
         String body = extractContent(text);
+        if (beats != null && !beats.isEmpty()) {
+            String contractIssue = validateContract(text, body, beats, requireClosure);
+            if (contractIssue != null) {
+                return contractIssue;
+            }
+        }
         int n = len(body);
         if (lenCheck && (n < lo || n > hi)) {
             return "正文字数 " + n + " 超出预算带 [" + lo + "," + hi + "]（预算±10%），调整篇幅";
@@ -632,12 +662,66 @@ public class DeriveWriteService {
         return null;
     }
 
+    /** 输出层契约校验：章注之外必须交出拍兑现表，evidence 必须能在正文里逐字找到。 */
+    static String validateContract(String rawText, String body, List<BeatInstanceDO> beats,
+                                   boolean requireClosure) {
+        Matcher m = CONTRACT_PATTERN.matcher(rawText == null ? "" : rawText);
+        if (!m.find()) {
+            return "缺拍兑现契约（beats/evidence/open_threads/closed_threads）——按提示词输出契约行";
+        }
+        JsonNode contract;
+        try {
+            contract = STATIC_MAPPER.readTree(m.group(1));
+        } catch (Exception e) {
+            return "拍兑现契约 JSON 解析失败：" + e.getMessage();
+        }
+        JsonNode arr = contract.path("beats");
+        if (!arr.isArray()) {
+            return "拍兑现契约 beats 必须是数组";
+        }
+        Set<Integer> expected = new HashSet<>();
+        for (BeatInstanceDO b : beats) {
+            expected.add(b.getSeq());
+        }
+        Set<Integer> seen = new HashSet<>();
+        for (JsonNode n : arr) {
+            int seq = n.path("seq").asInt(0);
+            if (!expected.contains(seq) || !seen.add(seq)) {
+                return "拍兑现契约 beats 含非法或重复 seq: " + seq;
+            }
+            String evidence = n.path("evidence").asText("").trim();
+            if (evidence.length() < 4) {
+                return "拍 seq " + seq + " 缺 evidence（必须从正文逐字摘录）";
+            }
+            if (!body.contains(evidence)) {
+                return "拍 seq " + seq + " 的 evidence 不在正文原文中——必须逐字摘录，不许改写或编造";
+            }
+        }
+        if (!seen.equals(expected)) {
+            return "拍兑现契约 beats 必须与本章拍实例完全一致（缺 "
+                    + expected.stream().filter(x -> !seen.contains(x)).toList() + "）";
+        }
+        if (!contract.path("open_threads").isArray() || !contract.path("closed_threads").isArray()) {
+            return "拍兑现契约 open_threads/closed_threads 必须是数组（没有就给空数组）";
+        }
+        if (requireClosure) {
+            JsonNode closure = contract.path("closure");
+            if (!closure.path("resolved_threads").isArray()
+                    || closure.path("resolved_threads").isEmpty()
+                    || closure.path("final_state").asText("").trim().isEmpty()) {
+                return "结局形状=闭合：末章契约必须给非空 closure.resolved_threads 与 final_state";
+            }
+        }
+        return null;
+    }
+
     /** 剥掉章注行与代码围栏，得到纯正文。 */
     static String extractContent(String text) {
         if (text == null) {
             return "";
         }
         String s = text.replaceAll("```[a-zA-Z]*", "").trim();
+        s = CONTRACT_PATTERN.matcher(s).replaceAll("");
         Matcher m = COMMENT_PATTERN.matcher(s);
         StringBuilder sb = new StringBuilder();
         int last = 0;
@@ -671,10 +755,11 @@ public class DeriveWriteService {
         ch.setCharCount(len(body));
         ch.setComment(buildComment(body, beats));
         ch.setStatus("DRAFTED");
-        chapterMapper.updateById(ch);
+        chapterMapper.updateContent(
+                ch.getId(), ch.getContent(), ch.getCharCount(), ch.getComment(), ch.getStatus());
         for (BeatInstanceDO b : beats) {
             b.setStatus("WRITTEN");
-            beatInstanceMapper.updateById(b);
+            beatInstanceMapper.updateStatus(b.getId(), b.getStatus());
         }
     }
 

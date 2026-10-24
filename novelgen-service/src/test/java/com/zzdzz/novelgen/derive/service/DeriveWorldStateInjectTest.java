@@ -98,5 +98,7 @@ class DeriveWorldStateInjectTest {
         assertTrue(DeriveWriteService.WORLD_STATE_PROMPT.contains("严禁反推总历时"),
                 "时间防呆（AGENTS #22 同款）进抽取提示词");
         assertTrue(DeriveWriteService.WORLD_STATE_PROMPT.contains("open_loops"));
+        assertTrue(DeriveWriteService.WORLD_STATE_PROMPT.contains("\"characters\""));
+        assertTrue(DeriveWriteService.WORLD_STATE_PROMPT.contains("characterKey"));
     }
 }
