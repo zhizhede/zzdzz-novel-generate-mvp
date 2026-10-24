@@ -9,7 +9,7 @@ import java.util.List;
 public interface WorldStateDataService extends IService<WorldStateDO> {
 
     /** 素材库查看：按章列出（含人工编辑目标定位）。 */
-    record StateRow(int chapterNo, String stateJson, String updateTime) {
+    record StateRow(int chapterNo, String stateJson, String updatedTime) {
     }
 
     void upsert(long novelId, int chapterNo, Object state);

@@ -17,6 +17,6 @@
     </select>
 
     <update id="updateValue">
-UPDATE tuning SET tvalue=#{value}, update_time=NOW() WHERE tkey=#{key}
+UPDATE tuning SET tvalue=#{value}, updated_time=NOW() WHERE tkey=#{key}
     </update>
 </mapper>

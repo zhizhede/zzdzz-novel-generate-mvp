@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.WorldStateMapper">
+
+    <!-- jsonb 显式 ::jsonb（MP save 绑 varchar 会被 PG 拒——AGENTS 坑 #13）；一章一份覆盖 -->
+    <insert id="upsert">
+        INSERT INTO world_states (novel_id, chapter_no, state)
+        VALUES (#{p.novelId}, #{p.chapterNo}, #{p.state}::jsonb)
+        ON CONFLICT (novel_id, chapter_no)
+        DO UPDATE SET state = EXCLUDED.state, updated_time = NOW()
+    </insert>
+
+    <delete id="deleteByNovel">
+        DELETE FROM world_states WHERE novel_id = #{novelId}
+    </delete>
+
+</mapper>

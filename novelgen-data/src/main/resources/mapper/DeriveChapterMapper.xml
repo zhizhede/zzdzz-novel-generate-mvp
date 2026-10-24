@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.ChapterMapper">
+
+    <!-- ⑧ REWORK：显式置 NULL（MP NOT_NULL 策略做不到） -->
+    <update id="clearForRewrite">
+        UPDATE chapters
+        SET content      = NULL,
+            char_count   = NULL,
+            comment      = NULL,
+            status       = 'PLANNED',
+            updated_time = NOW()
+        WHERE novel_id = #{novelId}
+    </update>
+
+    <!-- v3.7 ⑥b REWORK：清 draft_outline（title 保留⑥a 章题，分批窗重填纲） -->
+    <update id="clearDraftOutlines">
+        UPDATE chapters
+        SET draft_outline = NULL,
+            updated_time  = NOW()
+        WHERE novel_id = #{novelId}
+    </update>
+
+    <update id="updatePlanContract">
+        UPDATE chapters
+        SET plan_contract = #{planContract}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{chapterId}
+    </update>
+
+    <update id="clearPlanByVolume">
+        UPDATE chapters
+        SET plan_contract = '{}'::jsonb,
+            updated_time = NOW()
+        WHERE novel_id = #{novelId}
+          AND volume_no = #{volumeNo}
+    </update>
+
+    <update id="updateDraftOutline">
+        UPDATE chapters
+        SET title = #{title},
+            draft_outline = #{draftOutline},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE chapters
+        SET status = #{status},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateContent">
+        UPDATE chapters
+        SET content = #{content},
+            char_count = #{charCount},
+            comment = #{comment},
+            status = #{status},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

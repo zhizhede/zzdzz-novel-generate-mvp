@@ -283,7 +283,7 @@ public class ImportAnalyzeService {
             }
         }
         return new ImportAnalyzeStatusVO(task.getId(), task.getNovelId(), task.getStatus(), task.getCurrentStep(),
-                planned, skipExisting, rows, task.getMessage(), task.getUpdateTime());
+                planned, skipExisting, rows, task.getMessage(), task.getUpdatedTime());
     }
 
     /** 步骤项的键：新格式是对象 {key,skipExisting}，旧格式（本次之前入队的行）是裸字符串。 */

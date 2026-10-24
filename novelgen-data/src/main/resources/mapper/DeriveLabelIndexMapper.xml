@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.LabelIndexMapper">
+
+    <!-- jsonb 两列显式 ::jsonb；pacing 走 numeric(3,2)（LLM 行锚点由 DB CHECK 把关） -->
+    <select id="insertFull" resultType="long">
+        INSERT INTO label_index (entry_type, entry_type_id, cat, beat_type, pacing, pacing_src,
+                                 arc_fit, standalone, src_novel_id)
+        VALUES (#{p.entryType}, #{p.entryTypeId}, #{p.cat}::jsonb, #{p.beatType}, #{p.pacing}, #{p.pacingSrc},
+                #{p.arcFit}::jsonb, #{p.standalone}, #{p.srcNovelId})
+        RETURNING id
+    </select>
+
+</mapper>

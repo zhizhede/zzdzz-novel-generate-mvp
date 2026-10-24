@@ -31,7 +31,7 @@ public class ImportedSampleDataServiceImpl extends ServiceImpl<ImportedSampleMap
         return baseMapper.update(null, new UpdateWrapper<ImportedSampleDO>()
                 .eq("genre", genre)
                 .set("preset_id", presetId)
-                .set("update_time", java.time.OffsetDateTime.now()));
+                .set("updated_time", java.time.OffsetDateTime.now()));
     }
 
     @Override

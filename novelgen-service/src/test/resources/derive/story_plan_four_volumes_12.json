@@ -1,0 +1,84 @@
+{
+  "scope": {
+    "storyScale": "LONG",
+    "volumeCount": 4,
+    "chapterCount": 48,
+    "chapterAvg": 2800,
+    "scopeDecision": "MULTI_VOLUME",
+    "scopeEvidence": ["第二卷给A高光", "第三卷给B高光", "第四卷给C高光"]
+  },
+  "spine": {
+    "mainMystery": "十年前海难名单被篡改",
+    "finalTruth": "主谋利用旧事故掩盖失踪名单",
+    "finalChoice": "主角公开真相并承担家族责任",
+    "truthLadder": [
+      {"volumeNo": 1, "reveals": ["旧事故真实存在"], "forbidden": ["主谋身份"], "evidenceThreads": ["GM-CLUE-01"]},
+      {"volumeNo": 2, "reveals": ["作案手法重复"], "forbidden": ["完整动机"], "evidenceThreads": ["GM-CLUE-02"]},
+      {"volumeNo": 3, "reveals": ["主角与旧案有关"], "forbidden": ["完整作案链"], "evidenceThreads": ["GM-CLUE-03"]},
+      {"volumeNo": 4, "reveals": ["主谋、动机和手法兑现"], "forbidden": [], "evidenceThreads": ["GM-CLUE-01"]}
+    ],
+    "globalThreads": [
+      {"threadKey": "GM-CLUE-01", "kind": "CLUE", "title": "缺失名单页",
+       "openedVolume": 1, "payoffVolume": 4, "ownerCharacterKey": "C1",
+       "contract": {"plantedChapter": 3, "payoffChapter": 43}}
+    ]
+  },
+  "volumes": {
+    "volumes": [
+      {"volumeNo": 1, "fromChapter": 1, "toChapter": 12, "arc": "失踪案",
+       "localQuestion": "谁改了名单", "falseAnswer": "管理员自导自演", "trueAnswer": "内部人员替换名单",
+       "mainMysteryAdvance": "旧事故真实存在", "focusCharacters": ["C1", "C2"],
+       "relationshipChanges": ["REL-C1-C2"], "requiredThreads": ["GM-CLUE-01"],
+       "forbiddenReveals": ["主谋身份"], "localClosureProof": "名单原件被找到",
+       "nextHook": "进入第二卷", "globalRole": "LOCAL"},
+      {"volumeNo": 2, "fromChapter": 13, "toChapter": 24, "arc": "重复事故",
+       "localQuestion": "事故为何重演", "falseAnswer": "巧合", "trueAnswer": "同一手法被复制",
+       "mainMysteryAdvance": "手法重复", "focusCharacters": ["C2"],
+       "relationshipChanges": ["REL-C1-C2"], "requiredThreads": ["GM-CLUE-02"],
+       "forbiddenReveals": ["完整动机"], "localClosureProof": "复制手法被证明",
+       "nextHook": "进入第三卷", "globalRole": "LOCAL"},
+      {"volumeNo": 3, "fromChapter": 25, "toChapter": 36, "arc": "旧案重启",
+       "localQuestion": "谁在掩盖旧案", "falseAnswer": "主角家族", "trueAnswer": "主谋借家族掩护",
+       "mainMysteryAdvance": "主角与旧案有关", "focusCharacters": ["C3"],
+       "relationshipChanges": ["REL-C1-C3"], "requiredThreads": ["GM-CLUE-03"],
+       "forbiddenReveals": ["完整作案链"], "localClosureProof": "旧案责任部分兑现",
+       "nextHook": "进入最终卷", "globalRole": "LOCAL"},
+      {"volumeNo": 4, "fromChapter": 37, "toChapter": 48, "arc": "最终真相",
+       "localQuestion": "谁制造最后假结局", "falseAnswer": "替身伏法", "trueAnswer": "主谋与完整手法兑现",
+       "mainMysteryAdvance": "完整真相", "focusCharacters": ["C1", "C2", "C3"],
+       "relationshipChanges": ["REL-C1-C2", "REL-C1-C3"], "requiredThreads": ["GM-CLUE-01"],
+       "forbiddenReveals": [], "localClosureProof": "责任人兑现且关系收束",
+       "nextHook": "", "globalRole": "FINAL"}
+    ]
+  },
+  "characters": {
+    "characters": [
+      {"characterKey": "C2", "displayNameHint": "林雾", "function": "ACCESS",
+       "spotlightVolume": 2, "conflictVolume": 3, "payoffVolume": 4,
+       "uniqueContribution": "能进入封锁区", "want": "证明自己", "flaw": "独自行动",
+       "conflictTargets": ["C1"], "functionalConflict": "救人还是先取证",
+       "highlightChoice": "公开旧身份", "highlightCost": "失去同伴信任",
+       "relationshipChanges": ["REL-C1-C2"], "arcBefore": "只靠自己",
+       "arcAfter": "学会协作", "payoffProof": "主动请求支援"},
+      {"characterKey": "C3", "displayNameHint": "周渡", "function": "KNOWLEDGE",
+       "spotlightVolume": 3, "conflictVolume": 2, "payoffVolume": 4,
+       "uniqueContribution": "掌握旧档案", "want": "保护家人", "flaw": "隐瞒事实",
+       "conflictTargets": ["C1"], "functionalConflict": "公开真相会伤害家人",
+       "highlightChoice": "交出档案", "highlightCost": "家人受审",
+       "relationshipChanges": ["REL-C1-C3"], "arcBefore": "隐瞒换安全",
+       "arcAfter": "承担后果", "payoffProof": "主动作证"},
+      {"characterKey": "C1", "displayNameHint": "顾砚", "function": "DETECTIVE",
+       "spotlightVolume": 4, "conflictVolume": 3, "payoffVolume": 4,
+       "uniqueContribution": "串联所有线索", "want": "查明旧案", "flaw": "执着真相",
+       "conflictTargets": ["C2", "C3"], "functionalConflict": "真相与保护同伴冲突",
+       "highlightChoice": "公开家族责任", "highlightCost": "失去继承身份",
+       "relationshipChanges": ["REL-C1-C2", "REL-C1-C3"], "arcBefore": "真相高于一切",
+       "arcAfter": "真相必须有人承担", "payoffProof": "公开并承担"}
+    ]
+  },
+  "appearanceSteps": [
+    {"chapterNo": 20, "characterKey": "C2", "mode": "LIVE", "requiresKnowledge": [], "writesKnowledge": [], "endsDead": true},
+    {"chapterNo": 30, "characterKey": "C2", "mode": "MEMORY", "requiresKnowledge": [], "writesKnowledge": [], "endsDead": false}
+  ],
+  "paidThreads": ["GM-CLUE-01"]
+}

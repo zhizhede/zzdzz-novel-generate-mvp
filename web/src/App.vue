@@ -1,39 +1,9 @@
 <template>
-  <el-container v-if="isLogin" style="height: 100vh">
-    <el-main><router-view /></el-main>
-  </el-container>
-  <el-container v-else style="height: 100vh">
-    <el-aside width="180px" style="border-right: 1px solid var(--border)">
-      <div style="padding: 18px 16px; font-weight: bold">小说生成平台</div>
-      <el-menu :default-active="$route.path" router>
-        <el-menu-item index="/">工作台</el-menu-item>
-        <el-menu-item index="/wizard">开新书</el-menu-item>
-        <el-menu-item index="/books">书籍管理</el-menu-item>
-        <el-menu-item index="/chapters">章节</el-menu-item>
-        <el-menu-item index="/planning">规划</el-menu-item>
-        <el-menu-item index="/plans">规划资产</el-menu-item>
-        <el-menu-item index="/library">素材库</el-menu-item>
-        <el-menu-item index="/fingerprints">文风指纹</el-menu-item>
-        <el-menu-item index="/logs">调用台账</el-menu-item>
-      </el-menu>
-      <div style="position: absolute; bottom: 16px; padding: 0 16px">
-        <el-button size="small" @click="logout">退出</el-button>
-      </div>
-    </el-aside>
+  <el-container style="height: 100vh">
     <el-main><router-view /></el-main>
   </el-container>
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-
-const route = useRoute()
-const router = useRouter()
-const isLogin = computed(() => route.path === '/login')
-
-async function logout() {
-  await fetch('/api/auth/logout', { method: 'POST' })
-  router.push('/login')
-}
+// 随机衍生专用壳：无侧栏菜单，布局与页签由 DeriveShell 自理（2026-10-17 主站前端下线）。
 </script>

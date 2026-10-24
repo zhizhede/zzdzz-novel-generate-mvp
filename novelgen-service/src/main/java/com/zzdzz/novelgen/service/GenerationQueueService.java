@@ -91,13 +91,41 @@ public class GenerationQueueService {
         }
     }
 
-    /** 入队：立即返回任务 id（异步执行）。priority 0-2（null=按书 derive_config，缺省 1）。 */
-    public long submit(String novelTitle, int from, int to, Long userId, Integer priority) {
+    /** 入队：立即返回任务 id（异步执行）。priority 0-2（null=按书 derive_config，缺省 1）。
+     * autoContinue 任务级自动续跑（null=开，显式 false 才关）：落任务 payload，DONE 后自动续批至规划用尽。 */
+    public long submit(String novelTitle, int from, int to, Long userId, Integer priority, Boolean autoContinue) {
         Long novelId = novelData.findIdByTitle(novelTitle);
         if (novelId == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "作品不存在: " + novelTitle);
         }
-        return submitById(novelId, requireNovelTitle(novelId), from, to, userId, priority);
+        String payload = Boolean.FALSE.equals(autoContinue) ? null : buildAutoContinuePayload();
+        int prio = Math.max(0, Math.min(2, priority != null ? priority : java.util.Objects.requireNonNullElse(
+                DeriveSupport.parse(novelData.findDeriveConfig(novelId)).priority(), 1)));
+        return enqueue(novelId, requireNovelTitle(novelId), from, to, userId,
+                TaskKind.CHAPTERS.wire(), payload, prio);
+    }
+
+    /** 任务级续跑开关的 payload（{"autoContinue":true}）；序列化失败回 null＝本批不续（fail-safe）。 */
+    static String buildAutoContinuePayload() {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper()
+                    .writeValueAsString(Map.of("autoContinue", true));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 任务 payload 里的续跑开关：只有显式 {"autoContinue":true} 才续（缺 payload/坏 JSON 一律不续）。 */
+    static boolean taskAutoContinueOn(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return false;
+        }
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().readTree(payload)
+                    .path("autoContinue").asBoolean(false);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** 取书名给任务行用。行已物理删除时 getById 返回 null——换成可读的 404，别让它变成 NPE。 */
@@ -673,14 +701,60 @@ public class GenerationQueueService {
 
     // ===== P3 书级无人续跑闭环 =====
 
-    /** CHAPTERS 任务 DONE 后的续跑判定。 */
-    private void autoContinueAfterChapters(GenerationTaskDataService.TaskRow task) {
-        try {
-            continueChain(task.novelId(), "上批生成完成");
-        } catch (Exception e) {
-            log.error("无人续跑判定异常 novelId={}：{}", task.novelId(), e.getMessage(), e);
-            pauseChain(task.novelId(), "续跑判定异常：" + e.getMessage());
+    /** CHAPTERS 任务 DONE 后的续跑判定：书级无人续跑链优先（含规划下卷）；否则任务级开关续批至规划用尽。 */
+    void autoContinueAfterChapters(GenerationTaskDataService.TaskRow task) {
+        if (DeriveSupport.parse(novelData.findDeriveConfig(task.novelId())).autoContinueOn()) {
+            try {
+                continueChain(task.novelId(), "上批生成完成");
+            } catch (Exception e) {
+                log.error("无人续跑判定异常 novelId={}：{}", task.novelId(), e.getMessage(), e);
+                pauseChain(task.novelId(), "续跑判定异常：" + e.getMessage());
+            }
+            return;
         }
+        if (!taskAutoContinueOn(task.payload())) {
+            return;
+        }
+        try {
+            continuePlannedBatch(task);
+        } catch (Exception e) {
+            // 任务级续批不写 auto_state（那是书级链的状态），失败只断本次续批
+            log.error("自动续跑判定异常 novelId={}：{}", task.novelId(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 任务级自动续跑：接排下一段**已有规划行**的章（每批 cap=batch_max_chapters，钳 targetChapters），
+     * 不规划新卷——规划用尽即停。入队前查该书已有排队/运行任务：用户手动排了就让位，绝不双入队
+     * （runChapter 无「已有正文则跳过」，重复入队会重写正文）。
+     */
+    void continuePlannedBatch(GenerationTaskDataService.TaskRow task) {
+        long novelId = task.novelId();
+        if (taskDAO.existsActiveForNovel(novelId)) {
+            log.info("自动续跑：本书已有排队/运行任务，本批不接排 novelId={}", novelId);
+            return;
+        }
+        int after = Math.max(task.toChapter(),
+                java.util.Objects.requireNonNullElse(chapterData.maxChapterWithText(novelId), 0));
+        Integer next = chapterData.nextPlannedChapterNo(novelId, after);
+        if (next == null) {
+            log.info("自动续跑：第 {} 章之后无规划行，续跑收束 novelId={}", after, novelId);
+            return;
+        }
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
+        Integer last = chapterData.maxPlannedChapterNo(novelId);
+        int cap = tuning.i("batch_max_chapters", TuningDefaults.BATCH_MAX_CHAPTERS);
+        int to = Math.min(next + cap - 1, last == null ? next : last);
+        if (cfg.targetChapters() != null) {
+            to = Math.min(to, cfg.targetChapters());
+        }
+        if (to < next) {
+            log.info("自动续跑：已达目标章数（{}），不接排 novelId={}", cfg.targetChapters(), novelId);
+            return;
+        }
+        long id = enqueue(novelId, task.novelTitle(), next, to, null, TaskKind.CHAPTERS.wire(),
+                buildAutoContinuePayload(), task.priority());
+        log.info("自动续跑：{} 接排第 {}-{} 章（任务 #{}）", task.novelTitle(), next, to, id);
     }
 
     /** PLAN 任务 DONE 后：新落库的规划行存在即自动续批。 */

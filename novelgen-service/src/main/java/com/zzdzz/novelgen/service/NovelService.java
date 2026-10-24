@@ -78,7 +78,7 @@ public class NovelService {
             DeriveSupport.Cfg c = DeriveSupport.parse(novelData.findDeriveConfig(n.getId()));
             return new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(),
                     n.getStatus(), NovelSourceType.normalize(n.getSourceType()),
-                    novelData.chapterCount(n.getId()), n.getCreateTime(),
+                    novelData.chapterCount(n.getId()), n.getCreatedTime(),
                     c.autoContinueOn(), c.targetChapters());
         })
                 .filter(row -> matches(row, condition))
@@ -308,7 +308,7 @@ public class NovelService {
         NovelDO n = novelData.getById(novelId);
         return new NovelVO(n.getId(), n.getTitle(), n.getDescription(), n.getApprovalMode(), n.getStatus(),
                 NovelSourceType.normalize(n.getSourceType()), 0,
-                n.getCreateTime(), derive != null && derive.autoContinue() != null && derive.autoContinue(),
+                n.getCreatedTime(), derive != null && derive.autoContinue() != null && derive.autoContinue(),
                 derive == null ? null : derive.targetChapters());
     }
 

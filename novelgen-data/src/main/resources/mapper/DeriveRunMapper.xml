@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.RunMapper">
+
+    <!-- jsonb 七列显式 ::jsonb；words_pred 不在 run 上（v1.2：落 calibration.words_pred） -->
+    <select id="insertFull" resultType="long">
+        INSERT INTO run (seed, param_words_min, param_words_max, param_tags, param_pace,
+                         param_form, param_outcome, param_intent, param_style, tags_norm, domain_id, domain_snapshot,
+                         b0, p_min, p_max, k_outline, m_beat,
+                         tolerance_trace, picked_outline_ids, picked_beat_ids, picked_world_id,
+                         welded, novel_id, status, qc_round, step_status, anti_repro, intake_review, len_check)
+        VALUES (#{p.seed}, #{p.paramWordsMin}, #{p.paramWordsMax}, #{p.paramTags}::jsonb, #{p.paramPace},
+                #{p.paramForm}, #{p.paramOutcome}, #{p.paramIntent}, #{p.paramStyle}, #{p.tagsNorm}::jsonb, #{p.domainId}, #{p.domainSnapshot}::jsonb,
+                #{p.b0}, #{p.pMin}, #{p.pMax}, #{p.kOutline}, #{p.mBeat},
+                #{p.toleranceTrace}::jsonb, #{p.pickedOutlineIds}::jsonb, #{p.pickedBeatIds}::jsonb, #{p.pickedWorldId},
+                #{p.welded}::jsonb, #{p.novelId}, #{p.status}, #{p.qcRound}, #{p.stepStatus}::jsonb,
+                COALESCE(#{p.antiRepro}, FALSE), #{p.intakeReview}::jsonb, COALESCE(#{p.lenCheck}, FALSE))
+        RETURNING id
+    </select>
+
+    <update id="updateWeld">
+        UPDATE run
+        SET welded       = #{welded}::jsonb,
+            status       = 'PLANNING',
+            step_status  = CASE
+                               WHEN #{welded} IS NULL
+                                   THEN '{"v":1,"steps":{"SAMPLE":{"status":"DONE"},"WELD":{"status":"SKIPPED"}}}'::jsonb
+                               ELSE '{"v":1,"steps":{"SAMPLE":{"status":"DONE"},"WELD":{"status":"DONE"}}}'::jsonb
+            END,
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateNovelId">
+        UPDATE run
+        SET novel_id     = #{novelId},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE run
+        SET status       = #{status},
+            qc_round     = COALESCE(#{qcRound}, qc_round),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- P6 立项闸：step_status 整列回写（调用方负责合并既有 steps 键，jsonb 显式 cast） -->
+    <update id="updateStepStatus">
+        UPDATE run
+        SET step_status  = #{stepStatus}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="clearPlanning">
+        UPDATE run
+        SET novel_id    = NULL,
+            status      = 'PLANNING',
+            qc_round    = 0,
+            step_status = #{stepStatus}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

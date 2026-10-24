@@ -1,0 +1,6 @@
+{
+  "appearanceSteps": [
+    {"chapterNo": 20, "characterKey": "C2", "mode": "LIVE", "requiresKnowledge": [], "writesKnowledge": [], "endsDead": true},
+    {"chapterNo": 30, "characterKey": "C2", "mode": "LIVE", "requiresKnowledge": [], "writesKnowledge": [], "endsDead": false}
+  ]
+}

@@ -6,7 +6,7 @@
                 INSERT INTO world_states (novel_id, chapter_no, state)
                 VALUES (#{novelId}, #{chapterNo}, #{state}::jsonb)
                 ON CONFLICT (novel_id, chapter_no) WHERE is_deleted = FALSE
-                DO UPDATE SET state = EXCLUDED.state, update_time = now()
+                DO UPDATE SET state = EXCLUDED.state, updated_time = now()
     </update>
 
     <select id="findLatestBefore" resultType="string">
@@ -16,13 +16,13 @@
     </select>
 
     <select id="listByNovel" resultType="com.zzdzz.novelgen.service.data.WorldStateDataService$StateRow">
-                SELECT chapter_no AS "chapterNo", state::text AS "stateJson", to_char(update_time, 'YYYY-MM-DD HH24:MI:SS') AS "updateTime" FROM world_states
+                SELECT chapter_no AS "chapterNo", state::text AS "stateJson", to_char(updated_time, 'YYYY-MM-DD HH24:MI:SS') AS "updateTime" FROM world_states
                 WHERE novel_id=#{novelId}
                 ORDER BY chapter_no DESC LIMIT #{limit}
     </select>
 
     <update id="updateByChapter">
-                UPDATE world_states SET state = #{stateJson}::jsonb, update_time = now()
+                UPDATE world_states SET state = #{stateJson}::jsonb, updated_time = now()
                 WHERE novel_id=#{novelId} AND chapter_no=#{chapterNo}
     </update>
 

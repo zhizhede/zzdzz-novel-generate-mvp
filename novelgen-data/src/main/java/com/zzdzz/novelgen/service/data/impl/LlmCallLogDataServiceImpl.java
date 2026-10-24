@@ -15,11 +15,11 @@ public class LlmCallLogDataServiceImpl extends ServiceImpl<LlmCallLogMapper, Llm
         implements LlmCallLogDataService {
 
     @Override
-    public long insert(String node, Long novelId, Long chapterId, String model,
+    public long insert(String node, Long novelId, Long chapterId, Long runId, String model,
                        int promptTokens, int cachedTokens, int completionTokens, int totalTokens,
                        long latencyMs, String status, String errorMsg, String reasoningText,
                        String requestJson, String responseJson) {
-        Long id = baseMapper.insert(node, novelId, chapterId, model, promptTokens, cachedTokens,
+        Long id = baseMapper.insert(node, novelId, chapterId, runId, model, promptTokens, cachedTokens,
                 completionTokens, totalTokens, latencyMs, status, errorMsg, reasoningText,
                 requestJson, responseJson);
         return id == null ? 0 : id;
@@ -28,6 +28,17 @@ public class LlmCallLogDataServiceImpl extends ServiceImpl<LlmCallLogMapper, Llm
     @Override
     public List<LlmCallLogDO> findPage(Long novelId, Long chapterId, int limit, int offset) {
         return baseMapper.findPage(novelId, chapterId, limit, offset);
+    }
+
+    @Override
+    public List<LlmCallLogDO> findPageByRun(Long runId, String nodePrefix, int limit, int offset) {
+        return baseMapper.findPageByRun(runId, nodePrefix, limit, offset);
+    }
+
+    @Override
+    public long countByRun(Long runId, String nodePrefix) {
+        Long n = baseMapper.countByRun(runId, nodePrefix);
+        return n == null ? 0 : n;
     }
 
     @Override

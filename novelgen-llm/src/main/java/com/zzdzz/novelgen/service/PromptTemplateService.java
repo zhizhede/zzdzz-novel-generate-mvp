@@ -177,7 +177,7 @@ public class PromptTemplateService {
     public List<PromptTemplateVO> list() {
         return dao.findAll().stream()
                 .map(t -> new PromptTemplateVO(t.getId(), t.getNode(), t.getPhase(), t.getTitle(),
-                        t.exact(), t.getVersion(), t.custom(), t.enabled(), t.getContent().length(), t.getUpdateTime()))
+                        t.exact(), t.getVersion(), t.custom(), t.enabled(), t.getContent().length(), t.getUpdatedTime()))
                 .toList();
     }
 

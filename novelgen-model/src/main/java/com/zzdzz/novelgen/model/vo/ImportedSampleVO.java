@@ -22,7 +22,7 @@ public record ImportedSampleVO(
 
     public static ImportedSampleVO from(com.zzdzz.novelgen.model.entity.ImportedSampleDO d) {
         return new ImportedSampleVO(d.getId(), d.getTitle(), d.getGenre(), d.getChunks(), d.getTotalChars(),
-                d.getSource(), d.getPresetId(), d.getAnalysis(), parseTags(d.getTags()), d.getCreateTime());
+                d.getSource(), d.getPresetId(), d.getAnalysis(), parseTags(d.getTags()), d.getCreatedTime());
     }
 
     private static JsonNode parseTags(String json) {

@@ -48,7 +48,7 @@ SELECT EXISTS (SELECT 1 FROM material_cards WHERE novel_id=#{novelId})
 
     <update id="update">
                 UPDATE material_cards SET name=#{name}, aliases=#{aliases}::jsonb, summary=#{summary}, content_md=#{contentMd}, pinned=#{pinned},
-                       status=#{status}, source_chapter=#{sourceChapter}, update_time=NOW()
+                       status=#{status}, source_chapter=#{sourceChapter}, updated_time=NOW()
                 WHERE id=#{id}
     </update>
 </mapper>

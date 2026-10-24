@@ -9,7 +9,7 @@ import java.util.List;
 public interface DigestDataService extends IService<DigestDO> {
 
     /** 素材库行：带章号（内部模型，非表行）。 */
-    record DigestItem(long id, int chapterNo, String contentMd, String facts, String updateTime) {
+    record DigestItem(long id, int chapterNo, String contentMd, String facts, String updatedTime) {
     }
 
     /** 素材库：全作品事实账列表（时间正序）。 */

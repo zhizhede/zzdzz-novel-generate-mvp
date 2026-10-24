@@ -97,8 +97,8 @@ public class PlanAssetService {
                     has && content.strip().startsWith(SKELETON_OUTLINE_MARKER),
                     null, null, null, null, null, null,
                     null, null, null, null, null,
-                    doc == null ? novel.getCreateTime() : doc.getCreateTime(),
-                    doc == null ? null : doc.getUpdateTime()));
+                    doc == null ? novel.getCreatedTime() : doc.getCreatedTime(),
+                    doc == null ? null : doc.getUpdatedTime()));
         }
         return rows;
     }

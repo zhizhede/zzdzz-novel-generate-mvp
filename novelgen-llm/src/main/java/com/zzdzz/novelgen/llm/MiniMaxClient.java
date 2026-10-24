@@ -649,7 +649,7 @@ public class MiniMaxClient implements LlmPort {
                            int promptTokens, int cachedTokens, int completionTokens, int totalTokens,
                            long latencyMs, String status, String errorMsg) {
         String responseJson = response == null ? null : serialize(response);
-        return callLogDAO.insert(request.node(), request.novelId(), request.chapterId(), model,
+        return callLogDAO.insert(request.node(), request.novelId(), request.chapterId(), request.runId(), model,
                 promptTokens, cachedTokens, completionTokens, totalTokens, latencyMs, status, errorMsg,
                 reasoning, requestJson, responseJson);
     }

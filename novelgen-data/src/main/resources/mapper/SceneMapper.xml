@@ -24,14 +24,14 @@ SELECT id FROM chapter_scenes WHERE chapter_id=#{chapterId} AND scene_no=#{scene
 
     <update id="saveDraft">
 
-                UPDATE chapter_scenes SET draft_text=#{draftText}, update_time=NOW()
+                UPDATE chapter_scenes SET draft_text=#{draftText}, updated_time=NOW()
                 WHERE chapter_id=#{chapterId} AND scene_no=#{sceneNo}
                 
     </update>
 
     <update id="applyRevise">
 
-                UPDATE chapter_scenes SET draft_text=#{draftText}, revision_round=revision_round+1, update_time=NOW()
+                UPDATE chapter_scenes SET draft_text=#{draftText}, revision_round=revision_round+1, updated_time=NOW()
                 WHERE id=#{sceneId}
                 
     </update>

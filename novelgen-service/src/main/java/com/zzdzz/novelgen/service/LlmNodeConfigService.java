@@ -53,8 +53,8 @@ public class LlmNodeConfigService {
         try {
             LlmModelPriceDO p = priceMap().get(call.getModel());
             if (p == null) return null;
-            boolean peak = call.getCreateTime() != null
-                    && isPeakHour(call.getCreateTime(), p);
+            boolean peak = call.getCreatedTime() != null
+                    && isPeakHour(call.getCreatedTime(), p);
             long hit = Math.min(call.getCachedTokens(), call.getPromptTokens());
             long miss = call.getPromptTokens() - hit;
             BigDecimal inHit = peak ? p.getPeakInputHit() : p.getIdleInputHit();

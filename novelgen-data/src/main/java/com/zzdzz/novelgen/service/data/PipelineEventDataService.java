@@ -8,7 +8,7 @@ import java.util.List;
 /** pipeline_events 数据服务接口（原 PipelineEventDAO）。 */
 public interface PipelineEventDataService extends IService<PipelineEventDO> {
 
-    record EventRow(long id, Integer chapterNo, String stage, String phase, String payloadJson, String createTime) {
+    record EventRow(long id, Integer chapterNo, String stage, String phase, String payloadJson, String createdTime) {
     }
 
     void insert(Long novelId, Integer chapterNo, String stage, String phase, Object payload);
