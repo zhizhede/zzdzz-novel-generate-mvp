@@ -67,6 +67,21 @@ class DeriveDraftBatchTest {
     }
 
     @Test
+    void windowBeatsIgnoresSkippedBeatsWithoutChapter() {
+        BeatInstanceDO skipped = new BeatInstanceDO();
+        skipped.setSeq(1);
+        skipped.setChapterNo(null);
+        skipped.setStatus("SKIPPED");
+        skipped.setFilledText("已跳过");
+        List<BeatInstanceDO> beats = List.of(skipped, beat(2, 1, "PLANNED", "正文拍"));
+
+        List<BeatInstanceDO> selected = DeriveDraftService.windowBeats(beats, List.of(1));
+
+        assertEquals(1, selected.size());
+        assertEquals(2, selected.get(0).getSeq());
+    }
+
+    @Test
     void windowDoneNeedsEveryOutline() {
         List<ChapterDO> chapters = List.of(ch(1, "纲一"), ch(2, ""), ch(3, "纲三"));
         assertFalse(DeriveDraftService.windowDone(List.of(1, 2), chapters), "窗内第2章无纲");

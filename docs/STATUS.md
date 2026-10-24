@@ -1533,3 +1533,21 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - 新增 `web/src/views/derive/taskProgress.js`：统一 write-loop / auto-flow 的运行、停止、完成、失败、断连文案；轮询失败不再静默，显示「进度连接中断，保留最后一次进度」。
 - 验证：`npm run build` 通过；`mvn -q compile` 通过；`mvn -q test` 通过。未启动/重启服务，未部署线上。
 - 补充前端纯函数 smoke：Node 导入 `taskProgress.js` 验证「停止中/已停止」文案映射通过。
+
+## 停止态与轮询修复已上线宝塔（2026-10-24，已授权部署）
+
+- 部署范围：`novelgen-derive-app` jar + `web/dist` 前端；主站 `novelgen` 未重启、未改动。
+- 本地构建：`mvn -q -pl novelgen-derive-app -am package -DskipTests`；前端 `npm run build`。
+- 远端备份：`/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-stopui`、`/www/wwwroot/novelgen-ui.bak-20261024-stopui/`。
+- 线上 jar SHA256=`5afd11b20fe69d5772019f5eb2fc6f4ac53064377b70bfc588fc41fd97f2e202`，前端 `index.html` SHA256=`0d0de2ad4df1f720fe6d90e44fde230238eedd320592908b406aff2f2047505a`，与本地产物一致。
+- `novelgen-derive` 已重启并 active，PID 1820094，Tomcat 8091 / context-path `/derive` 正常；Flyway validate 通过，线上 schema v123。
+- 出口验收：`https://zzdzz.cn:8888/` 返回 200；带 `Origin: https://zzdzz.cn:8888` 的 `/derive/api/derive/ping` 返回 401 `A0003`（未登录 JSON，非 CORS 文本）。
+- 未推送远端 Git；数据库未迁移、未改线上配置。
+
+## run39 ⑥b 跳过拍空章号 NPE 修复并上线（2026-10-24，已授权部署）
+
+- 根因核实：run39 的 seq1~6 是拍路由阶段合法落库的 `SKIPPED` 拍，`chapter_no=NULL`；`DeriveDraftService.draftInner` 原先用 `win.contains(b.getChapterNo())`，不可变列表对 null 调 `contains` 抛 NPE，自动流程把异常转成 `lastError=NullPointerException` 并停止。
+- 修复：新增 `DeriveDraftService.windowBeats(...)`，窗口过滤前排除 `chapter_no IS NULL` 的跳过拍；不修改数据库、不清规划，run39 可从断点续跑。
+- 回归：新增 `DeriveDraftBatchTest.windowBeatsIgnoresSkippedBeatsWithoutChapter`；全量 `mvn -q test` 通过；`mvn -q -pl novelgen-derive-app -am package -DskipTests` 通过。
+- 线上更新：仅更新 `novelgen-derive` jar；旧 jar 备份 `/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-skipnull`。新 jar SHA256=`444ed533bef93e91631b389c56be48834e18dbc35ed230d6a102aa30863c4277`，服务 active，PID 1822851，8091/context-path `/derive` 正常；主站 `novelgen` 未重启。
+- 验收：线上根路径 200；带 Origin 的 `/derive/api/derive/ping` 返回 401 `A0003` JSON；Flyway schema v123 validate 通过。

@@ -267,9 +267,7 @@ public class DeriveDraftService {
             if (windowDone(win, chapters)) {
                 continue;
             }
-            List<BeatInstanceDO> winBeats = beats.stream()
-                    .filter(b -> win.contains(b.getChapterNo()))
-                    .toList();
+            List<BeatInstanceDO> winBeats = windowBeats(beats, win);
             Set<Integer> winSeqs = new LinkedHashSet<>();
             for (BeatInstanceDO b : winBeats) {
                 winSeqs.add(b.getSeq());
@@ -341,6 +339,12 @@ public class DeriveDraftService {
                 chapters.size(), 0, 0, "DONE", wins.size(), wins.size(), true);
     }
 
+    /** 取本窗参与具体稿的拍：跳过拍没有章号，必须在窗口过滤前排除，避免 contains(null) 空指针。 */
+    static List<BeatInstanceDO> windowBeats(List<BeatInstanceDO> beats, List<Integer> window) {
+        return beats.stream()
+                .filter(b -> b.getChapterNo() != null && window.contains(b.getChapterNo()))
+                .toList();
+    }
     /** 全局头人设卡五键（顺序即提示词顺序）。 */
     static final List<String> PERSONA_KEYS =
             List.of("temperament", "conduct", "speech", "desire", "flaw");
