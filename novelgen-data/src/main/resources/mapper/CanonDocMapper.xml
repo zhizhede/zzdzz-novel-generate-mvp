@@ -30,7 +30,7 @@ SELECT id FROM canon_docs WHERE novel_id=#{novelId} AND kind=#{kind} AND name=#{
 
     <!-- 规划资产页：全库同类同名文档（各书大纲）连正文一起取，带创建/更新时间 -->
     <select id="listAliveByKindName" resultType="com.zzdzz.novelgen.model.entity.CanonDocDO">
-SELECT id, novel_id, kind, name, content, sort_no, create_time, update_time
+SELECT id, novel_id, kind, name, content, sort_no, created_time, updated_time
 FROM canon_docs WHERE kind=#{kind} AND name=#{name} ORDER BY novel_id
     </select>
 
@@ -49,7 +49,7 @@ FROM canon_docs WHERE kind=#{kind} AND name=#{name} ORDER BY novel_id
     </select>
 
     <update id="updateContent">
-UPDATE canon_docs SET content=#{content}, update_time=NOW() WHERE id=#{id}
+UPDATE canon_docs SET content=#{content}, updated_time=NOW() WHERE id=#{id}
     </update>
 
     <delete id="delete">

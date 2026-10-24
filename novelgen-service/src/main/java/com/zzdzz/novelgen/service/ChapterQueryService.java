@@ -67,7 +67,7 @@ public class ChapterQueryService {
         List<ChapterStepVO> steps = stepData.listByChapter(chapterId).stream()
                 .map(s -> new ChapterStepVO(s.getStep(), s.getSubKey(),
                         s.getAttempt() == null ? 1 : s.getAttempt(), s.getStatus(),
-                        s.getDetail(), String.valueOf(s.getUpdateTime())))
+                        s.getDetail(), String.valueOf(s.getUpdatedTime())))
                 .toList();
         return new ChapterDetailVO(ch.getId(), ch.getChapterNo(), ch.getTitle(), ch.getStatus(), ch.getRound(),
                 ch.getBudgetMin(), ch.getBudgetMax(), ch.getFullText(), scenes,
@@ -86,7 +86,7 @@ public class ChapterQueryService {
                 .map(s -> new ChapterTraceVO.StepItem(
                         s.getStep(), s.getSubKey(),
                         s.getAttempt() == null ? 1 : s.getAttempt(), s.getStatus(), s.getDetail(),
-                        iso(s.getCreateTime()), iso(s.getUpdateTime())))
+                        iso(s.getCreatedTime()), iso(s.getUpdatedTime())))
                 .toList();
 
         List<ChapterTraceVO.CallItem> calls = new ArrayList<>(
@@ -94,14 +94,14 @@ public class ChapterQueryService {
                         .map(l -> new ChapterTraceVO.CallItem(
                                 l.getId(), l.getNode(), l.getModel(), l.getStatus(),
                                 l.getPromptTokens(), l.getCompletionTokens(), l.getTotalTokens(), l.getCachedTokens(),
-                                l.getLatencyMs(), nodeConfig.costOf(l), iso(l.getCreateTime())))
+                                l.getLatencyMs(), nodeConfig.costOf(l), iso(l.getCreatedTime())))
                         .toList());
         java.util.Collections.reverse(calls);   // findPage 为 id DESC，档案要时间正序
 
         List<ChapterTraceVO.CheckItem> checks = gateReportData.listByChapter(chapterId).stream()
                 .map(g -> new ChapterTraceVO.CheckItem(
                         g.getSceneId(), g.getGateType(), g.getRound(), g.isPassed(),
-                        parseJson(g.getResult()), iso(g.getCreateTime())))
+                        parseJson(g.getResult()), iso(g.getCreatedTime())))
                 .toList();
 
         // 按节点小计（calls 已正序；成本无价目行的节点计 null）
@@ -163,7 +163,7 @@ public class ChapterQueryService {
                     new com.fasterxml.jackson.core.type.TypeReference<List<java.util.Map<String, Object>>>() {
                     });
             return new GateReportVO(GateType.MECHANICAL.wire(), row.passed(),
-                    row.createTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                    row.createdTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
                     checks);
         } catch (Exception e) {
             throw new IllegalStateException("门禁报告不可解析", e);
@@ -174,7 +174,7 @@ public class ChapterQueryService {
     public ReviewVO latestReview(long chapterId) {
         GateReportDataService.LatestReview row = gateReportData.findLatestChapterReview(chapterId);
         if (row == null) return null;
-        String time = row.createTime().format(
+        String time = row.createdTime().format(
                 DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
         try {
             JsonNode node = mapper.readTree(row.resultJson());

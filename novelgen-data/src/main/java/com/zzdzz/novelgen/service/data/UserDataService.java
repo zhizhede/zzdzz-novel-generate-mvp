@@ -13,4 +13,7 @@ public interface UserDataService extends IService<UserDO> {
     Long findIdByUsername(String username);
 
     long insert(String username, String passwordHash, String role);
+
+    /** 改密：只更新 password_hash 列（updated_time 不动，避开 MP NOT_NULL 回写坑）。 */
+    int updatePasswordHash(long id, String passwordHash);
 }

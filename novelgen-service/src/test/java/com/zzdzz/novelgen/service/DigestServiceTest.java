@@ -48,7 +48,7 @@ class DigestServiceTest {
         chapterData = mock(ChapterDataService.class);
         worldStateData = mock(WorldStateDataService.class);
         characterState = mock(CharacterStateService.class);
-        service = new DigestService(llm, new LlmJson(null, null), digestData, foreshadowData,
+        service = new DigestService(llm, new LlmJson(null, null, null), digestData, foreshadowData,
                 chapterData, worldStateData, characterState,
                 mock(PromptTemplateService.class), mock(TuningService.class));
         // Mockito 对 String 返回型默认给 null：不显式打桩的话 insertProposal 的编码位是 null，

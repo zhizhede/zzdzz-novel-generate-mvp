@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.NovelMapper">
+
+    <!-- jsonb 三列显式 ::jsonb（MP save 绑 varchar 会被 PG 拒——AGENTS 坑 #13）；created_* 走库默认 -->
+    <select id="insertFull" resultType="long">
+        INSERT INTO novels (title, source_type, category_tags, char_count, form, chapter_count,
+                            author, platform, summary, run_id, story_settings, story_assets)
+        VALUES (#{p.title}, #{p.sourceType}, #{p.categoryTags}::jsonb, #{p.charCount}, #{p.form}, #{p.chapterCount},
+                #{p.author}, #{p.platform}, #{p.summary}, #{p.runId},
+                #{p.storySettings}::jsonb, #{p.storyAssets}::jsonb)
+        RETURNING id
+    </select>
+
+    <update id="updateMeta">
+        UPDATE novels
+        SET title        = #{title},
+            summary      = #{summary},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- jsonb 留缝：protagonist 进 story_assets（⑧ QC 读主角名做指纹登记）；|| 合并保已有键 -->
+    <update id="updateProtagonist">
+        UPDATE novels
+        SET story_assets = COALESCE(story_assets, '{"v":1}'::jsonb)
+                               || jsonb_build_object('protagonist', to_jsonb(#{protagonist})),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- ⑥b：protagonist + 全书 cast 表一并落（⑦ 各章注入的称谓锚点） -->
+    <update id="updateCast">
+        UPDATE novels
+        SET story_assets = COALESCE(story_assets, '{"v":1}'::jsonb)
+                               || jsonb_build_object('protagonist', to_jsonb(#{protagonist}),
+                                                     'cast', #{cast}::jsonb),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- ⑥b：真相卡（推理体裁，v3.6 分段契约）；|| 合并保其他键，v 升 3 作标记 -->
+    <update id="updateTruth">
+        UPDATE novels
+        SET story_assets = COALESCE(story_assets, '{"v":1}'::jsonb)
+                               || jsonb_build_object('truth', #{truth}::jsonb, 'v', 3),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- ⑥b：brief 拆分（v3.6 全体裁）；premise 全程注入⑦、ending 仅揭示章起 -->
+    <update id="updateBrief">
+        UPDATE novels
+        SET story_assets = COALESCE(story_assets, '{"v":1}'::jsonb)
+                               || jsonb_build_object('brief', #{brief}::jsonb, 'v', 3),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- ④d：文风卡（v3.6 方案B；覆盖式幂等——重跑整键覆盖） -->
+    <update id="updateStyleProfile">
+        UPDATE novels
+        SET story_settings = COALESCE(story_settings, '{"v":1}'::jsonb)
+                                || jsonb_build_object('style_profile', #{styleProfile}::jsonb),
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStats">
+        UPDATE novels
+        SET char_count     = #{charCount},
+            chapter_count  = #{chapterCount},
+            updated_time   = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- v3.7 ⑥b REWORK：清头产物键（protagonist/cast/truth/brief），逼 ⑥b-0 重跑；其他键保留 -->
+    <update id="clearDraftAssets">
+        UPDATE novels
+        SET story_assets = (COALESCE(story_assets, '{"v":1}'::jsonb))
+                             - 'protagonist' - 'cast' - 'truth' - 'brief',
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

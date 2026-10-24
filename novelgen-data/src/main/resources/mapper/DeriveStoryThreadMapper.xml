@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.StoryThreadMapper">
+
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_story_thread (
+            run_id, novel_id, thread_key, kind, title, opened_volume,
+            payoff_volume, owner_character_key, status, contract
+        ) VALUES (
+            #{p.runId}, #{p.novelId}, #{p.threadKey}, #{p.kind}, #{p.title}, #{p.openedVolume},
+            #{p.payoffVolume}, #{p.ownerCharacterKey}, #{p.status}, #{p.contract}::jsonb
+        )
+        RETURNING id
+    </select>
+
+    <update id="updateFull">
+        UPDATE derive_story_thread
+        SET thread_key = #{p.threadKey},
+            kind = #{p.kind},
+            title = #{p.title},
+            opened_volume = #{p.openedVolume},
+            payoff_volume = #{p.payoffVolume},
+            owner_character_key = #{p.ownerCharacterKey},
+            status = #{p.status},
+            contract = #{p.contract}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{p.id}
+    </update>
+
+</mapper>

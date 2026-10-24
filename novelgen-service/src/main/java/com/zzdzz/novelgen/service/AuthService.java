@@ -35,6 +35,29 @@ public class AuthService {
         return new LoginUser(user.getId(), user.getUsername(), user.getRole());
     }
 
+    /** 改当前用户密码：旧密按登录口径校验，新密 ≥6 位且不与旧密相同；哈希仍走 sha256(username:password)。 */
+    public void changePassword(long userId, com.zzdzz.novelgen.model.dto.PasswordChangeDTO dto) {
+        if (dto == null || isBlank(dto.oldPassword()) || isBlank(dto.newPassword())) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "旧密码与新密码均不能为空");
+        }
+        String neu = dto.newPassword();
+        if (neu.length() < 6) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "新密码至少 6 位");
+        }
+        if (neu.equals(dto.oldPassword())) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "新密码不能与旧密码相同");
+        }
+        UserDO user = userData.getById(userId);
+        if (user == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "用户不存在: " + userId);
+        }
+        // 旧密校验复用登录口径（用户名+旧密全匹配）
+        if (!sha256(user.getUsername() + ":" + dto.oldPassword()).equals(user.getPasswordHash())) {
+            throw new BizException(ErrorCode.LOGIN_FAILED, "旧密码不正确");
+        }
+        userData.updatePasswordHash(userId, sha256(user.getUsername() + ":" + neu));
+    }
+
     private static boolean isBlank(String s) {
         return s == null || s.isBlank();
     }

@@ -9,7 +9,7 @@ RETURNING id
     </select>
 
     <update id="updateTags">
-UPDATE imported_samples SET tags=#{tagsJson}::jsonb, update_time=NOW()
+UPDATE imported_samples SET tags=#{tagsJson}::jsonb, updated_time=NOW()
 WHERE id=#{sampleId}
     </update>
 </mapper>

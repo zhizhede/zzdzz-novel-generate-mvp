@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper">
+
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_character_plan (
+            run_id, novel_id, character_key, display_name_hint, function_code,
+            spotlight_volume, conflict_volume, payoff_volume, arc_before, arc_after,
+            contract, status
+        ) VALUES (
+            #{p.runId}, #{p.novelId}, #{p.characterKey}, #{p.displayNameHint}, #{p.functionCode},
+            #{p.spotlightVolume}, #{p.conflictVolume}, #{p.payoffVolume}, #{p.arcBefore}, #{p.arcAfter},
+            #{p.contract}::jsonb, #{p.status}
+        )
+        RETURNING id
+    </select>
+
+    <update id="updateScalars">
+        UPDATE derive_character_plan
+        SET display_name_hint = #{p.displayNameHint},
+            function_code = #{p.functionCode},
+            spotlight_volume = #{p.spotlightVolume},
+            conflict_volume = #{p.conflictVolume},
+            payoff_volume = #{p.payoffVolume},
+            arc_before = #{p.arcBefore},
+            arc_after = #{p.arcAfter},
+            status = #{p.status},
+            updated_time = NOW()
+        WHERE id = #{p.id}
+    </update>
+
+    <update id="updateContract">
+        UPDATE derive_character_plan
+        SET contract = #{contract}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

@@ -35,7 +35,7 @@ public class LlmLogService {
                 .findPage(novelId, chapterId, safeSize, (safePage - 1) * safeSize).stream()
                 .map(l -> new LlmLogVO(l.getId(), l.getNode(), l.getNovelId(), l.getChapterId(), l.getModel(),
                         l.getPromptTokens(), l.getCompletionTokens(), l.getTotalTokens(), l.getCachedTokens(),
-                        l.getLatencyMs(), l.getStatus(), iso(l.getCreateTime()),
+                        l.getLatencyMs(), l.getStatus(), iso(l.getCreatedTime()),
                         l.getReasoningText() == null ? 0 : l.getReasoningText().length()))
                 .toList();
         return new PageVO<>(items, llmCallLogData.countBy(novelId, chapterId), safePage, safeSize);
@@ -51,7 +51,7 @@ public class LlmLogService {
     public List<PipelineEventVO> events(Long novelId, Integer chapterNo, int limit) {
         return pipelineEventData.list(novelId, chapterNo, Math.min(Math.max(1, limit), 500)).stream()
                 .map(e -> new PipelineEventVO(e.id(), novelId, e.chapterNo(), e.stage(), e.phase(),
-                        e.payloadJson(), e.createTime()))
+                        e.payloadJson(), e.createdTime()))
                 .toList();
     }
 
@@ -62,7 +62,7 @@ public class LlmLogService {
         }
         return new LlmLogDetailVO(log.getId(), log.getNode(), log.getNovelId(), log.getChapterId(), log.getModel(),
                 log.getPromptTokens(), log.getCompletionTokens(), log.getTotalTokens(), log.getCachedTokens(),
-                log.getLatencyMs(), log.getStatus(), log.getErrorMsg(), iso(log.getCreateTime()),
+                log.getLatencyMs(), log.getStatus(), log.getErrorMsg(), iso(log.getCreatedTime()),
                 nodeConfig.costOf(log), promptMessages(log.getRequestJson()),
                 log.getReasoningText(), extractContent(log.getResponseJson()));
     }

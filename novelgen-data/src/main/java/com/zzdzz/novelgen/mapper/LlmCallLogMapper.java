@@ -12,12 +12,18 @@ import java.util.Map;
 public interface LlmCallLogMapper extends BaseMapper<LlmCallLogDO> {
 
     Long insert(@Param("node") String node, @Param("novelId") Long novelId, @Param("chapterId") Long chapterId,
+                @Param("runId") Long runId,
                 @Param("model") String model, @Param("promptTokens") int promptTokens,
                 @Param("cachedTokens") int cachedTokens, @Param("completionTokens") int completionTokens,
                 @Param("totalTokens") int totalTokens, @Param("latencyMs") long latencyMs,
                 @Param("status") String status, @Param("errorMsg") String errorMsg,
                 @Param("reasoningText") String reasoningText, @Param("requestJson") String requestJson,
                 @Param("responseJson") String responseJson);
+
+    List<LlmCallLogDO> findPageByRun(@Param("runId") Long runId, @Param("nodePrefix") String nodePrefix,
+                                     @Param("limit") int limit, @Param("offset") int offset);
+
+    Long countByRun(@Param("runId") Long runId, @Param("nodePrefix") String nodePrefix);
 
     List<LlmCallLogDO> findPage(@Param("novelId") Long novelId, @Param("chapterId") Long chapterId,
                                 @Param("limit") int limit, @Param("offset") int offset);

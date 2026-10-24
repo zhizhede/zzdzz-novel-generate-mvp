@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DomainCellMapper">
+
+    <!-- jsonb 列 ::jsonb；text[] 列 ::text[]（字段存 PG 数组字面量 "{铺垫,事件}"） -->
+    <select id="insertFull" resultType="long">
+        INSERT INTO domain_cell (name, grp, cats, beat_types, relation_note, counter_words, ref_ids, enabled, sort)
+        VALUES (#{p.name}, #{p.grp}, #{p.cats}::jsonb, #{p.beatTypes}::text[], #{p.relationNote},
+                #{p.counterWords}::text[], #{p.refIds}::jsonb, #{p.enabled}, #{p.sort})
+        RETURNING id
+    </select>
+
+</mapper>

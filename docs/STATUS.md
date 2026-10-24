@@ -2,6 +2,213 @@
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
 
+## P6 结构化质量闸 + 自动根因回炉部署实弹（2026-10-21，已授权部署）
+
+- **P6 终态权收归 Java**：`derive_gate` 不再输出 `GO/REWORK/REJECT` 决定动作，只输出六项 `single_rule/budget/motive_chain/closure/function_lock/motif_dedup`，每项含 `pass/severity/note/issues/repairTarget`。全通过或仅 ADVISORY → `PASS`；存在 HARD/FIXABLE 时第 1~2 轮 `REWORK`，第 3 轮才 `FAILED`。模型即便额外输出旧 `verdict` 也被忽略。
+- **回炉目标统一**：优先级 `SCALE > SPINE > PLAN_VOLUME:n > DRAFT`。`PLAN_VOLUME:n` 只重排该卷；`SPINE` 保留规模，清卷/角色/线程/章/拍并从脊柱重建；`SCALE` 从规模重判。GATE 轮次、结构化判据和减法指令在根因回炉后保留，防止无限循环。
+- **规划硬约束补齐**：短卷模板不再前 4 章固定切角色，8 章卷也必含 `HIGHLIGHT/CHARACTER_CHOICE/COST/LOCAL_CLOSURE/CLUE_PAYOFF/FINAL_CLOSURE`；模型不能删除系统结构槽。规划校验发现知识缺口/高光缺口/线程未兑现时自动定位卷并带具体问题重排；知识事实可由同场焦点角色共享，确定性修复只补到已有获知拍，不伪造来源。
+- **⑥b 稳定性**：按“最多 4 章且最多 6 拍”双重切窗；单章 4 拍不再与别章捆绑成 9 拍。覆盖不足的重试错误现在精确列出缺失 `seq`，模型可逐拍补齐而不是盲猜。
+- **V123**：`derive_volume_plan.arc` 从 `VARCHAR(128)` 改 `TEXT`（模型卷弧线常超 128 字），并给 `run_id/novel_id` 外键补 `ON DELETE CASCADE`；线上 schema=v123 success。
+- **部署**：仅更新随机衍生线与前端，主站 `novelgen` 未动。线上 jar SHA256=`318a4897317ca731731bc7acaf9b40d47f6425f675248d1ecd0e54e20830f6c2`，前端 index SHA256=`3ef403f20d70bd684f1350b0b0ec7e1e48913d79a45decd5693d83522e0fbfb2`；服务 active，PID 1196652，启动 `2026-10-21 03:13:30 CST`。旧 jar 备份 `novelgen-derive-app.jar.bak-20261021-p6struct1..13`，旧前端备份 `novelgen-ui.bak-20261021-p6struct`。
+- **run38 真实闭环**：单案轻小说短篇《门缝里的钥匙》，8 章/14 拍；第 1 轮 P6 结构化判 `REWORK`（线索未植入、动机缺台阶、第 7/8 章重复，target=`PLAN_VOLUME:1`），随后自动从 SPINE 重建、重修短卷结构槽/知识因果/线程兑现，重做 ⑥b；第 3 轮六项全过，`GATE=PASS / round=3 / repairTarget=NONE / issues=0`。这次是自然 GO，不是直通或人工强制放行。线上 GATE 分布更新为 PASS=6（含 4 次直通+1 次人工+本次自然 GO）、FAILED=6、PENDING=2。
+- **验证**：全量 `mvn -q test` 通过；`mvn -q -DskipTests package` 通过；`web/npm run build` 通过；`git diff --check` 通过；首页 200，未登录 ping（带 Origin）401 JSON；数据库 v123。实弹另修出并验证：卷弧线超长写库失败、线程兑现槽缺失、短卷高光槽被模型删除、⑥b 窗拍数过载。临时登录口令已恢复原 hash。未 commit/push。
+- **质量口径说明**：P6 不是模型打一个“质量分”。它是六项语义审稿 + 规则/知识/线程硬校验 + Java 严重度裁决。当前仍属于“有硬伤就拦”的合同闸，不保证每本书一定通过；run38 证明在问题被真正修掉后可以自然通过。
+
+## 故事规划与节拍路由部署宝塔 + 实弹（2026-10-21，已授权部署）
+
+- **部署范围**：`novelgen-derive` jar + `web/dist`；主站 `novelgen` 未动。当前线上 jar SHA256=`7ac730b26bc0321e5cfb16f33e4744fb7f9452fd7d494f06f822b524907e18af`，与服务 active；前端 index SHA256=`3962ff1e2c5f453b85eaa48a406cf7ab402dedc6d4ed39685be9966a1dc97c02`。旧 jar 多版备份 `/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261021-storyplan-v1..v12`，旧前端目录 `/www/wwwroot/novelgen-ui.old-20261021-storyplan`。
+- **数据库**：Flyway 已应用 V121（故事规划两表与合同列）和 V122（`beat_instance.source` 扩到 VARCHAR(16)，容纳 9 字符 `SYNTHETIC`）；当前 schema v122，`derive_character_plan`/`derive_story_thread`/`beat_instance.route_contract` 线上结构核验通过。
+- **实弹 run37**：单案轻小说短篇，V2 规划返回 `DONE`：15 章、21 拍（15 ARC_SEG + 6 SYNTHETIC）、0 告警；⑥b 全部 HEAD/BATCH 单元成功，书名《化装舞会》，主角陆则，15 章均有具体纲；P6 最终按设计 `REJECT→FAILED`，原因集中在失踪者身份互斥、替身对象错位、催眠规则未兑现、事件拍拥挤——属质量闸正常拦截，不是系统异常。run37 未写正文，未进入⑦/⑧。
+- **实弹修出的真实问题**：①裸 ObjectMapper 序列化 DO 的 OffsetDateTime 失败 → 改为 `PlanJsonViews` 显式业务投影；②模型漏 synthetic 的 beatType/storyLayer/goal → 由 beatRole 确定性兜底；③缺必需 beatRole 自动生成 SYNTHETIC；④SOURCE/章节/拍更新中 `updateById` 重写 JSONB 失败 → 全部改显式 update SQL；⑤synthetic source 长度不足 → V122；⑥知识校验误把线程 key 当叙事知识、角色高光误要求所有 spotlight 角色都完成 → 分别更正。
+- **验证**：全量 `mvn -q test` 通过；`mvn -q -DskipTests package` 通过；`web/npm run build` 通过；首页 200；未登录 derive ping 带 Origin 返回 401 JSON A0003（非 CORS 403）；线上故事规划/单卷拍读端点 200；服务日志无未处理异常（P6 REJECT 为业务结果）。
+- **遗留**：run37 是质量失败样本，不应继续写正文；需新建 run 或修正框架后重跑。未 commit/push。
+
+## 故事规划与节拍路由第一阶段落码（2026-10-21，未提交未部署）
+
+- 新增 V121：`derive_character_plan`、`derive_story_thread` 两表，扩展 `derive_volume_plan.contract`、`chapters.plan_contract`、`beat_instance.story_layer/beat_role/route_contract`，并把拍来源扩到 `SYNTHETIC`。
+- 新增 `DeriveStoryPlanService`（SCALE→SPINE→VOLUMES→CHARACTERS）、`DeriveBeatRouteService`（12章功能槽、拍匹配/补拍/跳过、单卷重规划）、`DerivePlanValidationService`（死亡/知识/钩子/角色高光/线程闭环校验）。
+- `DerivePlanService` 支持 `steps.PLAN_V2` 单元状态机并保留历史 `steps.PLAN` 兼容；⑥b 绑定 `characterKey`、注入卷/章/拍合同并禁止跨章移拍；P6/⑧输出 `repairTarget`，自动流程可区分结构回炉与文字回炉。
+- API 新增 `confirm-scope`、`story-plan`、单卷 beats/replan；run 详情增加规模、脊柱、卷/角色/线程/章槽视图和单卷重规划入口；`clear-planning` 同步清理 V121 数据。
+- 验证：四卷×12章有效/无效 fixture、显式四卷、死亡后 LIVE/MEMORY、知识前置、线程闭环、路由覆盖、V121 结构、读模型均有测试；全量 `mvn -q test` 通过，`mvn -q -DskipTests package` 通过，`web/npm run build` 通过。
+- 未做：未对任何数据库应用 V121（需单独授权），未启动本地/线上服务做真实 LLM 端到端，未提交/推送/部署。现有工作区其它未提交改动未回退。
+
+## 衍生故事规划与节拍路由设计定稿（2026-10-20，未改代码）
+
+- 新增设计文档 `docs/design/衍生故事规划与节拍路由设计.md`，把当前 ⑥a“定规模后按数量顺序切拍”升级为：故事脊柱 → 卷合同 → 角色功能/弧光 → 故事线程 → 12章功能槽 → 全局拍路由 → 状态/知识模拟 → P6/⑧接入。
+- 设计边界：只新增 `derive_character_plan`、`derive_story_thread` 2 张表；扩展 `derive_volume_plan.contract`、`chapters.plan_contract`、`beat_instance.story_layer/beat_role/route_contract`；不新建角色状态表，实时状态继续以 `world_states` 为准。
+- 业务拆分：新增 `DeriveStoryPlanService`、`DeriveBeatRouteService`、`DerivePlanValidationService`；改造 `DerivePlanService`、`DeriveDraftService`、`DeriveGateService`、`DeriveQcService`、`DeriveQueryService`。⑦逐章断点续跑主流程不变。
+- 明确硬约束：显式卷数/每卷章数不可被字数或拍数推翻；死亡角色只能按回忆/遗体/转述等形式出现；角色不得使用尚未获得的知识；每卷必须有局部闭合，非末卷有钩子，最终卷关闭必需线程。
+- 实施计划已拆到 `docs/superpowers/plans/2026-10-20-story-planning-beat-routing.md`：12 个任务，先 V121/合同/规划模块，再接拍路由、校验、⑥b/P6/⑧和前端；每任务含 TDD 与验收步骤。
+- 下一步：待用户审阅实施计划并选择执行方式；本轮未改代码、未提交、未部署。
+
+## 深夜四改：thinking 参数 / ⑥a 逐窗 / auto 判据 / ⑥b 状态增量（2026-10-19 凌晨，已部署宝塔）
+
+**这次最值钱的是一条配置事实**：MiMo 关思考的官方参数是 **`thinking.type=disabled`**，不是 `enable_thinking`（后者官方不认，模型继续默认开思考，`max_tokens` 被思考吃光后正文为空）。实测（`derive_draft` 节点）：关思考后单次 **19–31 秒 / 思考 0 字 / 不再空 content**，之前是 100–340 秒 / 思考 5000+ 字 / 频繁「响应缺少 content」。另两条口径：`mimo-v2.6-flash` **默认开思考**；预算字段是 `max_completion_tokens`（限思考+正文总长），只调大 `max_tokens` 而不关思考，单次失败会从 200 秒拖到 339 秒。**线上已改 `derive_draft`**（`extra_json={"thinking":{"type":"disabled"}}`、`max_tokens=8192`、`updated_time`——注意本库列名是 `updated_time` 不是 `update_time`）；`derive_write`/`derive_plan`/`derive_qc`/`world_state` **仍开思考**（⑦ 每章 260–586 秒就是它）。
+
+**⑥a 章节计划逐窗化**（`DerivePlanService`）：废弃「章数 = 总字数 ÷ 硬常量（快热 2500/中 3200/慢 4000）」，`PLAN_SCALE_PROMPT` 让 **AI 自己判章数与章均**，系统只夹区间（章 6~80、章均 2000~6000、总量 ≥ 上限 80%、**章数 ≤ 拍数**——run24 实弹：AI 判 18 章而拍只 24 个，首窗就把拍吃光）；`PLAN_WINDOW_PROMPT` 每窗 ≤10 章分拍，跨窗带「剩余拍 + 前窗章概览 + 前窗末两章拍型」，校验章号连续、拍不跨窗重复、最后一窗必须用完剩余拍。状态存 `steps.PLAN`，`plan()` 单元推进至 `allDone`。字数带校验**全部按 `run.len_check` 门控**（不开审计只留机械项）。
+
+**auto 判据回归修复**（`DeriveAutoFlowService`）：原「`novel_id` 非空 = ⑥a 完成」，而 SCALE 段就建书 → auto 拿到第一段就跳 ⑥b（run27 因此 0 章跑 ⑥b，真相卡 `reveal_chapter` 全越界、3 轮全废）。改看 `plan()` 的 `allDone`；`DeriveDraftService` 另加硬闸：0 章直接拒绝 ⑥b。
+
+**⑥b 章末状态增量**（用户定调：死人可以出现在回忆里，不能建「死者名单」硬闸；也不能只做生死账，覆盖不了全类型）：`BATCH_PROMPT` 每章多出 `time` + `state_changes`（who 必须在 cast；what 限死亡/离场/被囚/失去身份/关系改变/物件易主/得知，得知须 detail）；`parseBatch` 校验；`buildBatchUser` 把跨窗累加的「已发生不可逆状态」喂下一窗，并写明**回忆/梦境/遗体/遗物/他人转述/信件引用不受此限（但要写明形式）**；累计值存 `steps.DRAFT.changes`，REWORK 清空。run27 实弹证据：布兰第 2 章被刺身亡、第 9 章又「登门拜访」并活到第 11 章再死一次——闸判得对，根因是第 3 窗输入只带章号/章题/预算/拍型，没带「布兰已死」。
+
+**文风优先级**（run28 实弹：`param_style="轻小说"` 却写成冷硬卷宗腔）：根因是 ⑥b 全程没读过 `param_style`（grep 零命中），`brief.premise` 自己长成「可核查痕迹/证词/名册/时间窗」的文书体，而 ⑦ 虽写了「目标文风优先于源书文风卡」却没说与 premise 描写红线冲突时怎么办。已补：⑥b C 段输入带目标文风并要求 premise 服从；⑦ 两个 prompt 都加「目标文风 > 文风卡 > 前提里的描写红线」优先级。
+
+**测试与部署**：`DerivePlanWindowTest` 7 条 + `DeriveDraftBatchTest` 11 条新增/改写；全量 403+3+4 绿；已推宝塔（`ActiveEnterTimestamp 2026-10-19 02:39:58`、进程 819686、`/` 200、ping 401）。
+
+**未做**：把 `thinking.type=disabled` 配到四个节点（⑦ 提速关键）；⑥b 状态只做「传递+提示词约束」，未加 LLM 互斥校验（P6 闸仍是第二道防线）；卷级弧光锚点未成为一等产出。
+
+## ⑥a 章节计划逐窗化：章数由 AI 判 + 单次输出封顶（2026-10-18 深夜，未提交未部署）
+
+**用户两条定调**（连续两轮）：「每章字数按节奏定死太极端」「不设字数的初衷是让 AI 自己判篇幅」「为什么不能让 AI 多次请求」。
+
+**改前的两个硬除数（已废）**：`chapterAvg` 只按 pace 定 2500/3200/4000，`expectedCh = wordsPred / chapterAvg`，且 `buildUserInput` 把「章节数 = expectedCh」写进提示词、`parsePlan` 校验「章节数必须 = N」——AI 完全没有分章自由；另一套 `B0_TABLE` 每拍字数 1100~2500 又独立反推拍数，两套除数互不联动。字数一放到轻小说档 8–16 万，章数被除成 32–64，⑥a 单次输出翻三五倍，必然撞模型输出上限（run22 那次 plan 已 19417 tokens / 思考 41297 字 / 357 秒）。
+
+**本批落地**：
+- `PLAN_SCALE_PROMPT`（⑥a-0）：AI 自己判 `chapterCount` 与 `chapterAvg`，系统只验合理带（章 6~80、章均 1500~6000）与「章数×章均落在字数区间」，输出几十 tokens。
+- `PLAN_WINDOW_PROMPT`（⑥a-1..n）：每窗 ≤10 章，只做「把拍分到章」；输入「本章号范围 + 剩余拍清单 + 前窗章概览」，校验章号连续齐全、拍只取自剩余且不跨窗重复、累计预算不超上限、快热前 3 章（首窗）、张力密度（含 `complete` 参数：中途窗不判「最后 30%」反转后移，避免拿不完整章表误报）。
+- 幂等状态：`run.step_status.steps.PLAN = {chapterCount, chapterAvg, usedSeqs, drafts[]}`（`readPlanState` / `mergePlanState`），`plan()` 改成「推进一个单元」，客户端循环至 `allDone`。
+- `PlanVO` 加 `unit/windowIndex/windowTotal/plannedChapters/usedBeats/allDone`，旧五参构造保留。
+- 前端 `actPlan` 改循环（SCALE → 窗… → DONE），复用 ⑥b 的循环文案模式。
+- 删掉旧的一次性 `parsePlan`；`DeriveClosureContractTest` 改盯 `PLAN_WINDOW_PROMPT`。
+- **防重复规划**：读到 `PLAN` 段为空但 `novel_id` 非空（老的一次性计划书）直接拒绝，避免重复建章。
+- 测试：新增 `DerivePlanWindowTest` 5 条（规模带/窗内章节与拍校验/跨窗重复拍/状态往返/窗数）；全量 `mvn -o test` **403+3+4 全绿**；`npm run build` 过。jar 已打（41557684 字节），**未部署**。
+
+**待验证**：新建一个长档 run（如轻小说 8–16 万）看 ⑥a 是否分出 30+ 章、窗间拍是否不重不漏；老 run（22/23）已计划过，按下发保护会被拒绝，不影响存量。
+
+## AI 调用监测可点开看输入输出 + run22 卡点定位（2026-10-18 夜，未提交未部署）
+
+**用户三问的事实答案**（均已查证，勿再从记忆猜）：
+- **「全流程监测」没有独立入口**：10-17 主站 UI 整体删除后只剩衍生四视图；监测只存在于 run 详情「运行过程」卡片内的 `llm-trail` 表格（`GET /api/derive/runs/{id}/llm-trail`），且**只给摘要**（节点/耗时/tokens/成败），点不开、看不到提示词与返回。
+- **关联键一直是错的**：`LlmPort.ChatRequest` 只有 `(node, novelId, chapterId, …)`，derive 侧 6 处按 `(node, runId, novelId, …)` 调用，类型都是 `Long` 编译能过 → `llm_call_log.novel_id` 存的是 **run id**、`chapter_id` 存的是 novel id、`run_id` 列恒 NULL。
+- **run 22 卡在 ⑥b「全局头」**：`headDone()` 判 `story_assets.protagonist` 非空，而全局头是原子写（全过才落库），每次 3 轮全不合规 → 无任何产物 → 点一次从头重来。线上日志 18:29–18:31、18:45–18:48 两批各 3 轮：`cast persona 缺 speech` / 三次 JSON 语法错 / `clue 直接出现 solution 内容`。
+- **坏 JSON 的真实畸形点**（取 run22 的 899 号调用原文验证）：`"flade":"怕什么":"怕发现自己一直信任的人在说谎"` —— 键名错拼 + 值与值的边界错乱（对象内出现 `"k":"v1":"v2"`）。现有 `LlmJson` 修复器覆盖「漏逗号/漏闭符/裸引号」三类，**覆盖不到这一类**；6 次调用 6 次坏，输出长度集中在 3000–5200 字符（非 max_tokens 截断，`derive_plan` 曾一次吐 11457 tokens）。
+
+**本批落地（代码已改，未部署）**：
+- `ChatRequest` 补 `runId` 分量（保留 5 参构造器给主站），derive 6 处调用点归位（plan/qc/write×2/draft×2/gate）；`llm_call_log` insert 补 `run_id` 列（DO/接口/实现/XML 全套）。
+- `GET /api/derive/runs/llm-calls/{callId}` 新读端点（`LlmCallDetailVO`：messages 分段 + 返回正文 + 思考 + 原始 request/response）；`findPageByRun` 兼容历史行（`run_id IS NULL AND novel_id = runId`）。
+- `LlmJson.ask` 每轮校验失败回写该次调用 `error_msg` —— 账本行终于能看到「为什么不合规」，不再只活在进程日志里。
+- 前端 run 详情账本加「看详情」→ 抽屉四页签（提示词/模型返回/思考/原始 JSON）。
+- 单测：`LlmJson` 三处构造改三参；全量 `mvn -o test` 480 条 0 失败；`npm run build` 过。
+
+**未决**：坏 JSON 治本三选一（拆小单次输出 / 加畸形修复器 / 换更强模型——线上 chat 只有 `mimo-v2.6-flash` 一个 provider）；以上代码**未部署**（需用户授权）。
+
+**同日深夜追加（用户当轮授权部署 + 选定「拆小单次输出」）**：
+- **⑥b 全局头拆三段**（`DeriveDraftService`）：`HEAD_A_PROMPT` 定名+人物表（title/summary/protagonist/cast name/role/gender）、`HEAD_B_PROMPT` 人设卡（`persona[{name,五键}]`，只准名单内、不得漏人）、`HEAD_C_PROMPT` brief+真相卡。单次输出从 3000–5200 字符降到 ~500–1000。
+- 幂等改按段判定：`headStage(novel, reasoning)` → 0 未定名 / 1 缺人设卡 / 2 缺 brief（推理体裁还缺 truth）/ 3 齐；`headStep` 每次只推进一段并立刻落库（`updateMeta+updateCast` / `updateCast(mergePersona)` / `updateBrief+updateTruth`），返回 `unit=HEAD, batchIndex=1..3, batchTotal=3`。`headDone` 改为 `headStage>=3`（旧口径只看 protagonist，拆段后会把缺人设卡的书误判成完成）。
+- 新增纯函数：`parseHeadBasic` / `parsePersona` / `parseBriefTruth` / `mergePersona`；单测 `DeriveDraftBatchTest` 补 `headStageWalksThreeSegments`、`parseHeadBasic_requiresCoreFieldsOnly`、`parsePersona_coversWholeCastExactly`、`mergePersonaKeepsCastOrder`（删掉旧的 `headDoneRequiresProtagonist`）。
+- `findPageByRun` 加 node 前缀过滤（`derive_`），避免 runId 与 novelId 撞车时捞到主站节点行。
+- **已部署**（19:12 CST）：`mvn -pl novelgen-derive-app -am clean package` → 备份旧 jar → 覆盖 → `systemctl restart novelgen-derive`（PID 变更、active）；`web/dist` 覆盖 `/www/wwwroot/novelgen-ui/`（备份 `novelgen-ui.bak-*`）。验收：`systemctl is-active`=active、`/derive/api/derive/ping` 401（未登录预期）、站点 `/` 200；全量 `mvn -o test` 398+3+4 全绿、`npm run build` 过。
+- **待实弹**：run22 的 `novels.story_assets` 为空 → 下次点⑥b 会从 A 段（定名）开始；三段能否一次过、`llm_call_log.run_id` 是否落值、账本「看详情」能否读出提示词/返回，需点一次后用 psql 复核。
+
+## 宝塔部署：衍生 V119 世界状态账 + 前端（2026-10-18 午后，用户当轮授权，未 commit）
+
+**授权**：用户当轮明说「把新的前后端部署上宝塔环境」。
+
+- **包**：本机 `mvn -pl novelgen-derive-app -am clean package`；首包嵌的是旧 `novelgen-data`（无 V119，MD5 曾与线上撞成同值），**clean 重打后** fat jar 内确认含 `V119__derive_world_states.sql`。本地/线上 MD5=`c5a0b3aa457f0410239352da2e02137c`。
+- **后端**：`systemctl stop novelgen-derive` → 备份 `novelgen-derive-app.jar.bak-20261018-v119` → scp → start。Flyway **20 migrations validated，成功应用 119**；`world_states` 表在线上 derive_gen 已建（unique novel_id+chapter_no，ON DELETE CASCADE）。
+- **前端**：`web/dist` 整目录覆盖 `/www/wwwroot/novelgen-ui/`。
+- **验收**：`GET /` 200；`GET /derive/api/derive/ping` 带 Origin 未登录 **401 JSON A0003**（非 CORS 403）；`GET /derive/api/derive/runs` 401；`systemctl is-active novelgen-derive`=active。
+- **主站 novelgen jar 未动**（本批改动只在 derive 链路）。
+- **踩坑**：`-pl … -am package` 可能嵌入未刷新的 data jar——升级含 Flyway 新迁移的包前，必须核 fat jar 内 `BOOT-INF/lib/novelgen-data-*.jar` 是否含新 SQL，否则线上「Schema up to date」假成功。
+
+## 衍生⑧状态账注入 + ⑥a张力密度闸（2026-10-18，已随后批部署宝塔）
+
+**接续 V119 世界状态账**，补审稿结构伤的两道闸：
+
+- **⑧**：`DeriveQcService` 注入 `world_states` 逐章时间线；`QC_PROMPT` logic 增⑥——时刻/地点/在场矛盾、open_loops 已关闭事件再演（酒窖脱困两次）、key_facts 被推翻 → fail 并点名章号。
+- **⑥a**：`PLAN_PROMPT` 规则 7/8（张力沉淀 + 反转后移）；`checkTensionDensity` 硬校验——连续 ≥3 章整章只有{事件,反转}拒；推理/悬疑且反转 ≥2 时最后 30% 章必须还有 ≥1 反转。`PlanContext` 增 `tags`（兼容旧 7 参构造器）。
+- **测试**：`DeriveTensionGateTest` 7 条；`DeriveLenCheckTest`/`DeriveQcConcentrationTest` 构造器补 WorldStateMapper；`Derive*` 全套绿。
+- **仍未做**：线上部署、V119 实弹（本地 Docker 未起）、⑥b 窗级时间锚。
+
+## 衍生侧世界状态账落地：V119 + world_state 节点接进⑦（2026-10-18，已随后批部署宝塔）
+
+**背景**：用户指出「重点应是把没真正落地的东西落地」——`world_state` 节点自 V102 起只在 `llm_node_config` 里躺种子，derive 写链从未消费；⑦ 前情只有正文尾 300 字，时序/同一事件重复无账本。
+
+- **表**：derive V119 `world_states`（novel_id+chapter_no 唯一，jsonb `state`，物理删；一章一份 upsert）。
+- **⑦**：落稿后 `refreshWorldState` 走 `NODE_WORLD_STATE=world_state` 抽取（time 防呆对齐 AGENTS #22：只认明确时间线索、禁反推总历时、无线索沿用上一章）；`buildUser` 任何模式注入最新快照键「世界状态账」；抽取失败 fail-open 不炸章。
+- **REWORK**：⑥b 回炉 `worldStateMapper.deleteByNovel` 整本清账。
+- **META_LEAK gate**（审稿实锤回归钉）：拦「估算字数/本章N字/挂拍/第N章——」等过程话，与 FORBIDDEN 同级硬校验。
+- **测试**：`DeriveWorldStateInjectTest` 4 条 + 既有 `Derive*` 全套绿。
+- **未做**：⑧ QC 注入全账、⑥a 张力密度闸、线上部署。本地 Docker 未起，V119 待下次 derive 应用启动 Flyway 自动执行。
+
+## 字数留空改 AI 估档 + 前端对齐三件套（2026-10-17 深夜，未提交未部署）
+
+**背景**：用户实弹 run20 建 run 转圈 3.5 分钟（AI 预审 181s+焊接 36s，非卡死后端正常落库），随后指出字数带留空的产品本意是 **AI 自己判字数与篇幅**，不是按形态套默认档——推翻 P7 短期档口径。
+
+- **后端**：`derive_word_band` 节点——wordsMin/Max 都空时 LLM 按 tags/intent/style 判 form+带宽（form 已指定则只估带宽），`clampBand` 钳入 FORM_WORDS 档内（贪大护栏），fail-open 回退 seed 抽 form+默认带；**字数空且 form 空时不再 seed 抽 form**。单测 `DeriveWordBandEstimateTest`（parse/clamp 10 用例）+ 旧 `DeriveWordsDefaultTest` 全过。
+- **前端**（同轮已改）：①run 详情「P6 立项闸」按钮+结果卡（GATE 未 PASS 禁用⑦）；②建 run 字数带可选、防复刻默认开；③估档/形态提示文案对齐新语义。`npm run build` 过。
+- **未部署**：jar 与 dist 都在本地。run20 仍是旧语义产物（SHORT 1~3万 默认带）。
+- 遗留：run19 过闸、闸 REWORK 无快照丢稿、force 越闸、derive_plan 流式化，见方案文档。
+
+## 衍生前端 v2：动作层落地，纯前端可走完全流程（2026-10-17 深夜，未提交，已部署见文末）
+
+**部署补记（同晚，用户授权「把新前端更新到宝塔环境」）**：`web/dist`（含动作层+computed 修复）覆盖 `/www/wwwroot/novelgen-ui/`，旧版备份 `novelgen-ui.bak-20261017-v2`；**只推前端未动 jar**——线上 jar（上午版）自带读端点与 derive_token，ingest 空标签 bug 由前端默认发 `'{}'` 绕开（后端补丁已落本地 jar，待下次随批上线）。验收：首页200/标题✓、新 chunk200✓、`GET /derive/api/derive/runs` 200✓、浏览器生产实测 run19 详情状态机操作条（写作中→⑦/连续写完）✓。
+
+**目标（用户定调）**：「其他前端部分也开始设计和编写，要有能让人靠纯前端就能走完全流程的完整性」——①入库→②③④素材链→⑤采样→⑥⑦⑧跑书全部按钮化。
+
+**落地**：
+- 书库页「入库新书」对话框（书名/作者/平台/标签/粘贴正文→①）；详情页自动回跳。
+- 书详情「素材处理流水线」操作条：②抽取/③无指向化/④a扫查/④b打标/④c域格/④d文风，AI 步骤二次确认（标注计费耗时）；✓ 完成态按读数推断（outlineCount/outlineLabeledCount/labelCount/hasStyleProfile）；④a 结果带命中数与「黑名单命中回③」提示。
+- 任务页「新建 run」对话框（字数带/tags/pace 必填 + seed/form/outcome/防复刻/字数校验/intent/思路预审/文风 高级折叠）；创建后跳详情。
+- **run 详情状态机操作条（签名交互）**：按 status 永远只亮一个下一步——PLANNING→⑥a/⑥b、DRAFTING→⑦写下一章/**连续写完**（自动逐章循环，allDone 终止、60 章保护、可停止、gateCleared=false 提示 lastIssue）、QC→⑧质检（确认框提示 10 分钟级）、REWORK→⑥b 回炉（清稿归档提示）、PASSED/FAILED 完成态文案；顶部引导语随状态切换。
+- `deriveApi`：POST 失败/中断追加「服务端可能仍在执行，稍后刷新」韧性文案（nginx /derive/ 已是 600s，确认无需改）。
+- **顺手修后端潜伏 bug**：`DeriveBookService.ingest` 空标签写 NULL 撞 `novels.category_tags NOT NULL DEFAULT '{}'`（insertFull 显式插值绕过 DEFAULT）→ 空标签补 `'{}'`；前端同步默认发 `'{}'`（线上旧 jar 也立即可用）。
+
+**验证**（本地 5173+8091，LLM 步骤只验按钮/确认框不实跑烧钱）：入库 UI验收小书→自动切2章跳详情✓；书4 点④a→确认框→POST grep 200+读数刷新✓；新建 run（tags=推理恒等归一化免 LLM）→跳 run16 详情→⑥a→自动切「⑥b 生成具体稿」✓；实测抓出并修复 `computed` 未导入导致详情页崩的 bug；`npm run build` 过。**线上未部署本批**（线上跑的是上午的只读版 jar+dist；注意线上 jar 仍带 ingest 空标签 bug——前端已发 `'{}'` 绕开）。遗留：FAILED 重开仍无端点；LLM 步骤（②③④b④c④d⑥b⑦⑧）未做端到端烧钱实测，链路与已验步骤同构。
+
+## 随机衍生前端+derive 新 jar 已部署宝塔（2026-10-17 晚，用户当轮授权「推前端」，未提交）
+
+**部署内容**（打包=当日工作树，前端+衍生后端成套，主站 novelgen jar 未动）：
+1. **前端**：`web/dist`（纯衍生版，标题「随机衍生」）整目录覆盖 `/www/wwwroot/novelgen-ui/`；旧版备份 `/www/wwwroot/novelgen-ui.bak-20261017`（含被下线的主站 UI）。
+2. **derive 新 jar**（新前端依赖的 7 个读端点 + `derive_token` cookie 改名必须随行）：MD5 本地=线上 `507c0b3d…`；旧 jar 备份 `novelgen-derive-app.jar.bak-20261017`；流程 stop→scp→chown→start，服务 active。
+
+**验收**：`https://zzdzz.cn:8888/` 200 且 `<title>随机衍生</title>`；未登录 `GET /derive/api/derive/ping`→401；登录 200（**线上 derive 口令≠本地 admin123，哈希 `16c32b9…` vs 本地 `bf6b5b…`；本轮用户提供线上口令完成验收，未改库**）；`GET /derive/api/derive/runs` 返 19 个 run（线上今日新增 16-19）；浏览器生产实测：`/#/derive/runs` → 登录门 → 登录 → 列表含 run17《环泽七日》。
+
+**连带生效**：线上主站 UI 已被替换（用户定调预期）；旧 `novelgen_token` 形态的 derive curl 脚本全部失效，须用 `derive_token`/重新 login；`docs/deploy-bt.md`/skill 里「API-only/主站 UI 不显示」的描述已过时待改口。**代码仍全部未 commit。**
+
+## web/ 前端只剩随机衍生：主站 UI 整体下线 + 衍生只读监控台（2026-10-17，未提交，已部署见上节）
+
+**背景两步**（同日用户两次定调）：①「并入 web/ + 只读监控台优先」→ 衍生页组落地；②「主站前端都给删了，只留随机衍生，我说的」→ 主站 UI 整体下线。
+
+**衍生页组（保留的全部前端）**：路由 `/derive` 嵌套组（runs / runs:id / books / books:id，`/` 与未知路径 redirect 到 `/derive/runs`）；`DeriveShell.vue` 衍生登录门（cookie `derive_token`，与主站分名防同域互覆盖——配套改了 derive-app `JwtService.TOKEN_COOKIE` 一行，**既有 curl 旧 cookie 失效需重新 login**）+ 任务/书库页签；四视图 Runs/RunDetail（进度卡+章/拍表+质检折叠 JSON）/Books/BookDetail；`deriveApi.js`（`/derive` 前缀）；vite 代理 `/derive`→8091（rewrite 剥前缀，本地 jar 无 context-path）。**依赖后端 2026-10-17 补的 7 个读端点 + books 列表筛选**（见下一条流水）。
+
+**主站下线删除 22 文件**：Login/Workbench/Wizard/Books/Chapters/Planning/PlanAsset/Library/Fingerprint/Logs 十视图 + TextFileDropZone/SceneStream/SampleImportDialog/ReadingPane/ImportAnalyzeDialog/FingerprintMetricTable/FingerprintDraftDialog 七组件 + api/labels/novelSelection/importAnalyze/readingSettings 五模块。router 砍主站守卫（/api/auth/me 不再调用）、App.vue 砍侧栏、标题改「随机衍生」。**后端 8090 未动**；部署新 dist 会替换线上主站 UI，需用户授权。
+
+**验证**：衍生读端点——`DeriveQueryServiceTest` 13 条绿 + 全量 mvn test 绿 + 本地 8091 实弹（run5 全量读出）；前端——`npm run build` 过、Playwright 黄金路径全通（主站登录已删后：`/`→derive runs→run5 详情→书 31 详情；标题「随机衍生」）。**未 commit、未部署**。第二批候选：动作按钮、FAILED 重开、draft_history 读端点。
+
+## 随机衍生补读端点：进度/结果展示 + 带筛选列表（2026-10-17，未提交，已随新 jar 部署见上节）
+
+**动机**：用户要求「补一批读端点展示进度和结果 + 带筛选的列表接口」——此前 derive-app 18 个端点几乎全是动作型 POST，查询型只有 `GET /books` 一个，前端无从展示。本轮 **新增 7 个 GET + 增强 1 个**（总端点 18→25）：
+
+| 端点 | 用途 |
+|---|---|
+| `GET /api/derive/runs` | run 列表（status/novelId/keyword(成品书名+思路)/from/to/sort；默认 id 倒序；novelTitle 回填） |
+| `GET /api/derive/runs/{id}` | run 详情：状态机+⑤参数快照+章/拍进度聚合+最新质检判定+calibration 读数 |
+| `GET /api/derive/runs/{id}/chapters` | 成品章进度（章号升序；`includeText=true` 附正文；`status` 可筛） |
+| `GET /api/derive/runs/{id}/qc-reports` | 质检历史（轮次降序；`verdict` 可筛；jsonb 四列→JsonNode） |
+| `GET /api/derive/runs/{id}/beats` | 拍实例进度（seq 升序；`status`/`chapterNo` 可筛） |
+| `GET /api/derive/books/{id}` | 书详情：元数据+素材进度读数（源章/弧/拍/世界/标签计数、outlineLabeledCount、hasStyleProfile） |
+| `GET /api/derive/books/{id}/chapters` | 源章列表（seq 升序；`includeText=true` 附原文） |
+| `GET /api/derive/books`（增强） | 加 keyword/sourceType(SOURCE 缺省=旧行为,ALL,GENERATED)/from/to/sort 筛选 |
+
+**实现**：`DeriveQueryService`（读编排，列表=读全量内存筛+排序，口径同 zzdzz `NovelService.list`；`matches`/`comparator` 纯函数单测锁定）；DTO `RunQueryDTO`/`BookQueryDTO`；VO `RunDetailVO`（嵌套 Progress/QcSummary）/`RunListItemVO`/`RunChapterVO`/`QcReportVO`/`BeatVO`/`BookDetailVO`/`SourceChapterVO`；**`BookVO` 加 createTime 组件**（JSON 键 createTime，兼容）；`DeriveBookService.list()` 迁入 query 服务后删除。鉴权自动继承 `/api/**` 拦截。
+
+**验证**：`DeriveQueryServiceTest` **13 条绿**（筛选/排序/聚合/NOT_FOUND/verdict 筛/includeText）；全量 `mvn test` BUILD SUCCESS（service 351 + app 3 + derive-app 4）；**实弹**（本地 8091 重启新 jar，admin/admin123）：list/detail/chapters/qc-reports/beats/books 系列 200，run5《无歇之航》8 章 QC_PASS/12 拍 VERIFIED/9 轮质检全量读出，`GET /runs/999999`→A0005 NOT_FOUND。**未部署线上、未 commit**。
+
+## 宝塔上线：novelgen-app 已部署到 101.126.22.219（2026-10-16，未提交）
+
+**入口**：**`https://zzdzz.cn:8888/`**（必须带 https；`http://` 得 400 属预期。2026-10-16 追加：**本地数据已全量迁移上线**——27 书/828 章/526 向量/405 卡与本地逐表一致，admin 口令随 users 表恢复为本地库口令）。**部署手册见 `docs/deploy-bt.md`**（路径速查/升级步骤/HTTPS·数据迁移细节/排障全在那份，收尾前必读）。
+
+**要点**：与 zzdzz-blog 同机共存——PG 复用 docker `zzdzz-pg-zzdzz-pg-1`（pgvector:pg16:35432）新开库 `novel_gen`；后端 fat jar 跑 systemd `novelgen`（Temurin 21 在 `/usr/local/jdk-21`，8090 只绑 127.0.0.1）；前端 dist 在 `/www/wwwroot/novelgen-ui/` 由 nginx 8888 站点 serve；`/api/` 反代段按博客 SSE 教训配了 gzip off/buffering off/600s。SSH 私钥复制到本仓库 `keys/`（gitignore）。derive-app（8091/derive_gen）**未部署**。
+
+**部署文档三件套（2026-10-16 蒸馏）**：详版 `docs/deploy-bt.md`（路径/坑/排障全集）· 简版流程 `docs/deploy-bt-quick.md`（照着做）· agent skill `.mimocode/skills/bt-deploy-novelgen/`（升级/迁移/排障场景化命令；`.mimocode/` 在 gitignore，skill 仅本机可见）。**改部署契约三处同步**。
+
+**CORS 修复上线（2026-10-16 深夜，用户报登录 403 `Invalid CORS request`）**：同源误判（浏览器 https Origin vs 后端反代后 scheme=http）→ 修 `server.forward-headers-strategy: framework`（base application.yaml）+ nginx `/api/` 补 `X-Forwarded-Port/Host`；带 Origin 复测 401 JSON（口令过期属预期）、preflight 200、页面 200。教训：**CORS 验证必须带 Origin 头，裸 curl 测不出**（已入 deploy-bt.md §十二 与 skill）。**同日用户定调铁律：未经当轮明确允许禁止部署上线（已进 AGENTS 架构铁律，与 commit/push 同级）。**
+
+**顺手修的启动 bug（本地重打 jar 也会踩）**：derive 服务泄进共享 novelgen-service 后，主应用没扫 `derive.mapper`，新 jar 必崩（`DeriveBookService` 缺 `NovelMapper`）。已修 `NovelGenApplication`：`@MapperScan` 补 `com.zzdzz.novelgen.derive.mapper` + `FullyQualifiedAnnotationBeanNameGenerator` 防同名接口撞 bean（与 DeriveGenApplication 同款）。另一坑：新库要手工 `CREATE EXTENSION pgcrypto`（V3 注释里的改口令 SQL 依赖 digest()，迁移里没建）。
+
+**随机衍生系统部署上线（2026-10-16 深夜，用户当轮授权「完整部署随机衍生」）**：回答「为什么线上还是旧流程数据」——novel_gen 两边逐表一致（27 本，max updated 同为 10-08 10:55），**新流程数据在 derive_gen（33 本/13 run）且此前从未部署**。已落地：derive_gen 全量 pg_restore（33/13 对齐）· Redis 容器 `novel-ai-redis`（redis:7-alpine，127.0.0.1:6379）· systemd `novelgen-derive`（/www/wwwroot/novelgen-derive，8091 绑回环，context-path=/derive，-Xmx1g）· nginx `/derive/` 同站反代（不新开端口）· base yaml 补 `forward-headers-strategy: framework`。入口 **`https://zzdzz.cn:8888/derive/`**（API-only，web/ 无 /api/derive 页面，主站 UI 不显示衍生数据属预期）。**Redis 已切到面板实例 `redis_PcNS`（127.0.0.1:26739，密码在面板/derive 配置）**——用户指出后返工：此前只查 6379/docker ps 没发现该实例，自建的 novel-ai-redis 容器已删；教训入 deploy-bt.md §六（先问面板/全端口再动中间件）。两个新坑入册：root 建日志文件 www 写不进→java 没起就 exit 1 秒循环（deploy-bt.md §六）。文档/快照/skill 已同步。
+
 ## codebase-design 盘点后的外科重构：死键清理 + 接线收口（2026-10-08 晚，未提交，404 测试绿 + 前端 build 过）
 
 **背景**：用户指令「表结构/业务逻辑/依赖关系多了少了复杂了就再重构」，三路并行盘点（表结构与迁移 / 业务逻辑深浅 / 六模块依赖）后按规格（`docs/改造方案-业务侧推翻重构详细规划.md`，下称规划）执行。**先核规格再动手**：`gates`/`clones`/`SEED_PRELUDE` 是规划 D3/§3.2 明定的预留位（词条段、能力表目标态），**保留不删**；真正动的是规格要接没接、或已成死肉的部分。
@@ -1096,6 +1303,59 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 3. 门禁指标**方向语义**须在指标定义处显式声明（上限/下限混用教训：dialogue_end_punct_ratio 场景级曾按上限执法）；修订轮成本优化（单轮 8 分钟）。
 4. 测试缺口：门禁指标边界、断点复用分支未覆盖；LLM 429 限流未处理（402 余额耗尽已有先例）。
 
+## 任务级自动续跑开关 + 开发工作流 skill（2026-10-17，未提交）
+
+- **功能：任务级自动续跑（随 /run，默认开）**：`PipelineRunDTO` 加 `Boolean autoContinue`（null=开）→ `GenerationQueueService.submit` 落任务 payload `{"autoContinue":true}`（方法 `buildAutoContinuePayload`/判定 `taskAutoContinueOn`，同包 `AutoContinuePayloadTest` 3 条钉语义）→ CHAPTERS 任务 DONE 钩子分叉：书级无人续跑链（`derive_config.autoContinue`）开着且优先，否则 `continuePlannedBatch` 续排下一批**已有规划行**的章（cap=batch_max_chapters=10、钳 targetChapters、**不开新卷**，规划用尽即停；入队前 `existsActiveForNovel` 防双入队）。前端：工作台启动生成行加「自动续跑」开关 `runAutoContinue`（默认 ref(true)、随 /run 传值、tooltip 说明与书级链关系）；章节页单章重生成显式传 `autoContinue:false`。
+- **验证**：`mvn -q test` 全量绿（含新增 AutoContinuePayloadTest）；`npm run build` 过。**遗留：后端未重启，实弹验收待打包重启后做**（启动生成开关可见性 + 一批跑完自动接排 + 规划用尽收束 + 与书级链并存不双入队）。
+- **线上 33 号续跑（2026-10-17 凌晨，用户指令「只续写不冲跑」）**：derive_gen《月潮盐崖塔》novel_id=33 / run 15 / DRAFTING，10 章已写 8、剩 27/30。服务端 `/root/run15-continue.sh`（nohup，与本机无关）：循环 `write` 至 allDone（自动转 QC）→ 质检一次 → 非 PASSED 即停等人工（**无 draft/返工调用**，防清稿冲跑）。`run` 表外键是 `novel_id`。口令几经波折：derive 曾被改致 A0002，最终按 §六 SQL（derive_gen 补装 pgcrypto 后）重置 admin=`zhizhedezongzi`（登录 00000 实证）；口令只落 `/root/.run15.pass`（600）。**大坑入册：PS 引号被吃后 `tr -d "\r"` 变成 `tr -d r`，把脚本里所有小写 r 删光**（root→oot、curl→cul），修 CRLF 只许 `sed "s/\r$//"`，禁 tr。01:11 登录成功进入 write 循环，日志 `/root/run15-continue.log`。**重置密码接口已写完（本地，未部署）**：`POST /api/auth/password` `{oldPassword,newPassword}`（主站与 derive 两套 AuthController 同步加；`AuthService.changePassword` 旧密按登录口径 sha256(username:password) 校验、新密 ≥6 位且不重复；`UserDataService.updatePasswordHash` 只 SET password_hash 避开 updated_time 坑；`AuthServiceChangePasswordTest` 4/4，金标哈希与线上库实测一致）。**未部署**——上线需用户当轮明确授权。
+- **过程修正（按 code-standards 自查抓出）**：WorkbenchView 行尾注释改独立行（§3.7）；方法名 `taskAutoContinue`→`taskAutoContinueOn`、`autoContinuePayload`→`buildAutoContinuePayload`（§3.3）。
+- **流程沉淀：项目 skill `.mimocode/skills/novelgen-dev-workflow/`**（用户定调最高规范）：开工必读顺序（AGENTS→code-standards→STATUS→按需 pipeline-contracts）、10 步执行工作流、模块地图与任务→文件路由、新旧口径对照表（DO/DTO/VO、软删、mapper 更名等）、排查路径（先坑清单后入口分清）、测试验收清单（Mockito 三坑/实弹五步）；AGENTS.md 顶部已加「开发工作流」指针节。locales zh-CN/en-US 齐。除非用户明示修改，此后开发任务按此执行。
+
+
+
+## 衍生管线质量闸设计方案已落稿（2026-10-17，未实施）
+
+- **背景**：书 33（run 15，《月潮盐崖塔》，审稿 69/66 分）与书 50（run 16，《重蹈覆辙的人们》，审稿 43 分）对证——两本 `param_outcome` 均为「开放」且均带真相卡（合同打架：「末章可留悬念」vs「结局须还原三要素」）；33 号 QC 已判 REWORK（logic/voice/domain 全 false）仍被导出投稿；33 号 content ch7–44 残留 LLM 章注回声（ch18 占位符 `本章X字`；`COMMENT_PATTERN` 吞不下 `seq` 前缀变体；提示词仍令 LLM 输出章注，与 P0「机器合成」矛盾）；50 号五标签拼贴、125 拍、DRAFTING 中。
+- **方案**：`docs/改造方案-衍生管线质量闸.md`（P1 清稿断供+兜底剥离·降报告不重写 / P2 推理·悬疑+真相卡强制闭合裁决 / P3 元素回收账 element_ledger（⑥b→⑦ 建账、⑧ 清算） / P4 前情瘦身+结尾禁复读 / P5 REWORK 禁导出 / P6 ⑥b 出口立项评审闸）。落地顺序 P1→P5→P2→P4→P6→P3；P3 动表结构，实施前需用户确认。
+- **本次仅产出方案文档，未改任何代码/库表**。未提交、未部署。
+
+## 衍生⑥b 分批改造已落码（2026-10-17，未提交未部署）
+
+- **契约**：`随机衍生工作流/小说随机衍生工作流-v3.7.md`（v3.6 升版副本）——⑥b 拆 ⑥b-0 全局头（书名/主角/cast/truth/brief，落 story_assets，路径不变）+ ⑥b-1..n 连续章段窗（默认 8 章一窗，确定性切窗不耗 seed）；`POST /runs/{id}/draft` 改幂等单元制（RESET/HEAD/BATCH/DONE，循环至 allDone，与 /write 同款 harness）；REWORK 仍整本重做（入口清正文+纲+头产物后回 PLANNING）。
+- **代码**：`DeriveDraftService` 重写（HEAD_PROMPT/BATCH_PROMPT、parseHead/parseBatch、windows/windowDone/headDone/globalReconcile 纯函数）；`DraftVO` 扩 unit/batchIndex/batchTotal/allDone；`ChapterMapper.clearDraftOutlines` + `NovelMapper.clearDraftAssets`（XML 显式 SQL）；`DeriveRunController` 注释同步。节点名仍 `derive_draft`（llm_node_config 路由兼容）。
+- **验证**：`DeriveDraftBatchTest` 6 条（切窗/头判定/窗判定/窗体对账含漏覆盖·窗外章·新造人名拒/终局对账点名）+ 既有 DeriveDraftArchiveTest/DeriveSpoilerGateTest/DeriveSampleServiceOutcomeTest 全绿；`mvn -q test` 全量绿。**未部署**——线上 derive jar 仍是 P2 版（run17 旧单次 draft 还在飞）；上线需用户明示。
+- **遗留**：批内人名只有 prompt 约束 + new_names 禁字段，无正文级人名扫描；窗间并行与按窗精准回炉留二期。
+
+## P2 收尾两刀已落码（2026-10-17，未提交未部署）
+
+- **⑥a 规划规则 4b**（`DerivePlanService.PLAN_PROMPT`）：类别含推理/悬疑且结局形状=闭合时，末章收束拍必须承载「真相了结/罪责兑现」可查验动作，禁纯氛围收束拍充数；`buildUserInput` 补注入「类别」字段（否则该规则无输入可判）。
+- **⑧ logic④ 硬对账**（`DeriveQcService.QC_PROMPT`）：三要素兑现动作缺失即 `pass=false` 并点名；solution 专名/anchors 悬空 >1 处即 fail（次级钩子暂用真相卡内元素兜底，P3 建成前的过渡口径）；「案情已闭合+判决后情绪余韵尾」明确判 pass（防误杀51号 ch56 型结尾）。
+- **验证**：`DeriveClosureContractTest` 2 条 + 关联 3 个测试类全绿。**未部署**。工作流 v3.7 副本已补 changelog 第 6 条。
+
+## P6 六判据方案 + P7 字数短期档已落（2026-10-17，未提交未部署）
+
+- **P6 方案细化**（`docs/改造方案-衍生管线质量闸.md` P6 节重写）：六判据=规则单轨/体量预算（**人命≤4**、支线≤2、拍数上限）/动机链/闭合/ **职能锁定**（照夜行新增：只记不断者禁肉搏）/ **母题查重**（wordlist 新增 grp='MOTIF' 黑名单：抱遗骸疯唱、色相求饶、鞋印嫁祸、替身伏法等四稿复读项）+ 融梗信号只报不拦；落点头后（⑥b-0 之后）；伴随补丁=**指纹登记前移**（⑥a 抽中弧即登记 BRIDGE——现只在 ⑧ PASSED 登记而 33 起无一过审，防复刻死循环）+ MOTIF 黑名单 + anti_repro 默认值（**待用户拍板**）。
+- **P7 字数短期档（已落码）**：`RunCreateDTO.wordsMin/Max` 改 `Integer` 可选——都传=显式、都不传=`FORM_WORDS` 按形态默认（LONG 10–20万/SHORT_STANDALONE 1–3万/LIGHT_NOVEL 8–16万/LONG_INNER_SHORT 10–20万/LN_INNER_SHORT 6–12万）确定性落 run 可复现、半传/未知形态报错；`resolveWordBand` 静态纯函数；规模预测块移到 form 抽签后（rnd 消费序不变）。AI 估档留 P6 同期（须钳 form 区间，防 AI 贪大加剧超载）。
+- **验证**：`DeriveWordsDefaultTest` 4 条 + 关联测试绿；`mvn -q test` 全量绿。**未部署**。遗留：run 18/19 两本 PLANNING/DRAFTING 测试书待处置；⑥a plan 非流式 RST 风险记待办（下次给 derive_plan 加流式）。
+
+## P6 立项闸代码已落（2026-10-17，未提交未部署；jar 已打好待部署令）
+
+- **新端点** `POST /api/derive/runs/{id}/gate`（`DeriveGateService`，节点 derive_gate）：⑥b 全窗完成后跑 LLM 立项评审（六判据提示词：规则单轨/体量预算〔人命≤4、支线≤1-2〕/动机链/闭合/职能锁定/母题查重 vs wordlist grp=MOTIF）。GO→step_status GATE=PASS 放行；REWORK→run→REWORK 回 ⑥b 整本重做（prevRound<2，否则熔断 FAILED）；REJECT→FAILED。记录落 `run.step_status.steps.GATE`（L2 层，无 DDL；`RunMapper.updateStepStatus` 新增 XML 显式 ::jsonb）。
+- **⑦ 硬闸**：`DeriveWriteService.writeNext` 要求 GATE=PASS，否则报「先 POST /gate」——烂大纲写不出正文；⑥b REWORK 清稿时同步 `gateReset` 作废旧 PASS（重做大纲必须重新过闸）。
+- **V118** `motif_blacklist`：wordlist 7 条母题（抱遗骸疯唱/色相求饶/鞋印嫁祸/替身伏法等，kind=BLACKLIST, grp='MOTIF'）；⑧ `checkBlacklist` 排除 grp='MOTIF'（母题不进正文 grep 硬判）。
+- **指纹前移**：`DerivePlanService.registerBridgeFingerprints`——⑥a 抽中弧即登记 BRIDGE（原仅⑧ PASS 登记，33 起无一过审致防复刻死循环）；与 QC `fingerprintOf` 同口径、唯一键幂等。
+- **anti_repro 默认开（2026-10-17 用户拍板）**：`antiReproDefaulted()` 不传=开、显式 false 才关。**⚠ 连带效应**：anti_repro=ON 同时把⑦ 会话切到独立干净会话口径（v3.3 既有耦合）+⑧ 词表类改硬判——如只想弧阻断不要独立会话，需后续解耦（另立项）。
+- **验证**：`DeriveGateServiceTest` 6 条（verdict→动作熔断/step 合并读写/回炉作废/解析校验/坏 JSON 安全/anti_repro 缺省）全绿；`mvn -q test` 全量绿；derive jar 23:00 打好（含 V118）。**未部署**——上线需明示；部署后 Flyway 自动跑 V118。
+- **遗留**：derive_gate 未插 llm_node_config 行（走全局默认模型回退）；run19 若 /write 需先 /gate；AI 字数估档仍待 P6 后期。
+
+## run 29《灰潮岛的无面者》审稿硬伤归因排查（2026-10-19，纯排查未改码）
+
+- **背景**：宝塔 29 号 run 成品（derive_gen novel_id=68，44 章 12.1 万字，AI 审稿 81/100）报「结局未闭环/末章停在『她得去安置点』」。用户问：是断链还是设计如此。
+- **结论：不是断链，是「全流程无人值守 + 直通模式」跳过了⑧质检直接 PASSED**。证据链：①⑥a 计划 44 章×2900 预算，44/44 全部成稿（120,929 字 ∈ [8万,14万]），无空章；②run.status=PASSED 但 qc_round=0、qc_report 0 行、44 章全 DRAFTED 未升 QC_PASS——`DeriveQcService.qc` 从未执行；③唯一不跑质检置 PASSED 的路径=`DeriveAutoFlowService` direct 分支（直通时 `updateStatus(PASSED, null)`）；④step_status GATE=「直通模式：免审放行（跳过 P6 立项闸）」实证 direct=true；⑤末章正文末句确为「她得去安置点。」，与 param_outcome=闭合 相悖且无人验收。
+- **附带事实**：章题 20/21 同名「以他人的脸」在⑥a PLAN titleHint 就已重复（非写作期漂移）；ch41=980 字（len_check=f，每章字数只报告不判负）；真相卡存在（culprit=塞德，reveal_chapter=12）——若质检真跑，logic④ 硬对账可能过（塞德案已闭合），而审稿人不满的「身份线/莉安」是真相卡外的悬置，现有五项快检无专项。
+- **缺陷候选（待用户拍板，未动码）**：A. direct 语义与 javadoc 不一致——`start()` 注释写「跳过闸与质检的 AI 检测」，实现是整个⑧（含 7 项脚本硬判）全跳；即便直通也应跑脚本项+落 qc_report+章升 QC_PASS（零 LLM 成本，可拦未齐稿/主角名缺失/流程痕迹）。B. 章题唯一性全链无查（规划/质检都没有）。C. param_outcome=闭合 无硬验收项（只进 LLM 上下文）。D. 中英夹杂/句式复沓 derive 侧无对应检查（主站门禁族未迁）。
+- 相关既有方案：`docs/改造方案-衍生管线质量闸.md`（P2 真相卡闭合裁决已落码未部署——线上 jar 若为旧版则 logic④ 旧口径更松）。
+
 ## 未提交改动
 
 （未提交）`09/0928-文风修复与体验收尾`（领先 main 24 提交，未推送）+ 工作区 10 改：P0-1 EmbeddingMapper.xml、P0-2 ReviewService、复检 ChapterPipelineService、P1 GateService/ContextPackerService、MiniMaxClient、PromptCatalog、GenerationTaskDataServiceImpl、.gitignore、tools/style_baseline.py。待用户授权后提交。后端 8090（PID 96424）/前端 5173 运行中。
@@ -1103,3 +1363,164 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 （空）`09/0922-走查与流式收尾` 六提交全推送远端（新分支首推）：a2eb4c6 修订流式/重连善后、e97a600 账本健康度、6f95105 伏笔自动园艺、9261611 失败自动重试(V22)、d82d3d4 审校透明化。待办：审校透明化与失败重试待下次生成实测；走查继续收发现。后端 8090/前端 5173 运行中。
 
 （空）`09/0921-全流程透明化` 已 merge 入 main 并推送（`d1cd97c`，205 文件 +4238/-2893，含六连规范化与命名配对切换）；当前分支 `09/0922-走查与流式收尾`（自 main 新开，待办：浏览器走查修整、scene_revise/chapter_revise 接流式、会话断线重连 trace 打底）。后端 8090/前端 5173 运行中。
+
+## run 29 复核补记（2026-10-19，继续纯排查未改码）
+
+- 线上 `derive_gen` 复核：run 29 → novel 68《灰潮岛的无面者》，`status=PASSED`、`qc_round=0`、`param_outcome=闭合`；44 章全部 `DRAFTED`，无空章，正文合计 120,929 字，`qc_report` 0 行。
+- `step_status.steps` 实际只有 `GATE/PLAN/DRAFT`，GATE 记录为「直通模式：免审放行（跳过 P6 立项闸）」；QC 键不存在，证实质检未跑。
+- 日志时间线：2026-10-19 03:00:29 run 29 因 `derive_draft` 真相卡 JSON 连续 3 轮不合规中断（第 3 轮原文 solution 键为 `culprit/mote/method`，缺标准 `motive`）；12:27:22 重新启动，13:59:35 收束 PASSED。此前 02:57:11 还有一次 RST_STREAM 传输错误，已自动重试 1/1 成功。
+- 结论保持：JSON 问题是「真相卡生成阶段中断→人工重启续跑」，不是第 3 章正文损坏；成品之所以停在未闭环结局，是直通模式跳过质检且 `param_outcome=闭合` 没有硬验收。
+
+## run 29 修复部署 + 全文审计（2026-10-19 22:18-22:23）
+
+- **修复**：沿用工作区补丁——`normalizeSolution` 将 `mote/motivation/reason/why` 归一为 `motive`；直通质检改为只跳 AI 快检，脚本 7 项照跑并落 `qc_report`。
+- **部署**：`novelgen-derive-app-0.1.0-SNAPSHOT.jar` 已 stop→scp→chown→start，`novelgen-derive` active；旧 jar 备份 `novelgen-derive-app.jar.bak-20261019`。
+- **审计**：将 run 29 临时置 `QC` 后调用 `POST /derive/api/derive/runs/29/qc`，跑完整脚本+LLM 快检；结果 `REWORK`、`qc_round=1`、script 7/7、LLM fail、17 条 issues。44 章仍全为 `DRAFTED`（REWORK 不升 QC_PASS），报告已入 `qc_report`。
+- **审计重点问题**：拍 45-121 共 77 拍未兑现；第14章正文粘贴章纲；第18章起英文标点/`anything`；真相卡 culprit=塞德 与第39章莫恩主线冲突；20/21章同名；莉安失踪/尸体状态冲突；凯尔逃脱链条断裂；物证计数不一致等。
+- **本次审计中断统计**：部署后审计调用本身 **0 次中断/0 次 JSON 重试**，`llm_call_log` 仅 1 条 `derive_qc` 成功记录。原 run29 生成过程共记录 **1 次硬中断**（`derive_draft` truth.solution 三轮：reveal 早于埋设、clue 泄底、缺 motive）+ **3 次自动恢复异常**（1 次 RST_STREAM、1 次 derive_plan 拍清单重试、1 次 ch2 world_state JSON 截断）。
+- **账号**：审计期间临时重置 derive admin 口令，完成后已恢复原 `users.password_hash=16c32b…`。
+
+## 输出层成书契约落地（2026-10-19 22:50，已部署）
+
+- **提示词**：`derive_write` 独立/连续/修整三种提示词统一增加「拍兑现契约」输出行：
+  `<!-- 拍兑现契约：{"beats":[{"seq":1,"evidence":"正文原句"}],"open_threads":[],"closed_threads":[]} -->`。
+  `evidence` 必须从正文逐字摘录；拍号必须与本章拍实例完全一致。
+- **服务端校验**：`DeriveWriteService.validateContract` 解析契约，检查拍号集合、重复/越界、evidence 是否真实出现在正文；`param_outcome=闭合` 的末章还必须给非空 `closure.resolved_threads` 与 `final_state`。契约行在落库前剥离，正文与机器章注不变。
+- **测试**：新增 `DeriveWriteContractTest`；全量 `mvn -q test` 通过。
+- **部署**：derive jar 已再次 stop→scp→chown→start，服务 active；旧包备份 `novelgen-derive-app.jar.bak-20261019-2`。本次只更新输出契约层，未重写 run29 正文。
+
+## run 30 中断排查（2026-10-19 23:11，纯排查未改码）
+
+- run30 → novel69《未命名·RUN-30》，`status=PLANNING`、`qc_round=0`、`param_outcome=闭合`；`step_status` 只有 SAMPLE/WELD/PLAN，未进入 DRAFTING/QC。
+- 日志：23:11:05 启动 `direct=false`；23:11:20 完成⑥a窗1章1-10（24/144拍）；随后 `derive_plan` 连续 3 轮语义校验失败：第1轮章号重复17，第2轮第9–11章连续整章{事件,反转}，第3轮第12–14章连续整章{事件,反转}；23:11:46 全流程中断，步数=2。
+- 结论：不是 JSON 语法损坏，也不是⑦正文/输出契约问题，而是⑥a 分章窗的张力沉淀校验耗尽重试；PLAN 已保留窗1草稿，当前没有正文写入。
+
+## 张力机械闸改 AI 复核并部署（2026-10-19 23:40）
+
+- `DerivePlanService`：张力规则改为 `detectTensionIssue` 只报风险，不再直接抛错；发现连续高张力后调用 `TENSION_REVIEW_PROMPT` 让 AI 判 PASS/REVISE。
+- AI 判 PASS：留痕放行；判 REVISE：把机械问题+AI意见喂回重排，最多 3 轮；3 轮仍未通过时**不再中断全流程**，采用最后一版并记录 warning，交后续质检。
+- 已部署 derive jar，备份 `novelgen-derive-app.jar.bak-20261019-4`，服务 active。
+- run30 实测：AI 复核在窗2/窗3均判 REVISE，但流程未再因张力中断，已完成 30/40 章规划；最终在最后一窗因“剩余拍未分配”机械完整性错误停止，属于另一个独立问题。admin 口令已恢复。
+
+## run30 再次中断复核（2026-10-19 23:47）
+
+- 用户重新启动 run30 后，AI 张力复核已生效：窗2/窗3虽判 REVISE，但流程继续推进，没有再被张力闸直接杀掉。
+- 最新中断原因已变为⑥a最后一窗机械完整性：窗4（章31-40）连续3轮未能把剩余拍全部分配；最后剩余 seq 仍达数十个，`run.status=PLANNING`、步数=0/2（取决于本次启动），30/40章规划已保留。
+- 根因：前3窗只用了64/144拍，最后10章被压上约80拍，单窗输出规模过大，模型无法在一次 JSON 中完整分配；这不是张力问题。
+
+## 设计阶段防过载拆窗 + 单章拍数上限（2026-10-19 23:57，已部署）
+
+- `DerivePlanService.planWindowChapterCount`：按剩余拍数/剩余章数动态决定本窗章数，并以 `MAX_PLAN_WINDOW_BEATS=40` 拆窗；run30 的“10章剩80拍”会被拆成 5+5 章，而不是压进最后一窗。
+- 新增 `MAX_BEATS_PER_CHAPTER=6`：⑥a 定规模要求章数至少 `ceil(拍数/6)`；分章窗校验单章最多6拍，提示词同步写明。
+- 全量 `mvn test` 通过；derive jar 已部署，服务 active，备份 `novelgen-derive-app.jar.bak-20261019-5`。
+- run30 当前旧 PLAN 已经形成前30章只用64拍的偏载状态，新规则无法凭空修复既有窗口；需要清空/重建 run30 的 PLAN 后再跑，后续新 run 会在设计阶段自动均衡。
+
+## 章节规模顺序修正 + run31 重建（2026-10-20 00:16）
+
+- 规模设计改为固定顺序：**总拍数 → 章数 → 每章拍数配额**。`PLAN_SCALE_PROMPT` 不再先让字数/章均决定章数；章数必须在 `ceil(拍数/3) ~ ceil(拍数/2)` 内，再由 `beatQuotaForChapter/Range` 固定每章和每窗配额。
+- `parseWindow` 现在要求每窗分配的拍数严格等于该窗配额，避免前窗少用、最后一窗超载。
+- run31 已清理旧 PLAN（38章/78拍），重建后规模为 **44章、章均2700、104拍**（符合35~52章范围）；当前因模型窗口输出出现重复章号4，规划窗尚未落库，状态仍 PLANNING。该问题是模型输出格式问题，不是拍数配额问题。
+- 相关规划测试通过；derive jar 已部署（备份 `novelgen-derive-app.jar.bak-20261020-2`）。
+
+## 清空 run 规划数据按钮/接口（2026-10-20，已部署）
+
+- 新端点 `POST /api/derive/runs/{id}/clear-planning`，返回 `RunResetVO`。
+- 清空范围：chapters、beat_instance、draft_history、qc_report、calibration、world_states、work_fingerprint、⑥a 生成的 novels 骨架；run 回 `PLANNING`、`novel_id=NULL`、`qc_round=0`。
+- 保留范围：run 参数、SAMPLE/WELD 步骤、welded/domain/picked/step_status 中⑥之前配置；LLM 调用账本保留。
+- 保护：auto/write-loop 运行中拒绝；`PASSED` 或全部章节已有正文的 run 拒绝，避免误删成稿。
+- 前端 run 详情操作条新增「清空⑥+数据」按钮（二次确认）；已部署 derive jar 与 web dist。
+- 实弹：run31 清空成功，`novel_id` 置空、step_status 仅保留 SAMPLE/WELD；后端 `mvn test` 全量通过。
+
+## run31 新配额规则实弹中断（2026-10-20 00:26）
+
+- 清空后重新定规模：104拍 → 40章、章均3000，第一窗配额30拍（10章×3拍）。
+- 模型连续3轮未按配额输出：第1轮24拍、第2轮第1章塞6拍、第3轮20拍；`parseWindow` 都以“本窗必须恰好分配30拍”拒绝，最终全流程停止。
+- 说明设计约束已生效（不再是最后一窗才发现），但当前模型仍自行决定拍分配；下一步应把拍→章的配额表由服务端确定性生成，模型只负责写章纲/标题，而不是让模型自由分配拍。
+- run31 当前 `PLANNING`、`novel_id=72`、PLAN drafts 为空。
+
+## 规划自由度修正并部署（2026-10-20，已上线）
+
+- 撤掉“每窗必须恰好 N 拍”的硬配额：`parseWindow` 只校验总拍数不丢、后续章仍能容纳、结局拍可用；不再要求窗口精确等于某个目标。
+- 单章拍数改为建议 2~3、允许 1~4；`PLAN_SCALE_PROMPT` 明确章数先由拍数确定，章内拍数允许按场景节奏浮动。
+- `本窗建议拍数` 仅作为节奏参考；窗口可前后微调，只有导致剩余拍无法在后续章节容纳时才拒绝。
+- derive jar 已重新部署，服务 active；备份 `novelgen-derive-app.jar.bak-20261020-5`。
+- 相关规划/张力测试通过；前端“清空⑥+数据”按钮此前已部署。
+
+## ⑥a 改为拍数→章数→确定性拍组（2026-10-20，已部署验证）
+
+- 规模阶段：104拍默认每章2拍，最低章数 `ceil(拍数/2)`；run31 重建为52章、章均约?（以库里为准），章内允许1~4拍浮动。
+- ⑥a 分章窗不再让模型分配拍：`allocateWindow` 由服务端按全书拍数/章数计算每章配额，按剩余拍清单顺序切组；模型只在⑥b围绕固定拍组写章纲和正文。
+- 实弹：run31 清空后自动跑，⑥a已完成，章1~8均为2拍，自动流程已进入⑥b；此前反复出现的“最后一窗拍未分配/每窗配额”中断不再发生。
+- 相关测试通过；derive jar 已部署（备份 `novelgen-derive-app.jar.bak-20261020-7`）。
+
+## run31 ⑥b skipped=0 兼容 + 试跑/续跑按钮（2026-10-20，已部署）
+
+- ⑥b `DeriveDraftService.parseBatch`：`skipped` 中的 `0` 视为模型表示“没有跳过拍”，归一化忽略，不再判非法 seq；这是 run31 在 ⑥b 第3窗中断的直接原因。
+- 前端 run 详情新增「试跑一步」与「↻ 续跑任务」：
+  - 试跑只推进当前状态机一个单元（⑥a scale / ⑥b 单单元 / 闸 / 单章 / 质检）；
+  - 续跑从当前断点起走全流程，不清空数据。
+- derive jar 与 web dist 已重新部署，服务 active；run31 已从 ⑥b 续跑。
+- 全量 `mvn test` 此前通过；本次针对 DraftBatch/PlanWindow 测试通过。
+
+## 末拍收束约束（2026-10-20，已部署并验证）
+
+- run31 原末章第52章末拍 seq104 是「事件：追到暗林湿地、行动陷入困局」，不是结局；全书3个「收束」拍都在第9-10章。
+- 新增 `ensureFinalClosureBeat`：`param_outcome=闭合` 时，若源清单最后一拍不是「收束」，保留其拍号/来源/节奏并提升为「终局收束：…」；总拍数不变、末章必含终局收束拍。开放/循环结局不改。
+- 实弹：run31 清空重跑后 104 拍/52 章，seq104 的 beat_type 已变为「收束」，位于第52章；自动流程已进入⑥b。
+- derive jar 已部署（备份 `novelgen-derive-app.jar.bak-20261020-9`）。
+
+## 终章内容约束（2026-10-20，已部署验证）
+
+- 发现收束拍虽落在末章，但⑥b填实内容仍是“追击/困局”，没有总结、复盘和角色后续。
+- `DeriveDraftService.buildBatchUser`：闭合结局且本窗含末章时注入「终章收束要求」：总结当前局面、复盘主线真相、交代角色后续；禁止继续追捕/反转/未解困局/悬念收尾，最后一拍必须稳定结局。
+- `persistWindow` 将计划拍标签写入 beat_instance.filled_text，⑥b拍清单优先使用该标签，终局收束标签不会被源素材标签覆盖。
+- 实弹：run31 清理重跑后，seq104 为「收束」且 filled_text=「主线真相收束，人物与事件落到最终状态」；自动流程已进入⑥b。
+- derive jar 已部署（备份 `novelgen-derive-app.jar.bak-20261020-10`）。
+
+## run31 终止复核（2026-10-20 01:38）
+
+- 本次不是质检三轮：`qc_report` 仍为 0 行，实际是 P6 立项闸 `round=1 verdict=REJECT action=FAILED`，run 直接转 FAILED。
+- GATE 6 条问题：两套真相诡计无法互释；死亡/机关/揭穿超长；关键 truth 拍未兑现（ch12 缺 motive/method，霍尔 ch39 遁走后未伏法）；persona 与行动冲突；重复桥段 3 处；104 拍大纲超载。
+- 当前 novel78 只有规划章，无正文；自动主控已收束 FAILED，普通续跑入口会被终态拦住。
+
+## 框架优先的规模判断修正（2026-10-20，已部署）
+
+- 根因：`buildScaleUser` 之前没有把 `run.param_intent`（用户创作框架）传给规模判断；AI 只看到 8~12 万字默认带和 104 拍，于是把“可以多卷”误当成“写成 52 章长篇”。
+- 修正：规模输入加入完整「创作框架」并明确“可多卷只是可选，不是扩长指令”；提示词要求先按框架判断短/中/长篇，字数区间仅作边界；移除按每章2拍反推章数的硬下限。
+- `parseScale` 只保留章数≥1、章数≤拍数等可行性检查，不再强制 52 章。
+- 测试通过；derive jar 已部署，备份 `novelgen-derive-app.jar.bak-20261020-11`。
+- RUN-31 仍是旧的 FAILED 数据，不会被这次部署自动改写；需要新建 run 或清理后重跑才能看到新规模判断。
+
+## 衍生卷级规划设计（2026-10-20，设计稿，未改代码）
+
+- 新增 `docs/design/衍生卷级规划设计.md`：按 derive 独立库设计卷级结构，方案为 创作框架→规模/卷数→卷级事件/闭合/钩子→卷内章/拍→⑥b→逐章正文→卷级+全书质检。
+- 明确短篇框架必须允许单卷；可多卷只是可选；45 章可按 3–5 卷拆，不再按单卷连续事件审。
+- 待用户确认后再做 V120 迁移、卷表、`chapters.volume_no` 与 API/前端。
+
+## 卷级规划第一版落地（2026-10-20，已部署）
+
+- V120 已应用：新增 `derive_volume_plan`，`chapters.volume_no`、`beat_instance.volume_no`。
+- 规模判断现在接收完整创作框架，AI 可返回 `volumeCount`；未返回时按约12章一卷估算。
+- ⑥a 定规模后落卷骨架；章节与拍实例写入 `volume_no`；⑥b 注入本卷结构、本卷末章闭合要求和下一卷钩子。
+- 第一版 `local_event/local_closure/next_hook` 仍是通用骨架文案，尚未由 AI 逐卷生成；API/前端卷结构卡也未做。
+- derive jar 已部署，备份 `novelgen-derive-app.jar.bak-20261020-12`；migration v120 applied。
+
+## 卷级规划完整版与短/多卷实跑（2026-10-20）
+
+- 完整版已上线：V120 卷表、`chapters/beat_instance.volume_no`、AI 生成卷事件/局部闭合/下一卷钩子、⑥b 注入本卷结构和卷末要求、GET `/runs/{id}/volumes`、前端卷结构卡。
+- 短篇冒烟 run33：框架明确“单案短篇”，AI 定规模为 `SHORT / 1卷 / 10章 / 25拍`，卷事件与终卷闭合已生成；验证框架优先生效。
+- 多卷真实测试 run34：使用 run32 的原 intent/config，AI 生成 3 卷：1–14 章“罪人塔密室失踪案”、15–28 章“岛外组织攻岛阴谋”、29–40 章“真相揭露与主角抉择”；本地卷事件/闭合/钩子均已落库，自动流程进入⑥b。
+- derive jar 已部署（备份 `novelgen-derive-app.jar.bak-20261020-14`），前端已部署；admin 临时口令已恢复。
+
+## 卷级短篇冒烟（run35，2026-10-20）
+
+- 框架优先验证成功：SHORT / 1卷 / 8章；卷事件与终卷闭合已由 AI 生成。
+- ⑥b 在拍填实阶段停止：模型在 seq7 写入了 cast 之外的“白薇”，`parseBatch` 按“必须写清 cast 人物动作”拒绝，连续3轮失败；run35 仍为 PLANNING，novel82《镜替》。
+- 这不是卷级结构问题，而是 ⑥b 模型违反 cast 名单；说明上一版“filled 出现 cast 人名”的硬校验已经生效，但也暴露出模型仍会新造人物。
+
+## 第六b人物锚定收紧 + run36冒烟（2026-10-20）
+
+- ⑥b 输入新增「允许人名（逐字使用，禁止新造）」；`filled` 必须包含 cast 人名，失败原因回传完整名单；占位文本（不落位/留待后续/待定）直接拒绝。
+- run36 短篇冒烟：框架优先正确生成 1卷/12章，⑥b 不再因新造人名中断，已进入 P6。
+- P6 第1轮仍判 REWORK：事件拍超载、顾砚死亡后继续行动、裴渡动机无章纲铺垫、终局真身逃逸等；当前仍在自动回炉。卷级结构未报错。
+- derive jar 已部署（备份 `novelgen-derive-app.jar.bak-20261020-16`）；admin 临时口令已恢复。

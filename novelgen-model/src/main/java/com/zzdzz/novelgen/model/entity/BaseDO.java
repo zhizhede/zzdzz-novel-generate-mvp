@@ -20,6 +20,10 @@ import java.time.OffsetDateTime;
  * 实体不再映射它们。
  *
  * <p>**投影查询里这两列会保持 null**：只取部分列的 SQL 不会填充它们，用前先判空。
+ *
+ * <p>**2026-10-16 用户定调**：全库时间列统一 **ed 形**（created_time/updated_time）——
+ * novel_gen V44 / derive_gen V117 重命名库列，实体属性同步 createdTime/updatedTime；
+ * **对外 JSON 键（VO/DTO）保持 createTime/updateTime 不变**（前端 7 处依赖，仅持久层改名）。
  */
 @Data
 public abstract class BaseDO {
@@ -27,7 +31,7 @@ public abstract class BaseDO {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private OffsetDateTime createTime;
+    private OffsetDateTime createdTime;
 
-    private OffsetDateTime updateTime;
+    private OffsetDateTime updatedTime;
 }

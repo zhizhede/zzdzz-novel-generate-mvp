@@ -26,4 +26,11 @@ public class UserDataServiceImpl extends ServiceImpl<UserMapper, UserDO> impleme
     public long insert(String username, String passwordHash, String role) {
         return baseMapper.insert(username, passwordHash, role);
     }
+
+    @Override
+    public int updatePasswordHash(long id, String passwordHash) {
+        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<UserDO>()
+                .eq(UserDO::getId, id)
+                .set(UserDO::getPasswordHash, passwordHash));
+    }
 }

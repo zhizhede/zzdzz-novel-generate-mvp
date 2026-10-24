@@ -52,7 +52,7 @@ public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, Gat
             return null;
         }
         GateReportDO r = rows.get(0);
-        return new LatestChapterReport(r.isPassed(), r.getCreateTime(), r.getResult());
+        return new LatestChapterReport(r.isPassed(), r.getCreatedTime(), r.getResult());
     }
 
     @Override
@@ -62,7 +62,7 @@ public class GateReportDataServiceImpl extends ServiceImpl<GateReportMapper, Gat
             return null;
         }
         GateReportDO r = rows.get(0);
-        return new LatestReview(r.isPassed(), r.getCreateTime(), r.getResult());
+        return new LatestReview(r.isPassed(), r.getCreatedTime(), r.getResult());
     }
 
     @Override

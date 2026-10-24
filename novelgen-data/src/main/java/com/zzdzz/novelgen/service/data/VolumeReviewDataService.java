@@ -17,6 +17,6 @@ public interface VolumeReviewDataService extends IService<VolumeReviewDO> {
     List<VolumeReviewRow> listAll();
 
     /** 卷复盘行（report 为 JSON 文本，解析交给 service）。 */
-    record VolumeReviewRow(long novelId, int volNo, String reportJson, java.time.OffsetDateTime updateTime) {
+    record VolumeReviewRow(long novelId, int volNo, String reportJson, java.time.OffsetDateTime updatedTime) {
     }
 }

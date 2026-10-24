@@ -4,20 +4,20 @@
 
     <update id="updateContent">
 
-                UPDATE prompt_templates SET content = #{content}, custom = TRUE, version = version + 1, update_time = NOW()
+                UPDATE prompt_templates SET content = #{content}, custom = TRUE, version = version + 1, updated_time = NOW()
                 WHERE id = #{id}
 
     </update>
 
     <update id="updateEnabled">
-                UPDATE prompt_templates SET enabled = #{enabled}, update_time = NOW()
+                UPDATE prompt_templates SET enabled = #{enabled}, updated_time = NOW()
                 WHERE id = #{id}
     </update>
 
     <update id="reset">
 
                 UPDATE prompt_templates SET content = #{content}, catalog_hash = #{catalogHash}, custom = FALSE,
-                       version = version + 1, update_time = NOW()
+                       version = version + 1, updated_time = NOW()
                 WHERE id = #{id}
                 
     </update>
@@ -30,13 +30,13 @@
 
     <update id="syncUpdateStale">
                 UPDATE prompt_templates SET title = #{title}, content = #{content}, exact = #{exact}, catalog_hash = #{catalogHash},
-                       version = version + 1, update_time = NOW()
+                       version = version + 1, updated_time = NOW()
                 WHERE node = #{node} AND phase = #{phase}
                   AND custom = FALSE AND (catalog_hash IS DISTINCT FROM #{catalogHash} OR content != #{content} OR title != #{title})
     </update>
 
     <update id="syncTouch">
-                UPDATE prompt_templates SET update_time = NOW()
+                UPDATE prompt_templates SET updated_time = NOW()
                 WHERE node = #{node} AND phase = #{phase}
     </update>
 

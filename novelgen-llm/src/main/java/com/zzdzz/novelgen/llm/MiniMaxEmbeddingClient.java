@@ -75,14 +75,14 @@ public class MiniMaxEmbeddingClient {
         try {
             resp = post(provider, body);
         } catch (Exception e) {
-            callLogDAO.insert(LlmNode.EMBEDDING, novelId, null, model,
+            callLogDAO.insert(LlmNode.EMBEDDING, novelId, null, null, model,
                     approxTokens, 0, 0, 0, elapsed(start), "error", truncate(e.toString()),
                     null, requestJson, null);
             throw new LlmException("向量化调用失败（llm_call_log 已留档）: " + e.getMessage(), e);
         }
         if (resp.path("base_resp").path("status_code").asInt(0) != 0) {
             String msg = "向量化业务失败: " + resp.path("base_resp").path("status_msg").asText();
-            callLogDAO.insert(LlmNode.EMBEDDING, novelId, null, model,
+            callLogDAO.insert(LlmNode.EMBEDDING, novelId, null, null, model,
                     approxTokens, 0, 0, 0, elapsed(start), "error", truncate(msg),
                     null, requestJson, serialize(resp));
             throw new LlmException(msg);
@@ -90,7 +90,7 @@ public class MiniMaxEmbeddingClient {
         JsonNode vectors = resp.path("vectors");
         if (!vectors.isArray() || vectors.size() != clipped.size()) {
             String msg = "向量化返回条数不匹配: " + vectors.size() + "/" + clipped.size();
-            callLogDAO.insert(LlmNode.EMBEDDING, novelId, null, model,
+            callLogDAO.insert(LlmNode.EMBEDDING, novelId, null, null, model,
                     approxTokens, 0, 0, 0, elapsed(start), "error", truncate(msg),
                     null, requestJson, serialize(resp));
             throw new LlmException(msg);
@@ -101,7 +101,7 @@ public class MiniMaxEmbeddingClient {
             for (int i = 0; i < vec.size(); i++) v[i] = (float) vec.get(i).asDouble();
             out.add(v);
         }
-        callLogDAO.insert(LlmNode.EMBEDDING, novelId, null, model,
+        callLogDAO.insert(LlmNode.EMBEDDING, novelId, null, null, model,
                 approxTokens, 0, 0, 0, elapsed(start), "ok", null,
                 null, requestJson, serialize(Map.of(
                         "count", out.size(),

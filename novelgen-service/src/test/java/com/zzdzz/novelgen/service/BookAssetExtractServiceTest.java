@@ -122,7 +122,7 @@ class BookAssetExtractServiceTest {
         LlmPort llm = mock(LlmPort.class);
         PromptTemplateService prompts = mock(PromptTemplateService.class);
         BookAssetExtractService svc = new BookAssetExtractService(novelData, chapterData, digestData, cardData,
-                null, llm, new LlmJson(llm, prompts), prompts);
+                null, llm, new LlmJson(llm, prompts, null), prompts);
 
         NovelDO novel = new NovelDO();
         novel.setTitle("导入书C");

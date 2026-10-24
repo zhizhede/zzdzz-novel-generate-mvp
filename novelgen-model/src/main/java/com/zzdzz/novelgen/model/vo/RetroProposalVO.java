@@ -9,6 +9,6 @@ public record RetroProposalVO(Long id, Long novelId, Integer volNo, String kind,
 
     public static RetroProposalVO from(RetroProposalDO d) {
         return new RetroProposalVO(d.getId(), d.getNovelId(), d.getVolNo(), d.getKind(), d.getContent(),
-                d.getStatus(), d.getDecisionNote(), d.getCreateTime());
+                d.getStatus(), d.getDecisionNote(), d.getCreatedTime());
     }
 }

@@ -1,9 +1,11 @@
 package com.zzdzz.novelgen.controller;
 
 import lombok.RequiredArgsConstructor;
+import com.zzdzz.novelgen.common.web.AuthInterceptor;
 import com.zzdzz.novelgen.common.web.JwtService;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.LoginDTO;
+import com.zzdzz.novelgen.model.dto.PasswordChangeDTO;
 import com.zzdzz.novelgen.model.vo.LoginVO;
 import com.zzdzz.novelgen.service.AuthService;
 import jakarta.servlet.http.Cookie;
@@ -51,5 +53,13 @@ public class AuthController {
         return Result.success(new LoginVO(
                 (String) request.getAttribute("username"),
                 (String) request.getAttribute("role")));
+    }
+
+    /** 修改当前登录用户密码（旧密按登录口径校验；登录态保持不失效）。 */
+    @PostMapping("/password")
+    public Result<Void> changePassword(@RequestBody PasswordChangeDTO dto, HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
+        authService.changePassword(userId, dto);
+        return Result.success();
     }
 }

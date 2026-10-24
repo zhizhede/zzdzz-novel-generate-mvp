@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** LlmJson 容错解析行为基线：重构期 1（三份内联拷贝迁入）前先锁行为。 */
 class LlmJsonTest {
 
-    private final LlmJson llmJson = new LlmJson(null, null); // read/repair 不触 LlmPort 与提示词注册表
+    private final LlmJson llmJson = new LlmJson(null, null, null); // read/repair 不触 LlmPort/提示词/日志
 
     @Test
     void plainObjectParses() throws Exception {
@@ -129,14 +129,104 @@ class LlmJsonTest {
     }
 
     @Test
-    void mismatchedCloserUntouched() {
-        // 种类都对不上（多写的 }、结构错乱）：不猜，原样返回让上层报错
-        assertThat(LlmJson.closeUnclosed("{\"a\":1}}")).isEqualTo("{\"a\":1}}");
+    void mismatchedCloserDroppedWhenStackEmpty() {
+        // 栈空后的多余 }：丢弃，保住可解析的正文（run20 同族）
+        assertThat(LlmJson.closeUnclosed("{\"a\":1}}")).isEqualTo("{\"a\":1}");
+    }
+
+    @Test
+    void mismatchedCloserCorrectedByStackTop() {
+        //  } 误写成 ]（run20 实弹：Unexpected close marker ']' expected '}'）：按栈顶纠正
+        assertThat(LlmJson.closeUnclosed("{\"cast\":[{\"name\":\"甲\"]," +
+                "{\"name\":\"乙\"}],\"truth\":{}}"))
+                .isEqualTo("{\"cast\":[{\"name\":\"甲\"},{\"name\":\"乙\"}],\"truth\":{}}");
+        //  ] 误写成 }
+        assertThat(LlmJson.closeUnclosed("{\"a\":{\"b\":1}]")).isEqualTo("{\"a\":{\"b\":1}}");
     }
 
     @Test
     void bracesInsideStringIgnored() {
         assertThat(LlmJson.closeUnclosed("{\"a\":\"含 } 和 ] 的正文\"}"))
                 .isEqualTo("{\"a\":\"含 } 和 ] 的正文\"}");
+    }
+
+    // ===== 缺逗号补插（2026-10-18 run22 全局头三连「was expecting comma」实弹）=====
+
+    @Test
+    void missingCommaBetweenEntriesRepaired() throws Exception {
+        JsonNode n = llmJson.read("{\"title\":\"烬渡\" \"protagonist\":\"江\" \"no\":3}");
+        assertThat(n.get("title").asText()).isEqualTo("烬渡");
+        assertThat(n.get("protagonist").asText()).isEqualTo("江");
+        assertThat(n.get("no").asInt()).isEqualTo(3);
+    }
+
+    @Test
+    void missingCommaInArrayRepaired() throws Exception {
+        JsonNode n = llmJson.read("{\"beats\":[1 2 3]}");
+        assertThat(n.path("beats")).hasSize(3);
+        assertThat(n.path("beats").get(2).asInt()).isEqualTo(3);
+    }
+
+    @Test
+    void missingCommaAfterObjectValueRepaired() throws Exception {
+        JsonNode n = llmJson.read("{\"a\":{\"x\":1} \"b\":\"y\"}");
+        assertThat(n.path("a").path("x").asInt()).isEqualTo(1);
+        assertThat(n.get("b").asText()).isEqualTo("y");
+    }
+
+    @Test
+    void missingCommaDoesNotBreakExponentNumber() throws Exception {
+        JsonNode n = llmJson.read("{\"a\":1.5e+3 \"b\":2}");
+        assertThat(n.get("a").asDouble()).isEqualTo(1500.0);
+        assertThat(n.get("b").asInt()).isEqualTo(2);
+    }
+
+    @Test
+    void missingCommaKeepsEscapedQuotesInsideString() throws Exception {
+        JsonNode n = llmJson.read("{\"a\":\"say \\\"hi\\\" ok\" \"b\":\"x\"}");
+        assertThat(n.get("a").asText()).isEqualTo("say \"hi\" ok");
+        assertThat(n.get("b").asText()).isEqualTo("x");
+    }
+
+    @Test
+    void missingCommaPlusUnclosedCombined() throws Exception {
+        // 缺逗号 + 漏收口组合（截断前的常见形态）：先补逗号再补括号
+        JsonNode n = llmJson.read("{\"chapters\":[{\"no\":1 \"title\":\"雨\"},{\"no\":2 \"title\":\"夜\"}");
+        assertThat(n.path("chapters")).hasSize(2);
+        assertThat(n.path("chapters").get(0).path("title").asText()).isEqualTo("雨");
+    }
+
+    @Test
+    void duplicateBeatSeqPairsAreSplitIntoObjects() throws Exception {
+        String raw = """
+                {"chapters":[{"no":5,"beats":[
+                  {"seq":5,"filled":"第一拍","seq":41,"filled":"第二拍"}
+                ]},{"no":6,"beats":[
+                  {"seq":6,"filled":"第三拍","seq":42,"filled":"第四拍"}
+                ]}]}
+                """;
+
+        JsonNode root = llmJson.read(raw);
+
+        assertThat(root.path("chapters").get(0).path("beats")).hasSize(2);
+        assertThat(root.path("chapters").get(0).path("beats").get(0).path("seq").asInt())
+                .isEqualTo(5);
+        assertThat(root.path("chapters").get(0).path("beats").get(1).path("seq").asInt())
+                .isEqualTo(41);
+        assertThat(root.path("chapters").get(1).path("beats").get(1).path("seq").asInt())
+                .isEqualTo(42);
+    }
+
+    @Test
+    void duplicateNonBeatKeyStaysLoud() {
+        assertThatThrownBy(() -> llmJson.read("{\"a\":1,\"a\":2}"))
+                .isInstanceOf(LlmJson.Bad.class)
+                .hasMessageContaining("重复键");
+    }
+
+    @Test
+    void validJsonUntouchedByMissingCommaRepair() {
+        String valid = "{\"a\":[1,2],\"b\":{\"c\":true},\"d\":null,\"e\":\"x\"}";
+        assertThat(LlmJson.repairMissingCommas(valid)).isEqualTo(valid);
     }
 }
