@@ -21,7 +21,7 @@ public class BeatInstanceDO extends DeriveBaseDO {
     /** 全局拍序（⑥a，与 run_id 唯一） */
     private Integer seq;
 
-    /** 拍来源：ARC_SEG=弧段拆拍 / ASSET=拍素材直采 */
+    /** 拍来源：ARC_SEG=弧段拆拍 / ASSET=拍素材直采 / SYNTHETIC=结构槽补拍 */
     private String source;
 
     /** 来源素材 → asset_beat.id（source=ASSET 时填） */
@@ -42,9 +42,21 @@ public class BeatInstanceDO extends DeriveBaseDO {
     /** 归属章号（⑥a） */
     private Integer chapterNo;
 
+    /** 归属卷号（⑥a-1；单卷书为1） */
+    private Integer volumeNo;
+
     /** 填实后的具体情节点（⑥b） */
     private String filledText;
 
     /** 状态：PLANNED→WRITTEN→VERIFIED；SKIPPED=⑥b判定用不上 */
     private String status;
+
+    /** 主叙事层：LOCAL_CASE / MAIN_MYSTERY / CHARACTER_ARC / RELATIONSHIP / WORLD。 */
+    private String storyLayer;
+
+    /** 结构功能：CLUE_PLANT / HIGHLIGHT / LOCAL_CLOSURE 等。 */
+    private String beatRole;
+
+    /** 出场方式、角色/线程引用、依赖、知识和状态变化。 */
+    private String routeContract;
 }

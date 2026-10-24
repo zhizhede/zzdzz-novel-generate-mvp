@@ -21,4 +21,44 @@
         WHERE novel_id = #{novelId}
     </update>
 
+    <update id="updatePlanContract">
+        UPDATE chapters
+        SET plan_contract = #{planContract}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{chapterId}
+    </update>
+
+    <update id="clearPlanByVolume">
+        UPDATE chapters
+        SET plan_contract = '{}'::jsonb,
+            updated_time = NOW()
+        WHERE novel_id = #{novelId}
+          AND volume_no = #{volumeNo}
+    </update>
+
+    <update id="updateDraftOutline">
+        UPDATE chapters
+        SET title = #{title},
+            draft_outline = #{draftOutline},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE chapters
+        SET status = #{status},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateContent">
+        UPDATE chapters
+        SET content = #{content},
+            char_count = #{charCount},
+            comment = #{comment},
+            status = #{status},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

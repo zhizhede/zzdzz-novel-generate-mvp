@@ -10,6 +10,14 @@ public record BeatVO(
         String source,
         Integer chapterNo,
         String status,
-        String filledText
+        String filledText,
+        String storyLayer,
+        String beatRole,
+        String routeContract
 ) {
+    public BeatVO(int seq, String beatType, BigDecimal pacing, String source,
+                  Integer chapterNo, String status, String filledText) {
+        this(seq, beatType, pacing, source, chapterNo, status, filledText,
+                null, null, "{}");
+    }
 }

@@ -24,4 +24,7 @@ public interface RunMapper extends BaseMapper<RunDO> {
 
     /** L2 步状态回写（P6 立项闸 GATE 记录等；jsonb 显式 cast，AGENTS 坑 #13）。 */
     int updateStepStatus(@Param("id") long id, @Param("stepStatus") String stepStatus);
+
+    /** 清空⑥及之后的规划/正文状态：novel_id 置空、回 PLANNING，保留⑤参数与 SAMPLE/WELD。 */
+    int clearPlanning(@Param("id") long id, @Param("stepStatus") String stepStatus);
 }

@@ -19,6 +19,9 @@ public class ChapterDO extends DeriveBaseDO {
     /** 章节号（⑥a，与 novel_id 唯一） */
     private Integer chapterNo;
 
+    /** 所属卷号（⑥a-1；单卷书为1） */
+    private Integer volumeNo;
+
     /** 章节名（⑥a title_hint，⑦可定稿；缺省"第N章"） */
     private String title;
 
@@ -42,4 +45,7 @@ public class ChapterDO extends DeriveBaseDO {
 
     /** 章注（⑦ <!-- 本章X字，挂拍：seq… -->，QC 用） */
     private String comment;
+
+    /** 章功能槽合同：本章职责、必需拍角色和状态边界。 */
+    private String planContract;
 }

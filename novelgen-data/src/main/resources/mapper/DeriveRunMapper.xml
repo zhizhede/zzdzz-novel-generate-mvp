@@ -54,4 +54,14 @@
         WHERE id = #{id}
     </update>
 
+    <update id="clearPlanning">
+        UPDATE run
+        SET novel_id    = NULL,
+            status      = 'PLANNING',
+            qc_round    = 0,
+            step_status = #{stepStatus}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

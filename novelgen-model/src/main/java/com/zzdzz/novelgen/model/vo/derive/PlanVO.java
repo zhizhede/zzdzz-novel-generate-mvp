@@ -18,7 +18,10 @@ public record PlanVO(
         int windowTotal,
         int plannedChapters,
         int usedBeats,
-        boolean allDone
+        boolean allDone,
+        Integer volumeNo,
+        int routedBeats,
+        List<String> validationWarnings
 ) {
     public record ChapterPlanItem(int no, String title, int budget, int beatCount, double pacePlan) {
     }
@@ -27,6 +30,15 @@ public record PlanVO(
     public PlanVO(long runId, long novelId, int chapterCount, int beatCount, int totalBudget,
                   List<ChapterPlanItem> chapters) {
         this(runId, novelId, chapterCount, beatCount, totalBudget, chapters,
-                "DONE", 1, 1, chapterCount, beatCount, true);
+                "DONE", 1, 1, chapterCount, beatCount, true, null, beatCount, List.of());
+    }
+
+    /** 兼容 V1 单元结果的旧构造。 */
+    public PlanVO(long runId, long novelId, int chapterCount, int beatCount, int totalBudget,
+                  List<ChapterPlanItem> chapters, String unit, int windowIndex,
+                  int windowTotal, int plannedChapters, int usedBeats, boolean allDone) {
+        this(runId, novelId, chapterCount, beatCount, totalBudget, chapters,
+                unit, windowIndex, windowTotal, plannedChapters, usedBeats, allDone,
+                null, usedBeats, List.of());
     }
 }
