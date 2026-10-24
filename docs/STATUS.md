@@ -1551,3 +1551,9 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - 回归：新增 `DeriveDraftBatchTest.windowBeatsIgnoresSkippedBeatsWithoutChapter`；全量 `mvn -q test` 通过；`mvn -q -pl novelgen-derive-app -am package -DskipTests` 通过。
 - 线上更新：仅更新 `novelgen-derive` jar；旧 jar 备份 `/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-skipnull`。新 jar SHA256=`444ed533bef93e91631b389c56be48834e18dbc35ed230d6a102aa30863c4277`，服务 active，PID 1822851，8091/context-path `/derive` 正常；主站 `novelgen` 未重启。
 - 验收：线上根路径 200；带 Origin 的 `/derive/api/derive/ping` 返回 401 `A0003` JSON；Flyway schema v123 validate 通过。
+
+## ⑥b skipped 冲突输出系统性容错（2026-10-24，未部署）
+
+- run39 新中断根因：模型第 3 轮把 seq7/8/23/24/29/30 同时写进 `beats.filled` 与 `skipped`；旧校验把 `filled.contains(seq)` 视为非法，连续 3 轮后停止。此前只处理过 `skipped=0`，没有处理 filled/skipped 重叠。
+- 系统性收口：`BATCH_PROMPT` 明确 skipped 只能放未出现在 beats 的 seq；`parseBatch` 把 skipped 当辅助标注而不是第二份真源——忽略 0、越界、重复、已填实项，最终仍由 `filled ∪ skipped` 覆盖校验硬拦缺拍。
+- 新增 `parseBatch_ignoresContradictorySkippedAnnotations` 回归测试；全量 `mvn -q test` 通过；derive jar 打包通过。未重启/部署线上。

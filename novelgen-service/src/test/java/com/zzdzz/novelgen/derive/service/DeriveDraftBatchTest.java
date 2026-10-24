@@ -156,6 +156,22 @@ class DeriveDraftBatchTest {
     }
 
     @Test
+    void parseBatch_ignoresContradictorySkippedAnnotations() throws Exception {
+        String json = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"},{"seq":2,"filled":"y"}]}],
+                 "skipped":[1,1,2,99,0]}
+                """;
+        DeriveDraftService.BatchContext ctx =
+                new DeriveDraftService.BatchContext(List.of(1, 2), List.of(1));
+
+        JsonNode parsed = DeriveDraftService.parseBatch(M.readTree(json), ctx);
+
+        assertEquals(1, parsed.path("chapters").size());
+        assertEquals(2, parsed.path("chapters").get(0).path("beats").size());
+    }
+
+    @Test
     void parseBatch_requiresTimeAndLegalStateChanges() throws Exception {
         DeriveDraftService.BatchContext ctx = new DeriveDraftService.BatchContext(
                 List.of(1), List.of(1), java.util.Set.of("布兰", "薇拉"));

@@ -137,7 +137,7 @@ public class DeriveDraftService {
             1. 每个本窗拍实例填实成具体情节点（1~2 句，写 filled）；filled 必须写清
                「谁 + 做了什么 + 结果/后果」，且至少出现一个 cast 名单内人名；
                禁止用「本窗不落位」「留待后续」「待定」「占位」等占位文本；
-               确实用不上的拍才放进 skipped 数组，不能把拍写成占位句；
+               确实用不上的拍才放进 skipped 数组，不能把拍写成占位句；skipped 只放没有出现在任何 beats 里的 seq，已经填实的 seq 不得再放进 skipped；
             2. 本窗每章给 draft_outline（本章具体大纲 2~3 句）与 title 定稿（≤12字，可沿用或改）；
             3. 人名、性别、称谓严格沿用全局头 cast 表，filled 与 draft_outline 中出现的
                每一个有名人名都必须是 cast 表内的逐字原名，禁止新造任何新名字（含路人、死者、
@@ -954,16 +954,16 @@ public class DeriveDraftService {
                 }
             }
         }
+        // skipped 是模型的辅助标注，不是第二份真源：filled 优先。
+        // 模型偶尔会把已填实/重复/越界的 seq 也塞进 skipped，做确定性归一，
+        // 只保留本窗且未填实的拍；最终是否完整仍由下面的覆盖校验硬拦。
         Set<Integer> skipped = new HashSet<>();
         for (JsonNode s : root.path("skipped")) {
             int seq = skippedSeq(s);
-            // 模型常用 0 表示“没有跳过拍”，归一化忽略，不把它当非法业务拍号。
-            if (seq == 0) {
+            if (seq == 0 || !ctx.windowSeqs().contains(seq) || filled.contains(seq)) {
                 continue;
             }
-            if (!ctx.windowSeqs().contains(seq) || filled.contains(seq) || !skipped.add(seq)) {
-                throw new LlmJson.Bad("skipped 含非法/重复 seq: " + seq);
-            }
+            skipped.add(seq);
         }
         Set<Integer> union = new HashSet<>(filled);
         union.addAll(skipped);
