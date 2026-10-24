@@ -129,7 +129,7 @@ public class DeriveAutoFlowService {
     public AutoVO status(long runId) {
         Auto a = AUTOS.get(runId);
         return a == null
-                ? new AutoVO(runId, false, false, "", 0, "", 0, false)
+                ? new AutoVO(runId, false, false, false, "", 0, "", 0, false)
                 : vo(a);
     }
 
@@ -280,7 +280,7 @@ public class DeriveAutoFlowService {
     }
 
     AutoVO vo(Auto a) {
-        return new AutoVO(a.runId, a.running, a.done, a.stage, a.steps, a.lastError,
+        return new AutoVO(a.runId, a.running, a.stop, a.done, a.stage, a.steps, a.lastError,
                 System.currentTimeMillis() - a.startedMs, a.direct);
     }
 }

@@ -8,6 +8,7 @@ package com.zzdzz.novelgen.model.vo.derive;
 public record AutoVO(
         long runId,
         boolean running,
+        boolean stopRequested,
         boolean done,
         String stage,
         int steps,

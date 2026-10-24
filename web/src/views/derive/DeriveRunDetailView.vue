@@ -465,12 +465,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '../../components/PageHeader.vue'
 import DataTable from '../../components/DataTable.vue'
 import { deriveApi } from '../../deriveApi'
+import { usePolling } from '../../composables/usePolling'
+import { formatAutoProgress, formatWriteProgress } from './taskProgress'
 import { BEAT_STATUS, CHAPTER_STATUS, PLAN_UNIT, RUN_STATUS, VERDICT, fmtTime, statusTag } from './deriveLabels'
 
 /** run 详情：进度聚合卡 + 章/拍表 + 质检报告折叠面板（只读监控核心页）。 */
@@ -610,106 +612,90 @@ async function toggleText() {
 /* ── 状态机操作条（纯前端走完全流程的驾驶位） ────────────────────── */
 const acting = ref('')
 const draftLoopText = ref('')
-const serverWrite = ref(null)
+const writePolling = usePolling(
+  () => deriveApi.get(`/api/derive/runs/${route.params.id}/write-progress`),
+  { intervalMs: 2500 }
+)
+const serverWrite = writePolling.data
+const writePollError = writePolling.error
 const writeStarting = ref(false)
 let writeDoneHandled = false
 let draftPollTimer = null
-let writePollTimer = null
 
 /** ⑦ 服务端连跑（2026-10-18 根修）：点一次服务器写到完，刷新/换页/关电脑都不影响。 */
 const writeBusy = computed(() => writeStarting.value || !!serverWrite.value?.running)
 
-const serverWriteText = computed(() => {
-  const w = serverWrite.value
-  if (!w) return ''
-  if (w.lastError) return `服务端连跑已停：${w.lastError}（修完可再点「连续写完」续跑）`
-  if (w.allDone) return '服务端连跑完成：全部正文已写完，run 已转质检 ⑧'
-  if (!w.running) return ''
-  const total = Math.round((w.elapsedMs || 0) / 1000)
-  const ch = w.lastChapterNo
-    ? `已写 ${w.chaptersDone} 章（第 ${w.lastChapterNo} 章 ${Math.round((w.lastChapterMs || 0) / 1000)}s）`
-    : `起步中（已写 ${w.chaptersDone} 章）`
-  const phase = w.phase ? ` · ${w.phase}` : ''
-  return `服务端连跑中：${ch}${phase} · 总耗时 ${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')} —— 关页面不断`
+const serverWriteText = computed(() => formatWriteProgress(serverWrite.value, writePollError.value))
+const pollWriteProgress = writePolling.poll
+const startWritePoll = writePolling.start
+const stopWritePoll = writePolling.stop
+
+watch(serverWrite, (w, prev) => {
+  if (!w) return
+  if (w.allDone && !writeDoneHandled) {
+    writeDoneHandled = true
+    ElMessage.success('服务端连跑完成：正文全部写完，下一步运行质检 ⑧')
+    loadAll()
+    return
+  }
+  if (w.lastError && (!prev || prev.lastError !== w.lastError)) {
+    ElMessage.error(`连跑停止：${w.lastError}`)
+    loadAll()
+    return
+  }
+  if (!w.running && prev?.running && w.stopRequested) {
+    ElMessage.success(`连跑已停止：共写 ${w.chaptersDone} 章，断点保留`)
+    loadAll()
+  }
 })
 
-async function pollWriteProgress() {
-  try {
-    const w = await deriveApi.get(`/api/derive/runs/${route.params.id}/write-progress`)
-    const prev = serverWrite.value
-    serverWrite.value = w
-    if (w?.allDone && !writeDoneHandled) {
-      writeDoneHandled = true
-      ElMessage.success('服务端连跑完成：正文全部写完，下一步运行质检 ⑧')
-      await loadAll()
-    }
-    if (w?.lastError && (!prev || prev.lastError !== w.lastError)) {
-      ElMessage.error(`连跑停止：${w.lastError}`)
-      await loadAll()
-    }
-  } catch {
-    // 轮询失败静默
+watch(writePollError, (err, prev) => {
+  const message = err?.message || err
+  const previous = prev?.message || prev
+  if (message && message !== previous) {
+    ElMessage.error(`连跑进度轮询失败：${message}`)
   }
-}
-
-function startWritePoll() {
-  stopWritePoll()
-  writePollTimer = setInterval(pollWriteProgress, 2500)
-}
-
-function stopWritePoll() {
-  if (writePollTimer) {
-    clearInterval(writePollTimer)
-    writePollTimer = null
-  }
-}
+})
 
 /* ── 全流程无人值守（服务端主控：⑥a→⑥b→闸→⑦→⑧ 到终态） ─────────── */
-const serverAuto = ref(null)
+const autoPolling = usePolling(
+  () => deriveApi.get(`/api/derive/runs/${route.params.id}/auto-progress`),
+  { intervalMs: 2500 }
+)
+const serverAuto = autoPolling.data
+const autoPollError = autoPolling.error
 const autoRunning = computed(() => !!serverAuto.value?.running)
-let autoPollTimer = null
 
-const serverAutoText = computed(() => {
-  const a = serverAuto.value
-  if (!a) return ''
-  const s = Math.round((a.elapsedMs || 0) / 1000)
-  const time = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
-  const mode = a.direct ? '全程直通（免审）' : '全流程无人值守'
-  if (a.lastError) return `${mode}已停：${a.lastError}（断点保留，再点按钮续跑）`
-  if (!a.running && a.done) return `${mode}完成：${a.stage} · 共 ${a.steps} 步`
-  if (!a.running) return ''
-  return `${mode}中：${a.stage} · ${a.steps} 步 · 已耗时 ${time} —— 关页面不断`
+const serverAutoText = computed(() => formatAutoProgress(serverAuto.value, autoPollError.value))
+const pollAuto = autoPolling.poll
+const startAutoPoll = autoPolling.start
+const stopAutoPoll = autoPolling.stop
+
+watch(serverAuto, (a, prev) => {
+  if (!a) return
+  if (a.done && (!prev || !prev.done)) {
+    ElMessage.success(`全流程完成：${a.stage}`)
+    loadAll()
+    return
+  }
+  if (a.lastError && (!prev || prev.lastError !== a.lastError)) {
+    ElMessage.error(`全流程停止：${a.lastError}`)
+    loadAll()
+    return
+  }
+  if (!a.running && prev?.running && a.stopRequested) {
+    ElMessage.success(`全流程已停止：${a.stage || '断点保留，再点按钮续跑'}`)
+    loadAll()
+  }
 })
 
-async function pollAuto() {
-  try {
-    const prev = serverAuto.value
-    serverAuto.value = await deriveApi.get(`/api/derive/runs/${route.params.id}/auto-progress`)
-    const a = serverAuto.value
-    if (a?.done && (!prev || !prev.done)) {
-      ElMessage.success(`全流程完成：${a.stage}`)
-      await loadAll()
-    }
-    if (a?.lastError && (!prev || prev.lastError !== a.lastError)) {
-      ElMessage.error(`全流程停止：${a.lastError}`)
-      await loadAll()
-    }
-  } catch {
-    // 轮询失败静默
+watch(autoPollError, (err, prev) => {
+  const message = err?.message || err
+  const previous = prev?.message || prev
+  if (message && message !== previous) {
+    ElMessage.error(`全流程进度轮询失败：${message}`)
   }
-}
-
-function startAutoPoll() {
-  stopAutoPoll()
-  autoPollTimer = setInterval(pollAuto, 2500)
-}
-
-function stopAutoPoll() {
-  if (autoPollTimer) {
-    clearInterval(autoPollTimer)
-    autoPollTimer = null
-  }
-}
+})
 
 async function actAuto(direct) {
   const conf = direct

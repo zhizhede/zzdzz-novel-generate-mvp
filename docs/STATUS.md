@@ -1524,3 +1524,12 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - run36 短篇冒烟：框架优先正确生成 1卷/12章，⑥b 不再因新造人名中断，已进入 P6。
 - P6 第1轮仍判 REWORK：事件拍超载、顾砚死亡后继续行动、裴渡动机无章纲铺垫、终局真身逃逸等；当前仍在自动回炉。卷级结构未报错。
 - derive jar 已部署（备份 `novelgen-derive-app.jar.bak-20261020-16`）；admin 临时口令已恢复。
+
+## 衍生 run 详情停止态与轮询收口（2026-10-24，未提交未部署）
+
+- 修复「生成中点停止后前端无反应」：`WriteLoopVO.stopRequested` 接入前端展示，新增「停止中：当前章写完后收尾」与「已停止：断点保留」；正常人工停止会在轮询状态变化时提示并刷新详情，不再只弹一次「已请求停止」。
+- `AutoVO` 增加 `stopRequested` 字段，`DeriveAutoFlowService.vo()` 返回停止标志；全流程停止后同样显示「停止中/已停止」。
+- 新增 `web/src/composables/usePolling.js`：统一轮询启动/停止/串行化/卸载清理，并把轮询失败暴露为 `pollError`；写正文连跑与全流程无人值守两套轮询已接入。
+- 新增 `web/src/views/derive/taskProgress.js`：统一 write-loop / auto-flow 的运行、停止、完成、失败、断连文案；轮询失败不再静默，显示「进度连接中断，保留最后一次进度」。
+- 验证：`npm run build` 通过；`mvn -q compile` 通过；`mvn -q test` 通过。未启动/重启服务，未部署线上。
+- 补充前端纯函数 smoke：Node 导入 `taskProgress.js` 验证「停止中/已停止」文案映射通过。
