@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.AssetBeatMapper;
@@ -12,11 +13,14 @@ import com.zzdzz.novelgen.derive.mapper.AssetWorldMapper;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.CalibrationMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
+import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.LabelIndexMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.QcReportMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.SourceChapterMapper;
+import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
+import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.model.dto.derive.BookQueryDTO;
 import com.zzdzz.novelgen.model.dto.derive.RunQueryDTO;
 import com.zzdzz.novelgen.model.entity.derive.AssetBeatDO;
@@ -25,11 +29,14 @@ import com.zzdzz.novelgen.model.entity.derive.AssetWorldDO;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.CalibrationDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
+import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
 import com.zzdzz.novelgen.model.entity.derive.LabelIndexDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.QcReportDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.SourceChapterDO;
+import com.zzdzz.novelgen.model.entity.derive.StoryThreadDO;
+import com.zzdzz.novelgen.model.entity.derive.VolumePlanDO;
 import com.zzdzz.novelgen.model.vo.derive.BeatVO;
 import com.zzdzz.novelgen.model.vo.derive.BookDetailVO;
 import com.zzdzz.novelgen.model.vo.derive.BookVO;
@@ -38,8 +45,10 @@ import com.zzdzz.novelgen.model.vo.derive.RunChapterVO;
 import com.zzdzz.novelgen.model.vo.derive.RunDetailVO;
 import com.zzdzz.novelgen.model.vo.derive.RunListItemVO;
 import com.zzdzz.novelgen.model.vo.derive.SourceChapterVO;
+import com.zzdzz.novelgen.model.vo.derive.StoryPlanDetailVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -80,6 +89,12 @@ public class DeriveQueryService {
     private final LabelIndexMapper labelIndexMapper;
     private final com.zzdzz.novelgen.mapper.LlmCallLogMapper llmCallLogMapper;
     private final ObjectMapper objectMapper;
+    @Autowired(required = false)
+    private VolumePlanMapper volumePlanMapper;
+    @Autowired(required = false)
+    private CharacterPlanMapper characterPlanMapper;
+    @Autowired(required = false)
+    private StoryThreadMapper storyThreadMapper;
 
     /**
      * run 的 LLM 调用时间线（最新在前 40 条）。
@@ -256,8 +271,114 @@ public class DeriveQueryService {
         return beatInstanceMapper.selectList(wrapper).stream()
                 .map(b -> new BeatVO(
                         b.getSeq() == null ? 0 : b.getSeq(), b.getBeatType(), b.getPacing(),
-                        b.getSource(), b.getChapterNo(), b.getStatus(), b.getFilledText()))
+                        b.getSource(), b.getChapterNo(), b.getStatus(), b.getFilledText(),
+                        b.getStoryLayer(), b.getBeatRole(), b.getRouteContract()))
                 .toList();
+    }
+
+    /** 单卷拍路由。 */
+    public List<BeatVO> listVolumeBeats(long runId, int volumeNo) {
+        RunDO run = runMapper.selectById(runId);
+        if (run == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
+        }
+        return beatInstanceMapper.selectList(new LambdaQueryWrapper<BeatInstanceDO>()
+                        .eq(BeatInstanceDO::getRunId, runId)
+                        .eq(BeatInstanceDO::getVolumeNo, volumeNo)
+                        .orderByAsc(BeatInstanceDO::getSeq))
+                .stream()
+                .map(b -> new BeatVO(
+                        b.getSeq() == null ? 0 : b.getSeq(), b.getBeatType(), b.getPacing(),
+                        b.getSource(), b.getChapterNo(), b.getStatus(), b.getFilledText(),
+                        b.getStoryLayer(), b.getBeatRole(), b.getRouteContract()))
+                .toList();
+    }
+
+    /** 故事规划完整读模型。 */
+    public StoryPlanDetailVO storyPlan(long runId) {
+        RunDO run = runMapper.selectById(runId);
+        if (run == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
+        }
+        JsonNode steps = readJson(run.getStepStatus()).path("steps");
+        JsonNode planState = steps.path("PLAN_V2");
+        List<JsonNode> volumes = volumePlanMapper == null ? List.of()
+                : volumePlanMapper.selectList(new LambdaQueryWrapper<VolumePlanDO>()
+                        .eq(VolumePlanDO::getRunId, runId)
+                        .orderByAsc(VolumePlanDO::getVolumeNo))
+                .stream().map(this::volumeNode).toList();
+        List<JsonNode> characters = characterPlanMapper == null ? List.of()
+                : characterPlanMapper.selectList(new LambdaQueryWrapper<CharacterPlanDO>()
+                        .eq(CharacterPlanDO::getRunId, runId)
+                        .orderByAsc(CharacterPlanDO::getCharacterKey))
+                .stream().map(this::characterNode).toList();
+        List<JsonNode> threads = storyThreadMapper == null ? List.of()
+                : storyThreadMapper.selectList(new LambdaQueryWrapper<StoryThreadDO>()
+                        .eq(StoryThreadDO::getRunId, runId)
+                        .orderByAsc(StoryThreadDO::getThreadKey))
+                .stream().map(this::threadNode).toList();
+        List<JsonNode> slots = run.getNovelId() == null ? List.of()
+                : chapterMapper.selectList(new LambdaQueryWrapper<ChapterDO>()
+                        .eq(ChapterDO::getNovelId, run.getNovelId())
+                        .orderByAsc(ChapterDO::getChapterNo))
+                .stream().map(this::chapterNode).toList();
+        return new StoryPlanDetailVO(runId, planState,
+                planState.path("scope"), steps.path("STORY_SPINE"),
+                volumes, characters, threads, slots);
+    }
+
+    private JsonNode volumeNode(VolumePlanDO row) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("volumeNo", row.getVolumeNo());
+        node.put("fromChapter", row.getFromChapter());
+        node.put("toChapter", row.getToChapter());
+        node.put("arc", row.getArc());
+        node.put("localEvent", row.getLocalEvent());
+        node.put("localClosure", row.getLocalClosure());
+        node.put("nextHook", row.getNextHook());
+        node.put("globalRole", row.getGlobalRole());
+        node.put("status", row.getStatus());
+        node.set("contract", readJson(row.getContract()));
+        return node;
+    }
+
+    private JsonNode characterNode(CharacterPlanDO row) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("characterKey", row.getCharacterKey());
+        node.put("displayNameHint", row.getDisplayNameHint());
+        node.put("functionCode", row.getFunctionCode());
+        node.put("spotlightVolume", row.getSpotlightVolume());
+        node.put("conflictVolume", row.getConflictVolume());
+        node.put("payoffVolume", row.getPayoffVolume());
+        node.put("arcBefore", row.getArcBefore());
+        node.put("arcAfter", row.getArcAfter());
+        node.put("status", row.getStatus());
+        node.set("contract", readJson(row.getContract()));
+        return node;
+    }
+
+    private JsonNode threadNode(StoryThreadDO row) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("threadKey", row.getThreadKey());
+        node.put("kind", row.getKind());
+        node.put("title", row.getTitle());
+        node.put("openedVolume", row.getOpenedVolume());
+        node.put("payoffVolume", row.getPayoffVolume());
+        node.put("ownerCharacterKey", row.getOwnerCharacterKey());
+        node.put("status", row.getStatus());
+        node.set("contract", readJson(row.getContract()));
+        return node;
+    }
+
+    private JsonNode chapterNode(ChapterDO row) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("chapterNo", row.getChapterNo());
+        node.put("volumeNo", row.getVolumeNo());
+        node.put("title", row.getTitle());
+        node.put("budget", row.getBudget());
+        node.put("status", row.getStatus());
+        node.set("planContract", readJson(row.getPlanContract()));
+        return node;
     }
 
     /** 书列表（带筛选；缺省 sourceType=SOURCE 且 id 倒序，保持旧 /books 行为）。 */

@@ -1,5 +1,6 @@
 package com.zzdzz.novelgen.derive.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
@@ -45,6 +46,27 @@ class DeriveDraftBatchTest {
     }
 
     @Test
+    void windowsSplitWhenBeatLoadWouldOverflow() {
+        List<BeatInstanceDO> beats = List.of(
+                beat(1, 1, "PLANNED", null),
+                beat(2, 2, "PLANNED", null),
+                beat(3, 2, "PLANNED", null),
+                beat(4, 3, "PLANNED", null),
+                beat(5, 4, "PLANNED", null),
+                beat(6, 4, "PLANNED", null),
+                beat(7, 4, "PLANNED", null),
+                beat(8, 4, "PLANNED", null),
+                beat(9, 5, "PLANNED", null),
+                beat(10, 6, "PLANNED", null),
+                beat(11, 6, "PLANNED", null));
+
+        List<List<Integer>> windows = DeriveDraftService.windowsByBeats(
+                List.of(1, 2, 3, 4, 5, 6), beats, 4, 6);
+
+        assertEquals(List.of(List.of(1, 2, 3), List.of(4, 5), List.of(6)), windows);
+    }
+
+    @Test
     void windowDoneNeedsEveryOutline() {
         List<ChapterDO> chapters = List.of(ch(1, "纲一"), ch(2, ""), ch(3, "纲三"));
         assertFalse(DeriveDraftService.windowDone(List.of(1, 2), chapters), "窗内第2章无纲");
@@ -66,13 +88,66 @@ class DeriveDraftBatchTest {
     }
 
     @Test
+    void parseBatchCoverageErrorNamesMissingSeqs() {
+        String json = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"}]},
+                             {"no":2,"title":"b","draft_outline":"…","time":"次日","state_changes":[],
+                              "beats":[]}],
+                 "skipped":[]}
+                """;
+        DeriveDraftService.BatchContext ctx =
+                new DeriveDraftService.BatchContext(List.of(1, 2, 3), List.of(1, 2));
+
+        LlmJson.Bad error = assertThrows(LlmJson.Bad.class,
+                () -> DeriveDraftService.parseBatch(M.readTree(json), ctx));
+
+        assertTrue(error.getMessage().contains("缺 seq=[2, 3]"));
+    }
+
+    @Test
+    void parseBatchAcceptsSkippedObjectsWithReasons() throws Exception {
+        String json = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"}]},
+                             {"no":2,"title":"b","draft_outline":"…","time":"次日","state_changes":[],
+                              "beats":[]}],
+                 "skipped":[{"seq":2,"reason":"原剧情含尸体，与无死亡红线冲突"},
+                            {"seq":3,"reason":"原剧情含诡异人形，与无超自然红线冲突"}]}
+                """;
+        DeriveDraftService.BatchContext ctx =
+                new DeriveDraftService.BatchContext(List.of(1, 2, 3), List.of(1, 2));
+
+        JsonNode parsed = DeriveDraftService.parseBatch(M.readTree(json), ctx);
+
+        assertTrue(parsed.path("skipped").isArray());
+        assertEquals(2, DeriveDraftService.skippedSeq(parsed.path("skipped").get(0)));
+        assertEquals(3, DeriveDraftService.skippedSeq(parsed.path("skipped").get(1)));
+    }
+
+    @Test
+    void parseBatch_ignoresUnknownExtraSeqWhenWindowIsCovered() throws Exception {
+        String json = """
+                {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚","state_changes":[],
+                              "beats":[{"seq":1,"filled":"x"},{"seq":99,"filled":"幻觉拍"}]},
+                             {"no":2,"title":"b","draft_outline":"…","time":"次日","state_changes":[],
+                              "beats":[{"seq":2,"filled":"y"}]}],
+                 "skipped":[]}
+                """;
+        DeriveDraftService.BatchContext ctx =
+                new DeriveDraftService.BatchContext(List.of(1, 2), List.of(1, 2));
+
+        assertEquals(2, DeriveDraftService.parseBatch(M.readTree(json), ctx).path("chapters").size());
+    }
+
+    @Test
     void parseBatch_requiresTimeAndLegalStateChanges() throws Exception {
         DeriveDraftService.BatchContext ctx = new DeriveDraftService.BatchContext(
                 List.of(1), List.of(1), java.util.Set.of("布兰", "薇拉"));
 
         String noTime = """
                 {"chapters":[{"no":1,"title":"a","draft_outline":"…","state_changes":[],
-                              "beats":[{"seq":1,"filled":"x"}]}], "skipped":[]}
+                              "beats":[{"seq":1,"filled":"薇拉发现线索"}]}], "skipped":[]}
                 """;
         assertThrows(LlmJson.Bad.class, () -> DeriveDraftService.parseBatch(M.readTree(noTime), ctx),
                 "缺 time 必须拒");
@@ -106,7 +181,7 @@ class DeriveDraftBatchTest {
                 {"chapters":[{"no":1,"title":"a","draft_outline":"…","time":"当晚",
                               "state_changes":[{"who":"布兰","what":"死亡"},
                                                {"who":"薇拉","what":"得知","detail":"布兰与卧房案有关"}],
-                              "beats":[{"seq":1,"filled":"x"}]}], "skipped":[]}
+                              "beats":[{"seq":1,"filled":"薇拉发现线索"}]}], "skipped":[]}
                 """;
         assertEquals(2, DeriveDraftService.countChanges(
                 DeriveDraftService.parseBatch(M.readTree(ok), ctx).path("chapters")));

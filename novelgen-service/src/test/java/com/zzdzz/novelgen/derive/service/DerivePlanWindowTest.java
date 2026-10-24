@@ -214,4 +214,14 @@ class DerivePlanWindowTest {
         assertEquals(3, DerivePlanService.totalWindows(21));
         assertEquals(6, DerivePlanService.totalWindows(60));
     }
+
+    @Test
+    void volumeBoundariesCoverContinuousChapters() {
+        assertEquals(1, DerivePlanService.volumeNoForChapter(1, 45, 4));
+        assertEquals(1, DerivePlanService.volumeNoForChapter(12, 45, 4));
+        assertEquals(2, DerivePlanService.volumeNoForChapter(13, 45, 4));
+        assertEquals(4, DerivePlanService.volumeNoForChapter(45, 45, 4));
+        assertEquals(1, DerivePlanService.defaultVolumeCount(12));
+        assertEquals(4, DerivePlanService.defaultVolumeCount(45));
+    }
 }

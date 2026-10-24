@@ -10,24 +10,32 @@ import com.zzdzz.novelgen.derive.mapper.AssetBeatMapper;
 import com.zzdzz.novelgen.derive.mapper.AssetWorldMapper;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
+import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.DraftHistoryMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
+import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
 import com.zzdzz.novelgen.derive.mapper.WorldStateMapper;
+import com.zzdzz.novelgen.derive.plan.PlanJsonViews;
 import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
+import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.AssetBeatDO;
 import com.zzdzz.novelgen.model.entity.derive.AssetWorldDO;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
+import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
 import com.zzdzz.novelgen.model.entity.derive.DraftHistoryDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
+import com.zzdzz.novelgen.model.entity.derive.StoryThreadDO;
 import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
+import com.zzdzz.novelgen.model.entity.derive.VolumePlanDO;
 import com.zzdzz.novelgen.model.vo.derive.DraftVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -55,6 +63,8 @@ public class DeriveDraftService {
 
     /** 窗宽 4 章（2026-10-18 提速：今晚模型单窗 8 章输出失控屡超 10 分钟；4 章减半单次输出）。 */
     static final int WINDOW_CHAPTERS = 4;
+    /** 单窗拍数上限：章数不再是唯一负荷指标，9 拍一次容易漏填。 */
+    static final int WINDOW_BEATS = 6;
 
     static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
 
@@ -107,6 +117,7 @@ public class DeriveDraftService {
             {"reveal_chapter":揭示章, "clues":[{"clue":"可观测现象","planted_chapter":章号}],
             "timeline_anchors":[{"fact":"纯数字或时刻事实","chapter":章号}],
             "solution":{"culprit":"凶手（必须是 cast 名单内人名）","motive":"…","method":"…"}}
+            solution 的三个键名必须逐字照抄 culprit / motive / method，禁止缩写、改写拼写或另起键名；
             —— reveal_chapter 不得早于最晚 planted_chapter；clues 至少 3 条；clue 只写可观测现象，
             禁止写成解释，禁止出现 culprit 姓名与 solution 内容；anchors 不得含因果结论；
             3. 所有章号必须是输入章节计划里出现过的章号。
@@ -123,10 +134,14 @@ public class DeriveDraftService {
             /brief/truth）、域格、类别与节奏、世界观、主线、前批章纲概览、已发生不可逆状态、
             本窗章节计划与本窗拍清单。
             要求：
-            1. 每个本窗拍实例填实成具体情节点（1~2 句，写 filled）；确实用不上的拍放进 skipped 数组；
+            1. 每个本窗拍实例填实成具体情节点（1~2 句，写 filled）；filled 必须写清
+               「谁 + 做了什么 + 结果/后果」，且至少出现一个 cast 名单内人名；
+               禁止用「本窗不落位」「留待后续」「待定」「占位」等占位文本；
+               确实用不上的拍才放进 skipped 数组，不能把拍写成占位句；
             2. 本窗每章给 draft_outline（本章具体大纲 2~3 句）与 title 定稿（≤12字，可沿用或改）；
-            3. 人名、性别、称谓严格沿用全局头 cast 表，禁止新造任何新名字（含路人）——
-               需要新配角时改用表内人名或把该拍放进 skipped；
+            3. 人名、性别、称谓严格沿用全局头 cast 表，filled 与 draft_outline 中出现的
+               每一个有名人名都必须是 cast 表内的逐字原名，禁止新造任何新名字（含路人、死者、
+               被提及者）；需要无名人物的动作时写“一名守卫/一个路人”等无名描述，或改用表内人名；
             4. 写纲无知之幕：章号 < reveal_chapter 的章（若输入带 truth），draft_outline 与 title
                只写在场角色认知内的情节走向，禁写 solution/真凶身份/解法/视角反转；
             5. 与前批章纲衔接：不推翻前批已定事实（人物关系、已发生事件、关键物件）；
@@ -158,6 +173,12 @@ public class DeriveDraftService {
     private final WorldStateMapper worldStateMapper;
     private final DraftHistoryMapper draftHistoryMapper;
     private final LlmJson llmJson;
+    @Autowired(required = false)
+    private VolumePlanMapper volumePlanMapper;
+    @Autowired(required = false)
+    private CharacterPlanMapper characterPlanMapper;
+    @Autowired(required = false)
+    private StoryThreadMapper storyThreadMapper;
 
     /** ⑥b：幂等推进一个单元（RESET/HEAD/BATCH/DONE，v3.7；客户端循环调用至 allDone）。 */
     public DraftVO draft(long runId) {
@@ -210,7 +231,8 @@ public class DeriveDraftService {
                     "⑥b 需要先完成 ⑥a 章节计划（这本书还没有任何章行，真相卡也没章号可对）"
                             + "——先把⑥a 跑到「章节计划完成」再点⑥b");
         }
-        List<List<Integer>> wins = windows(chapterNos, WINDOW_CHAPTERS);
+        List<List<Integer>> wins = windowsByBeats(
+                chapterNos, beats, WINDOW_CHAPTERS, WINDOW_BEATS);
 
         if ("REWORK".equals(run.getStatus())) {
             archiveRejectedDrafts(run, novelId, chapters);
@@ -220,11 +242,7 @@ public class DeriveDraftService {
             if (worldStateMapper != null) {
                 worldStateMapper.deleteByNovel(novelId);
             }
-            for (BeatInstanceDO b : beats) {
-                b.setFilledText(null);
-                b.setStatus("PLANNED");
-                beatInstanceMapper.updateById(b);
-            }
+            beatInstanceMapper.resetFilledByRun(runId);
             runMapper.updateStatus(runId, "PLANNING", null);
             runMapper.updateStepStatus(runId,
                     DeriveGateService.gateReset(clearDraftState(run.getStepStatus())));
@@ -260,7 +278,10 @@ public class DeriveDraftService {
             for (JsonNode c : assets.path("cast")) {
                 castNames.add(c.path("name").asText(""));
             }
-            BatchContext ctx = new BatchContext(new ArrayList<>(winSeqs), win, castNames);
+            Map<Integer, Integer> seqChapter = new HashMap<>();
+            winBeats.forEach(b -> seqChapter.put(b.getSeq(), b.getChapterNo()));
+            BatchContext ctx = new BatchContext(
+                    new ArrayList<>(winSeqs), win, castNames, seqChapter);
             JsonNode priorChanges = readDraftState(run.getStepStatus());
             String user = buildBatchUser(run, chapters, win, winBeats, labelBySeq, worldLabel(run),
                     assets, gateDirective, priorChanges);
@@ -278,7 +299,7 @@ public class DeriveDraftService {
             }
             Set<Integer> skipped = new HashSet<>();
             for (JsonNode s : out.path("skipped")) {
-                skipped.add(s.asInt());
+                skipped.add(skippedSeq(s));
             }
             int filledCount = 0;
             int skippedCount = 0;
@@ -291,7 +312,8 @@ public class DeriveDraftService {
                     b.setStatus("PLANNED");
                     filledCount++;
                 }
-                beatInstanceMapper.updateById(b);
+                beatInstanceMapper.updateFill(
+                        b.getId(), b.getFilledText(), b.getStatus());
             }
             for (JsonNode c : out.path("chapters")) {
                 int no = c.path("no").asInt();
@@ -301,7 +323,8 @@ public class DeriveDraftService {
                 }
                 ch.setTitle(c.path("title").asText(ch.getTitle()));
                 ch.setDraftOutline(c.path("draft_outline").asText(""));
-                chapterMapper.updateById(ch);
+                chapterMapper.updateDraftOutline(
+                        ch.getId(), ch.getTitle(), ch.getDraftOutline());
             }
             runMapper.updateStepStatus(runId, appendDraftState(run.getStepStatus(), out.path("chapters")));
             log.info("⑥b-1 分批窗：runId={} novelId={} 窗{}/{} 章{}-{} 填实{} 跳过{} 状态变更{}",
@@ -371,7 +394,8 @@ public class DeriveDraftService {
                             List.of(LlmPort.Message.system(HEAD_A_PROMPT), LlmPort.Message.user(user)), 0.4),
                     root -> parseHeadBasic(root, ctx), 3, (think, piece) -> touchProgress(runId, piece));
             novelMapper.updateMeta(novelId, out.path("title").asText(""), out.path("summary").asText(""));
-            novelMapper.updateCast(novelId, out.path("protagonist").asText(""), out.path("cast").toString());
+            novelMapper.updateCast(novelId, out.path("protagonist").asText(""),
+                    bindCharacterKeys(runId, out.path("cast")));
             log.info("⑥b-0a 定名：runId={} novelId={} 书名={} 主角={} cast={}",
                     runId, novelId, out.path("title").asText(""), out.path("protagonist").asText(""),
                     out.path("cast").size());
@@ -427,6 +451,42 @@ public class DeriveDraftService {
             merged.add(copy);
         }
         return merged.toString();
+    }
+
+    /** HEAD A 定名后把稳定角色 key 绑定到 cast；优先使用 displayNameHint，再按 key 顺序补位。 */
+    String bindCharacterKeys(long runId, JsonNode cast) {
+        if (characterPlanMapper == null || !cast.isArray()) {
+            return cast.toString();
+        }
+        List<CharacterPlanDO> plans = characterPlanMapper.selectList(
+                new LambdaQueryWrapper<CharacterPlanDO>()
+                        .eq(CharacterPlanDO::getRunId, runId)
+                        .orderByAsc(CharacterPlanDO::getCharacterKey));
+        if (plans.isEmpty()) {
+            return cast.toString();
+        }
+        Set<String> used = new LinkedHashSet<>();
+        var out = STATIC_MAPPER.createArrayNode();
+        for (JsonNode member : cast) {
+            ObjectNode copy = member.deepCopy();
+            String name = member.path("name").asText("");
+            String key = plans.stream()
+                    .filter(p -> name.equals(p.getDisplayNameHint()))
+                    .map(CharacterPlanDO::getCharacterKey)
+                    .filter(k -> !used.contains(k))
+                    .findFirst()
+                    .orElse(null);
+            if (key == null) {
+                key = plans.stream().map(CharacterPlanDO::getCharacterKey)
+                        .filter(k -> !used.contains(k)).findFirst().orElse(null);
+            }
+            if (key != null) {
+                used.add(key);
+                copy.put("characterKey", key);
+            }
+            out.add(copy);
+        }
+        return out.toString();
     }
 
     /**
@@ -497,6 +557,32 @@ public class DeriveDraftService {
         head.put("protagonist", assets.path("protagonist").asText(""));
         head.set("cast", assets.path("cast"));
         head.set("brief", assets.path("brief"));
+        var allowedNames = root.putArray("允许人名（逐字使用，禁止新造）");
+        for (JsonNode c : assets.path("cast")) {
+            String name = c.path("name").asText("").trim();
+            if (!name.isEmpty()) {
+                allowedNames.add(name);
+            }
+        }
+        root.put("人名硬约束", "filled 和 draft_outline 中出现的每个有名人名都必须来自上表；"
+                + "路人没有名字，不要给路人起名");
+        root.set("角色叙事计划", characterPlanMapper == null ? STATIC_MAPPER.createArrayNode()
+                : PlanJsonViews.characters(characterPlanMapper.selectList(
+                new LambdaQueryWrapper<CharacterPlanDO>()
+                        .eq(CharacterPlanDO::getRunId, run.getId())
+                        .orderByAsc(CharacterPlanDO::getCharacterKey))));
+        root.set("线程计划", storyThreadMapper == null ? STATIC_MAPPER.createArrayNode()
+                : PlanJsonViews.threads(storyThreadMapper.selectList(
+                new LambdaQueryWrapper<StoryThreadDO>()
+                        .eq(StoryThreadDO::getRunId, run.getId())
+                        .orderByAsc(StoryThreadDO::getThreadKey))));
+        ObjectNode keyMap = root.putObject("characterKeyMap");
+        for (JsonNode c : assets.path("cast")) {
+            String key = c.path("characterKey").asText("");
+            if (!key.isBlank()) {
+                keyMap.put(key, c.path("name").asText(""));
+            }
+        }
         if (assets.path("truth").isObject()) {
             head.set("truth", assets.path("truth"));
         }
@@ -511,12 +597,37 @@ public class DeriveDraftService {
             }
         }
         var chArr = root.putArray("本窗章节计划");
+        int lastChapterNo = chapters.isEmpty() ? 0 : chapters.get(chapters.size() - 1).getChapterNo();
+        boolean containsFinalChapter = window.contains(lastChapterNo);
+        VolumePlanDO volume = findVolume(run.getId(), window, chapters);
+        if (volume != null) {
+            ObjectNode volumeNode = root.putObject("本卷结构");
+            volumeNode.put("volume_no", volume.getVolumeNo());
+            volumeNode.put("from_chapter", volume.getFromChapter());
+            volumeNode.put("to_chapter", volume.getToChapter());
+            volumeNode.put("local_event", volume.getLocalEvent());
+            volumeNode.put("local_closure", volume.getLocalClosure());
+            volumeNode.put("next_hook", volume.getNextHook());
+            volumeNode.put("global_role", volume.getGlobalRole());
+            volumeNode.set("planContract", readTreeSafe(volume.getContract()));
+            if (window.contains(volume.getToChapter())) {
+                root.put("本卷末章要求",
+                        "本窗口含本卷末章：必须完成本卷事件与局部闭合，写清本卷阶段真相、人物关系变化，"
+                                + "并留下下一卷钩子；不要提前解决全书最终真相。");
+            }
+        }
+        if ("闭合".equals(run.getParamOutcome()) && containsFinalChapter) {
+            root.put("终章收束要求",
+                    "本窗含全书终章。终章必须做三件事：总结当前局面、复盘主线真相、交代主要角色的后续；"
+                            + "不得继续引入新的追捕/反转/未解困局，不得用悬念收尾。最后一拍必须落在稳定结局。");
+        }
         for (ChapterDO c : chapters) {
             if (window.contains(c.getChapterNo())) {
                 var n = chArr.addObject();
                 n.put("no", c.getChapterNo());
                 n.put("title", c.getTitle());
                 n.put("budget", c.getBudget());
+                n.set("planContract", readTreeSafe(c.getPlanContract()));
             }
         }
         var bArr = root.putArray("本窗拍清单");
@@ -526,9 +637,32 @@ public class DeriveDraftService {
             n.put("chapter", b.getChapterNo());
             n.put("beat_type", b.getBeatType());
             n.put("pacing", b.getPacing().toPlainString());
-            n.put("label", labelBySeq.getOrDefault(b.getSeq(), ""));
+            n.put("storyLayer", b.getStoryLayer());
+            n.put("beatRole", b.getBeatRole());
+            n.set("routeContract", readTreeSafe(b.getRouteContract()));
+            String label = b.getFilledText() != null && !b.getFilledText().isBlank()
+                    ? b.getFilledText() : labelBySeq.getOrDefault(b.getSeq(), "");
+            n.put("label", label);
         }
         return root.toString();
+    }
+
+    private VolumePlanDO findVolume(long runId, List<Integer> window, List<ChapterDO> chapters) {
+        if (volumePlanMapper == null) {
+            return null;
+        }
+        Integer volumeNo = chapters.stream()
+                .filter(c -> window.contains(c.getChapterNo()))
+                .map(ChapterDO::getVolumeNo)
+                .filter(java.util.Objects::nonNull)
+                .findFirst().orElse(null);
+        if (volumeNo == null) {
+            return null;
+        }
+        return volumePlanMapper.selectOne(new LambdaQueryWrapper<VolumePlanDO>()
+                .eq(VolumePlanDO::getRunId, runId)
+                .eq(VolumePlanDO::getVolumeNo, volumeNo)
+                .last("LIMIT 1"));
     }
 
     private void fillCommon(ObjectNode root, RunDO run, String worldLabel) {
@@ -640,9 +774,15 @@ public class DeriveDraftService {
     record HeadContext(List<Integer> chapterNos, List<String> banned, boolean reasoning) {
     }
 
-    record BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters, Set<String> castNames) {
+    record BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters,
+                        Set<String> castNames, Map<Integer, Integer> seqChapters) {
         BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters) {
-            this(windowSeqs, windowChapters, Set.of());
+            this(windowSeqs, windowChapters, Set.of(), Map.of());
+        }
+
+        BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters,
+                     Set<String> castNames) {
+            this(windowSeqs, windowChapters, castNames, Map.of());
         }
     }
 
@@ -720,14 +860,23 @@ public class DeriveDraftService {
         return arr;
     }
 
-    /** 头 C：brief 拆分 + 推理体裁真相卡。 */
+    /**
+     * 头 C：brief 拆分 + 推理体裁真相卡。
+     * 真相卡是写作上下文而非交付物——不合规只记日志降级放行，绝不掐断全流程
+     * （run 29 实弹：一个 clue 措辞连废 3 轮，整本 12 万字停摆 9 小时）。
+     * brief.premise 仍是硬要求：正文全靠它定人物/世界观/描写红线。
+     */
     static JsonNode parseBriefTruth(JsonNode root, HeadContext ctx) {
         JsonNode brief = root.path("brief");
         if (!brief.isObject() || brief.path("premise").asText("").trim().isEmpty()) {
             throw new LlmJson.Bad("必须输出 brief.premise（人物/世界观/氛围/红线摘要，≤300字）");
         }
         if (ctx.reasoning()) {
-            validateTruth(root.path("truth"), ctx.chapterNos());
+            normalizeSolution(root);
+            List<String> issues = truthIssues(root.path("truth"), ctx.chapterNos());
+            if (!issues.isEmpty()) {
+                log.warn("truth 真相卡不合规，降级放行（不影响写作，问题留痕）：{}", String.join("；", issues));
+            }
         }
         return root;
     }
@@ -774,17 +923,40 @@ public class DeriveDraftService {
             }
             for (JsonNode b : c.path("beats")) {
                 int seq = b.path("seq").asInt(0);
-                if (!ctx.windowSeqs().contains(seq) || !filled.add(seq)) {
+                if (!ctx.windowSeqs().contains(seq)) {
+                    continue;
+                }
+                if (!filled.add(seq)) {
                     throw new LlmJson.Bad("filled beats 含非法或重复 seq: " + seq);
                 }
-                if (b.path("filled").asText("").trim().isEmpty()) {
+                Integer plannedChapter = ctx.seqChapters().get(seq);
+                if (plannedChapter != null && plannedChapter != no) {
+                    throw new LlmJson.Bad("seq " + seq + " 计划归属第" + plannedChapter
+                            + "章，不能移动到第" + no + "章");
+                }
+                String filledText = b.path("filled").asText("").trim();
+                if (filledText.isEmpty()) {
                     throw new LlmJson.Bad("seq " + seq + " 缺 filled");
+                }
+                if (isPlaceholderFilled(filledText)) {
+                    throw new LlmJson.Bad("seq " + seq + " 的 filled 是占位文本（不落位/留待后续/待定），"
+                            + "必须在本章写出具体人物动作与结果");
+                }
+                if (!ctx.castNames().isEmpty()
+                        && ctx.castNames().stream().noneMatch(filledText::contains)) {
+                    throw new LlmJson.Bad("seq " + seq + " 的 filled 没有出现 cast 内人物——"
+                            + "必须写清谁做了什么、导致了什么结果；允许人名只能是："
+                            + String.join("、", ctx.castNames()));
                 }
             }
         }
         Set<Integer> skipped = new HashSet<>();
         for (JsonNode s : root.path("skipped")) {
-            int seq = s.asInt(0);
+            int seq = skippedSeq(s);
+            // 模型常用 0 表示“没有跳过拍”，归一化忽略，不把它当非法业务拍号。
+            if (seq == 0) {
+                continue;
+            }
             if (!ctx.windowSeqs().contains(seq) || filled.contains(seq) || !skipped.add(seq)) {
                 throw new LlmJson.Bad("skipped 含非法/重复 seq: " + seq);
             }
@@ -792,14 +964,31 @@ public class DeriveDraftService {
         Set<Integer> union = new HashSet<>(filled);
         union.addAll(skipped);
         if (union.size() != ctx.windowSeqs().size()) {
+            Set<Integer> missing = new LinkedHashSet<>(ctx.windowSeqs());
+            missing.removeAll(union);
             throw new LlmJson.Bad("filled ∪ skipped 必须恰好覆盖本窗全部 " + ctx.windowSeqs().size()
-                    + " 拍（当前 " + union.size() + "）");
+                    + " 拍（当前 " + union.size() + "）；缺 seq=" + missing
+                    + "，逐拍补进对应章的 beats，或明确列入 skipped");
         }
         JsonNode newNames = root.path("new_names");
         if (newNames.isArray() && !newNames.isEmpty()) {
             throw new LlmJson.Bad("禁止新造人名（new_names 必须为空）——改用全局头 cast 表内人名或把该拍放进 skipped");
         }
         return root;
+    }
+
+    /** skipped 兼容整数序号和 {seq,reason} 对象两种模型写法。 */
+    static int skippedSeq(JsonNode node) {
+        if (node == null) {
+            return 0;
+        }
+        return node.isObject() ? node.path("seq").asInt(0) : node.asInt(0);
+    }
+
+    static boolean isPlaceholderFilled(String text) {
+        return text.contains("不落位") || text.contains("留待后续") || text.contains("待后续")
+                || text.contains("待定") || text.contains("占位") || text.contains("TODO")
+                || text.equals("略") || text.equals("…") || text.equals("...");
     }
 
     /** 统计本窗产出的状态变更条数（日志用）。 */
@@ -858,49 +1047,130 @@ public class DeriveDraftService {
         return root.toString();
     }
 
-    static void validateTruth(JsonNode truth, List<Integer> chapterNos) {
+    /**
+     * 真相卡 solution 键名漂移归一化：模型偶发把 motive 漏个字母写成 mote、把 method 写成 means，
+     * 三要素校验会误判成「没写动机」而连废 3 轮、整条全流程中断（run 29 实弹：1136 号调用，
+     * 模型输出 culprit/mote/method，被判缺三要素→重试→FAILED 停摆 9 小时）。
+     * 只补缺失键、不覆盖已有值；补完仍为空才交给 validateTruth 报错。
+     */
+    static void normalizeSolution(JsonNode root) {
+        if (!(root.path("truth").path("solution") instanceof ObjectNode sol)) {
+            return;
+        }
+        fillMissing(sol, "culprit", "killer", "criminal");
+        fillMissing(sol, "motive", "mote", "motivation", "reason", "why");
+        fillMissing(sol, "method", "means", "how", "way");
+    }
+
+    private static void fillMissing(ObjectNode target, String key, String... aliases) {
+        if (!target.path(key).asText("").trim().isEmpty()) {
+            return;
+        }
+        for (String alias : aliases) {
+            String v = target.path(alias).asText("").trim();
+            if (!v.isEmpty()) {
+                target.put(key, v);
+                return;
+            }
+        }
+    }
+
+    /** 实际出现的键名清单——报错带上它，省掉「到底缺哪个、模型拼成了什么」的二次取证。 */
+    private static String keysOf(JsonNode obj) {
+        if (!obj.isObject()) {
+            return "非对象";
+        }
+        ArrayList<String> keys = new ArrayList<>();
+        obj.fieldNames().forEachRemaining(keys::add);
+        return String.join("/", keys);
+    }
+
+    /**
+     * 真相卡问题清单（空=全合规）。收集而非早停——降级放行时要把毛病一次记全，
+     * 否则模型修一个冒一个，3 轮白烧（run 29 实弹：reveal 冲突 / clue 泄底 / mote 拼写各占一轮）。
+     */
+    static List<String> truthIssues(JsonNode truth, List<Integer> chapterNos) {
+        List<String> issues = new ArrayList<>();
         if (!truth.isObject()) {
-            throw new LlmJson.Bad("推理体裁（tags 含 推理/悬疑）必须输出 truth 真相卡");
+            issues.add("未输出 truth 真相卡");
+            return issues;
         }
         int reveal = truth.path("reveal_chapter").asInt(-1);
-        if (!chapterNos.contains(reveal)) {
-            throw new LlmJson.Bad("truth.reveal_chapter 越界或缺失: " + reveal);
+        boolean revealOk = chapterNos.contains(reveal);
+        if (!revealOk) {
+            issues.add("reveal_chapter 越界或缺失: " + reveal);
         }
         JsonNode sol = truth.path("solution");
         if (!sol.isObject()
                 || sol.path("culprit").asText("").trim().isEmpty()
                 || sol.path("motive").asText("").trim().isEmpty()
                 || sol.path("method").asText("").trim().isEmpty()) {
-            throw new LlmJson.Bad("truth.solution 缺 culprit/motive/method 三要素");
+            issues.add("solution 缺 culprit/motive/method 三要素（实际键：" + keysOf(sol) + "）");
         }
         JsonNode clues = truth.path("clues");
         if (!clues.isArray() || clues.size() < 3) {
-            throw new LlmJson.Bad("truth.clues 至少 3 条（当前 "
-                    + (clues.isArray() ? clues.size() : 0) + "）");
-        }
-        int maxPlanted = -1;
-        String culprit = sol.path("culprit").asText("");
-        for (JsonNode cl : clues) {
-            int pc = cl.path("planted_chapter").asInt(-1);
-            String clueText = cl.path("clue").asText("").trim();
-            if (clueText.isEmpty() || !chapterNos.contains(pc)) {
-                throw new LlmJson.Bad("truth.clues 有缺 clue 或 planted_chapter 越界: " + pc);
+            issues.add("clues 至少 3 条（当前 " + (clues.isArray() ? clues.size() : 0) + "）");
+        } else {
+            int maxPlanted = -1;
+            for (JsonNode cl : clues) {
+                int pc = cl.path("planted_chapter").asInt(-1);
+                String clueText = cl.path("clue").asText("").trim();
+                if (clueText.isEmpty() || !chapterNos.contains(pc)) {
+                    issues.add("clues 有缺 clue 或 planted_chapter 越界: " + pc);
+                    continue;
+                }
+                if (leaksSolution(clueText, sol)) {
+                    issues.add("clue「" + clueText + "」复述了 solution 的动机/手法——只留可观测现象");
+                }
+                maxPlanted = Math.max(maxPlanted, pc);
             }
-            if (!culprit.isEmpty() && clueText.contains(culprit)) {
-                throw new LlmJson.Bad("clue「" + clueText + "」直接出现 solution 内容——"
-                        + "clue 只许写可观测现象，不许写解释或答案");
+            if (revealOk && maxPlanted >= 0 && reveal < maxPlanted) {
+                issues.add("reveal_chapter(" + reveal + ") 不得早于最晚埋设章(" + maxPlanted + ")");
             }
-            maxPlanted = Math.max(maxPlanted, pc);
-        }
-        if (reveal < maxPlanted) {
-            throw new LlmJson.Bad("truth.reveal_chapter(" + reveal + ") 不得早于最晚埋设章(" + maxPlanted + ")");
         }
         for (JsonNode a : truth.path("timeline_anchors")) {
             if (a.path("fact").asText("").trim().isEmpty()
                     || !chapterNos.contains(a.path("chapter").asInt(-1))) {
-                throw new LlmJson.Bad("truth.timeline_anchors 有缺 fact 或 chapter 越界");
+                issues.add("timeline_anchors 有缺 fact 或 chapter 越界");
             }
         }
+        return issues;
+    }
+
+    /** 硬校验（有问题即抛第一条）——给需要 fail-hard 的调用方与单测。 */
+    static void validateTruth(JsonNode truth, List<Integer> chapterNos) {
+        List<String> issues = truthIssues(truth, chapterNos);
+        if (!issues.isEmpty()) {
+            throw new LlmJson.Bad(issues.get(0));
+        }
+    }
+
+    /**
+     * clue 泄底判据：点名凶手不算（「失踪罪人芬恩入狱前曾以吟游诗人身份登岛」是可观测事实，
+     * 恰恰是好线索的写法），只有复述 solution 的动机/手法原文才算泄底。
+     * 旧判据「clue 含 culprit 名即拦」把正确写法判成违规，模型被迫改写又撞上 reveal 约束（run 29 1134→1135 连锁）。
+     */
+    private static boolean leaksSolution(String clueText, JsonNode sol) {
+        for (String key : List.of("motive", "method")) {
+            String answer = sol.path(key).asText("").trim();
+            if (sharesFragment(clueText, answer)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 8 字滑窗：答案里任一段原样出现在 clue 里即视为复述；答案本身不足 8 字不做判断。 */
+    private static boolean sharesFragment(String clueText, String answer) {
+        if (answer.length() < 8) {
+            return false;
+        }
+        for (int i = 0; i + 8 <= answer.length(); i++) {
+            if (clueText.contains(answer.substring(i, i + 8))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ---- 窗与对账 ----
@@ -910,6 +1180,36 @@ public class DeriveDraftService {
         List<List<Integer>> out = new ArrayList<>();
         for (int i = 0; i < chapterNos.size(); i += size) {
             out.add(List.copyOf(chapterNos.subList(i, Math.min(i + size, chapterNos.size()))));
+        }
+        return out;
+    }
+
+    /** 同时按章数与拍数切窗；单章拍数再大也不拆章，保证 filled 不跨章移动。 */
+    static List<List<Integer>> windowsByBeats(List<Integer> chapterNos,
+                                              List<BeatInstanceDO> beats,
+                                              int maxChapters, int maxBeats) {
+        Map<Integer, Integer> countByChapter = new HashMap<>();
+        for (BeatInstanceDO beat : beats) {
+            if (beat.getChapterNo() != null) {
+                countByChapter.merge(beat.getChapterNo(), 1, Integer::sum);
+            }
+        }
+        List<List<Integer>> out = new ArrayList<>();
+        List<Integer> current = new ArrayList<>();
+        int currentBeats = 0;
+        for (Integer chapterNo : chapterNos) {
+            int chapterBeats = countByChapter.getOrDefault(chapterNo, 0);
+            if (!current.isEmpty() && (current.size() >= maxChapters
+                    || currentBeats + chapterBeats > maxBeats)) {
+                out.add(List.copyOf(current));
+                current.clear();
+                currentBeats = 0;
+            }
+            current.add(chapterNo);
+            currentBeats += chapterBeats;
+        }
+        if (!current.isEmpty()) {
+            out.add(List.copyOf(current));
         }
         return out;
     }

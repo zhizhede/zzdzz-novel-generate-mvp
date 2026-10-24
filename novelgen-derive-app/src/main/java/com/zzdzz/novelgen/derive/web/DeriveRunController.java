@@ -3,15 +3,21 @@ package com.zzdzz.novelgen.derive.web;
 import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.derive.service.DeriveDraftService;
 import com.zzdzz.novelgen.derive.service.DeriveAutoFlowService;
+import com.zzdzz.novelgen.derive.service.DeriveBeatRouteService;
 import com.zzdzz.novelgen.derive.service.DeriveGateService;
 import com.zzdzz.novelgen.derive.service.DerivePlanService;
 import com.zzdzz.novelgen.derive.service.DeriveQcService;
 import com.zzdzz.novelgen.derive.service.DeriveQueryService;
+import com.zzdzz.novelgen.derive.service.DeriveResetService;
 import com.zzdzz.novelgen.derive.service.DeriveSampleService;
+import com.zzdzz.novelgen.derive.service.DeriveStoryPlanService;
+import com.zzdzz.novelgen.derive.service.DeriveVolumeService;
 import com.zzdzz.novelgen.derive.service.DeriveWriteService;
 import com.zzdzz.novelgen.model.dto.derive.RunCreateDTO;
 import com.zzdzz.novelgen.model.dto.derive.RunQueryDTO;
+import com.zzdzz.novelgen.model.dto.derive.PlanScopeConfirmDTO;
 import com.zzdzz.novelgen.model.vo.derive.BeatVO;
+import com.zzdzz.novelgen.model.vo.derive.BeatRouteVO;
 import com.zzdzz.novelgen.model.vo.derive.AutoVO;
 import com.zzdzz.novelgen.model.vo.derive.DraftProgressVO;
 import com.zzdzz.novelgen.model.vo.derive.DraftVO;
@@ -24,7 +30,10 @@ import com.zzdzz.novelgen.model.vo.derive.QcVO;
 import com.zzdzz.novelgen.model.vo.derive.RunChapterVO;
 import com.zzdzz.novelgen.model.vo.derive.RunDetailVO;
 import com.zzdzz.novelgen.model.vo.derive.RunListItemVO;
+import com.zzdzz.novelgen.model.vo.derive.RunResetVO;
 import com.zzdzz.novelgen.model.vo.derive.RunVO;
+import com.zzdzz.novelgen.model.vo.derive.StoryPlanDetailVO;
+import com.zzdzz.novelgen.model.vo.derive.VolumePlanVO;
 import com.zzdzz.novelgen.model.vo.derive.WriteLoopVO;
 import com.zzdzz.novelgen.model.vo.derive.WriteVO;
 import lombok.RequiredArgsConstructor;
@@ -46,12 +55,16 @@ public class DeriveRunController {
 
     private final DeriveSampleService sampleService;
     private final DerivePlanService planService;
+    private final DeriveStoryPlanService storyPlanService;
+    private final DeriveBeatRouteService beatRouteService;
     private final DeriveDraftService draftService;
     private final DeriveWriteService writeService;
     private final DeriveQcService qcService;
     private final DeriveQueryService queryService;
     private final DeriveGateService gateService;
     private final DeriveAutoFlowService autoFlowService;
+    private final DeriveResetService resetService;
+    private final DeriveVolumeService volumeService;
 
     @PostMapping
     public Result<RunVO> create(@RequestBody RunCreateDTO dto) {
@@ -78,6 +91,18 @@ public class DeriveRunController {
         return Result.success(queryService.listRunChapters(id, includeText, status));
     }
 
+    /** 清空⑥及之后的规划/正文数据；保留⑤采样、焊接和参数，回到 PLANNING。 */
+    @PostMapping("/{id}/clear-planning")
+    public Result<RunResetVO> clearPlanning(@PathVariable long id) {
+        return Result.success(resetService.clearPlanning(id));
+    }
+
+    /** run 的卷级规划：卷边界、本卷事件、局部闭合与下一卷钩子。 */
+    @GetMapping("/{id}/volumes")
+    public Result<List<VolumePlanVO>> volumes(@PathVariable long id) {
+        return Result.success(volumeService.list(id));
+    }
+
     /** 质检历史（轮次降序；verdict 可筛 PASS/REWORK/FAIL）。 */
     @GetMapping("/{id}/qc-reports")
     public Result<List<QcReportVO>> qcReports(@PathVariable long id,
@@ -97,6 +122,34 @@ public class DeriveRunController {
     @PostMapping("/{id}/plan")
     public Result<PlanVO> plan(@PathVariable long id) {
         return Result.success(planService.plan(id));
+    }
+
+    /** 模糊规模确认：确定卷数并允许/禁止扩卷。 */
+    @PostMapping("/{id}/plan/confirm-scope")
+    public Result<PlanVO> confirmScope(@PathVariable long id,
+                                       @RequestBody PlanScopeConfirmDTO dto) {
+        return Result.success(storyPlanService.confirmScope(
+                id, dto.volumeCount(), dto.allowExpansion()));
+    }
+
+    /** 故事脊柱、卷合同、角色、线程、章槽完整读模型。 */
+    @GetMapping("/{id}/story-plan")
+    public Result<StoryPlanDetailVO> storyPlan(@PathVariable long id) {
+        return Result.success(queryService.storyPlan(id));
+    }
+
+    /** 单卷拍路由。 */
+    @GetMapping("/{id}/volumes/{volumeNo}/beats")
+    public Result<List<BeatVO>> volumeBeats(@PathVariable long id,
+                                            @PathVariable int volumeNo) {
+        return Result.success(queryService.listVolumeBeats(id, volumeNo));
+    }
+
+    /** 只重做目标卷拍路由；已有正文卷由 service 拒绝。 */
+    @PostMapping("/{id}/volumes/{volumeNo}/replan")
+    public Result<BeatRouteVO> replanVolume(@PathVariable long id,
+                                            @PathVariable int volumeNo) {
+        return Result.success(beatRouteService.replanVolume(id, volumeNo));
     }
 
     /** ⑥b生成具体稿（v3.7 幂等单元制：每次只推进 HEAD/BATCH 一窗/RESET 回炉清稿/DONE，循环至 allDone）。 */
