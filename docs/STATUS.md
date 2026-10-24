@@ -1690,3 +1690,4 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - `DerivePlanService.finishBookValidation` 在事实账重建后调用线程状态同步。
 - 新增 `DeriveThreadServiceTest`，验证 CLUE_PAYOFF 拍可把线程标为 PAYOFF。
 - `mvn -q compile`、定向测试通过；未部署线上。
+- ThreadLedger 接入后 derive jar 重新打包通过。
