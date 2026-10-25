@@ -52,6 +52,6 @@ class DeriveThreadServiceTest {
 
         service.syncFromBeats(40L);
 
-        verify(storyThreadMapper).updateById(thread);
+        verify(storyThreadMapper).updateFull(thread);
     }
 }

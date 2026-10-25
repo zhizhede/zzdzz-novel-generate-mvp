@@ -122,7 +122,28 @@ class DerivePlanValidationServiceTest {
         assertTrue(threadIssue.stream().anyMatch(i -> i.code().equals("REQUIRED_THREAD_OPEN")));
     }
 
-    private static DerivePlanValidationService.AppearanceStep step(
+
+    @Test
+    void missingThreadOwnerOrUnknownRelationIsSpineRepair() {
+        var volume = new PlanContracts.VolumeContract(
+                1, 1, 12, "卷", "问", "错", "真", "增量",
+                List.of("C2"), List.of(), List.of("GM-CLUE-01"), List.of(), "闭合", "", "FINAL");
+        var thread = new PlanContracts.ThreadContract(
+                "GM-CLUE-01", PlanContracts.ThreadKind.CLUE, "名单",
+                1, 1, "C3", PlanContracts.ThreadStatus.OPEN, Map.of());
+        var character = new PlanContracts.CharacterContract(
+                "C1", "调查者", PlanContracts.CharacterFunction.DETECTIVE, "唯一", "查清", "执着",
+                List.of(), List.of("C3"), "冲突", "选择", "代价", List.of("REL-C1-C3"),
+                "兑现", 1, 1, 1, "开始", "结束");
+
+        var issues = DerivePlanValidationService.validateContractClosure(
+                List.of(volume), List.of(thread), List.of(character));
+
+        assertTrue(issues.stream().anyMatch(i -> "THREAD_OWNER_MISSING".equals(i.code())));
+        assertTrue(issues.stream().anyMatch(i -> "VOLUME_CHARACTER_MISSING".equals(i.code())));
+        assertTrue(issues.stream().anyMatch(i -> "RELATION_REFERENCE_MISSING".equals(i.code())));
+        assertTrue(issues.stream().allMatch(i -> i.repairScope() == PlanContracts.RepairScope.SPINE));
+    }    private static DerivePlanValidationService.AppearanceStep step(
             int chapterNo, String characterKey, PlanContracts.AppearanceMode mode, boolean dead) {
         return step(chapterNo, characterKey, mode, dead, List.of(), List.of());
     }

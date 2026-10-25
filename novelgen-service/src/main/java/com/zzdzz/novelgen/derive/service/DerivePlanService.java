@@ -29,6 +29,7 @@ import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
 import com.zzdzz.novelgen.model.entity.derive.VolumePlanDO;
+import com.zzdzz.novelgen.model.vo.derive.PlanValidationVO;
 import com.zzdzz.novelgen.model.vo.derive.PlanVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,9 +79,8 @@ public class DerivePlanService {
     static final int PLAN_WINDOW_CHAPTERS = 10;
     /** 单窗拍数软上限：超过就按剩余拍/剩余章动态拆窗，避免最后一窗被压上几十拍。 */
     static final int MAX_PLAN_WINDOW_BEATS = 40;
-    /** 规模设计口径：每章建议 2~3 拍，允许 1~4 拍；章数先由拍数反推。 */
+    /** 规模设计口径：每章建议 2~3 拍，具体拍数由分章配额决定；章数先由拍数反推。 */
     static final int MIN_BEATS_PER_CHAPTER = 1;
-    static final int MAX_BEATS_PER_CHAPTER = 4;
 
     /** 每章字数与章数的合理带（AI 自定，系统只夹区间——旧的"字数÷硬常量算章数"已废）。 */
     static final int CHAPTER_AVG_MIN = 2000;
@@ -103,7 +103,7 @@ public class DerivePlanService {
             3. 拍数是素材规模，不等于必须写成的章节规模；短框架可以压缩拍组、合并事件，
                由你判断需要多少章承载，不要机械按每章固定拍数。
             4. 在框架允许的规模内自选 chapterCount 与 chapterAvg；章数 1~80，每章字数
-               2000~6000；章数不得超过拍数，且每章至少 1 拍。
+               2000~6000；章数是规模建议值，可高于原始拍数，结构缺口由后续 syntheticSlots 补齐。
             5. 同时给出卷级骨架：每卷必须有本卷独立事件、本卷局部闭合、下一卷钩子；
                普通卷 global_role=LOCAL，最后一卷 global_role=FINAL 且 next_hook 为空。
                卷章号范围必须连续覆盖 1..chapterCount，不得重叠。
@@ -130,7 +130,7 @@ public class DerivePlanService {
             {"chapters":[{"no":11,"title_hint":"≤12字章题","budget":2500,"beats":[23,24]}]}
             规则：
             1. 只能输出本窗章号范围内的章，章号连续、每章都要出现，章数必须等于范围内章数；
-            2. beats 只能从"剩余拍清单"取 seq，同一个 seq 只能用一次，每章至少 1 拍、最多 6 拍；
+            2. beats 只能从"剩余拍清单"取 seq，同一个 seq 只能用一次，每章至少 1 拍；具体拍数按剧情需要安排，不限制单章上限；
                「本窗建议拍数」只是节奏参考，不是硬配额；可在不导致后续章节塞不下、
                也不影响结局闭合的前提下，根据场景和情绪自由前后微调；
             2b. 本窗不要贪多把拍用光：后面的章还等着分拍，本窗用完后剩余拍数必须 ≥ 剩余章数；
@@ -331,6 +331,27 @@ public class DerivePlanService {
             validation = planValidationService.validateBook(run.getId());
         }
         if (!validation.passed()) {
+            List<PlanValidationVO.Issue> upstream = validation.hardErrors().stream()
+                    .filter(issue -> "SPINE".equals(issue.repairTarget())
+                            || "SCALE".equals(issue.repairTarget()))
+                    .toList();
+            if (!upstream.isEmpty()) {
+                List<String> issues = upstream.stream()
+                        .map(issue -> issue.code() + "：" + issue.message())
+                        .collect(java.util.stream.Collectors.toList());
+                String repairTarget = upstream.get(0).repairTarget();
+                int gateRound = DeriveGateService.gateRound(run.getStepStatus());
+                String directive = "规划硬校验发现上游合同缺口；按下列问题重建唯一真相合同："
+                        + String.join("；", issues);
+                runMapper.updateStepStatus(run.getId(), DeriveGateService.withGate(
+                        run.getStepStatus(), "REWORK", gateRound, issues, directive, repairTarget));
+                runMapper.updateStatus(run.getId(), "REWORK", null);
+                log.warn("规划校验转根因回炉：runId={} target={} issues={}",
+                        run.getId(), repairTarget, issues);
+                return new PlanVO(run.getId(), run.getNovelId(), chaptersPlanned(run.getId()),
+                        beatsPlanned(run.getId()), totalBudget(run.getId()), List.of(), "REWORK",
+                        0, 0, 0, 0, false);
+            }
             String message = validation.hardErrors().isEmpty()
                     ? "故事规划校验失败"
                     : validation.hardErrors().get(0).message();
@@ -437,6 +458,17 @@ public class DerivePlanService {
                 BeatInstanceDO writer = firstWriter.get(fact);
                 if (writer == null) {
                     writer = findEarlierFactWriter(rows, beat, fact, routeByBeatId);
+                }
+                if (writer == null) {
+                    writer = rows.stream()
+                            .filter(row -> row.getChapterNo() != null
+                                    && (beat.getChapterNo() == null
+                                    || row.getChapterNo() < beat.getChapterNo()))
+                            .findFirst().orElse(null);
+                    if (writer != null) {
+                        log.warn("落库知识缺口改用前置占位拍：fact={} targetSeq={} writerSeq={}",
+                                fact, beat.getSeq(), writer.getSeq());
+                    }
                 }
                 if (writer == null || missing.isEmpty()) {
                     if (!missing.isEmpty()) {
@@ -928,7 +960,7 @@ public class DerivePlanService {
         int remainingChapters = Math.max(1, chapterCount - drafts.size());
         int targetBeats = (int) Math.ceil(remain.size() * (to - from + 1) / (double) remainingChapters);
         root.put("本窗建议拍数", targetBeats);
-        root.put("单章拍数允许范围", MIN_BEATS_PER_CHAPTER + "~" + MAX_BEATS_PER_CHAPTER);
+        root.put("单章最少拍数", MIN_BEATS_PER_CHAPTER);
         root.put("全章平均拍数", chapterCount == 0 ? 0 : inventory.size() / (double) chapterCount);
         var prev = root.putArray("前窗章概览");
         for (PlanDraft d : drafts) {
@@ -979,11 +1011,7 @@ public class DerivePlanService {
         if (avg < 1) {
             throw new LlmJson.Bad("每章字数必须 >0（当前 " + avg + "）");
         }
-        if (ch > beatCount) {
-            throw new LlmJson.Bad("章数 " + ch + " 超过拍数 " + beatCount
-                    + "——每章至少分到 1 拍，章数不得超过拍数（宁可把章写长）");
-        }
-        // 章数由创作框架决定；系统只做“每章至少 1 拍、章数不超过拍数”的可行性校验。
+        // 章数由创作框架决定；系统只做规模带校验，拍数缺口交给后续结构补拍。
         // 不再用固定每章拍数反推章数，否则会把短框架强制扩成长篇。
         if (!Boolean.TRUE.equals(run.getLenCheck())) {
             return root;
@@ -1046,10 +1074,6 @@ public class DerivePlanService {
             if (!beats.isArray() || beats.isEmpty()) {
                 throw new LlmJson.Bad("第" + no + "章 beats 必须非空（每章≥1拍）");
             }
-            if (beats.size() > MAX_BEATS_PER_CHAPTER) {
-                throw new LlmJson.Bad("第" + no + "章 beats=" + beats.size()
-                        + " 超过单章上限 " + MAX_BEATS_PER_CHAPTER + "——拆章或把拍摊到前面章节");
-            }
             List<Integer> beatList = new ArrayList<>();
             for (JsonNode b : beats) {
                 int s = b.asInt(0);
@@ -1083,11 +1107,11 @@ public class DerivePlanService {
         }
         int restChapters = ctx.state().chapterCount() - ctx.to();
         int restBeats = ctx.remain().size() - used.size();
-        int mustUse = ctx.remain().size() - MAX_BEATS_PER_CHAPTER * restChapters;
+        int mustUse = Math.max(0, ctx.remain().size() - restChapters);
         if (used.size() < mustUse) {
             throw new LlmJson.Bad("本窗只分配 " + used.size() + " 拍，至少需要分配 " + mustUse
                     + " 拍——否则剩下 " + restBeats + " 拍无法在后续 " + restChapters
-                    + " 章内以每章最多 " + MAX_BEATS_PER_CHAPTER + " 拍容纳");
+                    + " 章内保证每章至少 1 拍");
         }
         if (restBeats < restChapters) {
             throw new LlmJson.Bad("本窗用掉 " + used.size() + " 拍后只剩 " + restBeats

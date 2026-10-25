@@ -78,21 +78,25 @@ public class DeriveFactService {
         }
         for (FactDraft draft : drafts.values()) {
             DeriveFactDO row = existing.get(draft.key);
-            if (row == null) {
+            boolean insert = row == null;
+            if (insert) {
                 row = new DeriveFactDO();
                 row.setRunId(runId);
                 row.setNovelId(novelId);
                 row.setFactKey(draft.key);
                 row.setStatus("OPEN");
                 row.setContract("{}");
-                factMapper.insertFull(row);
             }
             row.setCanonicalText(draft.canonicalText);
             row.setWriters(toJson(draft.writers));
             row.setReaders(toJson(draft.readers));
             row.setPlantedChapter(draft.plantedChapter);
             row.setRevealedChapter(draft.revealedChapter);
-            factMapper.updateFull(row);
+            if (insert) {
+                factMapper.insertFull(row);
+            } else {
+                factMapper.updateFull(row);
+            }
         }
     }
 
@@ -110,7 +114,7 @@ public class DeriveFactService {
         repairLogMapper.insertFull(row);
     }
 
-    static String factKey(String canonicalText) {
+    public static String factKey(String canonicalText) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(canonicalText.getBytes(StandardCharsets.UTF_8));

@@ -62,7 +62,7 @@ public class DeriveThreadService {
                             : "OPEN";
             if (!next.equals(thread.getStatus())) {
                 thread.setStatus(next);
-                storyThreadMapper.updateById(thread);
+                storyThreadMapper.updateFull(thread);
                 log.info("线程状态同步：runId={} threadKey={} status={}",
                         runId, thread.getThreadKey(), next);
             }
@@ -70,7 +70,7 @@ public class DeriveThreadService {
     }
 
     private static boolean isPayoffRole(String role) {
-        return "CLUE_PAYOFF".equals(role)
+        return "CLUE_PAYOFF".equals(role) || "RELATION_CONFLICT".equals(role)
                 || "LOCAL_CLOSURE".equals(role)
                 || "FINAL_REVEAL".equals(role)
                 || "FINAL_CLOSURE".equals(role);

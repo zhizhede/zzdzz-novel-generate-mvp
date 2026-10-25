@@ -9,6 +9,7 @@ import com.zzdzz.novelgen.model.entity.derive.DeriveFactDO;
 import com.zzdzz.novelgen.model.entity.derive.DeriveRepairLogDO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -53,8 +54,10 @@ class DeriveFactServiceTest {
 
         service.rebuild(40L, 87L);
 
-        verify(factMapper).insertFull(any(DeriveFactDO.class));
-        verify(factMapper).updateFull(any(DeriveFactDO.class));
+        ArgumentCaptor<DeriveFactDO> captor = ArgumentCaptor.forClass(DeriveFactDO.class);
+        verify(factMapper).insertFull(captor.capture());
+        org.junit.jupiter.api.Assertions.assertNotNull(captor.getValue().getCanonicalText());
+        org.junit.jupiter.api.Assertions.assertTrue(captor.getValue().getCanonicalText().contains("C2"));
     }
 
     @Test
