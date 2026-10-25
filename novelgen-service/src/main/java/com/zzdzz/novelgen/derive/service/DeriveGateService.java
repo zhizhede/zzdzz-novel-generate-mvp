@@ -65,7 +65,7 @@ public class DeriveGateService {
             你是小说大纲立项评审员。输入含：类别/产品形态/字数带/结局形状/主线、人物表（cast 含 persona）、
             真相卡（若有）、brief、全书章纲（每章 no/title/outline）、拍清单（seq/拍型/归属章/状态/filled 情节点）、
             母题黑名单（跨稿复读母题，命中要换写）。
-            只依据给出材料评审。你的职责是“诊断”，不是决定放行或熔断；最终动作由系统按结构化结果计算。
+            只依据给出材料评审。TruthContract 是唯一真相合同；真相卡、卷合同、主线或章纲与它冲突时，必须判为合同冲突，不得把两套案情当成同一个故事。你的职责是“诊断”，不是决定放行或熔断；最终动作由系统按结构化结果计算。
             六判据逐项输出 pass、severity、note、issues、repairTarget：
             1. 规则单轨：真相卡存在时，诡计/手法层只允许一套可理性化规则——超自然只能做氛围，
                不得进入解释通道；两套规则并存判 fail；
@@ -130,11 +130,17 @@ public class DeriveGateService {
             List<GateCriterionVO> criteria) {
     }
 
+    record GateTruth(
+            DeriveTruthContractService.TruthResolution resolution,
+            JsonNode volumes) {
+    }
+
     private final RunMapper runMapper;
     private final NovelMapper novelMapper;
     private final ChapterMapper chapterMapper;
     private final BeatInstanceMapper beatInstanceMapper;
     private final WordlistMapper wordlistMapper;
+    private final DeriveTruthContractService truthContractService;
     private final LlmJson llmJson;
     @Autowired(required = false)
     private DerivePlanValidationService planValidationService;
@@ -177,7 +183,8 @@ public class DeriveGateService {
                         .eq(WordlistDO::getKind, "BLACKLIST")
                         .eq(WordlistDO::getGrp, "MOTIF"))
                 .stream().map(WordlistDO::getWord).filter(w -> w != null && !w.isBlank()).toList();
-        String user = buildUser(run, novel, chapters, beats, motifs);
+        GateTruth gateTruth = resolveGateTruth(run, novel);
+        String user = buildUser(run, novel, chapters, beats, motifs, gateTruth);
 
         GateReview review;
         DeriveActivity.begin(runId, "P6 立项闸评审（六判据）");
@@ -198,6 +205,7 @@ public class DeriveGateService {
                 run.getStepStatus(), decision.action(), round, decision.issues(),
                 review.directive(), decision.repairTarget(), decision.criteria()));
         runMapper.updateStepStatus(runId, run.getStepStatus());
+        persistTruthContract(runId, gateTruth.resolution().contract());
         if ("REWORK".equals(decision.action())) {
             runMapper.updateStatus(runId, "REWORK", null);
         } else if ("FAILED".equals(decision.action())) {
@@ -214,14 +222,49 @@ public class DeriveGateService {
 
     // ---- 输入构造 ----
 
+    private GateTruth resolveGateTruth(RunDO run, NovelDO novel) {
+        JsonNode assets = DeriveDraftService.readTreeSafe(novel.getStoryAssets());
+        JsonNode spine = DeriveDraftService.readTreeSafe(run.getStepStatus())
+                .path("steps").path("STORY_SPINE");
+        JsonNode volumes = volumePlanMapper == null
+                ? STATIC_MAPPER.createArrayNode()
+                : PlanJsonViews.volumes(volumePlanMapper.selectList(
+                        new LambdaQueryWrapper<VolumePlanDO>()
+                                .eq(VolumePlanDO::getRunId, run.getId())
+                                .orderByAsc(VolumePlanDO::getVolumeNo)));
+        return new GateTruth(truthContractService.resolve(
+                run.getId(), spine, assets.path("truth"), volumes), volumes);
+    }
+
+    private void persistTruthContract(long runId,
+                                      com.zzdzz.novelgen.derive.contract.TruthContract contract) {
+        RunDO current = runMapper.selectById(runId);
+        if (current == null) {
+            return;
+        }
+        ObjectNode root = stepsRoot(current.getStepStatus());
+        root.with("steps").set("TRUTH_CONTRACT", STATIC_MAPPER.valueToTree(contract));
+        runMapper.updateStepStatus(runId, root.toString());
+    }
+
     String buildUser(RunDO run, NovelDO novel, List<ChapterDO> chapters,
                      List<BeatInstanceDO> beats, List<String> motifs) {
+        return buildUser(run, novel, chapters, beats, motifs, resolveGateTruth(run, novel));
+    }
+
+    String buildUser(RunDO run, NovelDO novel, List<ChapterDO> chapters,
+                     List<BeatInstanceDO> beats, List<String> motifs,
+                     GateTruth gateTruth) {
         ObjectNode root = STATIC_MAPPER.createObjectNode();
         root.set("类别", DeriveDraftService.readTreeSafe(run.getParamTags()));
         root.put("产品形态", run.getParamForm());
         root.put("字数带", run.getParamWordsMin() + "~" + run.getParamWordsMax());
         root.put("结局形状", run.getParamOutcome());
-        root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+        String canonicalMainline = gateTruth.resolution().contract().finalTruth();
+        if (canonicalMainline == null || canonicalMainline.isBlank()) {
+            canonicalMainline = run.getWelded() == null ? "" : run.getWelded();
+        }
+        root.put("主线", canonicalMainline);
         JsonNode assets = DeriveDraftService.readTreeSafe(novel.getStoryAssets());
         root.set("人物表", assets.path("cast"));
         root.put("protagonist", assets.path("protagonist").asText(""));
@@ -229,6 +272,14 @@ public class DeriveGateService {
             root.set("真相卡", assets.path("truth"));
         }
         root.set("brief", assets.path("brief"));
+        JsonNode spine = DeriveDraftService.readTreeSafe(run.getStepStatus())
+                .path("steps").path("STORY_SPINE");
+        JsonNode volumes = gateTruth.volumes();
+        var truthResolution = gateTruth.resolution();
+        root.set("TruthContract", STATIC_MAPPER.valueToTree(truthResolution.contract()));
+        if (!truthResolution.conflicts().isEmpty()) {
+            root.set("truthConflicts", STATIC_MAPPER.valueToTree(truthResolution.conflicts()));
+        }
         if (volumePlanMapper != null) {
             root.set("卷合同", PlanJsonViews.volumes(volumePlanMapper.selectList(
                     new LambdaQueryWrapper<VolumePlanDO>()
@@ -271,11 +322,20 @@ public class DeriveGateService {
     // ---- 解析与判定（纯函数，单测覆盖） ----
 
     static GateReview parseGate(JsonNode root) {
-        if (!root.path("issues").isArray()) {
-            throw new LlmJson.Bad("issues 必须是数组（可为空）");
+        JsonNode issuesNode = root.path("issues");
+        if (issuesNode.isTextual() && !issuesNode.asText("").isBlank()) {
+            ArrayNode normalized = STATIC_MAPPER.createArrayNode();
+            normalized.add(issuesNode.asText(""));
+            ((ObjectNode) root).set("issues", normalized);
+        } else if (issuesNode.isObject()) {
+            ArrayNode normalized = STATIC_MAPPER.createArrayNode();
+            issuesNode.forEach(normalized::add);
+            ((ObjectNode) root).set("issues", normalized);
+        } else if (!issuesNode.isArray()) {
+            ((ObjectNode) root).putArray("issues");
         }
         if (!root.has("directive")) {
-            throw new LlmJson.Bad("缺 directive（可为空串，但键必须在）");
+            ((ObjectNode) root).put("directive", "");
         }
         JsonNode criteriaNode = root.path("criteria");
         if (!criteriaNode.isObject()) {
@@ -300,9 +360,8 @@ public class DeriveGateService {
             if (note.isEmpty()) {
                 throw new LlmJson.Bad("criteria." + key + ".note 不能为空");
             }
-            if (!node.path("issues").isArray()) {
-                throw new LlmJson.Bad("criteria." + key + ".issues 必须是数组");
-            }
+            JsonNode criterionIssues = normalizeIssuesNode(node.path("issues"));
+            ((ObjectNode) node).set("issues", criterionIssues);
             List<String> issues = new ArrayList<>();
             node.path("issues").forEach(n -> {
                 String issue = n.asText("").trim();
@@ -357,12 +416,30 @@ public class DeriveGateService {
                     new ArrayList<>(issues), review.criteria());
         }
         String repairTarget = mostUpstreamTarget(targets);
-        boolean exhausted = prevRound >= 2;
+        boolean exhausted = prevRound >= 5;
         return new GateDecision(exhausted ? "REJECT" : "REWORK",
                 exhausted ? "FAILED" : "REWORK", repairTarget,
                 new ArrayList<>(issues), review.criteria());
     }
 
+    private static boolean isUpstreamRepair(String repairTarget) {
+        return "SPINE".equals(repairTarget)
+                || "SCALE".equals(repairTarget)
+                || (repairTarget != null && repairTarget.startsWith("PLAN_VOLUME:"));
+    }
+
+    /** 根因重建后保留闸轮次，避免同一个上游矛盾被无限重置回第 1 轮。 */
+    static String gateResetForRootRebuild(String stepStatus) {
+        ObjectNode root = stepsRoot(stepStatus);
+        ObjectNode gate = root.with("steps").withObject("GATE");
+        String directive = gate.path("directive").asText("");
+        String repairTarget = gate.path("repairTarget").asText("NONE");
+        java.util.List<String> issues = new java.util.ArrayList<>();
+        gate.path("issues").forEach(n -> issues.add(n.asText("")));
+        int round = gate.path("round").asInt(0);
+        return withGateNode(root.toString(), "PENDING", round, issues, directive,
+                repairTarget, gate.path("criteria"));
+    }
     // ---- step_status.steps.GATE 读写（合并既有键，L2 层） ----
 
     static int gateRound(String stepStatus) {
@@ -451,6 +528,20 @@ public class DeriveGateService {
 
     private static JsonNode readGate(String stepStatus) {
         return stepsRoot(stepStatus).path("steps").path("GATE");
+    }
+
+    private static JsonNode normalizeIssuesNode(JsonNode node) {
+        if (node.isTextual() && !node.asText("").isBlank()) {
+            ArrayNode array = STATIC_MAPPER.createArrayNode();
+            array.add(node.asText(""));
+            return array;
+        }
+        if (node.isObject()) {
+            ArrayNode array = STATIC_MAPPER.createArrayNode();
+            node.forEach(array::add);
+            return array;
+        }
+        return node.isArray() ? node : STATIC_MAPPER.createArrayNode();
     }
 
     private static boolean isValidTarget(String target) {

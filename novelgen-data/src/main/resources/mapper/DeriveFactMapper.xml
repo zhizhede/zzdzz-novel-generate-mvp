@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveFactMapper">
+
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_fact (
+            run_id, novel_id, fact_key, canonical_text, writers, readers,
+            planted_chapter, revealed_chapter, status, contract
+        ) VALUES (
+            #{p.runId}, #{p.novelId}, #{p.factKey}, #{p.canonicalText},
+            #{p.writers}::jsonb, #{p.readers}::jsonb,
+            #{p.plantedChapter}, #{p.revealedChapter}, #{p.status}, #{p.contract}::jsonb
+        )
+        RETURNING id
+    </select>
+
+    <update id="updateFull">
+        UPDATE derive_fact
+        SET canonical_text = #{p.canonicalText},
+            writers = #{p.writers}::jsonb,
+            readers = #{p.readers}::jsonb,
+            planted_chapter = #{p.plantedChapter},
+            revealed_chapter = #{p.revealedChapter},
+            status = #{p.status},
+            contract = #{p.contract}::jsonb,
+            updated_time = NOW()
+        WHERE id = #{p.id}
+    </update>
+
+</mapper>

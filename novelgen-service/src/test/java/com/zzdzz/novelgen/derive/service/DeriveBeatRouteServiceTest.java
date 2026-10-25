@@ -38,13 +38,52 @@ class DeriveBeatRouteServiceTest {
     }
 
     @Test
+    void missingLegalSeqIsRecoveredToNearestChapter() throws Exception {
+        String route = validRoute().replace("\"seq\":2,\"chapterNo\":2", "\"seq\":99,\"chapterNo\":2");
+
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(route), context());
+
+        assertTrue(plan.assignments().stream().anyMatch(a -> a.seq() == 2));
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
+    }
+
+    @Test
+    void futureKnowledgeWriterIsPulledBeforeRequirement() throws Exception {
+        String route = validRoute()
+                .replace("\"seq\":2,\"chapterNo\":2", "\"seq\":2,\"chapterNo\":2")
+                .replace("\"requiresKnowledge\":[],\"writesKnowledge\":[\"C1\"]",
+                        "\"requiresKnowledge\":[\"未来事实\"],\"writesKnowledge\":[\"C1\"]")
+                .replace("\"seq\":1,\"chapterNo\":1", "\"seq\":1,\"chapterNo\":1")
+                .replace("\"requiresKnowledge\":[],\"writesKnowledge\":[\"C1\"]",
+                        "\"requiresKnowledge\":[],\"writesKnowledge\":[\"C1\"]");
+
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(route), context());
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
+    }
+    @Test
+    void unknownSeqIsIgnoredAndStructuralRolesAreSynthesized() throws Exception {
+        String extra = "{\"seq\":99,\"chapterNo\":2,\"storyLayer\":\"CHARACTER_ARC\","
+                + "\"beatRole\":\"HIGHLIGHT\",\"focusCharacters\":[\"C2\"],"
+                + "\"threadRefs\":[],\"dependsOn\":[],\"payoffTarget\":\"\","
+                + "\"appearanceMode\":\"LIVE\",\"requiresKnowledge\":[],"
+                + "\"writesKnowledge\":[],\"requiresState\":{},\"changesState\":{}},";
+        String route = validRoute().replace("\"assignments\":[", "\"assignments\":[" + extra).replace("\"requiredBeatRoles\":[\"HIGHLIGHT\"]", "\"requiredBeatRoles\":[\"HIGHLIGHT\",\"COST\"]");
+
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(route), context());
+
+        assertTrue(plan.assignments().stream().noneMatch(a -> a.seq() == 99));
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
+        assertTrue(plan.synthetic().stream()
+                .anyMatch(s -> s.chapterNo() == 2 && s.beatRole() == PlanContracts.BeatRole.COST));
+    }
+    @Test
     void syntheticSlotCoversRequiredBeatRole() throws Exception {
         PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(
                 json(syntheticRoute("抉择", false)), context());
 
         assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
-        assertEquals(1, plan.synthetic().size());
-        assertEquals("抉择", plan.synthetic().get(0).beatType());
+        assertTrue(plan.synthetic().size() >= 1);
+        assertTrue(plan.synthetic().stream().anyMatch(item -> "抉择".equals(item.beatType())));
     }
 
     @Test
@@ -55,6 +94,38 @@ class DeriveBeatRouteServiceTest {
         assertEquals("抉择", plan.synthetic().get(0).beatType());
         assertEquals("CHARACTER_ARC", plan.synthetic().get(0).storyLayer().name());
         assertTrue(plan.synthetic().get(0).goal().contains("HIGHLIGHT"));
+    }
+
+    @Test
+    void syntheticSlotRetainsKnowledgeAndStateContract() throws Exception {
+        String route = validRoute().replace(
+                "\"syntheticSlots\":[]",
+                "\"syntheticSlots\":[{\"chapterNo\":2,\"storyLayer\":\"LOCAL_CASE\","
+                        + "\"beatRole\":\"HIGHLIGHT\",\"beatType\":\"抉择\","
+                        + "\"goal\":\"补齐高光结构\",\"focusCharacters\":[\"C1\"],"
+                        + "\"threadRefs\":[\"GM-CLUE-01\"],\"dependsOn\":[1],"
+                        + "\"payoffTarget\":\"VC1\",\"appearanceMode\":\"LIVE\","
+                        + "\"requiresKnowledge\":[\"名单缺页\"],"
+                        + "\"writesKnowledge\":[\"林雾承认进入封锁区\"],"
+                        + "\"requiresState\":{},"
+                        + "\"changesState\":{\"REL-C1-C2\":\"TRUST_DAMAGED\"}}]");
+
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(route), context());
+        PlanContracts.SyntheticAssignment synthetic = plan.synthetic().stream()
+                .filter(s -> s.chapterNo() == 2 && s.beatRole() == PlanContracts.BeatRole.HIGHLIGHT)
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(List.of(1), synthetic.dependsOn());
+        assertEquals("VC1", synthetic.payoffTarget());
+        assertEquals(List.of("名单缺页"), synthetic.requiresKnowledge());
+        assertEquals(List.of("林雾承认进入封锁区"), synthetic.writesKnowledge());
+        assertEquals("TRUST_DAMAGED",
+                synthetic.changesState().get("REL-C1-C2"));
+        JsonNode persisted = MAPPER.valueToTree(synthetic);
+        assertEquals("林雾承认进入封锁区",
+                persisted.path("writesKnowledge").get(0).asText());
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
     }
 
     @Test
@@ -128,6 +199,39 @@ class DeriveBeatRouteServiceTest {
                 intent, "顾川检查门底擦痕与钥匙棉纤维"));
     }
 
+        @Test
+    void requiredThreadPayoffIsAddedToSyntheticClosure() throws Exception {
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(validRoute()), context());
+
+        assertTrue(plan.synthetic().stream().anyMatch(item ->
+                item.beatRole() == PlanContracts.BeatRole.CLUE_PAYOFF
+                        && item.threadRefs().contains("GM-CLUE-01")));
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
+    }
+
+    @Test
+    void forcedSkipAssignmentIsDroppedWhenModelEchoesIt() throws Exception {
+        DeriveBeatRouteService.RouteContext base = context();
+        DeriveBeatRouteService.RouteContext ctx = new DeriveBeatRouteService.RouteContext(
+                base.volume(), base.inventory(), base.characterKeys(), base.threadKeys(),
+                base.syntheticSeqBase(), java.util.Map.of(3, "原拍含尸体，与无死亡红线冲突"));
+
+        String route = validRoute()
+                .replace("\"skipped\":[{\"seq\":3,\"reason\":\"情绪重复，不服务本卷闭合\"}]",
+                        "\"skipped\":[]")
+                .replace("\"assignments\":[",
+                        "\"assignments\":[{\"seq\":3,\"chapterNo\":1,\"storyLayer\":\"LOCAL_CASE\","
+                                + "\"beatRole\":\"HOOK\",\"focusCharacters\":[\"C1\"],"
+                                + "\"threadRefs\":[\"GM-CLUE-01\"],\"dependsOn\":[],"
+                                + "\"payoffTarget\":\"VC1\",\"appearanceMode\":\"LIVE\","
+                                + "\"requiresKnowledge\":[],\"writesKnowledge\":[\"C1\"],"
+                                + "\"requiresState\":{},\"changesState\":{}},");
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(route), ctx);
+
+        assertTrue(plan.assignments().stream().noneMatch(a -> a.seq() == 3));
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, ctx).isEmpty());
+    }
+
     @Test
     void forcedSkipCoversItsOwnSeqWithoutModelEcho() throws Exception {
         DeriveBeatRouteService.RouteContext base = context();
@@ -144,7 +248,70 @@ class DeriveBeatRouteServiceTest {
                 && skip.reason().contains("无死亡")));
     }
 
-    private static Set<Integer> assignedSeqs(PlanContracts.RoutePlan plan) {
+
+    @Test
+    void scaffoldChapterAndRoleAliasesAreNormalized() throws Exception {
+        DeriveBeatRouteService.RouteContext ctx = new DeriveBeatRouteService.RouteContext(
+                new PlanContracts.VolumeContract(
+                        1, 1, 2, "失踪案", "谁改了名单", "自导自演", "名单被替换",
+                        "旧事故真实存在", List.of("C1"), List.of("REL-C1-C2"),
+                        List.of("GM-CLUE-01"), List.of("主谋"), "名单原件被找到",
+                        "进入第二卷", "LOCAL"),
+                List.of(
+                        new DerivePlanService.InvBeat(1, "ARC_SEG", null, 11L, 0,
+                                "事件", new java.math.BigDecimal("0.75"), "顾砚发现名单缺页", "开头"),
+                        new DerivePlanService.InvBeat(2, "ARC_SEG", null, 11L, 1,
+                                "反转", new java.math.BigDecimal("0.75"), "林雾承认进入封锁区", "中段"),
+                        new DerivePlanService.InvBeat(3, "ASSET", 21L, null, null,
+                                "情绪", new java.math.BigDecimal("0.50"), "周渡拒绝交出档案", "中段")),
+                Set.of("C1", "C2", "C3"), Set.of("GM-CLUE-01", "REL-C1-C2"), 4,
+                java.util.Map.of(), java.util.Map.of(1, 1, 2, 2));
+        String route = validRoute()
+                .replace("\"seq\":2,\"chapterNo\":2", "\"seq\":2,\"chapterNo\":99")
+                .replace("\"beatRole\":\"HIGHLIGHT\"", "\"beatRole\":\"REVERSAL\"");
+
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(route), ctx);
+
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, ctx).isEmpty());
+        assertTrue(plan.assignments().stream().anyMatch(a -> a.seq() == 2 && a.chapterNo() == 2));
+        assertTrue(plan.assignments().stream().anyMatch(a -> a.seq() == 2
+                && a.beatRole() == PlanContracts.BeatRole.FALSE_ANSWER));
+    }
+    @Test
+    void relationshipChangesAreAutomaticallyPaidOff() throws Exception {
+        PlanContracts.VolumeContract volume = new PlanContracts.VolumeContract(
+                1, 1, 2, "失踪案", "谁改了名单", "自导自演", "名单被替换",
+                "旧事故真实存在", List.of("C1"), List.of("REL-C1-C2"),
+                List.of(), List.of(), "名单原件被找到", "", "FINAL");
+        DeriveBeatRouteService.RouteContext ctx = new DeriveBeatRouteService.RouteContext(
+                volume, List.of(
+                        new DerivePlanService.InvBeat(1, "ARC_SEG", null, 11L, 0,
+                                "事件", new java.math.BigDecimal("0.75"), "顾砚发现名单缺页", "开头"),
+                        new DerivePlanService.InvBeat(2, "ARC_SEG", null, 11L, 1,
+                                "反转", new java.math.BigDecimal("0.75"), "林雾承认进入封锁区", "中段"),
+                        new DerivePlanService.InvBeat(3, "ASSET", 21L, null, null,
+                                "情绪", new java.math.BigDecimal("0.50"), "周渡拒绝交出档案", "中段")),
+                Set.of("C1", "C2", "C3"), Set.of("GM-CLUE-01", "REL-C1-C2"), 4);
+
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(validRoute()), ctx);
+
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, ctx).isEmpty());
+        assertTrue(plan.assignments().stream().anyMatch(a ->
+                a.beatRole() == PlanContracts.BeatRole.FINAL_CLOSURE
+                        && a.threadRefs().contains("REL-C1-C2"))
+                || plan.synthetic().stream().anyMatch(s ->
+                s.beatRole() == PlanContracts.BeatRole.FINAL_CLOSURE
+                        && s.threadRefs().contains("REL-C1-C2")));
+    }
+    @Test
+    void relationshipThreadShorthandIsNormalized() throws Exception {
+        String route = validRoute().replace("\"threadRefs\":[\"REL-C1-C2\"]", "\"threadRefs\":[\"C1-C2：协作关系\"]");
+
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(json(route), context());
+
+        assertTrue(plan.assignments().stream().anyMatch(a -> a.threadRefs().contains("REL-C1-C2")));
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
+    }    private static Set<Integer> assignedSeqs(PlanContracts.RoutePlan plan) {
         return plan.assignments().stream()
                 .map(PlanContracts.BeatAssignment::seq)
                 .collect(java.util.stream.Collectors.toSet());

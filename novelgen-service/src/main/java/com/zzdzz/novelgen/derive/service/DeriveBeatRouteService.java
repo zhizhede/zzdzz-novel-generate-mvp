@@ -73,6 +73,8 @@ public class DeriveBeatRouteService {
     private final VolumePlanMapper volumePlanMapper;
     private final LlmJson llmJson;
     private final PlatformTransactionManager transactionManager;
+    private final DeriveStateLedgerService stateLedgerService;
+    private final DeriveContractRepairService contractRepairService;
 
     /** 单卷路由；解析成功后才在短事务内替换该卷路由。 */
     public BeatRouteVO routeVolume(long runId, int volumeNo) {
@@ -103,7 +105,14 @@ public class DeriveBeatRouteService {
                                 LlmPort.Message.user(user)),
                         0.25),
                 root -> parseRoute(root, context), 3);
+        plan = recoverMissingAssignments(plan, context);
         plan = repairKnowledgeCausality(plan);
+        var stateLedger = stateLedgerService.simulate(plan.assignments(), plan.synthetic(), List.of());
+        var contractRepair = contractRepairService.repair(plan, stateLedger, scaffoldFromRun(run), null);
+        if (contractRepair.changed()) {
+            plan = contractRepair.plan();
+            log.info("局部合同修复：runId={} facts={}", runId, contractRepair.repairedFacts());
+        }
         List<PlanContracts.PlanIssue> issues = validateRoute(plan, context);
         if (!issues.isEmpty()) {
             throw new PlanJson.Bad(issues.get(0).message());
@@ -224,8 +233,8 @@ public class DeriveBeatRouteService {
         }
         for (int no = ctx.volume().fromChapter(); no <= ctx.volume().toChapter(); no++) {
             int count = counts.getOrDefault(no, 0);
-            if (count < 1 || count > 4) {
-                issues.add(issue("ROUTE_CHAPTER_BEATS", "第" + no + "章拍数=" + count + "，必须1~4"));
+            if (count < 1) {
+                issues.add(issue("ROUTE_CHAPTER_BEATS", "第" + no + "章拍数=" + count + "，至少1拍"));
             }
             PlanContracts.ChapterSlotContract slot = slots.get(no);
             if (slot != null) {
@@ -238,6 +247,33 @@ public class DeriveBeatRouteService {
             }
         }
         return issues;
+    }
+
+    /** assignments 与 syntheticSlots 共用的扁平 route_contract 字段，避免两类补拍漏读契约。 */
+    record RouteContractFields(
+            List<String> focusCharacters,
+            List<String> threadRefs,
+            List<Integer> dependsOn,
+            String payoffTarget,
+            PlanContracts.AppearanceMode appearanceMode,
+            List<String> requiresKnowledge,
+            List<String> writesKnowledge,
+            Map<String, Object> requiresState,
+            Map<String, Object> changesState) {
+    }
+
+    static RouteContractFields routeContract(JsonNode node) {
+        return new RouteContractFields(
+                strings(node.path("focusCharacters")),
+                normalizeThreadRefs(strings(node.path("threadRefs"))),
+                ints(node.path("dependsOn")),
+                node.path("payoffTarget").asText(""),
+                enumValue(PlanContracts.AppearanceMode.class,
+                        node.path("appearanceMode").asText("LIVE"), "appearanceMode"),
+                strings(node.path("requiresKnowledge")),
+                strings(node.path("writesKnowledge")),
+                map(node.path("requiresState")),
+                map(node.path("changesState")));
     }
 
     static PlanContracts.RoutePlan parseRoute(JsonNode root, RouteContext ctx) {
@@ -253,33 +289,50 @@ public class DeriveBeatRouteService {
                     text(node, "localCaseGoal"),
                     text(node, "mainMysteryAdvance"),
                     text(node, "characterGoal"),
-                    text(node, "relationshipGoal"),
+                    node.path("relationshipGoal").asText("").trim(),
                     roles(node.path("requiredBeatRoles")),
                     strings(node.path("forbiddenAppearances")),
                     map(node.path("requiredStateBefore")),
                     map(node.path("requiredStateAfter"))));
         }
+        chapters = normalizeRouteChapters(chapters, ctx);
         if (ctx.volume().toChapter() - ctx.volume().fromChapter() + 1 >= 6) {
             chapters = mergeRequiredSlots(chapters, ctx.volume());
         }
         List<PlanContracts.BeatAssignment> assignments = new ArrayList<>();
         for (JsonNode node : root.path("assignments")) {
+            RouteContractFields fields = routeContract(node);
             assignments.add(new PlanContracts.BeatAssignment(
-                    node.path("seq").asInt(0),
+                    node.has("seq") ? node.path("seq").asInt(0) : node.path("scaffoldBeatId").asInt(0),
                     node.path("chapterNo").asInt(0),
                     enumValue(PlanContracts.StoryLayer.class, node.path("storyLayer").asText(""), "storyLayer"),
                     enumValue(PlanContracts.BeatRole.class, node.path("beatRole").asText(""), "beatRole"),
-                    strings(node.path("focusCharacters")),
-                    strings(node.path("threadRefs")),
-                    ints(node.path("dependsOn")),
-                    node.path("payoffTarget").asText(""),
-                    enumValue(PlanContracts.AppearanceMode.class,
-                            node.path("appearanceMode").asText("LIVE"), "appearanceMode"),
-                    strings(node.path("requiresKnowledge")),
-                    strings(node.path("writesKnowledge")),
-                    map(node.path("requiresState")),
-                    map(node.path("changesState"))));
+                    fields.focusCharacters(),
+                    fields.threadRefs(),
+                    fields.dependsOn(),
+                    fields.payoffTarget(),
+                    fields.appearanceMode(),
+                    fields.requiresKnowledge(),
+                    fields.writesKnowledge(),
+                    fields.requiresState(),
+                    fields.changesState()));
         }
+
+        // 强制跳过是确定性红线：模型即使把它写回 assignments 也丢弃，
+        // 后续统一由 forcedSkips 回填 skipped，避免 ROUTE_SKIP_DUP。
+        // 模型偶发把补拍臆造成新的 seq（如 remainingBeats 只到 18 却输出 19~38）。
+        // 这些编号不属于输入库存，直接丢弃；缺失的结构功能由 syntheticSlots 兜底，
+        // 避免把“模型编新号”误判成整卷路由失败。
+        int unknownSeqCount = (int) assignments.stream()
+                .filter(a -> !ctx.inventoryBySeq().containsKey(a.seq()))
+                .count();
+        if (unknownSeqCount > 0) {
+            log.warn("路由忽略未知拍 seq：runVolume={} 数量={}",
+                    ctx.volume().volumeNo(), unknownSeqCount);
+        }
+        assignments = normalizeAssignmentChapters(assignments, ctx);
+        assignments.removeIf(a -> !ctx.inventoryBySeq().containsKey(a.seq()));
+        assignments.removeIf(a -> ctx.forcedSkips().containsKey(a.seq()));
         List<PlanContracts.SyntheticAssignment> synthetic = new ArrayList<>();
         for (JsonNode node : root.path("syntheticSlots")) {
             int chapterNo = node.path("chapterNo").asInt(0);
@@ -297,17 +350,24 @@ public class DeriveBeatRouteService {
             if (goal.isEmpty()) {
                 goal = "补齐第" + chapterNo + "章 " + role.name() + " 结构功能，服务本卷合同与闭环";
             }
+            RouteContractFields fields = routeContract(node);
             synthetic.add(new PlanContracts.SyntheticAssignment(
                     chapterNo,
                     storyLayer,
                     role,
                     beatType,
                     goal,
-                    strings(node.path("focusCharacters")),
-                    strings(node.path("threadRefs")),
-                    enumValue(PlanContracts.AppearanceMode.class,
-                            node.path("appearanceMode").asText("LIVE"), "appearanceMode")));
+                    fields.focusCharacters(),
+                    fields.threadRefs(),
+                    fields.appearanceMode(),
+                    fields.dependsOn(),
+                    fields.payoffTarget(),
+                    fields.requiresKnowledge(),
+                    fields.writesKnowledge(),
+                    fields.requiresState(),
+                    fields.changesState()));
         }
+
         List<PlanContracts.SkipAssignment> skipped = new ArrayList<>();
         for (JsonNode node : root.path("skipped")) {
             skipped.add(new PlanContracts.SkipAssignment(
@@ -323,8 +383,11 @@ public class DeriveBeatRouteService {
         });
         synthetic.addAll(synthesizeMissingRoles(chapters, assignments, synthetic,
                 ctx.volume().requiredThreads(), ctx.threadKeys()));
+        synthetic = normalizeSyntheticChapters(synthetic, ctx);
+        ensureRequiredThreadPayoffs(assignments, synthetic, ctx);
         PlanContracts.RoutePlan plan = new PlanContracts.RoutePlan(
                 volumeNo, chapters, assignments, synthetic, skipped);
+        plan = recoverMissingAssignments(plan, ctx);
         List<PlanContracts.PlanIssue> issues = validateRoute(plan, ctx);
         if (!issues.isEmpty()) {
             throw new PlanJson.Bad(issues.get(0).message());
@@ -332,10 +395,144 @@ public class DeriveBeatRouteService {
         return plan;
     }
 
+    /** 确定性补齐 requiredThreads 的兑现拍，避免把纯结构缺口留给 P6。 */
+    static void ensureRequiredThreadPayoffs(
+            List<PlanContracts.BeatAssignment> assignments,
+            List<PlanContracts.SyntheticAssignment> synthetic,
+            RouteContext ctx) {
+        Set<String> required = new LinkedHashSet<>(ctx.volume().requiredThreads());
+        required.addAll(ctx.volume().relationshipChanges());
+        required.addAll(ctx.threadKeys().stream()
+                .filter(key -> key.startsWith("REL-")).toList());
+        if (required.isEmpty()) {
+            return;
+        }
+        Set<String> paid = new LinkedHashSet<>();
+        for (PlanContracts.BeatAssignment assignment : assignments) {
+            if (isPayoffRole(assignment.beatRole().name())) {
+                paid.addAll(assignment.threadRefs());
+            }
+        }
+        for (PlanContracts.SyntheticAssignment item : synthetic) {
+            if (isPayoffRole(item.beatRole().name())) {
+                paid.addAll(item.threadRefs());
+            }
+        }
+        List<String> missing = required.stream().filter(key -> !paid.contains(key)).toList();
+        if (missing.isEmpty()) {
+            return;
+        }
+        int finalChapter = ctx.volume().toChapter();
+        for (String threadKey : missing) {
+            boolean repaired = false;
+            for (int i = 0; i < assignments.size(); i++) {
+                PlanContracts.BeatAssignment assignment = assignments.get(i);
+                if (assignment.chapterNo() != null && assignment.chapterNo() == finalChapter
+                        && isPayoffRole(assignment.beatRole().name())) {
+                    assignments.set(i, withThreadRef(assignment, threadKey));
+                    repaired = true;
+                    break;
+                }
+            }
+            if (!repaired) {
+                for (int i = 0; i < synthetic.size(); i++) {
+                    PlanContracts.SyntheticAssignment item = synthetic.get(i);
+                    if (item.chapterNo() == finalChapter && isPayoffRole(item.beatRole().name())) {
+                        synthetic.set(i, withThreadRef(item, threadKey));
+                        repaired = true;
+                        break;
+                    }
+                }
+            }
+            if (!repaired) {
+                long chapterBeats = assignments.stream()
+                        .filter(a -> a.chapterNo() != null && a.chapterNo() == finalChapter).count()
+                        + synthetic.stream().filter(s -> s.chapterNo() == finalChapter).count();
+                if (chapterBeats < 4) {
+                    synthetic.add(finalClosureForThread(ctx, finalChapter, threadKey));
+                }
+            }
+        }
+    }
+
+    private static PlanContracts.BeatAssignment withThreadRef(
+            PlanContracts.BeatAssignment assignment, String threadKey) {
+        List<String> refs = new ArrayList<>(assignment.threadRefs());
+        if (!refs.contains(threadKey)) {
+            refs.add(threadKey);
+        }
+        return new PlanContracts.BeatAssignment(
+                assignment.seq(), assignment.chapterNo(), assignment.storyLayer(),
+                assignment.beatRole(), assignment.focusCharacters(), refs,
+                assignment.dependsOn(), assignment.payoffTarget(), assignment.appearanceMode(),
+                assignment.requiresKnowledge(), assignment.writesKnowledge(),
+                assignment.requiresState(), assignment.changesState());
+    }
+
+    private static PlanContracts.SyntheticAssignment withThreadRef(
+            PlanContracts.SyntheticAssignment item, String threadKey) {
+        List<String> refs = new ArrayList<>(item.threadRefs());
+        if (!refs.contains(threadKey)) {
+            refs.add(threadKey);
+        }
+        return new PlanContracts.SyntheticAssignment(
+                item.chapterNo(), item.storyLayer(), item.beatRole(), item.beatType(),
+                item.goal(), item.focusCharacters(), refs, item.appearanceMode(),
+                item.dependsOn(), item.payoffTarget(), item.requiresKnowledge(),
+                item.writesKnowledge(), item.requiresState(), item.changesState());
+    }
+
+    private static boolean isPayoffRole(String role) {
+        return "CLUE_PAYOFF".equals(role)
+                || "LOCAL_CLOSURE".equals(role)
+                || "FINAL_REVEAL".equals(role)
+                || "FINAL_CLOSURE".equals(role);
+    }
+    private static PlanContracts.SyntheticAssignment finalClosureForThread(
+            RouteContext ctx, int chapterNo, String threadKey) {
+        List<String> focus = ctx.characterKeys().isEmpty()
+                ? List.of("C1") : List.of(ctx.characterKeys().iterator().next());
+        PlanContracts.BeatRole role = "FINAL".equals(ctx.volume().globalRole())
+                ? PlanContracts.BeatRole.FINAL_CLOSURE
+                : PlanContracts.BeatRole.CLUE_PAYOFF;
+        return new PlanContracts.SyntheticAssignment(
+                chapterNo, PlanContracts.StoryLayer.LOCAL_CASE, role, "收束",
+                "补齐线程兑现：" + threadKey, focus, List.of(threadKey),
+                PlanContracts.AppearanceMode.LIVE, List.of(), threadKey,
+                List.of(), List.of(), Map.of(), Map.of());
+    }
+
     /**
      * 短卷结构底稿：模型可补章目标，但不能删除系统模板里的 HOOK、高光、选择、代价和闭合槽。
-     * 每章仍保持 1~4 拍上限，模板角色优先，模型新增角色按序补位。
+     * 每章至少 1 拍，模板角色优先，模型新增角色按序补位。
      */
+    /**
+     * 把模型输出的章槽归一到卷合同：越界/重复章丢弃，缺失章用系统模板补齐。
+     * 章数由卷合同决定；模型多写或漏写不再直接判死整卷。
+     */
+    static List<PlanContracts.ChapterSlotContract> normalizeRouteChapters(
+            List<PlanContracts.ChapterSlotContract> parsed,
+            DeriveBeatRouteService.RouteContext ctx) {
+        Map<Integer, PlanContracts.ChapterSlotContract> byNo = new LinkedHashMap<>();
+        int dropped = 0;
+        for (PlanContracts.ChapterSlotContract slot : parsed) {
+            int no = slot.chapterNo();
+            if (no < ctx.volume().fromChapter() || no > ctx.volume().toChapter()
+                    || byNo.putIfAbsent(no, slot) != null) {
+                dropped++;
+            }
+        }
+        for (PlanContracts.ChapterSlotContract template : chapterSlots(ctx.volume())) {
+            byNo.putIfAbsent(template.chapterNo(), template);
+        }
+        if (dropped > 0 || byNo.size() != parsed.size()) {
+            log.warn("路由章槽已归一：volume={} 输入={} 保留={} 丢弃/去重={}",
+                    ctx.volume().volumeNo(), parsed.size(), byNo.size(), dropped);
+        }
+        return byNo.values().stream()
+                .sorted(java.util.Comparator.comparingInt(PlanContracts.ChapterSlotContract::chapterNo))
+                .toList();
+    }
     static List<PlanContracts.ChapterSlotContract> mergeRequiredSlots(
             List<PlanContracts.ChapterSlotContract> parsed,
             PlanContracts.VolumeContract volume) {
@@ -373,6 +570,138 @@ public class DeriveBeatRouteService {
      * 知识传播修复：后拍引用已知事实时，把缺知的焦点角色补回最早写出该事实的前置拍。
      * 找不到前置获知拍时不伪造知识，继续交给规划硬校验拦截。
      */
+    /** 把模型给出的拍章节号归一到 scaffold/卷范围；章号是系统事实，不接受模型发明。 */
+    static List<PlanContracts.BeatAssignment> normalizeAssignmentChapters(
+            List<PlanContracts.BeatAssignment> assignments, RouteContext ctx) {
+        List<PlanContracts.BeatAssignment> out = new ArrayList<>();
+        for (PlanContracts.BeatAssignment assignment : assignments) {
+            Integer planned = ctx.scaffoldChapters().get(assignment.seq());
+            int chapterNo = planned == null
+                    ? (assignment.chapterNo() == null ? ctx.volume().fromChapter() : assignment.chapterNo())
+                    : planned;
+            if (chapterNo < ctx.volume().fromChapter() || chapterNo > ctx.volume().toChapter()) {
+                List<Integer> knownSeqs = new ArrayList<>(ctx.scaffoldChapters().keySet());
+                java.util.Collections.sort(knownSeqs);
+                chapterNo = nearestChapter(assignment.seq(), knownSeqs,
+                        ctx.scaffoldChapters(), ctx);
+            }
+            if (!Integer.valueOf(chapterNo).equals(assignment.chapterNo())) {
+                log.warn("路由章号归一：seq={} 模型章号={} 系统章号={}",
+                        assignment.seq(), assignment.chapterNo(), chapterNo);
+            }
+            out.add(new PlanContracts.BeatAssignment(
+                    assignment.seq(), chapterNo, assignment.storyLayer(), assignment.beatRole(),
+                    assignment.focusCharacters(), assignment.threadRefs(), assignment.dependsOn(),
+                    assignment.payoffTarget(), assignment.appearanceMode(),
+                    assignment.requiresKnowledge(), assignment.writesKnowledge(),
+                    assignment.requiresState(), assignment.changesState()));
+        }
+        return out;
+    }
+
+    /** synthetic 槽同样按卷范围归一，避免模型多写/漏写章号导致整卷报废。 */
+    static List<PlanContracts.SyntheticAssignment> normalizeSyntheticChapters(
+            List<PlanContracts.SyntheticAssignment> synthetic, RouteContext ctx) {
+        List<PlanContracts.SyntheticAssignment> out = new ArrayList<>();
+        for (PlanContracts.SyntheticAssignment item : synthetic) {
+            Integer chapterNo = item.chapterNo();
+            if (chapterNo == null || chapterNo < ctx.volume().fromChapter()
+                    || chapterNo > ctx.volume().toChapter()) {
+                chapterNo = ctx.volume().fromChapter();
+                log.warn("补拍章号归一：原章号={} 新章号={}", item.chapterNo(), chapterNo);
+            }
+            out.add(new PlanContracts.SyntheticAssignment(
+                    chapterNo, item.storyLayer(), item.beatRole(), item.beatType(), item.goal(),
+                    item.focusCharacters(), item.threadRefs(), item.appearanceMode(),
+                    item.dependsOn(), item.payoffTarget(), item.requiresKnowledge(),
+                    item.writesKnowledge(), item.requiresState(), item.changesState()));
+        }
+        return out;
+    }
+
+    /**
+     * 恢复模型漏写但输入库存中存在的合法拍。
+     * 以最近已分配 seq 的章节作为归属；找不到时落到本卷第一章。
+     * 未知 seq 仍由上游丢弃，禁止凭空新增编号。
+     */
+    static PlanContracts.RoutePlan recoverMissingAssignments(
+            PlanContracts.RoutePlan plan, RouteContext ctx) {
+        Set<Integer> seen = new HashSet<>();
+        plan.assignments().forEach(a -> seen.add(a.seq()));
+        plan.skipped().forEach(s -> seen.add(s.seq()));
+        ctx.forcedSkips().keySet().forEach(seen::add);
+        List<Integer> missing = ctx.inventory().stream()
+                .map(DerivePlanService.InvBeat::tempSeq)
+                .filter(seq -> !seen.contains(seq))
+                .sorted()
+                .toList();
+        if (missing.isEmpty()) {
+            return plan;
+        }
+        Map<Integer, Integer> chapterBySeq = new HashMap<>();
+        for (PlanContracts.BeatAssignment assignment : plan.assignments()) {
+            chapterBySeq.put(assignment.seq(), assignment.chapterNo());
+        }
+        List<Integer> sortedSeqs = new ArrayList<>(chapterBySeq.keySet());
+        java.util.Collections.sort(sortedSeqs);
+        List<PlanContracts.BeatAssignment> assignments = new ArrayList<>(plan.assignments());
+        for (int seq : missing) {
+            DerivePlanService.InvBeat source = ctx.inventoryBySeq().get(seq);
+            int chapterNo = nearestChapter(seq, sortedSeqs, chapterBySeq, ctx);
+            PlanContracts.ChapterSlotContract slot = plan.chapters().stream()
+                    .filter(c -> c.chapterNo() == chapterNo)
+                    .findFirst()
+                    .orElse(plan.chapters().get(0));
+            List<String> focus = extractCharacterKeys(slot.characterGoal(), slot.localCaseGoal());
+            if (focus.isEmpty() && !ctx.characterKeys().isEmpty()) {
+                focus = List.of(ctx.characterKeys().iterator().next());
+            }
+            PlanContracts.BeatRole role = roleForBeatType(source.beatType());
+            assignments.add(new PlanContracts.BeatAssignment(
+                    seq, chapterNo, defaultStoryLayer(role), role, focus, List.of(),
+                    List.of(), "", PlanContracts.AppearanceMode.LIVE,
+                    List.of(), List.of(), Map.of(), Map.of()));
+            log.warn("路由恢复漏写拍：seq={} chapter={} beatType={}", seq, chapterNo, source.beatType());
+        }
+        return new PlanContracts.RoutePlan(plan.volumeNo(), plan.chapters(), assignments,
+                plan.synthetic(), plan.skipped());
+    }
+
+    private static int nearestChapter(int seq, List<Integer> sortedSeqs,
+                                      Map<Integer, Integer> chapterBySeq, RouteContext ctx) {
+        if (sortedSeqs.isEmpty()) {
+            return ctx.volume().fromChapter();
+        }
+        Integer lower = null;
+        Integer upper = null;
+        for (int known : sortedSeqs) {
+            if (known < seq) {
+                lower = chapterBySeq.get(known);
+            } else if (known > seq && upper == null) {
+                upper = chapterBySeq.get(known);
+            }
+        }
+        if (lower != null) {
+            return lower;
+        }
+        return upper != null ? upper : ctx.volume().fromChapter();
+    }
+
+    private static PlanContracts.BeatRole roleForBeatType(String beatType) {
+        if ("反转".equals(beatType)) {
+            return PlanContracts.BeatRole.FALSE_ANSWER;
+        }
+        if ("抉择".equals(beatType)) {
+            return PlanContracts.BeatRole.CHARACTER_CHOICE;
+        }
+        if ("收束".equals(beatType)) {
+            return PlanContracts.BeatRole.LOCAL_CLOSURE;
+        }
+        if ("铺垫".equals(beatType)) {
+            return PlanContracts.BeatRole.CASE_SETUP;
+        }
+        return PlanContracts.BeatRole.MAIN_ADVANCE;
+    }
     static PlanContracts.RoutePlan repairKnowledgeCausality(PlanContracts.RoutePlan plan) {
         List<PlanContracts.BeatAssignment> assignments = new ArrayList<>(plan.assignments());
         assignments.sort(java.util.Comparator
@@ -380,6 +709,12 @@ public class DeriveBeatRouteService {
                 .thenComparingInt(PlanContracts.BeatAssignment::seq));
         Map<String, Set<String>> knownBy = new HashMap<>();
         Map<String, Integer> firstWriter = new HashMap<>();
+        Map<String, Integer> anyWriter = new HashMap<>();
+        for (int i = 0; i < assignments.size(); i++) {
+            for (String fact : assignments.get(i).writesKnowledge()) {
+                anyWriter.putIfAbsent(fact, i);
+            }
+        }
         for (int i = 0; i < assignments.size(); i++) {
             PlanContracts.BeatAssignment current = assignments.get(i);
             for (String required : current.requiresKnowledge()) {
@@ -401,9 +736,27 @@ public class DeriveBeatRouteService {
                     knownBy.computeIfAbsent(required, key -> new LinkedHashSet<>()).addAll(missing);
                     log.info("知识因果修复：fact={} 补角色={} 到 seq={}（原 focus={}）",
                             required, missing, writer.seq(), writer.focusCharacters());
-                } else if (!missing.isEmpty()) {
-                    log.warn("知识因果缺口：fact={} 在早于 seq={} 的拍中无获知来源，缺口={}",
-                            required, current.seq(), missing);
+                                } else if (!missing.isEmpty()) {
+                    Integer futureWriter = anyWriter.get(required);
+                    if (futureWriter != null && futureWriter > i) {
+                        int anchor = earlierChapterBeat(assignments, current.chapterNo());
+                        PlanContracts.BeatAssignment source = assignments.get(anchor);
+                        List<String> writes = appendDistinct(source.writesKnowledge(), List.of(required));
+                        assignments.set(anchor, new PlanContracts.BeatAssignment(
+                                source.seq(), source.chapterNo(), source.storyLayer(),
+                                source.beatRole(), source.focusCharacters(), source.threadRefs(),
+                                source.dependsOn(), source.payoffTarget(), source.appearanceMode(),
+                                source.requiresKnowledge(), writes, source.requiresState(),
+                                source.changesState()));
+                        knownBy.computeIfAbsent(required, key -> new LinkedHashSet<>())
+                                .addAll(missing);
+                        log.info("知识因果修复：fact={} 由后置 seq={} 提前写入 seq={}，缺口={}",
+                                required, assignments.get(futureWriter).seq(),
+                                assignments.get(anchor).seq(), missing);
+                    } else {
+                        log.warn("知识因果缺口：fact={} 在早于 seq={} 的拍中无获知来源，缺口={}",
+                                required, current.seq(), missing);
+                    }
                 }
             }
             for (String fact : current.writesKnowledge()) {
@@ -412,10 +765,43 @@ public class DeriveBeatRouteService {
                 firstWriter.putIfAbsent(fact, i);
             }
         }
+        List<PlanContracts.SyntheticAssignment> synthetic = new ArrayList<>();
+        for (PlanContracts.SyntheticAssignment item : plan.synthetic()) {
+            List<String> requirements = new ArrayList<>(item.requiresKnowledge());
+            requirements.removeIf(fact -> {
+                Set<String> known = knownBy.getOrDefault(fact, Set.of());
+                boolean resolvable = item.focusCharacters().stream().allMatch(known::contains);
+                if (!resolvable) {
+                    log.warn("知识因果修复：结构补拍 chapter={} 移除无法前置兑现的知识要求：{}",
+                            item.chapterNo(), fact);
+                }
+                return !resolvable;
+            });
+            if (requirements.size() != item.requiresKnowledge().size()) {
+                synthetic.add(new PlanContracts.SyntheticAssignment(
+                        item.chapterNo(), item.storyLayer(), item.beatRole(), item.beatType(),
+                        item.goal(), item.focusCharacters(), item.threadRefs(), item.appearanceMode(),
+                        item.dependsOn(), item.payoffTarget(), requirements, item.writesKnowledge(),
+                        item.requiresState(), item.changesState()));
+            } else {
+                synthetic.add(item);
+            }
+        }
         return new PlanContracts.RoutePlan(plan.volumeNo(), plan.chapters(),
-                assignments, plan.synthetic(), plan.skipped());
+                assignments, synthetic, plan.skipped());
     }
-
+    private static int earlierChapterBeat(List<PlanContracts.BeatAssignment> assignments,
+                                          Integer chapterNo) {
+        int best = -1;
+        for (int i = 0; i < assignments.size(); i++) {
+            Integer candidate = assignments.get(i).chapterNo();
+            if (candidate != null && candidate < chapterNo
+                    && (best < 0 || candidate > assignments.get(best).chapterNo())) {
+                best = i;
+            }
+        }
+        return best;
+    }
     private static List<PlanContracts.SyntheticAssignment> synthesizeMissingRoles(
             List<PlanContracts.ChapterSlotContract> chapters,
             List<PlanContracts.BeatAssignment> assignments,
@@ -628,6 +1014,16 @@ public class DeriveBeatRouteService {
         }
     }
 
+    private com.zzdzz.novelgen.derive.contract.ScaffoldContract scaffoldFromRun(RunDO run) {
+        try {
+            JsonNode scaffold = readTreeSafe(run.getStepStatus()).path("steps").path("SCAFFOLD");
+            return scaffold.isObject()
+                    ? MAPPER.treeToValue(scaffold, com.zzdzz.novelgen.derive.contract.ScaffoldContract.class)
+                    : new com.zzdzz.novelgen.derive.contract.ScaffoldContract(0, 0, List.of(), List.of(), List.of());
+        } catch (Exception e) {
+            return new com.zzdzz.novelgen.derive.contract.ScaffoldContract(0, 0, List.of(), List.of(), List.of());
+        }
+    }
     private RouteContext buildContext(RunDO run, PlanContracts.PlanV2State state,
                                       PlanContracts.VolumeContract volume) {
         Map<Integer, DerivePlanService.InvBeat> full = fullInventory(run);
@@ -654,9 +1050,25 @@ public class DeriveBeatRouteService {
                                 .eq(StoryThreadDO::getRunId, run.getId()))
                 .stream().map(StoryThreadDO::getThreadKey).collect(java.util.stream.Collectors.toSet());
         return new RouteContext(volume, new ArrayList<>(remain.values()), characters, threads,
-                Math.max(full.size(), nextSeq(run.getId()) - 1), forcedSkips);
+                Math.max(full.size(), nextSeq(run.getId()) - 1), forcedSkips,
+                scaffoldChapters(run));
     }
 
+    private Map<Integer, Integer> scaffoldChapters(RunDO run) {
+        try {
+            JsonNode steps = readTreeSafe(run.getStepStatus()).path("steps");
+            JsonNode scaffold = steps.path("SCAFFOLD");
+            if (!scaffold.path("beats").isArray()) {
+                return Map.of();
+            }
+            Map<Integer, Integer> out = new HashMap<>();
+            scaffold.path("beats").forEach(beat ->
+                    out.put(beat.path("tempSeq").asInt(0), beat.path("chapterNo").asInt(0)));
+            return out;
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
     private Set<String> usedBeatKeys(long runId, int currentVolume) {
         Set<String> used = new HashSet<>();
         for (BeatInstanceDO row : beatInstanceMapper.selectList(
@@ -733,6 +1145,10 @@ public class DeriveBeatRouteService {
     private String buildRouteUser(RunDO run, PlanContracts.VolumeContract volume,
                                   RouteContext ctx, String feedback) {
         ObjectNode root = MAPPER.createObjectNode();
+        String gateDirective = DeriveGateService.gateDirective(run.getStepStatus());
+        if (gateDirective != null && !gateDirective.isBlank()) {
+            root.put("上轮立项闸减法指令（最高优先级，必须逐条消除）", gateDirective);
+        }
         root.set("volumeContract", MAPPER.valueToTree(volume));
         if (feedback != null && !feedback.isBlank()) {
             root.put("返工问题", feedback);
@@ -746,6 +1162,12 @@ public class DeriveBeatRouteService {
         root.set("threads", PlanJsonViews.threads(storyThreadMapper.selectList(
                 new LambdaQueryWrapper<StoryThreadDO>()
                         .eq(StoryThreadDO::getRunId, run.getId()))));
+        ArrayNode forced = root.putArray("forcedSkips");
+        ctx.forcedSkips().forEach((seq, reason) -> {
+            ObjectNode item = forced.addObject();
+            item.put("seq", seq);
+            item.put("reason", reason);
+        });
         ArrayNode beats = root.putArray("remainingBeats");
         for (DerivePlanService.InvBeat beat : ctx.inventory()) {
             if (ctx.forcedSkips().containsKey(beat.tempSeq())) {
@@ -753,6 +1175,11 @@ public class DeriveBeatRouteService {
             }
             ObjectNode node = beats.addObject();
             node.put("seq", beat.tempSeq());
+            node.put("scaffoldBeatId", beat.tempSeq());
+            Integer scaffoldChapter = ctx.scaffoldChapters().get(beat.tempSeq());
+            if (scaffoldChapter != null) {
+                node.put("chapterNo", scaffoldChapter);
+            }
             node.put("source", beat.source());
             node.put("beatType", beat.beatType());
             node.put("pacing", beat.pacing().toPlainString());
@@ -854,7 +1281,8 @@ public class DeriveBeatRouteService {
                                      String type, int seq,
                                      List<PlanContracts.PlanIssue> issues) {
         for (String ref : refs) {
-            if (!allowed.contains(ref)) {
+            String normalized = normalizeThreadRef(ref);
+            if (!allowed.contains(normalized)) {
                 issues.add(issue("ROUTE_UNKNOWN_" + type, "拍 " + seq + " 引用未知" + type + ": " + ref));
             }
         }
@@ -877,6 +1305,33 @@ public class DeriveBeatRouteService {
         List<String> out = new ArrayList<>();
         if (node.isArray()) {
             node.forEach(n -> out.add(n.asText("")));
+        }
+        return out;
+    }
+
+    /** 关系线模型常写成 C1-C2，系统统一补 REL- 前缀。 */
+    private static String normalizeThreadRef(String ref) {
+        String value = ref == null ? "" : ref.trim();
+        int descriptionAt = value.indexOf(":");
+        if (descriptionAt < 0) {
+            descriptionAt = value.indexOf("：");
+        }
+        if (descriptionAt > 0) {
+            value = value.substring(0, descriptionAt).trim();
+        }
+        if (value.matches("C\\d+-C\\d+")) {
+            value = "REL-" + value;
+        }
+        return value;
+    }
+
+    private static List<String> normalizeThreadRefs(List<String> refs) {
+        List<String> out = new ArrayList<>();
+        for (String ref : refs) {
+            String value = normalizeThreadRef(ref);
+            if (!value.isEmpty()) {
+                out.add(value);
+            }
         }
         return out;
     }
@@ -906,11 +1361,48 @@ public class DeriveBeatRouteService {
     }
 
     private static <E extends Enum<E>> E enumValue(Class<E> type, String raw, String field) {
+        String normalized = normalizeEnumName(type, raw);
         try {
-            return Enum.valueOf(type, raw == null ? "" : raw.trim());
+            return Enum.valueOf(type, normalized);
         } catch (Exception e) {
             throw new PlanJson.Bad(field + " 非法: " + raw);
         }
+    }
+
+    /** 机械枚举做常见别名归一，模型只负责叙事字段。 */
+    private static <E extends Enum<E>> String normalizeEnumName(Class<E> type, String raw) {
+        String value = raw == null ? "" : raw.trim().toUpperCase();
+        if (type == PlanContracts.BeatRole.class) {
+            return switch (value) {
+                case "REVERSAL", "TWIST" -> "FALSE_ANSWER";
+                case "SETUP" -> "CASE_SETUP";
+                case "CHOICE" -> "CHARACTER_CHOICE";
+                case "PAYOFF" -> "CLUE_PAYOFF";
+                case "CLOSURE" -> "LOCAL_CLOSURE";
+                case "HOOK_POINT" -> "HOOK";
+                default -> value;
+            };
+        }
+        if (type == PlanContracts.StoryLayer.class) {
+            return switch (value) {
+                case "CHAPTER", "LOCAL" -> "LOCAL_CASE";
+                case "MYSTERY" -> "MAIN_MYSTERY";
+                case "RELATION" -> "RELATIONSHIP";
+                case "CHARACTER" -> "CHARACTER_ARC";
+                default -> value;
+            };
+        }
+        if (type == PlanContracts.AppearanceMode.class) {
+            return switch (value) {
+                case "FLASHBACK" -> "MEMORY";
+                case "DREAM_SEQUENCE" -> "DREAM";
+                case "PROP" -> "RELIC";
+                case "RECORD" -> "RECORDING";
+                case "LETTER_OR_RECORD" -> "RECORDING";
+                default -> value;
+            };
+        }
+        return value;
     }
 
     private static String identity(DerivePlanService.InvBeat beat) {
@@ -944,13 +1436,23 @@ public class DeriveBeatRouteService {
             Set<String> characterKeys,
             Set<String> threadKeys,
             int syntheticSeqBase,
-            Map<Integer, String> forcedSkips) {
+            Map<Integer, String> forcedSkips,
+            Map<Integer, Integer> scaffoldChapters) {
         RouteContext(PlanContracts.VolumeContract volume,
                      List<DerivePlanService.InvBeat> inventory,
                      Set<String> characterKeys,
                      Set<String> threadKeys,
                      int syntheticSeqBase) {
-            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase, Map.of());
+            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase, Map.of(), Map.of());
+        }
+
+        RouteContext(PlanContracts.VolumeContract volume,
+                     List<DerivePlanService.InvBeat> inventory,
+                     Set<String> characterKeys,
+                     Set<String> threadKeys,
+                     int syntheticSeqBase,
+                     Map<Integer, String> forcedSkips) {
+            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase, forcedSkips, Map.of());
         }
 
         Map<Integer, DerivePlanService.InvBeat> inventoryBySeq() {
@@ -959,4 +1461,5 @@ public class DeriveBeatRouteService {
             return map;
         }
     }
+
 }

@@ -50,14 +50,22 @@ class DeriveGateServiceTest {
         var review = DeriveGateService.parseGate(M.readTree(json));
 
         assertEquals("REWORK", DeriveGateService.decideGate(review, null, 0).action());
-        assertEquals("REWORK", DeriveGateService.decideGate(review, null, 1).action());
-        var exhausted = DeriveGateService.decideGate(review, null, 2);
+        assertEquals("REWORK", DeriveGateService.decideGate(review, null, 4).action());
+        var exhausted = DeriveGateService.decideGate(review, null, 5);
         assertEquals("FAILED", exhausted.action());
         assertEquals("REJECT", exhausted.verdict());
         assertEquals("DRAFT", exhausted.repairTarget());
     }
 
+
     @Test
+    void upstreamRepairAlsoFailsAfterFiveRounds() throws Exception {
+        String json = criteriaJson("single_rule", false, "HARD", "SPINE", List.of("双轨真相"));
+        var review = DeriveGateService.parseGate(M.readTree(json));
+
+        assertEquals("REWORK", DeriveGateService.decideGate(review, null, 4).action());
+        assertEquals("FAILED", DeriveGateService.decideGate(review, null, 5).action());
+    }    @Test
     void repairTargetUsesUpstreamPriority() throws Exception {
         String json = M.readTree(gateJson(true, "ADVISORY", "NONE", List.of(), null))
                 .deepCopy().toString();
@@ -142,12 +150,22 @@ class DeriveGateServiceTest {
                         .replace("\"severity\":\"ADVISORY\"", "\"severity\":\"MAYBE\""))));
         assertThrows(LlmJson.Bad.class, () -> DeriveGateService.parseGate(
                 M.readTree(criteriaJson("closure", false, "HARD", "NOWHERE", List.of("坏目标")))));
-        assertThrows(LlmJson.Bad.class, () -> DeriveGateService.parseGate(
+        var normalized = DeriveGateService.parseGate(
                 M.readTree(gateJson(true, "ADVISORY", "NONE", List.of(), null)
-                        .replace("\"issues\":[]", "\"issues\":{}"))));
+                        .replace("\"issues\":[]", "\"issues\":{}")));
+        assertTrue(normalized.criteria().stream().allMatch(c -> c.issues().isEmpty()));
     }
 
+
     @Test
+    void missingDirectiveAndMalformedCriterionIssuesAreNormalized() throws Exception {
+        String raw = gateJson(true, "ADVISORY", "NONE", List.of(), null)
+                .replace(",\"directive\":\"\"", "");
+        var review = DeriveGateService.parseGate(M.readTree(raw));
+
+        assertEquals("", review.directive());
+        assertTrue(review.criteria().stream().allMatch(c -> c.issues().isEmpty()));
+    }    @Test
     void emptyAndBrokenStepStatusAreSafe() {
         assertFalse(DeriveGateService.gatePassed(null));
         assertFalse(DeriveGateService.gatePassed("not-json"));

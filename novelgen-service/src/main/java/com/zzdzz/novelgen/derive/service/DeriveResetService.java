@@ -201,7 +201,7 @@ public class DeriveResetService {
             steps.remove("DRAFT");
             steps.remove("QC");
             steps.remove("QC_REPAIR_TARGET");
-            return DeriveGateService.gateReset(root.toString());
+            return DeriveGateService.gateResetForRootRebuild(root.toString());
         } catch (BizException e) {
             throw e;
         } catch (Exception e) {
@@ -222,6 +222,7 @@ public class DeriveResetService {
             steps.remove("PLAN");
             steps.remove("PLAN_V2");
             steps.remove("STORY_SPINE");
+            steps.remove("TRUTH_CONTRACT");
             steps.remove("DRAFT");
             steps.remove("GATE");
             steps.remove("QC");

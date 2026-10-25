@@ -117,6 +117,8 @@ public class LlmJson {
         } catch (Exception first) {
             for (String candidate : List.of(
                     repairDuplicateBeatObjects(json),
+                    repairExtraObjectClosers(json),
+                    repairSingleStringObjects(json),
                     repairStraightQuotes(json),
                     repairMissingCommas(json),
                     closeUnclosed(json),
@@ -137,6 +139,46 @@ public class LlmJson {
         }
     }
 
+    /**
+     * 修复角色/章节数组里常见的“字符串收口后多写一个 }”：
+     * {@code ..."payoffProof":"..."}},{"characterKey"...} → {@code ..."payoffProof":"..."},{...}
+     * 只处理引号后连续两个闭括号且后面紧跟分隔符的确定性畸形，避免误伤合法嵌套。
+     */
+    static String repairExtraObjectClosers(String json) {
+        return json.replaceAll("(?<=\"\\})\\}(?=\\s*[,\\]])", "");
+    }
+
+    /**
+     * 修复模型把状态对象写成只有一个字符串、没有键值对的畸形：
+     * {@code {"C1已接案"}} → {@code {}}。仅在对象内没有冒号时生效。
+     */
+    static String repairSingleStringObjects(String json) {
+        StringBuilder out = new StringBuilder(json.length() + 8);
+        int i = 0;
+        while (i < json.length()) {
+            char c = json.charAt(i);
+            if (c != '{') {
+                out.append(c);
+                i++;
+                continue;
+            }
+            int j = i + 1;
+            while (j < json.length() && Character.isWhitespace(json.charAt(j))) j++;
+            if (j < json.length() && json.charAt(j) == '"') {
+                int close = json.indexOf('"', j + 1);
+                int after = close + 1;
+                while (after < json.length() && Character.isWhitespace(json.charAt(after))) after++;
+                if (close > 0 && after < json.length() && json.charAt(after) == '}') {
+                    out.append("{}");
+                    i = after + 1;
+                    continue;
+                }
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
+    }
     /**
      * 修复模型把两个拍塞进同一对象的畸形：
      * {@code {"seq":5,"filled":"A","seq":41,"filled":"B"}}。
@@ -393,9 +435,10 @@ public class LlmJson {
     static String closeUnclosed(String json) {
         Deque<Character> open = new ArrayDeque<>();
         boolean inStr = false;
-        StringBuilder fixed = null;
-        for (int i = 0; i < json.length(); i++) {
-            char c = json.charAt(i);
+        char[] chars = json.toCharArray();
+        boolean[] drop = new boolean[chars.length];
+        for (int i = 0; i < chars.length; i++) {
+            char c = chars[i];
             if (inStr) {
                 if (c == '\\') {
                     i++;
@@ -410,14 +453,11 @@ public class LlmJson {
                 open.push(c);
             } else if (c == '}' || c == ']') {
                 if (open.isEmpty()) {
-                    // 栈空还来闭符＝多写的：丢弃
-                    if (fixed == null) fixed = new StringBuilder(json).deleteCharAt(i);
-                    else fixed.deleteCharAt(i--);
+                    drop[i] = true;
                 } else {
                     char want = open.peek() == '{' ? '}' : ']';
                     if (c != want) {
-                        if (fixed == null) fixed = new StringBuilder(json);
-                        fixed.setCharAt(i, want);
+                        chars[i] = want;
                     }
                     open.pop();
                 }
@@ -426,10 +466,12 @@ public class LlmJson {
         if (inStr) {
             return json;
         }
-        if (fixed == null && open.isEmpty()) {
-            return json;
+        StringBuilder sb = new StringBuilder(chars.length + open.size());
+        for (int i = 0; i < chars.length; i++) {
+            if (!drop[i]) {
+                sb.append(chars[i]);
+            }
         }
-        StringBuilder sb = fixed != null ? fixed : new StringBuilder(json);
         while (!open.isEmpty()) {
             sb.append(open.pop() == '{' ? '}' : ']');
         }

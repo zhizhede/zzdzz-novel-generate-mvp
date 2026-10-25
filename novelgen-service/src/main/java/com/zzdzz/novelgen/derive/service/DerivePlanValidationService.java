@@ -83,7 +83,8 @@ public class DerivePlanValidationService {
                 boolean knownByFocus = beat.stream()
                         .map(step -> states.computeIfAbsent(step.characterKey(),
                                 key -> new CharacterState(true, new LinkedHashSet<>())))
-                        .anyMatch(state -> state.knowledge().contains(knowledge));
+                        .anyMatch(state -> state.knowledge().stream()
+                                .anyMatch(known -> knowledgeMatches(known, knowledge)));
                 if (!knownByFocus) {
                     AppearanceStep first = beat.get(0);
                     issues.add(error("KNOWLEDGE_NOT_ACQUIRED",
@@ -164,6 +165,7 @@ public class DerivePlanValidationService {
                 new LambdaQueryWrapper<CharacterPlanDO>()
                         .eq(CharacterPlanDO::getRunId, runId));
         List<PlanContracts.ThreadContract> threads = loadThreads(runId);
+        List<PlanContracts.CharacterContract> characterContracts = loadCharacterContracts(characters);
         List<BeatInstanceDO> beats = beatInstanceMapper.selectList(
                 new LambdaQueryWrapper<BeatInstanceDO>()
                         .eq(BeatInstanceDO::getRunId, runId)
@@ -175,6 +177,7 @@ public class DerivePlanValidationService {
 
         List<PlanContracts.PlanIssue> issues = new ArrayList<>();
         issues.addAll(validateVolumeHooks(volumes));
+        issues.addAll(validateContractClosure(volumes, threads, characterContracts));
         List<AppearanceStep> steps = new ArrayList<>();
         Set<String> paidThreads = new LinkedHashSet<>();
         Map<String, Set<PlanContracts.BeatRole>> rolesByCharacterVolume = new HashMap<>();
@@ -261,6 +264,79 @@ public class DerivePlanValidationService {
         return issues;
     }
 
+    /** 角色/线程/卷合同必须闭合，缺 owner 或缺线程直接退回 SPINE，不允许带病进入拍路由。 */
+    static List<PlanContracts.PlanIssue> validateContractClosure(
+            List<PlanContracts.VolumeContract> volumes,
+            List<PlanContracts.ThreadContract> threads,
+            List<PlanContracts.CharacterContract> characters) {
+        List<PlanContracts.PlanIssue> issues = new ArrayList<>();
+        Set<String> characterKeys = new LinkedHashSet<>();
+        characters.forEach(character -> characterKeys.add(character.characterKey()));
+        Set<String> threadKeys = new LinkedHashSet<>();
+        threads.forEach(thread -> threadKeys.add(thread.threadKey()));
+        for (PlanContracts.ThreadContract thread : threads) {
+            String owner = thread.ownerCharacterKey();
+            if (owner != null && !owner.isBlank() && !characterKeys.contains(owner)) {
+                issues.add(error("THREAD_OWNER_MISSING", PlanContracts.RepairScope.SPINE,
+                        thread.payoffVolume(), "线程 " + thread.threadKey()
+                                + " 的 ownerCharacterKey=" + owner + " 不在角色叙事计划中"));
+            }
+        }
+        for (PlanContracts.VolumeContract volume : volumes) {
+            for (String key : volume.focusCharacters()) {
+                if (!characterKeys.contains(key)) {
+                    issues.add(error("VOLUME_CHARACTER_MISSING", PlanContracts.RepairScope.SPINE,
+                            volume.volumeNo(), "第" + volume.volumeNo() + "卷 focusCharacters 含未知角色 " + key));
+                }
+            }
+            for (String key : volume.requiredThreads()) {
+                if (!threadKeys.contains(key)) {
+                    issues.add(error("VOLUME_THREAD_MISSING", PlanContracts.RepairScope.SPINE,
+                            volume.volumeNo(), "第" + volume.volumeNo() + "卷 requiredThreads 含未知线程 " + key));
+                }
+            }
+        }
+        for (PlanContracts.CharacterContract character : characters) {
+            for (String target : character.conflictTargets()) {
+                if (!characterKeys.contains(target)) {
+                    issues.add(error("CHARACTER_TARGET_MISSING", PlanContracts.RepairScope.SPINE,
+                            character.payoffVolume(), character.characterKey()
+                                    + " 的 conflictTargets 含未知角色 " + target));
+                }
+            }
+            for (String relation : character.relationshipChanges()) {
+                if (relation == null || !relation.startsWith("REL-")) {
+                    continue;
+                }
+                String[] parts = relation.split("-");
+                if (parts.length != 3 || !characterKeys.contains(parts[1])
+                        || !characterKeys.contains(parts[2])) {
+                    issues.add(error("RELATION_REFERENCE_MISSING", PlanContracts.RepairScope.SPINE,
+                            character.payoffVolume(), character.characterKey()
+                                    + " 的关系线 " + relation + " 引用了未知角色"));
+                }
+            }
+        }
+        return issues;
+    }
+
+    private List<PlanContracts.CharacterContract> loadCharacterContracts(
+            List<CharacterPlanDO> rows) {
+        List<PlanContracts.CharacterContract> out = new ArrayList<>();
+        for (CharacterPlanDO row : rows) {
+            try {
+                out.add(MAPPER.readValue(row.getContract(), PlanContracts.CharacterContract.class));
+            } catch (Exception e) {
+                out.add(new PlanContracts.CharacterContract(
+                        row.getCharacterKey(), row.getDisplayNameHint(), PlanContracts.CharacterFunction.SUPPORT,
+                        "", "", "", List.of(), List.of(), "", "", "", List.of(), "",
+                        row.getSpotlightVolume(), row.getConflictVolume(), row.getPayoffVolume(),
+                        "", ""));
+            }
+        }
+        return out;
+    }
+
     private List<PlanContracts.VolumeContract> loadVolumes(long runId, Integer onlyVolume) {
         List<VolumePlanDO> rows = volumePlanMapper.selectList(new LambdaQueryWrapper<VolumePlanDO>()
                 .eq(VolumePlanDO::getRunId, runId)
@@ -328,10 +404,21 @@ public class DerivePlanValidationService {
     }
 
     private static boolean isPayoffRole(String role) {
-        return "CLUE_PAYOFF".equals(role) || "LOCAL_CLOSURE".equals(role)
+        return "CLUE_PAYOFF".equals(role) || "LOCAL_CLOSURE".equals(role) || "RELATION_CONFLICT".equals(role)
                 || "FINAL_REVEAL".equals(role) || "FINAL_CLOSURE".equals(role);
     }
 
+    private static boolean knowledgeMatches(String known, String required) {
+        if (known == null || required == null) {
+            return false;
+        }
+        if (known.equals(required)) {
+            return true;
+        }
+        String left = DerivePlanService.factCore(known);
+        String right = DerivePlanService.factCore(required);
+        return !right.isEmpty() && !left.isEmpty() && (left.contains(right) || right.contains(left));
+    }
     private static boolean endsDead(JsonNode changes) {
         if (!changes.isObject()) {
             return false;
