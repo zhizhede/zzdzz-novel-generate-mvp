@@ -13,6 +13,7 @@ import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
 import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
+import com.zzdzz.novelgen.derive.contract.ScaffoldContract;
 import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.derive.plan.PlanJson;
 import com.zzdzz.novelgen.derive.plan.PlanV2StateCodec;
@@ -57,6 +58,7 @@ public class DeriveStoryPlanService {
     private final StoryThreadMapper storyThreadMapper;
     private final VolumePlanMapper volumePlanMapper;
     private final LlmJson llmJson;
+    private final DeriveScaffoldService scaffoldService;
 
     /** 推进一个 PLAN_V2 单元。 */
     public PlanVO advance(long runId) {
@@ -118,9 +120,12 @@ public class DeriveStoryPlanService {
                 new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_SCALE, run.getNovelId(), null,
                         run.getId(),
                         List.of(LlmPort.Message.system(StoryPlanningPrompts.SCALE),
-                                LlmPort.Message.user(user)),
+                                LlmPort.Message.user(user.toString())),
                         0.3),
                 root -> parseScale(root, run, beatCount), 3);
+        ScaffoldContract scaffold = scaffoldService.buildScaffold(
+                run, beatCount, scope.volumeCount(), scope.chapterCount());
+        writeSubContract(run, "SCAFFOLD", scaffold);
         if (scope.decision() == PlanContracts.ScopeDecision.NEED_CONFIRMATION) {
             PlanContracts.PlanV2State pending = new PlanContracts.PlanV2State(
                     PlanContracts.PlanUnit.NEED_SCOPE, oldState.completedUnits(), scope,
@@ -142,21 +147,29 @@ public class DeriveStoryPlanService {
         if (oldState.scope() == null || run.getNovelId() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "SPINE 缺少规模或成品书骨架");
         }
-        String user = MAPPER.createObjectNode()
-                .put("创作框架", nullToEmpty(run.getParamIntent()))
-                .put("主线", nullToEmpty(run.getWelded()))
-                .put("类别", nullToEmpty(run.getParamTags()))
-                .put("结局形状", run.getParamOutcome())
-                .put("volumeCount", oldState.scope().volumeCount())
-                .put("chapterCount", oldState.scope().chapterCount())
-                .toString();
-        PlanContracts.StorySpine spine = llmJson.ask(
-                new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_SPINE, run.getNovelId(), null,
-                        run.getId(),
-                        List.of(LlmPort.Message.system(StoryPlanningPrompts.SPINE),
-                                LlmPort.Message.user(user)),
-                        0.3),
-                root -> parseSpine(root, oldState.scope()), 3);
+        ObjectNode user = MAPPER.createObjectNode();
+        user.put("创作框架", nullToEmpty(run.getParamIntent()));
+        putMainline(user, run);
+        user.put("类别", nullToEmpty(run.getParamTags()));
+        user.put("结局形状", run.getParamOutcome());
+        user.put("volumeCount", oldState.scope().volumeCount());
+        user.put("chapterCount", oldState.scope().chapterCount());
+        putGateDirective(user, run);
+        putTruthContract(user, run);
+        JsonNode existingContract = readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
+        PlanContracts.StorySpine spine;
+        if (existingContract.isObject()
+                && !existingContract.path("finalTruth").asText("").isBlank()) {
+            spine = spineFromTruthContract(oldState.scope(), existingContract);
+        } else {
+            spine = llmJson.ask(
+                    new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_SPINE, run.getNovelId(), null,
+                            run.getId(),
+                            List.of(LlmPort.Message.system(StoryPlanningPrompts.SPINE),
+                                    LlmPort.Message.user(user.toString())),
+                            0.3),
+                    root -> parseSpine(root, oldState.scope(), existingContract), 3);
+        }
         persistSpine(run, spine);
         PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
                 PlanContracts.PlanUnit.VOLUMES,
@@ -174,14 +187,28 @@ public class DeriveStoryPlanService {
         user.set("scope", MAPPER.valueToTree(oldState.scope()));
         user.set("storySpine", readSteps(run.getStepStatus()).path("STORY_SPINE"));
         user.put("创作框架", nullToEmpty(run.getParamIntent()));
-        user.put("主线", nullToEmpty(run.getWelded()));
-        List<PlanContracts.VolumeContract> volumes = llmJson.ask(
-                new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_VOLUMES, run.getNovelId(), null,
-                        run.getId(),
-                        List.of(LlmPort.Message.system(StoryPlanningPrompts.VOLUMES),
-                                LlmPort.Message.user(user.toString())),
-                        0.3),
-                root -> parseVolumes(root, oldState.scope()), 3);
+        putMainline(user, run);
+        putGateDirective(user, run);
+        putTruthContract(user, run);
+        JsonNode volumeContract = readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
+        List<PlanContracts.VolumeContract> volumes;
+        if (volumeContract.isObject()
+                && !volumeContract.path("finalTruth").asText("").isBlank()) {
+            volumes = List.of(volumeFromTruthContract(oldState.scope(), volumeContract));
+        } else {
+            volumes = llmJson.ask(
+                    new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_VOLUMES, run.getNovelId(), null,
+                            run.getId(),
+                            List.of(LlmPort.Message.system(StoryPlanningPrompts.VOLUMES),
+                                    LlmPort.Message.user(user.toString())),
+                            0.3),
+                    root -> {
+                        List<PlanContracts.VolumeContract> parsed =
+                                parseVolumes(root, oldState.scope());
+                        requireTruthAlignment(parsed, volumeContract);
+                        return parsed;
+                    }, 3);
+        }
         persistVolumes(run, volumes);
         PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
                 PlanContracts.PlanUnit.CHARACTERS,
@@ -200,6 +227,8 @@ public class DeriveStoryPlanService {
         user.set("storySpine", readSteps(run.getStepStatus()).path("STORY_SPINE"));
         user.set("volumes", MAPPER.valueToTree(loadVolumeContracts(run.getId())));
         user.put("创作框架", nullToEmpty(run.getParamIntent()));
+        putGateDirective(user, run);
+        putTruthContract(user, run);
         List<PlanContracts.CharacterContract> characters = llmJson.ask(
                 new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_CHARACTERS, run.getNovelId(), null,
                         run.getId(),
@@ -222,6 +251,11 @@ public class DeriveStoryPlanService {
 
     /** SPINE 校验：逐卷真相阶梯、全局线程 key 与回收卷。 */
     static PlanContracts.StorySpine parseSpine(JsonNode root, PlanContracts.ScopeContract scope) {
+        return parseSpine(root, scope, null);
+    }
+
+    static PlanContracts.StorySpine parseSpine(JsonNode root, PlanContracts.ScopeContract scope,
+                                               JsonNode truthContract) {
         String mainMystery = root.path("mainMystery").asText("").trim();
         String finalTruth = root.path("finalTruth").asText("").trim();
         String finalChoice = root.path("finalChoice").asText("").trim();
@@ -269,6 +303,19 @@ public class DeriveStoryPlanService {
                     PlanContracts.ThreadStatus.OPEN,
                     MAPPER.convertValue(node.path("contract"),
                             MAPPER.getTypeFactory().constructMapType(Map.class, String.class, Object.class))));
+        }
+        if (truthContract != null && truthContract.isObject()) {
+            String contractTruth = truthContract.path("finalTruth").asText("");
+            String contractChoice = truthContract.path("finalChoice").asText("");
+            if (!contractTruth.isBlank()
+                    && DeriveTruthContractService.truthConflicts(contractTruth, finalTruth)) {
+                throw new PlanJson.Bad("SPINE finalTruth 与 TruthContract 不一致：" + finalTruth);
+            }
+            if (!contractChoice.isBlank()
+                    && !contractChoice.startsWith("按唯一真相合同完成最终选择")
+                    && DeriveTruthContractService.truthConflicts(contractChoice, finalChoice)) {
+                throw new PlanJson.Bad("SPINE finalChoice 与 TruthContract 不一致：" + finalChoice);
+            }
         }
         return new PlanContracts.StorySpine(mainMystery, finalTruth, finalChoice, ladder, threads);
     }
@@ -532,9 +579,6 @@ public class DeriveStoryPlanService {
         if (chapterAvg < 1) {
             throw new PlanJson.Bad("chapterAvg 必须>0");
         }
-        if (chapterCount > beatCount) {
-            throw new PlanJson.Bad("chapterCount=" + chapterCount + " 超过拍数 " + beatCount);
-        }
         if (volumeCount < 1) {
             throw new PlanJson.Bad("volumeCount 必须≥1");
         }
@@ -674,6 +718,77 @@ public class DeriveStoryPlanService {
         return new PlanVO(run.getId(), novelId == null ? 0 : novelId,
                 scope.chapterCount(), 0, 0, List.of(), unit,
                 0, DerivePlanService.totalWindows(scope.chapterCount()), 0, 0, allDone);
+    }
+
+    static PlanContracts.StorySpine spineFromTruthContract(
+            PlanContracts.ScopeContract scope, JsonNode contract) {
+        String truth = contract.path("finalTruth").asText("");
+        String choice = contract.path("finalChoice").asText("");
+        List<String> forbidden = strings(contract.path("forbidden"));
+        List<String> evidence = strings(contract.path("evidenceThreads"));
+        List<PlanContracts.TruthStep> ladder = new ArrayList<>();
+        List<PlanContracts.ThreadContract> threads = new ArrayList<>();
+        for (int volumeNo = 1; volumeNo <= scope.volumeCount(); volumeNo++) {
+            ladder.add(new PlanContracts.TruthStep(volumeNo, List.of(truth),
+                    forbidden, evidence));
+        }
+        for (String key : evidence) {
+            PlanContracts.ThreadKind kind = key.startsWith("OBJ-")
+                    ? PlanContracts.ThreadKind.OBJECT : PlanContracts.ThreadKind.CLUE;
+            threads.add(new PlanContracts.ThreadContract(key, kind, key, 1,
+                    scope.volumeCount(), "C1", PlanContracts.ThreadStatus.OPEN, Map.of()));
+        }
+        return new PlanContracts.StorySpine(truth, truth, choice, ladder, threads);
+    }
+
+    static PlanContracts.VolumeContract volumeFromTruthContract(
+            PlanContracts.ScopeContract scope, JsonNode contract) {
+        String truth = contract.path("finalTruth").asText("");
+        List<String> evidence = strings(contract.path("evidenceThreads"));
+        return new PlanContracts.VolumeContract(1, 1, scope.chapterCount(), truth,
+                "真相合同如何在本卷兑现", "任何与真相合同不一致的解释", truth,
+                truth, List.of("C1"), List.of(), evidence, List.of(),
+                truth, "", "FINAL");
+    }
+
+    private static void putMainline(ObjectNode user, RunDO run) {
+        JsonNode contract = readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
+        if (contract.isObject() && !contract.path("finalTruth").asText("").isBlank()) {
+            user.put("主线", contract.path("finalTruth").asText(""));
+        } else {
+            user.put("主线", nullToEmpty(run.getWelded()));
+        }
+    }
+
+    private static void putTruthContract(ObjectNode user, RunDO run) {
+        JsonNode contract = readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
+        if (contract.isObject()) {
+            user.set("TruthContract（唯一真相合同，冲突时以此为准）", contract);
+        }
+    }
+
+    static void requireTruthAlignment(List<PlanContracts.VolumeContract> volumes,
+                                      JsonNode contract) {
+        if (contract == null || !contract.isObject()) {
+            return;
+        }
+        String truth = contract.path("finalTruth").asText("");
+        if (truth.isBlank()) {
+            return;
+        }
+        for (PlanContracts.VolumeContract volume : volumes) {
+            if (DeriveTruthContractService.truthConflicts(truth, volume.trueAnswer())) {
+                throw new PlanJson.Bad("第" + volume.volumeNo()
+                        + "卷 trueAnswer 与 TruthContract 不一致：" + volume.trueAnswer());
+            }
+        }
+    }
+
+    private static void putGateDirective(ObjectNode user, RunDO run) {
+        String directive = DeriveGateService.gateDirective(run.getStepStatus());
+        if (directive != null && !directive.isBlank()) {
+            user.put("上轮立项闸减法指令（最高优先级，必须逐条消除）", directive);
+        }
     }
 
     private static String nullToEmpty(String value) {

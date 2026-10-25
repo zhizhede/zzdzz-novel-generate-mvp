@@ -106,7 +106,7 @@ public class DeriveWriteService {
     /** 九轮原口径：独立干净会话（anti_repro=ON 时用）。v3.6：文化语感/剧透禁令/密度/文风卡。 */
     static final String WRITE_PROMPT_INDEPENDENT = """
             你在按章节计划写一章小说正文。独立干净会话：只依据给出的全局设定与本章材料，不参考其他章节原文。
-            全局：作品名、域格、类别与目标节奏、结局形状、世界观条目、标签层主线、
+            全局：作品名、域格、类别与目标节奏、结局形状、世界观条目、标签层主线、TruthContract（若有，唯一真相合同）、
             创作前提（若有）、真相卡埋设表或完整真相卡（若有）、文风卡/目标文风（若有）。
             本章：章号/章题/预算字数/计划节奏、本章拍实例（seq + 具体情节点）。
             要求：
@@ -145,7 +145,7 @@ public class DeriveWriteService {
     /** 连续创作会话（anti_repro=OFF 默认，harness）。v3.6：文化语感/剧透禁令/密度/文风卡。 */
     static final String WRITE_PROMPT_CONTINUOUS = """
             你在按章节计划写一章小说正文。输入含全书状态包：cast 人物表（含人设卡）、前情（前章正文尾段）、
-            全书章纲概览、本章拍实例、创作前提/真相卡（若有）——你已"读过前文"，必须保持同一部书的连续性。
+            全书章纲概览、本章拍实例、创作前提/真相卡（若有）——你已"读过前文"，必须保持同一部书的连续性；
             要求：
             1. 正文字数 = 预算 ±10%（按中文字数计，不含章注）；
             2. 必须兑现本章全部拍实例（情节按 seq 顺序展开，可丰满不可丢失）；
@@ -527,7 +527,14 @@ public class DeriveWriteService {
                 root.set("文风卡（源书画像；句式/对话比/密度/用语按此执行，no_go 逐条规避）", sp);
             }
         }
-        root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+        JsonNode truthContract = readTreeSafe(run.getStepStatus())
+                .path("steps").path("TRUTH_CONTRACT");
+        if (truthContract.isObject() && !truthContract.path("finalTruth").asText("").isBlank()) {
+            root.put("主线", truthContract.path("finalTruth").asText(""));
+            root.set("TruthContract（唯一真相合同，冲突时以此为准）", truthContract);
+        } else {
+            root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+        }
 
         // ---- 状态包：cast 人物表（harness 核心，任何模式都给——它不是"其他章原文"）----
         root.put("主角名", assets.path("protagonist").asText(""));

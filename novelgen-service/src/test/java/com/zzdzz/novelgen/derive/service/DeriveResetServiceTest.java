@@ -28,6 +28,7 @@ class DeriveResetServiceTest {
         String status = M.writeValueAsString(Map.of("v", 1, "steps", Map.of(
                 "PLAN_V2", done,
                 "STORY_SPINE", Map.of("mainMystery", "旧脊柱"),
+                "TRUTH_CONTRACT", Map.of("truthId", "T-old"),
                 "DRAFT", Map.of("batch", 2),
                 "GATE", Map.of(
                         "status", "REWORK",
@@ -44,10 +45,12 @@ class DeriveResetServiceTest {
         assertEquals(PlanContracts.PlanUnit.SPINE, state.currentUnit());
         assertEquals(scope, state.scope());
         assertTrue(state.volumeUnits().isEmpty());
-        assertEquals(1, M.readTree(reset).path("steps").path("GATE").path("round").asInt());
+        assertEquals(1, M.readTree(reset).path("steps").path("GATE").path("round").asInt(), "根因回炉保留轮次，禁止无限重置");
         assertEquals("重建角色弧",
                 M.readTree(reset).path("steps").path("GATE").path("directive").asText());
         assertTrue(M.readTree(reset).path("steps").path("STORY_SPINE").isMissingNode());
+        assertEquals("T-old", M.readTree(reset).path("steps").path("TRUTH_CONTRACT").path("truthId").asText(),
+                "真相合同跨根因回炉保留");
         assertTrue(M.readTree(reset).path("steps").path("DRAFT").isMissingNode());
     }
 
