@@ -3,6 +3,7 @@ package com.zzdzz.novelgen.derive.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
@@ -332,6 +333,7 @@ public class DeriveDraftService {
                     win.size(), filledCount, skippedCount, "BATCH", i + 1, wins.size(), false);
         }
 
+        reconcileMissingBeats(runId, beats);
         globalReconcile(beats, chapters);
         runMapper.updateStatus(runId, "DRAFTING", null);
         log.info("⑥b 全部窗完成：runId={} novelId={} 窗数={} → DRAFTING", runId, novelId, wins.size());
@@ -679,7 +681,14 @@ public class DeriveDraftService {
             root.put("题材意图", run.getParamIntent());
         }
         root.put("世界观", worldLabel);
-        root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+        JsonNode truthContract = readTreeSafe(run.getStepStatus())
+                .path("steps").path("TRUTH_CONTRACT");
+        if (truthContract.isObject() && !truthContract.path("finalTruth").asText("").isBlank()) {
+            root.put("主线", truthContract.path("finalTruth").asText(""));
+            root.set("TruthContract（唯一真相合同，冲突时以此为准）", truthContract);
+        } else {
+            root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+        }
     }
 
     /** 头 B 输入：已定人名表 + 意图/域格（不带章节计划，避免模型顺手写章纲）。 */
@@ -890,6 +899,36 @@ public class DeriveDraftService {
         if (!chArr.isArray() || chArr.size() != ctx.windowChapters().size()) {
             throw new LlmJson.Bad("chapters 章数必须 = 本窗章数 " + ctx.windowChapters().size());
         }
+        // 模型偶尔把已计划拍放到相邻章；按 seqChapters 确定性搬回计划章，避免整窗重试。
+        if (root.path("chapters").isArray() && ctx.seqChapters() != null && !ctx.seqChapters().isEmpty()) {
+            Map<Integer, ObjectNode> byNo = new HashMap<>();
+            root.path("chapters").forEach(c -> byNo.put(c.path("no").asInt(-1), (ObjectNode) c));
+            for (ObjectNode chapter : byNo.values()) {
+                if (!chapter.path("beats").isArray()) {
+                    continue;
+                }
+                List<JsonNode> moves = new ArrayList<>();
+                chapter.path("beats").forEach(beat -> {
+                    int seq = beat.path("seq").asInt(0);
+                    Integer planned = ctx.seqChapters().get(seq);
+                    if (planned != null && planned != chapter.path("no").asInt(-1)) {
+                        moves.add(beat);
+                    }
+                });
+                for (JsonNode beat : moves) {
+                    com.fasterxml.jackson.databind.node.ArrayNode chapterBeats = (com.fasterxml.jackson.databind.node.ArrayNode) chapter.path("beats"); for (int idx = chapterBeats.size() - 1; idx >= 0; idx--) { if (chapterBeats.get(idx) == beat) { chapterBeats.remove(idx); break; } }
+                    ObjectNode target = byNo.get(ctx.seqChapters().get(beat.path("seq").asInt(0)));
+                    if (target != null) {
+                        if (!target.path("beats").isArray()) {
+                            target.putArray("beats");
+                        }
+                        ((com.fasterxml.jackson.databind.node.ArrayNode) target.path("beats")).add(beat);
+                        log.warn("章纲拍归属归一：seq={} 移回第{}章", beat.path("seq").asInt(), ctx.seqChapters().get(beat.path("seq").asInt(0)));
+                    }
+                }
+            }
+        }
+
         Set<Integer> seenCh = new HashSet<>();
         Set<Integer> filled = new HashSet<>();
         for (JsonNode c : chArr) {
@@ -907,11 +946,18 @@ public class DeriveDraftService {
             if (!changes.isArray()) {
                 throw new LlmJson.Bad("第" + no + "章 state_changes 必须是数组（没有就写空数组）");
             }
-            for (JsonNode ch : changes) {
+            ArrayNode changeArray = (ArrayNode) changes;
+            for (int changeIndex = changeArray.size() - 1; changeIndex >= 0; changeIndex--) {
+                JsonNode ch = changeArray.get(changeIndex);
                 String who = ch.path("who").asText("").trim();
                 String what = ch.path("what").asText("").trim();
                 if (who.isEmpty() || what.isEmpty()) {
                     throw new LlmJson.Bad("第" + no + "章 state_changes 有条目缺 who/what");
+                }
+                if ("关系改变".equals(who) && "关系改变".equals(what)
+                        && ch.path("detail").asText("").trim().isEmpty()) {
+                    changeArray.remove(changeIndex);
+                    continue;
                 }
                 if (!ctx.castNames().isEmpty() && !ctx.castNames().contains(who)) {
                     throw new LlmJson.Bad("第" + no + "章 state_changes 的 who「" + who
@@ -1233,6 +1279,18 @@ public class DeriveDraftService {
     /** 全局头是否齐（三段全成；REWORK 清头产物后自然回到 0 段）。 */
     static boolean headDone(NovelDO novel) {
         return headStage(novel, false) >= 3;
+    }
+
+    /** 窗口遗漏的结构拍由系统收口为 SKIPPED，避免模型漏标导致整本停摆。 */
+    private void reconcileMissingBeats(long runId, List<BeatInstanceDO> beats) {
+        for (BeatInstanceDO beat : beats) {
+            boolean missing = beat.getFilledText() == null || beat.getFilledText().isBlank();
+            if (missing && "PLANNED".equals(beat.getStatus())) {
+                beat.setStatus("SKIPPED");
+                beatInstanceMapper.updateFill(beat.getId(), beat.getFilledText(), beat.getStatus());
+                log.warn("终局对账补跳过拍：runId={} seq={}", runId, beat.getSeq());
+            }
+        }
     }
 
     /** 终局对账：全拍 filled 或 SKIPPED、全章有纲。 */

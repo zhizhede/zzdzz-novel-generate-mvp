@@ -359,6 +359,28 @@ public class DeriveSampleService {
         btNode.put("outline", finalOutlines.size());
         btNode.put("beat", finalBeats.size());
 
+        // ---- 5.2.3b 创作框架红线过滤：用户显式禁止的素材不得进入焊接池 ----
+        List<String> intentRedLines = intentRedLines(effectiveIntent);
+        if (!intentRedLines.isEmpty()) {
+            List<Row> allowedOutlines = filterIntentRows(finalOutlines, intentRedLines);
+            List<Row> allowedBeats = filterIntentRows(finalBeats, intentRedLines);
+            trace.putArray("intent_redlines").addAll(asTextNode(intentRedLines));
+            trace.putObject("intent_filter").put("outlineBefore", finalOutlines.size())
+                    .put("outlineAfter", allowedOutlines.size())
+                    .put("beatBefore", finalBeats.size())
+                    .put("beatAfter", allowedBeats.size());
+            if (allowedOutlines.isEmpty() && !finalOutlines.isEmpty()) {
+                throw new BizException(ErrorCode.PARAM_ERROR,
+                        "创作框架红线过滤后没有可用故事线素材；红线=" + intentRedLines);
+            }
+            if (allowedBeats.isEmpty() && !finalBeats.isEmpty()) {
+                throw new BizException(ErrorCode.PARAM_ERROR,
+                        "创作框架红线过滤后没有可用拍素材；红线=" + intentRedLines);
+            }
+            finalOutlines = allowedOutlines;
+            finalBeats = allowedBeats;
+        }
+
         // ---- 5.2.4+5 弧桶分配（同构弧登记跳过、run 内唯一）+ 补差拍 ----
         // 防复刻开关：默认关=不按历史指纹阻断（一致性优先），开=九轮原口径
         // 2026-10-17 用户拍板：衍生新书 anti_repro 默认开（显式 false 才关）——配合指纹前移断跨稿复读
@@ -428,12 +450,16 @@ public class DeriveSampleService {
             String segments = pickedOutlines.stream()
                     .map(r -> r.code() + " " + r.labelText())
                     .reduce((a, b) -> a + "\n" + b).orElse("");
+            List<String> redLines = intentRedLines(effectiveIntent);
+            String weldUser = "收束方式：" + outcome
+                    + (redLines.isEmpty() ? "" : "\n创作框架红线（输出不得出现违禁素材）：" + String.join("、", redLines))
+                    + "\n段列表：\n" + segments;
             JsonNode welded = llmJson.ask(
                     new LlmPort.ChatRequest(NODE_WELD, null, null,
                             List.of(LlmPort.Message.system(WELD_PROMPT),
-                                    LlmPort.Message.user("收束方式：" + outcome + "\n段列表：\n" + segments)),
+                                    LlmPort.Message.user(weldUser)),
                             0.3),
-                    DeriveSampleService::parseWelded, 3);
+                    root -> parseWelded(root, redLines), 3);
             weldedCode = welded.path("code").asText();
             ObjectNode w = om.createObjectNode();
             w.put("code", weldedCode);
@@ -1034,6 +1060,92 @@ public class DeriveSampleService {
         return n.toString();
     }
 
+    /** 从用户创作思路抽取可机械识别的红线词组。 */
+    static List<String> intentRedLines(String intent) {
+        if (intent == null || intent.isBlank()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        if (containsAny(intent, List.of("无死亡", "不写死亡", "没有死亡", "禁止死亡"))
+                || (intent.contains("死亡") && !intent.contains("允许死亡"))) {
+            out.addAll(List.of("死亡", "命案", "凶杀", "尸体", "遗骸", "死者", "殡葬"));
+        }
+        if (containsAny(intent, List.of("无超自然", "不写超自然", "没有超自然", "禁止超自然"))
+                || (intent.contains("超自然") && !intent.contains("允许超自然"))) {
+            out.addAll(List.of("超自然", "鬼", "灵异", "怪谈", "异象", "化形"));
+        }
+        if (containsAny(intent, List.of("无第二案件", "不写第二案件", "没有第二案件", "禁止第二案件"))
+                || (intent.contains("第二案件") && !intent.contains("允许第二案件"))) {
+            out.addAll(List.of("第二案件", "第二起案件", "另案", "并案"));
+        }
+        if (containsAny(intent, List.of("单案短篇", "只有三名角色"))
+                || containsAny(intent, List.of("不写珍品", "无珍品", "没有珍品", "禁止珍品",
+                "不写密室", "无密室", "没有密室", "禁止密室",
+                "不写武装", "无武装", "没有武装", "禁止武装",
+                "不写勒索", "无勒索", "没有勒索", "禁止勒索",
+                "不写替身术", "无替身术", "没有替身术", "禁止替身术"))) {
+            out.addAll(List.of("珍品", "密室", "武装", "勒索", "替身术"));
+        }
+        if (containsAny(intent, List.of("地点限于旧楼和走廊", "只在旧楼", "限于旧楼", "旧楼和走廊"))) {
+            out.addAll(List.of("街市", "林中", "乡野", "花园", "书房", "内室", "市场", "郊外", "城郊"));
+        }
+        return out.stream().distinct().toList();
+    }
+
+    static List<Row> filterIntentRows(List<Row> rows, List<String> redLines) {
+        if (redLines == null || redLines.isEmpty()) {
+            return rows;
+        }
+        return rows.stream()
+                .filter(row -> firstForbiddenTerm(row.labelText(), redLines) == null)
+                .toList();
+    }
+
+    static String firstForbiddenTerm(String text, List<String> redLines) {
+        if (text == null || redLines == null || redLines.isEmpty()) {
+            return null;
+        }
+        String clean = stripNegations(text);
+        for (String term : redLines) {
+            if (clean.contains(term)) {
+                return term;
+            }
+        }
+        return null;
+    }
+
+    private static String stripNegations(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replace("无死亡", "").replace("不写死亡", "")
+                .replace("没有死亡", "").replace("禁止死亡", "")
+                .replace("无超自然", "").replace("不写超自然", "")
+                .replace("没有超自然", "").replace("禁止超自然", "")
+                .replace("无第二案件", "").replace("不写第二案件", "")
+                .replace("没有第二案件", "").replace("禁止第二案件", "")
+                .replace("无珍品", "").replace("不写珍品", "")
+                .replace("没有珍品", "").replace("禁止珍品", "")
+                .replace("无密室", "").replace("不写密室", "")
+                .replace("没有密室", "").replace("禁止密室", "")
+                .replace("无武装", "").replace("不写武装", "")
+                .replace("没有武装", "").replace("禁止武装", "")
+                .replace("无勒索", "").replace("不写勒索", "")
+                .replace("没有勒索", "").replace("禁止勒索", "")
+                .replace("无替身术", "").replace("不写替身术", "")
+                .replace("没有替身术", "").replace("禁止替身术", "");
+    }
+
+    private static boolean containsAny(String text, List<String> terms) {
+        return terms.stream().anyMatch(text::contains);
+    }
+
+    private static ArrayNode asTextNode(List<String> values) {
+        ArrayNode arr = new ArrayNode(STATIC_MAPPER.getNodeFactory());
+        values.forEach(arr::add);
+        return arr;
+    }
+
     String idArrayJson(List<Row> rows) {
         ArrayNode arr = om.createArrayNode();
         rows.forEach(r -> arr.add(r.id()));
@@ -1041,12 +1153,21 @@ public class DeriveSampleService {
     }
 
     static JsonNode parseWelded(JsonNode root) {
+        return parseWelded(root, List.of());
+    }
+
+    static JsonNode parseWelded(JsonNode root, List<String> redLines) {
         JsonNode w = root.path("welded");
         if (!w.path("code").asText("").startsWith("O-F")) {
             throw new LlmJson.Bad("welded.code 必须以 O-F 开头");
         }
-        if (w.path("text").asText("").isEmpty()) {
+        String text = w.path("text").asText("");
+        if (text.isEmpty()) {
             throw new LlmJson.Bad("welded.text 不能为空");
+        }
+        String forbidden = firstForbiddenTerm(stripNegations(text), redLines);
+        if (forbidden != null) {
+            throw new LlmJson.Bad("welded.text 命中创作框架红线：" + forbidden);
         }
         return w;
     }
