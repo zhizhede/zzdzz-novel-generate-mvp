@@ -229,4 +229,19 @@ class LlmJsonTest {
         String valid = "{\"a\":[1,2],\"b\":{\"c\":true},\"d\":null,\"e\":\"x\"}";
         assertThat(LlmJson.repairMissingCommas(valid)).isEqualTo(valid);
     }
-}
+
+    @Test
+    void extraObjectCloserBeforeArrayCommaIsRepaired() throws Exception {
+        String raw = "{\"characters\":[{\"name\":\"甲\",\"proof\":\"第一\"}},{\"name\":\"乙\"}]}";
+        JsonNode root = llmJson.read(raw);
+        assertThat(root.path("characters")).hasSize(2);
+        assertThat(root.path("characters").get(0).path("name").asText()).isEqualTo("甲");
+    }
+
+    @Test
+    void extraObjectCloserDoesNotBreakNestedObjectComma() throws Exception {
+        String raw = "{\"a\":{\"x\":\"y\"},\"b\":1}";
+        JsonNode root = llmJson.read(raw);
+        assertThat(root.path("a").path("x").asText()).isEqualTo("y");
+        assertThat(root.path("b").asInt()).isEqualTo(1);
+    }}
