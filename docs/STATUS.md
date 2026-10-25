@@ -1691,3 +1691,112 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - 新增 `DeriveThreadServiceTest`，验证 CLUE_PAYOFF 拍可把线程标为 PAYOFF。
 - `mvn -q compile`、定向测试通过；未部署线上。
 - ThreadLedger 接入后 derive jar 重新打包通过。
+
+## P1 FactLedger/ThreadLedger 宝塔部署（2026-10-24）
+
+- 用户确认部署；本地分支 `codex/derive-flow-v2-p0`，部署前 jar SHA256：`61EEE8921CF7F8B580CEE5B6E056D0B729C3B7468E35BA9F11218121BBAFF9C2`。
+- 部署前已确认宝塔 `derive_gen` 全库备份：`/www/backup/novelgen-derive/20261024-154919/derive_gen-full.dump`，SHA256：`07428adecce19842160fc7436f546917c7e3877e22078c934101eca55de96dd9`。
+- 旧 jar 备份：`/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-p1thread`。
+- 新 jar 已替换至 `/www/wwwroot/novelgen-derive/novelgen-derive-app.jar`，远端 SHA256 与本地一致。
+- Flyway 启动自动迁移成功：V124 `derive fact`、V125 `derive repair log`；当前 `flyway_schema_history` 最新版本为 125。
+- `derive_fact`、`derive_repair_log` 结构核验通过（含外键、索引、状态 CHECK）。
+- 服务验收：`novelgen-derive` active，8091 端口监听，日志 `Started DeriveGenApplication in 7.674 seconds`。
+- 外网入口带正确 Host/Origin 验收：`/derive/api/derive/ping`、`/derive/api/derive/runs/40` 均返回预期未登录 `401 A0003`（说明 CORS 与鉴权链路正常）；`/derive/` 根路径返回业务 `400 A0001`（无资源，属预期）。
+- run40 当前仍为 `PLANNING`（14:02 左右因“故事规划校验失败：焦点角色均尚未获得知识…”中断），部署后未自动续跑，等待用户明确指示。
+
+## FactLedger 插入顺序修复与 run41 重跑（2026-10-24）
+
+- 实弹发现 `DeriveFactService.rebuild` 首次插入 `derive_fact` 时先 `insertFull` 后设置 `canonical_text`，触发 `canonical_text` 非空约束。
+- 修复为先填充完整行，再按 insert/update 分支落库；回归测试改为捕获插入行并断言 `canonical_text` 非空。
+- 定向测试、全量 `mvn -q test`、derive jar 打包通过。
+- 已部署宝塔：新 jar SHA256 `a464d5e850ed86414e93919ed01e8921905175558bbb5fafc787358d66ce17e0`；服务 active，8091 监听，启动日志正常。
+- run40 在换包重启时被中断；已新建并启动 run41（seed=450045，SHORT_STANDALONE，12000~18000，闭合），当前处于 ⑥a 章节计划阶段。
+
+## 拍数硬上限解除（2026-10-24）
+
+- 删除节拍路由对单章拍数的 `1~4` 硬上限，仅保留“每章至少 1 拍”。
+- 同步调整 `StoryPlanningPrompts.ROUTE`：模型可按剧情需要分配单章拍数；`syntheticSlots` 仍用于补结构拍。
+- 同步调整 ⑥a 分章窗提示与校验：不再拒绝单章超过原上限；“剩余拍必须留给后续章节”改为保证后续每章至少 1 拍。
+- 保留 `MIN_BEATS_PER_CHAPTER=1`，避免空章；移除 `MAX_BEATS_PER_CHAPTER`。
+- `DeriveResetServiceTest` 与既有根因回炉口径对齐（根因重建后 GATE 轮次归零）。
+- 回归：`DeriveBeatRouteServiceTest`、`DerivePlanWindowTest` 定向通过；全量 `mvn -q test` 通过；derive jar 打包通过，SHA256 `D0306E34DA127CED634D26F617CE5E99FC53E5CC7C72A50CEAAF0FE3535BF0C5`。未部署。
+
+## 无单章拍数上限修复部署与 run42（2026-10-24）
+
+- 本地最新 jar SHA256：`E75EE4205CB6A5C392A7256158683C192794B406D077CCF5387FC444438B2B43`。
+- 宝塔旧 jar 备份：`/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-nohardcap`。
+- 已部署并重启 derive 服务；线上 jar 哈希一致，8091 端口正常，启动日志无迁移/启动异常。
+- 新建 run42（seed=450045，SHORT_STANDALONE，12000~18000，闭合）并启动无人值守。
+- run42 已通过 ⑥a 规划并进入 ⑥b 具体稿阶段；线程同步正常，当前无 lastError。
+
+## DeriveFlow 工作流口径纠偏：章数/拍数改为系统可归一合同（2026-10-24）
+
+- 针对用户质疑“先拍后章却被内部硬合同卡死”，调整规划链路：
+  - `SCALE` 的 `chapterCount` 改为规模建议值，不再要求不得超过原始拍数；拍数缺口由后续 `syntheticSlots` 补齐。
+  - `ROUTE` 输入章槽先经 `normalizeRouteChapters` 归一：越界/重复章丢弃，缺失章用卷合同模板补齐；章数以卷合同为准，不再因模型多写/漏写章直接判死。
+  - 删除节拍路由单章拍数上限校验；保留“每章至少1拍”。
+  - ⑥a 分章窗提示与校验同步改为“至少1拍、不限制单章上限”，后续章只保证至少1拍。
+- 新增回归：未知 seq 忽略、结构拍自动补齐、章槽归一、章数可高于原始拍数。
+- `mvn -q test` 全量通过；derive jar 打包通过，SHA256 `EBDAD2AB5DECF58702EA80B2664634F608D29E0CF5B1F78ADD3B1F9331F2EBEB`。未部署。
+
+## 弹性内部合同修复部署与 run43（2026-10-24）
+
+- 部署弹性合同 jar SHA256：`EBDAD2AB5DECF58702EA80B2664634F608D29E0CF5B1F78ADD3B1F9331F2EBEB`。
+- 旧 jar 备份：`/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-flexcontract`。
+- derive 服务重启正常，8091 端口监听；启动日志仅见旧 run42 中断产生的 Socket closed，随后 `Started DeriveGenApplication`。
+- run42 已请求停止；新 run43 创建并启动，seed=450046，参数同前。
+- run43 当前已进入 ⑥a 章节计划阶段，`running=true`，暂无 `lastError`。
+
+## 拍合同恢复与知识账本修复部署及 run43 实测（2026-10-24）
+
+- 工作流修复设计与实现计划：`docs/superpowers/plans/2026-10-24-derive-contract-repair.md`。
+- `DeriveBeatRouteService`：
+  - `recoverMissingAssignments`：恢复模型漏写但输入库存存在的合法 seq，按最近 seq 章节归属；未知 seq 仍丢弃。
+  - `repairKnowledgeCausality`：对后置写入、前置要求的知识倒置，尝试把知识提前写入同章更早拍；结构补拍无法兑现的知识要求会被移除并留日志。
+  - 路由解析前调用恢复逻辑，最终覆盖校验继续兜底。
+- 回归：`DeriveBeatRouteServiceTest` 新增合法漏写恢复、未来知识写入修复用例；全量 `mvn -q test` 通过。
+- 新 jar SHA256：`ED8A868951F6060DC685FFDADBE34B55BA19DB70B9DA537414A9ABD87070BC4C`。
+- 已备份旧包 `/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-knowledge-ledger` 并部署；服务 active，8091 正常。
+- run43 重启后已越过此前的知识因果停止点，完成 ⑥a/⑥b：18 章具体稿 5 窗全部完成，进入 P6。
+- P6 第1轮返回 REWORK（18 个剧情/真相卡一致性问题），当前回到规划重做；未进入正文阶段。该问题属于内容合同冲突，不是本次拍合同/知识账本修复范围。
+
+## run43 剩余工作流报错修复（2026-10-24）
+
+- `LlmJson` 增加单字符串状态对象修复（如 `{"C1已接案"}` → `{}`），并保留既有缺逗号/裸引号/闭符修复链。
+- `DeriveGateService.parseGate`：`issues` 为字符串或对象时归一为数组，不再因模型输出形状错误直接重试。
+- `DeriveDraftService.parseBatch`：模型把已计划拍放入相邻章时，按 `seqChapters` 确定性搬回计划章。
+- `DeriveBeatRouteService.ensureRequiredThreadPayoffs`：把 `relationshipChanges` 也纳入必须兑现线程，修复 `REL-C1-C2` 未兑现停止。
+- 全量 `mvn -q test` 通过；derive jar 打包通过，SHA256 `47461A68B4A31988B6C6FE9571E1263AF8709CBD31BC46425D5607B5DA664C2F`。
+- 已部署宝塔，旧包备份 `/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-json-knowledge2`；run43 已重启续跑，当前处于 ⑥b 具体稿阶段，未再出现 `lastError`。
+
+## 合同分层重构第一阶段实施与 run44（2026-10-24）
+
+- 计划文件：`docs/superpowers/plans/2026-10-24-derive-contract-layering.md`。
+- 新增合同层：`ContractLayer`、`ScaffoldBeat`、`ScaffoldContract`、`TruthContract`、`KnowledgeFact`。
+- 新增 `DeriveScaffoldService`：系统生成章/卷/拍稳定骨架；`DeriveStoryPlanService` 在 SCALE 后写入 `SCAFFOLD` 子合同。
+- 路由读取 scaffold，按 scaffold 归一模型输出的章节归属；提示词要求模型只能使用输入 scaffoldBeatId/章号。
+- 新增 `DeriveStateLedgerService`：按章节/seq 模拟知识状态与线程兑现。
+- 新增 `DeriveContractRepairService`：局部补知识前置 synthetic 拍。
+- 新增 `DeriveTruthContractService`：统一真相合同并向 P6 注入 `TruthContract`/冲突列表。
+- `relationshipGoal` 改为可空，修复 run44 连续重试停止。
+- 定向测试、全量 `mvn -q test`、derive jar 打包通过；jar SHA256 `483E259BC70861755D365CF0B36D604008AC84AE70D2CE3F7B7717E17430C7A9`。
+- 已部署宝塔，旧包备份 `/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261024-layered-final3`。
+- run44 已重启续跑；此前 ⑥b 5 窗完成，P6 返回 REWORK（真相/卷合同/章纲仍冲突），当前回到 ⑥a 规划重做，`lastError` 为空。尚未进入正文。
+
+## run43 线上排查结论：工作流契约冲突导致“稳定模型”被逼成不稳定输出（2026-10-25，只读排查）
+
+- **现场事实**：宝塔 `derive_gen` run43 当前 `status=PLANNING`、`novel_id=93`、`qc_round=0`；`llm_call_log` 共 48 次调用，全部 HTTP/传输层 `status=ok`，**没有模型服务拒绝或内容过滤拒答**；其中 12 次被工作流以 `error_msg` 拒绝。应用日志 `/www/wwwroot/novelgen-derive/logs/app.log` 的 run43 时间线显示三次重启续跑：20:40、21:23、22:34，三次分别停在“焦点角色均尚未获得知识”“线程未兑现：REL-C1-C2”“LLM JSON 连续 3 轮不合规”。
+- **质量闸实际拒绝内容**（P6 第 1 轮，run43 最后一次 gate id=1999，9 个 issues）：真相卡=苏晚单独伪造失踪者去向、无死亡、无珍品/密室/武装威胁；卷合同/主线 O-F01/角色叙事计划/线程计划=珍品骗局、密室囚禁、武装勒索、替身术、对手与女伴共同作案；brief 红线还被违反（第二起毒案、超出旧楼、三名角色外人物）。第 7/9 章基站线索重复、12/15/16/17 章同一矛盾重复拆解、事件拍超载。
+- **格式/机械拒绝逐条**：id1962 `"seq":,` 缺值；id1970 `filled` 文本内裸引号（`回答"不知道"`）且 seq2 被放到第1章；id1976 根对象多出 `issues` 外层片段；id1982 状态对象写成 `{"C1已接案并持有特异印痕证物"}`；id1986 seq 4 空/重复；id1994 `state_changes.who="关系改变"`（把 what 枚举写进 who）；id1998 gate 缺顶层 `directive`；id1980/2002/2003/2004 角色对象提前写成 `"}}` 多闭括号；另有 missing seq17、coverage 等语义拒绝。
+- **根因一（输入源互相打架）**：`param_intent` 明确要求“无死亡、超自然、第二案件、三角色、旧楼/走廊”，但 `DeriveSampleService.WELD_PROMPT` 只拿抽样段落和收束方式焊接，**没有把用户创作框架作为硬约束**；于是 O-F01 带进珍品骗局/毒案/密室等违禁素材。后续 `STORY_SPINE` 又只拿 welded 主线生成脊柱，`HEAD_C` 真相卡却按 intent/gate 指令生成苏晚案，系统没有单一真相真源。
+- **根因二（回炉指令没有回到上游）**：P6 `repairTarget=SPINE` 后 `DeriveResetService.replanFrom` 删除 STORY_SPINE 并把闸轮次清 0；但 `gateDirective` 只注入 ⑥b 的 head/batch，`advanceSpine/advanceVolumes/advanceCharacters` 不读它，于是同样的 O-F01 再次生成同样的珍品脊柱。`parseCharacters` 也不校验 globalThreads.ownerCharacterKey/requiredThreads 是否有对应角色，导致 C3 线程无人可兑现，后续校验只能报“线程未兑现”。
+- **根因三（单次 JSON 过载 + 修复器覆盖有限）**：路由/角色/闸一次吐出大量嵌套对象和自然语言长值；模型在“同时满足真相、章号、seq、cast、线程、知识因果”的上下文里产生局部语法漂移（多闭括号、漏冒号/漏值、字符串内裸引号）。`LlmJson` 只能修有限几类，三次重试后整条 auto-flow 中止；这不是模型没有稳定输出能力，而是工作流把矛盾合同和超大 JSON 同时塞给它。
+- **旁证**：run44 在合同分层后仍出现 `relationshipGoal 不能为空`、`requiredBeatRoles 非法: REVERSAL`、多次 `JSON Index out of bounds`，说明问题是工作流契约/回炉闭环，不是单个旧 bug。
+- **建议方向（本轮未改码）**：①把 TruthContract 设为唯一真相源，welding 阶段先按 intent 过滤不兼容素材；②gate directive 注入 SPINE/CHARACTERS/ROUTE，根因回炉轮次不得清零；③解析时校验 ownerCharacterKey/requiredThreads/relationshipChanges 闭包，机械字段（seq/章号/枚举）由系统生成，模型只写文本；④继续拆小输出（逐角色/逐窗）并加严格 JSON Schema/结构化输出，保留原始输出与修复轨迹。
+## DeriveFlow P0/P1 修复、宝塔部署与 run44 实测（2026-10-25）
+
+- **P0 单一真相合同**：`TruthContract` 兼容真相卡根形态 `{solution:{...}}` 与旧嵌套形态 `{truth:{...}}`；无 `finalChoice` 时生成中性合同选择；根因回炉保留 `TRUTH_CONTRACT`；SPINE/VOLUMES 在合同存在时由系统直接重建，CHARACTERS/ROUTE/⑥b/⑦/P6 均注入同一合同；P6 与写作阶段主线改为合同 `finalTruth`，不再把旧 O-F01 当第二真相。
+- **P0 闭环校验**：新增 `validateContractClosure`（ownerCharacterKey、focusCharacters、requiredThreads、conflictTargets、关系线引用闭合），上游硬错误自动转 `REWORK/SPINE`；关系线 `C1-C2`/`REL-C1-C2:说明` 统一归一；所有 `REL-*` 线程纳入必兑现集合，缺失自动挂到末章兑现拍/补拍。
+- **P1 机械字段系统化**：scaffold 按 scope 章数生成；路由章号按 scaffold 归一；`REVERSAL/RECORD` 等枚举别名归一；`state_changes` 空关系噪声丢弃；`LlmJson` 修复多闭括号、单字符串对象、缺逗号/裸引号；窗口遗漏的 PLANNED 拍由终局对账补为 `SKIPPED`，不再因模型漏标整本停摆。
+- **验证**：新增/扩展 `DeriveTruthContractServiceTest`、`DeriveStoryPlanTruthContractTest`、`DeriveBeatRouteServiceTest`（关系线/别名/章号归一）、`DeriveResetServiceTest`、`DeriveDraftBatchTest`、`LlmJsonTest` 等；最终全量 `mvn -q test` 通过。最终 derive jar SHA256=`C666A81B133E89CD56F53E049A63D5AD7E0BF7EF5CAAF0D057507B697514AEA1`，已部署宝塔并重启，服务 active，Flyway schema=125。
+- **run44 实测**：多次 `clear-planning + auto?direct=false` 实跑；机械链已能稳定通过 ⑥a/⑥b、知识因果修复、关系线兑现、终局漏拍收口。最后一轮 run44 走到 P6 round=6 后按熔断终止（`FAILED`，novel_id=106）；剩余6条均为内容质量类 FIXABLE（第4/5章重复、事件拍过密、乔晚 persona 与独自重返动作冲突、角色 arcBefore 不一致等），不再出现 P0/P1 的双真相、未知关系线、漏拍停摆或 JSON 解析死循环。若要继续到 PASSED，需要单独做 P6 内容合同/章纲重排修复，不应再回退 P0/P1。
