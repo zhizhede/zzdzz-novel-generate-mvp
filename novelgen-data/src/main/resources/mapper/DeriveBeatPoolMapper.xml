@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveBeatPoolMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_beat_pool (
+            run_id, beat_key, pool_seq, beat_role, source, goal, novelty,
+            state_before, state_after, depends_on, focus_characters, thread_refs,
+            requires_knowledge, writes_knowledge, reveal_level, required, protected,
+            status, contract
+        ) VALUES (
+            #{p.runId}, #{p.beatKey}, #{p.poolSeq}, #{p.beatRole}, #{p.source}, #{p.goal}, #{p.novelty},
+            #{p.stateBefore}::jsonb, #{p.stateAfter}::jsonb, #{p.dependsOn}::jsonb,
+            #{p.focusCharacters}::jsonb, #{p.threadRefs}::jsonb,
+            #{p.requiresKnowledge}::jsonb, #{p.writesKnowledge}::jsonb,
+            #{p.revealLevel}, #{p.required}, #{p.protectedBeat}, #{p.status},
+            #{p.contract}::jsonb
+         ) ON CONFLICT (run_id, beat_key) DO UPDATE SET
+            pool_seq = EXCLUDED.pool_seq, beat_role = EXCLUDED.beat_role, source = EXCLUDED.source,
+            goal = EXCLUDED.goal, novelty = EXCLUDED.novelty, state_before = EXCLUDED.state_before,
+            state_after = EXCLUDED.state_after, depends_on = EXCLUDED.depends_on,
+            focus_characters = EXCLUDED.focus_characters, thread_refs = EXCLUDED.thread_refs,
+            requires_knowledge = EXCLUDED.requires_knowledge, writes_knowledge = EXCLUDED.writes_knowledge,
+            reveal_level = EXCLUDED.reveal_level, required = EXCLUDED.required,
+            protected = EXCLUDED.protected, status = EXCLUDED.status, contract = EXCLUDED.contract,
+            updated_time = NOW()
+        RETURNING id
+    </select>
+</mapper>

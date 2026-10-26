@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveChapterContractMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_chapter_contract (
+            run_id, chapter_no, volume_no, required_roles, target_state_before,
+            target_state_after, reveal_level, min_beats, max_beats, outline_contract, pack_version
+        ) VALUES (
+            #{p.runId}, #{p.chapterNo}, #{p.volumeNo}, #{p.requiredRoles}::jsonb,
+            #{p.targetStateBefore}::jsonb, #{p.targetStateAfter}::jsonb,
+            #{p.revealLevel}, #{p.minBeats}, #{p.maxBeats}, #{p.outlineContract}, #{p.packVersion}
+         ) ON CONFLICT (run_id, chapter_no) DO UPDATE SET
+            volume_no = EXCLUDED.volume_no, required_roles = EXCLUDED.required_roles,
+            target_state_before = EXCLUDED.target_state_before, target_state_after = EXCLUDED.target_state_after,
+            reveal_level = EXCLUDED.reveal_level, min_beats = EXCLUDED.min_beats,
+            max_beats = EXCLUDED.max_beats, outline_contract = EXCLUDED.outline_contract,
+            pack_version = EXCLUDED.pack_version, updated_time = NOW()
+        RETURNING id
+    </select>
+</mapper>

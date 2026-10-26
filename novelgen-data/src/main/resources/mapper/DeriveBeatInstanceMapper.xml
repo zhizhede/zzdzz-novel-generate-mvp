@@ -6,11 +6,11 @@
         INSERT INTO beat_instance (
             run_id, seq, source, asset_id, arc_id, arc_seg_no, beat_type,
             pacing, chapter_no, volume_no, filled_text, status,
-            story_layer, beat_role, route_contract
+            beat_key, chapter_seq, pack_version, novelty_key, story_layer, beat_role, route_contract
         ) VALUES (
             #{p.runId}, #{p.seq}, #{p.source}, #{p.assetId}, #{p.arcId}, #{p.arcSegNo}, #{p.beatType},
             #{p.pacing}, #{p.chapterNo}, #{p.volumeNo}, #{p.filledText}, #{p.status},
-            #{p.storyLayer}, #{p.beatRole}, #{p.routeContract}::jsonb
+            #{p.beatKey}, #{p.chapterSeq}, #{p.packVersion}, #{p.noveltyKey}, #{p.storyLayer}, #{p.beatRole}, #{p.routeContract}::jsonb
         )
         RETURNING id
     </select>
@@ -24,6 +24,10 @@
             story_layer = #{p.storyLayer},
             beat_role = #{p.beatRole},
             route_contract = #{p.routeContract}::jsonb,
+            beat_key = #{p.beatKey},
+            chapter_seq = #{p.chapterSeq},
+            pack_version = #{p.packVersion},
+            novelty_key = #{p.noveltyKey},
             updated_time = NOW()
         WHERE id = #{p.id}
     </update>

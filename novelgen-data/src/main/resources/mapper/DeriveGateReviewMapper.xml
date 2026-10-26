@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveGateReviewMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_gate_review (
+            run_id, round, verdict, action, issues, criteria, directive, repair_target
+        ) VALUES (
+            #{p.runId}, #{p.round}, #{p.verdict}, #{p.action},
+            #{p.issues}::jsonb, #{p.criteria}::jsonb, #{p.directive}, #{p.repairTarget}
+        ) RETURNING id
+    </select>
+</mapper>

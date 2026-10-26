@@ -57,6 +57,18 @@ public class BeatInstanceDO extends DeriveBaseDO {
     /** 结构功能：CLUE_PLANT / HIGHLIGHT / LOCAL_CLOSURE 等。 */
     private String beatRole;
 
+    /** 全局拍键（机械装箱后必填；旧运行可为空）。 */
+    private String beatKey;
+
+    /** 章内顺序（系统装箱后必填）。 */
+    private Integer chapterSeq;
+
+    /** 装箱版本。 */
+    private Integer packVersion;
+
+    /** 新增信息指纹，供语义去重。 */
+    private String noveltyKey;
+
     /** 出场方式、角色/线程引用、依赖、知识和状态变化。 */
     private String routeContract;
 }
