@@ -74,7 +74,8 @@ public class DeriveQcService {
 
     /** 工作流痕迹正则（正文体；章注豁免） */
     static final Pattern FLOW_PATTERN = Pattern.compile(
-            "O-P\\d|S-P\\d|W-P\\d|O-F\\d|素材池|素材来源|抽取稿|标签层|约束采样|域格|拍实例|拍素材|弧素材|beat_type|arc_fit|label_text|工作流");
+            "O-P\\d|S-P\\d|W-P\\d|O-F\\d|素材池|素材来源|抽取稿|标签层|约束采样|域格|拍实例|拍素材|弧素材|beat_type|arc_fit|label_text|工作流"
+            + "|状态包|上一稿|请提供第[零一二三四五六七八九十百千两\\d]+章");
 
     static final String QC_PROMPT = """
             你是小说质检员。输入含：域格、类别与目标节奏、结局形状、产品形态、主线、

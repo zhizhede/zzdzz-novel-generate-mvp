@@ -352,10 +352,39 @@ public class DerivePlanService {
                         beatsPlanned(run.getId()), totalBudget(run.getId()), List.of(), "REWORK",
                         0, 0, 0, 0, false);
             }
-            String message = validation.hardErrors().isEmpty()
-                    ? "故事规划校验失败"
-                    : validation.hardErrors().get(0).message();
-            throw new BizException(ErrorCode.PARAM_ERROR, "故事规划校验失败：" + message);
+            // P6 Task4：DRAFT 级规划硬错误（persona/角色合同对齐）不再直接抛异常停死 auto-flow，
+            // 转成 GATE REWORK/DRAFT + 把 PLAN_V2 退回 CHARACTERS 局部重做角色合同，
+            // 轮次与 P6 共用同一熔断计数（>5 轮转 FAILED），禁止无限回炉。
+            List<String> issues = validation.hardErrors().stream()
+                    .map(issue -> issue.code() + "：" + issue.message())
+                    .collect(java.util.stream.Collectors.toList());
+            String repairTarget = validation.hardErrors().stream()
+                    .map(PlanValidationVO.Issue::repairTarget)
+                    .filter(target -> target != null && !target.isBlank()
+                            && !"NONE".equals(target))
+                    .findFirst().orElse("DRAFT");
+            int prevRound = DeriveGateService.gateRound(run.getStepStatus());
+            String directive = DeriveGateService.buildDirective(issues, repairTarget);
+            if (prevRound >= 5) {
+                runMapper.updateStepStatus(run.getId(), DeriveGateService.withGate(
+                        run.getStepStatus(), "FAILED", prevRound + 1, issues, directive,
+                        repairTarget));
+                runMapper.updateStatus(run.getId(), "FAILED", null);
+                log.error("规划硬校验熔断：runId={} target={} issues={}",
+                        run.getId(), repairTarget, issues);
+                return new PlanVO(run.getId(), run.getNovelId(), chaptersPlanned(run.getId()),
+                        beatsPlanned(run.getId()), totalBudget(run.getId()), List.of(), "FAILED",
+                        0, 0, 0, 0, false);
+            }
+            runMapper.updateStepStatus(run.getId(), DeriveGateService.withGate(
+                    run.getStepStatus(), "REWORK", prevRound + 1, issues, directive,
+                    repairTarget));
+            resetPlanToCharacters(run);
+            log.warn("规划硬校验转角色合同回炉：runId={} round={} target={} issues={}",
+                    run.getId(), prevRound + 1, repairTarget, issues);
+            return new PlanVO(run.getId(), run.getNovelId(), chaptersPlanned(run.getId()),
+                    beatsPlanned(run.getId()), totalBudget(run.getId()), List.of(), "REWORK",
+                    0, 0, 0, 0, false);
         }
         RunDO current = runMapper.selectById(run.getId());
         ObjectNode root = (ObjectNode) readTreeSafe(current.getStepStatus()).deepCopy();
@@ -589,6 +618,28 @@ public class DerivePlanService {
         return chapterMapper.selectList(new LambdaQueryWrapper<ChapterDO>()
                         .eq(ChapterDO::getNovelId, run.getNovelId()))
                 .stream().mapToInt(c -> c.getBudget() == null ? 0 : c.getBudget()).sum();
+    }
+
+    /**
+     * P6 Task4：把 PLAN_V2 退回 CHARACTERS 单元，让角色合同用已有 cast/ persona
+     * 局部重做（保留 scope 与已 VALIDATE 的卷路由，禁止清书重规划）。
+     */
+    private void resetPlanToCharacters(RunDO run) {
+        RunDO current = runMapper.selectById(run.getId());
+        ObjectNode root = (ObjectNode) readTreeSafe(current.getStepStatus()).deepCopy();
+        ObjectNode steps = root.path("steps").isObject()
+                ? (ObjectNode) root.path("steps") : root.putObject("steps");
+        PlanContracts.PlanV2State state = PlanV2StateCodec.read(
+                steps.path("PLAN_V2").toString());
+        List<PlanContracts.PlanUnit> completed = new ArrayList<>(state.completedUnits());
+        completed.remove(PlanContracts.PlanUnit.CHARACTERS);
+        completed.remove(PlanContracts.PlanUnit.SLOT_ROUTE);
+        completed.remove(PlanContracts.PlanUnit.VALIDATE);
+        Map<Integer, PlanContracts.PlanUnit> volumeUnits = new LinkedHashMap<>(state.volumeUnits());
+        PlanContracts.PlanV2State reset = new PlanContracts.PlanV2State(
+                PlanContracts.PlanUnit.CHARACTERS, completed, state.scope(), volumeUnits);
+        steps.set("PLAN_V2", STATIC_MAPPER.valueToTree(reset));
+        runMapper.updateStepStatus(run.getId(), root.toString());
     }
 
     private static <T> List<T> appendUnit(List<T> values, T value) {

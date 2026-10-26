@@ -31,6 +31,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -226,6 +227,12 @@ public class DeriveStoryPlanService {
         user.set("scope", MAPPER.valueToTree(oldState.scope()));
         user.set("storySpine", readSteps(run.getStepStatus()).path("STORY_SPINE"));
         user.set("volumes", MAPPER.valueToTree(loadVolumeContracts(run.getId())));
+        NovelDO novel = novelMapper.selectById(run.getNovelId());
+        if (novel != null) {
+            JsonNode assets = readTreeSafe(novel.getStoryAssets());
+            user.set("cast", assets.path("cast"));
+            user.set("brief", assets.path("brief"));
+        }
         user.put("创作框架", nullToEmpty(run.getParamIntent()));
         putGateDirective(user, run);
         putTruthContract(user, run);
@@ -237,9 +244,12 @@ public class DeriveStoryPlanService {
                         0.3),
                 root -> parseCharacters(root, oldState.scope()), 3);
         persistCharacters(run, characters);
+        // P6 Task4：角色合同回炉重做时，已 VALIDATE 的卷路由保留（局部修复，禁止整本重路由）。
         Map<Integer, PlanContracts.PlanUnit> volumeUnits = new java.util.LinkedHashMap<>();
         for (int volumeNo = 1; volumeNo <= oldState.scope().volumeCount(); volumeNo++) {
-            volumeUnits.put(volumeNo, PlanContracts.PlanUnit.SLOT_ROUTE);
+            PlanContracts.PlanUnit existing = oldState.volumeUnits().get(volumeNo);
+            volumeUnits.put(volumeNo, existing == PlanContracts.PlanUnit.VALIDATE
+                    ? PlanContracts.PlanUnit.VALIDATE : PlanContracts.PlanUnit.SLOT_ROUTE);
         }
         PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
                 PlanContracts.PlanUnit.SLOT_ROUTE,
@@ -432,7 +442,8 @@ public class DeriveStoryPlanService {
                     required(node, "payoffProof"),
                     spotlight, conflict, payoff,
                     required(node, "arcBefore"),
-                    required(node, "arcAfter")));
+                    required(node, "arcAfter"),
+                    blankToNull(node.path("castRole").asText(""))));
         }
         return out;
     }
@@ -483,7 +494,8 @@ public class DeriveStoryPlanService {
     }
 
     private void persistCharacters(RunDO run, List<PlanContracts.CharacterContract> characters) {
-        for (PlanContracts.CharacterContract contract : characters) {
+        List<PlanContracts.CharacterContract> enriched = withCastRoles(run, characters);
+        for (PlanContracts.CharacterContract contract : enriched) {
             CharacterPlanDO row = characterPlanMapper.selectOne(
                     new LambdaQueryWrapper<CharacterPlanDO>()
                             .eq(CharacterPlanDO::getRunId, run.getId())
@@ -515,6 +527,72 @@ public class DeriveStoryPlanService {
                 persistRelationshipThread(run, contract, relationKey);
             }
         }
+    }
+
+    private List<PlanContracts.CharacterContract> withCastRoles(
+            RunDO run, List<PlanContracts.CharacterContract> characters) {
+        if (run.getNovelId() == null) {
+            return characters;
+        }
+        NovelDO novel = novelMapper.selectById(run.getNovelId());
+        if (novel == null) {
+            return characters;
+        }
+        JsonNode cast = readTreeSafe(novel.getStoryAssets()).path("cast");
+        if (!cast.isArray() || cast.isEmpty()) {
+            return characters;
+        }
+        return applyCastRoles(cast, characters);
+    }
+
+    /** 按人物表回填 CharacterContract.castRole（key→name→顺序三级兜底）。 */
+    static List<PlanContracts.CharacterContract> applyCastRoles(
+            JsonNode cast, List<PlanContracts.CharacterContract> characters) {
+        if (cast == null || !cast.isArray() || cast.isEmpty()) {
+            return characters;
+        }
+        Map<String, String> roleByKey = new LinkedHashMap<>();
+        Map<String, String> roleByName = new LinkedHashMap<>();
+        List<JsonNode> members = new ArrayList<>();
+        cast.forEach(member -> {
+            members.add(member);
+            String role = member.path("role").asText("").trim();
+            String key = member.path("characterKey").asText("").trim();
+            String name = member.path("name").asText("").trim();
+            if (!key.isBlank()) {
+                roleByKey.put(key, role);
+            }
+            if (!name.isBlank()) {
+                roleByName.put(name, role);
+            }
+        });
+        List<PlanContracts.CharacterContract> out = new ArrayList<>();
+        for (int i = 0; i < characters.size(); i++) {
+            PlanContracts.CharacterContract contract = characters.get(i);
+            String role = contract.castRole();
+            if (role == null || role.isBlank()) {
+                role = roleByKey.get(contract.characterKey());
+            }
+            if (role == null || role.isBlank()) {
+                role = roleByName.get(contract.displayNameHint());
+            }
+            if ((role == null || role.isBlank()) && i < members.size()) {
+                role = members.get(i).path("role").asText("").trim();
+            }
+            if (role == null) {
+                role = "";
+            }
+            out.add(new PlanContracts.CharacterContract(
+                    contract.characterKey(), contract.displayNameHint(), contract.function(),
+                    contract.uniqueContribution(), contract.want(), contract.flaw(),
+                    contract.requiredSetup(), contract.conflictTargets(),
+                    contract.functionalConflict(), contract.highlightChoice(),
+                    contract.highlightCost(), contract.relationshipChanges(),
+                    contract.payoffProof(), contract.spotlightVolume(),
+                    contract.conflictVolume(), contract.payoffVolume(),
+                    contract.arcBefore(), contract.arcAfter(), role));
+        }
+        return out;
     }
 
     private void persistRelationshipThread(RunDO run, PlanContracts.CharacterContract contract,

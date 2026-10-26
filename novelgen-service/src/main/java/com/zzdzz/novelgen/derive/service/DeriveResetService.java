@@ -10,6 +10,9 @@ import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.CalibrationMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveBeatPoolMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveChapterContractMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveGateReviewMapper;
 import com.zzdzz.novelgen.derive.mapper.DraftHistoryMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.QcReportMapper;
@@ -23,6 +26,9 @@ import com.zzdzz.novelgen.derive.plan.PlanV2StateCodec;
 import com.zzdzz.novelgen.model.entity.derive.CalibrationDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
 import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveBeatPoolDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveChapterContractDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveGateReviewDO;
 import com.zzdzz.novelgen.model.entity.derive.DraftHistoryDO;
 import com.zzdzz.novelgen.model.entity.derive.QcReportDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
@@ -55,6 +61,12 @@ public class DeriveResetService {
     private final VolumePlanMapper volumePlanMapper;
     private final CharacterPlanMapper characterPlanMapper;
     private final StoryThreadMapper storyThreadMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveBeatPoolMapper beatPoolMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveChapterContractMapper chapterContractMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveGateReviewMapper gateReviewMapper;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -154,6 +166,18 @@ public class DeriveResetService {
                 .eq(CharacterPlanDO::getRunId, runId));
         storyThreadMapper.delete(new LambdaQueryWrapper<StoryThreadDO>()
                 .eq(StoryThreadDO::getRunId, runId));
+        if (beatPoolMapper != null) {
+            beatPoolMapper.delete(new LambdaQueryWrapper<DeriveBeatPoolDO>()
+                    .eq(DeriveBeatPoolDO::getRunId, runId));
+        }
+        if (chapterContractMapper != null) {
+            chapterContractMapper.delete(new LambdaQueryWrapper<DeriveChapterContractDO>()
+                    .eq(DeriveChapterContractDO::getRunId, runId));
+        }
+        if (gateReviewMapper != null) {
+            gateReviewMapper.delete(new LambdaQueryWrapper<DeriveGateReviewDO>()
+                    .eq(DeriveGateReviewDO::getRunId, runId));
+        }
         if (novelId > 0) {
             chapterMapper.delete(new LambdaQueryWrapper<ChapterDO>()
                     .eq(ChapterDO::getNovelId, novelId));
@@ -161,7 +185,8 @@ public class DeriveResetService {
                     .eq(WorldStateDO::getNovelId, novelId));
             workFingerprintMapper.delete(new LambdaQueryWrapper<WorkFingerprintDO>()
                     .eq(WorkFingerprintDO::getNovelId, novelId));
-            novelMapper.clearDraftAssets(novelId);
+            // P6 Task4：根因回炉保留 protagonist/cast，只清 brief/truth，供角色合同重做读取 role/persona。
+            novelMapper.clearDraftBriefTruth(novelId);
             novelMapper.updateStats(novelId, 0, 0);
         }
         runMapper.updateStepStatus(runId, resetPlanState(run.getStepStatus(), target));

@@ -7,12 +7,14 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
+import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
 import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
+import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.StoryThreadDO;
 import com.zzdzz.novelgen.model.entity.derive.VolumePlanDO;
@@ -28,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** 写作前故事规划校验：结构、状态、知识、角色弧与线程闭环。 */
 @Service
@@ -37,6 +40,7 @@ public class DerivePlanValidationService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final RunMapper runMapper;
+    private final NovelMapper novelMapper;
     private final VolumePlanMapper volumePlanMapper;
     private final CharacterPlanMapper characterPlanMapper;
     private final StoryThreadMapper storyThreadMapper;
@@ -176,6 +180,12 @@ public class DerivePlanValidationService {
         }
 
         List<PlanContracts.PlanIssue> issues = new ArrayList<>();
+        if (onlyVolume == null && run.getNovelId() != null) {
+            NovelDO novel = novelMapper.selectById(run.getNovelId());
+            JsonNode cast = novel == null ? null
+                    : readTreeSafe(novel.getStoryAssets()).path("cast");
+            issues.addAll(validatePersonaAlignment(characters, cast));
+        }
         issues.addAll(validateVolumeHooks(volumes));
         issues.addAll(validateContractClosure(volumes, threads, characterContracts));
         List<AppearanceStep> steps = new ArrayList<>();
@@ -320,6 +330,177 @@ public class DerivePlanValidationService {
         return issues;
     }
 
+    /**
+     * persona/人物表与角色叙事计划对齐（P6 Task4）：
+     * C1 必须是 DETECTIVE 主视角；DETECTIVE/OPPOSITION 不得同名；
+     * persona 绝对禁令不得与 arc/职能文本重合；castRole 与 function 互斥时报错。
+     * cast 缺失（⑥a 首跑）时只做行级检查，persona 类检查跳过。
+     */
+    static List<PlanContracts.PlanIssue> validatePersonaAlignment(
+            List<CharacterPlanDO> rows, JsonNode cast) {
+        List<PlanContracts.PlanIssue> issues = new ArrayList<>();
+        if (rows == null || rows.isEmpty()) {
+            return issues;
+        }
+        Map<String, JsonNode> castByKey = new LinkedHashMap<>();
+        Map<String, JsonNode> castByName = new LinkedHashMap<>();
+        boolean hasCast = cast != null && cast.isArray() && !cast.isEmpty();
+        if (hasCast) {
+            cast.forEach(member -> {
+                String key = member.path("characterKey").asText("").trim();
+                String name = member.path("name").asText("").trim();
+                if (!key.isBlank()) {
+                    castByKey.put(key, member);
+                }
+                if (!name.isBlank()) {
+                    castByName.put(name, member);
+                }
+            });
+        }
+        Set<String> detectiveNames = new LinkedHashSet<>();
+        Set<String> oppositionNames = new LinkedHashSet<>();
+        for (CharacterPlanDO row : rows) {
+            PlanContracts.CharacterFunction function = enumOr(
+                    PlanContracts.CharacterFunction.class, row.getFunctionCode(),
+                    PlanContracts.CharacterFunction.SUPPORT);
+            String planText = personaPlanText(row);
+            JsonNode member = castByKey.get(row.getCharacterKey());
+            if (member == null && row.getDisplayNameHint() != null) {
+                member = castByName.get(row.getDisplayNameHint().trim());
+            }
+            if (member != null) {
+                String conduct = member.path("persona").path("conduct").asText("");
+                String conflict = prohibitedActionConflict(conduct, planText);
+                if (conflict != null) {
+                    issues.add(error("PERSONA_ROLE_MISMATCH",
+                            PlanContracts.RepairScope.DRAFT, null,
+                            "角色 " + row.getCharacterKey() + " 的 persona 禁止「" + conflict
+                                    + "」，但角色计划文本安排了该动作"));
+                }
+                String castRole = member.path("role").asText("");
+                if (function == PlanContracts.CharacterFunction.DETECTIVE
+                        && containsAny(castRole, "凶手", "作案", "主谋", "罪犯", "加害")) {
+                    issues.add(error("PERSONA_ROLE_MISMATCH",
+                            PlanContracts.RepairScope.DRAFT, null,
+                            "角色 " + row.getCharacterKey() + " 的人物表 role 指向加害者，"
+                                    + "但 function=DETECTIVE（主视角）"));
+                }
+            }
+            if ("C1".equals(row.getCharacterKey())
+                    && function != PlanContracts.CharacterFunction.DETECTIVE) {
+                issues.add(error("PERSONA_ROLE_MISMATCH",
+                        PlanContracts.RepairScope.DRAFT, null,
+                        "C1 必须是 DETECTIVE 主视角，当前 function=" + function));
+            }
+            String name = member != null ? member.path("name").asText("").trim()
+                    : row.getDisplayNameHint() == null ? "" : row.getDisplayNameHint().trim();
+            if (!name.isBlank()) {
+                if (function == PlanContracts.CharacterFunction.DETECTIVE) {
+                    detectiveNames.add(name);
+                } else if (function == PlanContracts.CharacterFunction.OPPOSITION) {
+                    oppositionNames.add(name);
+                }
+            }
+        }
+        for (String name : detectiveNames) {
+            if (oppositionNames.contains(name)) {
+                issues.add(error("CHARACTER_FUNCTION_NAME_COLLISION",
+                        PlanContracts.RepairScope.DRAFT, null,
+                        "DETECTIVE 与 OPPOSITION 共用姓名「" + name + "」"));
+            }
+        }
+        return issues;
+    }
+
+    /** 角色计划中与 persona 判定相关的文本。 */
+    private static String personaPlanText(CharacterPlanDO row) {
+        JsonNode contract = readTreeSafe(row.getContract());
+        return nullToEmpty(row.getArcBefore()) + "\n" + nullToEmpty(row.getArcAfter()) + "\n"
+                + nullToEmpty(contract.path("functionalConflict").asText("")) + "\n"
+                + nullToEmpty(contract.path("highlightChoice").asText(""));
+    }
+
+    /** 动作前缀以否定/禁令词收尾的合规表述（中文里否定词紧贴动作前）。 */
+    private static final String[] NEGATION_PHRASES = {
+            "不再会", "避免", "不再", "没有", "拒绝", "杜绝", "克制",
+            "戒除", "戒掉", "放下", "放弃", "难以", "无意", "抑制", "压制"
+    };
+
+    /**
+     * 从 persona conduct 提取绝对禁令动作，若角色计划文本“裸安排”了该动作则判冲突。
+     * 例：conduct=“禁止私闯现场搜查”，计划含“私闯现场搜查” → 冲突。
+     *
+     * <p>run45 实弹（第三次尝试连续 4 轮 PERSONA_ROLE_MISMATCH 熔断）：纯子串包含会把
+     * 「复述禁令本身」（arc_before=“冷静克制、绝不提前下结论”）与「否定式使用」
+     * （functionalConflict=“必须在不提前下结论的前提下追问”）误判成安排了该动作——
+     * 这是合规表述，模型改不动，回炉永不收敛。故逐个出现位置检查紧邻前缀，
+     * 只有不带否定/禁令词的裸出现才判冲突。
+     */
+    static String prohibitedActionConflict(String conduct, String planText) {
+        if (conduct == null || conduct.isBlank() || planText == null || planText.isBlank()) {
+            return null;
+        }
+        var matcher = Pattern.compile("(禁止|不得|绝不|严禁|不能|不允许)"
+                + "([^，。；、!？\\n]{2,14})").matcher(conduct);
+        while (matcher.find()) {
+            String action = matcher.group(2).trim();
+            if (action.length() < 3) {
+                continue;
+            }
+            String normalizedAction = normalizePersonaText(action);
+            String normalizedPlan = normalizePersonaText(planText);
+            if (normalizedAction.isEmpty() || normalizedPlan.isEmpty()) {
+                continue;
+            }
+            int idx = normalizedPlan.indexOf(normalizedAction);
+            while (idx >= 0) {
+                String prefix = idx == 0 ? ""
+                        : normalizedPlan.substring(Math.max(0, idx - 6), idx);
+                if (!hasNegationPrefix(prefix)) {
+                    return action;
+                }
+                idx = normalizedPlan.indexOf(normalizedAction, idx + normalizedAction.length());
+            }
+        }
+        return null;
+    }
+
+    private static boolean hasNegationPrefix(String prefix) {
+        if (prefix.isEmpty()) {
+            return false;
+        }
+        for (String phrase : NEGATION_PHRASES) {
+            if (prefix.endsWith(phrase)) {
+                return true;
+            }
+        }
+        char last = prefix.charAt(prefix.length() - 1);
+        return last == '不' || last == '未' || last == '非' || last == '无'
+                || last == '止' || last == '得' || last == '能' || last == '许'
+                || last == '严';
+    }
+
+    private static String normalizePersonaText(String text) {
+        return text.replaceAll("[^\\p{IsHan}A-Za-z0-9]", "").toLowerCase();
+    }
+
+
+    private static boolean containsAny(String text, String... needles) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        for (String needle : needles) {
+            if (text.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
     private List<PlanContracts.CharacterContract> loadCharacterContracts(
             List<CharacterPlanDO> rows) {
         List<PlanContracts.CharacterContract> out = new ArrayList<>();
@@ -331,7 +512,7 @@ public class DerivePlanValidationService {
                         row.getCharacterKey(), row.getDisplayNameHint(), PlanContracts.CharacterFunction.SUPPORT,
                         "", "", "", List.of(), List.of(), "", "", "", List.of(), "",
                         row.getSpotlightVolume(), row.getConflictVolume(), row.getPayoffVolume(),
-                        "", ""));
+                        "", "", ""));
             }
         }
         return out;

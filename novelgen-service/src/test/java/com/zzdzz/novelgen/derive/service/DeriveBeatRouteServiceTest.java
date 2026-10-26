@@ -7,6 +7,7 @@ import com.zzdzz.novelgen.derive.plan.PlanJson;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -30,11 +31,20 @@ class DeriveBeatRouteServiceTest {
     }
 
     @Test
-    void duplicateBeatOrUnknownThreadFails() throws Exception {
+    void duplicateBeatFailsButUnknownThreadIsDropped() throws Exception {
+        // P6 run45 实弹：模型自由发明 REL-C1-C2（线程账没有）导致 3 轮重试耗尽停摆；
+        // 改为机械归一剔除未知线程引用，拍保留，不再整轮拒绝。
         assertThrows(PlanJson.Bad.class,
                 () -> DeriveBeatRouteService.parseRoute(json(duplicateSeq()), context()));
-        assertThrows(PlanJson.Bad.class,
-                () -> DeriveBeatRouteService.parseRoute(json(unknownThread()), context()));
+
+        PlanContracts.RoutePlan plan = DeriveBeatRouteService.parseRoute(
+                json(unknownThread()), context());
+
+        assertTrue(plan.assignments().stream().allMatch(
+                        a -> a.threadRefs().stream().allMatch(
+                                r -> context().threadKeys().contains(r))),
+                "未知线程引用必须被剔除：" + plan.assignments());
+        assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
     }
 
     @Test
@@ -311,6 +321,68 @@ class DeriveBeatRouteServiceTest {
 
         assertTrue(plan.assignments().stream().anyMatch(a -> a.threadRefs().contains("REL-C1-C2")));
         assertTrue(DeriveBeatRouteService.validateRoute(plan, context()).isEmpty());
+    }
+    @Test
+    void overloadRebalanceMovesOrdinaryBeatButKeepsRequiredRole() {
+        var hook = new PlanContracts.ChapterSlotContract(
+                1, "HOOK", "开篇", "启动案件", "C1介入", "关系建立",
+                List.of(PlanContracts.BeatRole.HOOK), List.of(), Map.of(), Map.of());
+        var middle = new PlanContracts.ChapterSlotContract(
+                2, "MIDPOINT", "中段", "线索升级", "C2暴露", "关系破裂",
+                List.of(PlanContracts.BeatRole.HIGHLIGHT), List.of(), Map.of(), Map.of());
+        var assignments = List.of(
+                assignment(1, 1, PlanContracts.BeatRole.HOOK),
+                assignment(2, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(3, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(4, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(5, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(6, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(7, 1, PlanContracts.BeatRole.MAIN_ADVANCE));
+        var synthetic = new PlanContracts.SyntheticAssignment(
+                2, PlanContracts.StoryLayer.LOCAL_CASE, PlanContracts.BeatRole.HIGHLIGHT,
+                "抉择", "补齐高光", List.of("C2"), List.of(),
+                PlanContracts.AppearanceMode.LIVE);
+        var plan = new PlanContracts.RoutePlan(
+                1, List.of(hook, middle), new java.util.ArrayList<>(assignments),
+                List.of(synthetic), List.of());
+
+        var balanced = DeriveBeatRouteService.rebalanceRouteLoad(plan, context());
+
+        assertTrue(balanced.assignments().stream().anyMatch(a ->
+                a.seq() == 1 && a.chapterNo() == 1));
+        assertTrue(balanced.assignments().stream().anyMatch(a ->
+                a.seq() == 2 && a.chapterNo() == 2));
+    }
+
+    @Test
+    void futureKnowledgeGapInFirstChapterDoesNotCrash() {
+        // run45 实弹：首章拍的知识缺口只有后置拍会写时，
+        // earlierChapterBeat 返回 -1，直接 get(-1) 抛 Index -1 out of bounds 停掉 auto-flow。
+        var need = new PlanContracts.BeatAssignment(
+                1, 1, PlanContracts.StoryLayer.LOCAL_CASE, PlanContracts.BeatRole.CASE_SETUP,
+                List.of("C1"), List.of(), List.of(), "", PlanContracts.AppearanceMode.LIVE,
+                List.of("旧楼门锁的撬痕"), List.of(), Map.of(), Map.of());
+        var writer = new PlanContracts.BeatAssignment(
+                2, 1, PlanContracts.StoryLayer.LOCAL_CASE, PlanContracts.BeatRole.MAIN_ADVANCE,
+                List.of("C1"), List.of(), List.of(), "", PlanContracts.AppearanceMode.LIVE,
+                List.of(), List.of("旧楼门锁的撬痕"), Map.of(), Map.of());
+        var plan = new PlanContracts.RoutePlan(
+                1, List.of(), new java.util.ArrayList<>(List.of(need, writer)),
+                List.of(), List.of());
+
+        var repaired = DeriveBeatRouteService.repairKnowledgeCausality(plan);
+
+        assertTrue(repaired.assignments().size() == 2, "拍数不得变化");
+        assertTrue(repaired.assignments().get(0).writesKnowledge()
+                        .contains("旧楼门锁的撬痕"),
+                "缺口必须回退写入最早拍而不是抛 Index -1");
+    }
+    private static PlanContracts.BeatAssignment assignment(
+            int seq, int chapterNo, PlanContracts.BeatRole role) {
+        return new PlanContracts.BeatAssignment(
+                seq, chapterNo, PlanContracts.StoryLayer.LOCAL_CASE, role,
+                List.of("C1"), List.of(), List.of(), "", PlanContracts.AppearanceMode.LIVE,
+                List.of(), List.of(), Map.of(), Map.of());
     }    private static Set<Integer> assignedSeqs(PlanContracts.RoutePlan plan) {
         return plan.assignments().stream()
                 .map(PlanContracts.BeatAssignment::seq)

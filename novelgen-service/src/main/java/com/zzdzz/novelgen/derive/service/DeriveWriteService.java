@@ -69,7 +69,22 @@ public class DeriveWriteService {
     static final Pattern FORBIDDEN = Pattern.compile("O-P\\d|S-P\\d|W-P\\d|O-F\\d|素材来源|抽取稿|标签层");
     /** 过程话泄漏（审稿实锤：字数自控笔记、「第十一章——」出戏台词）——恒开 gate */
     static final Pattern META_LEAK = Pattern.compile(
-            "估算字数|目标字数带|正文字数|本章\\d+字|挂拍|第[一二三四五六七八九十百千零两\\d]+章[——\\-]");
+            "估算字数|目标字数带|正文字数|本章\\d+字|挂拍|第[一二三四五六七八九十百千零两\\d]+章[——\\-]"
+            + "|请提供第[零一二三四五六七八九十百千两\\d]+章|我需要先确认第[零一二三四五六七八九十百千两\\d]+章"
+            + "|我先确认第[零一二三四五六七八九十百千两\\d]+章|上一稿|状态包|拍实例|evidence 从正文|章纲明确记载");
+    /** 内容红线自检（禁词/过程话/主角名，不含契约与字数）——⑦ 三轮兜底取稿时，
+     *  内容干净的稿优先于字数更贴的占位话（run45 实弹：163 字助手话按字数距离赢过 2500 字真章）。 */
+    static boolean contentClean(String text, String protagonist) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String body = extractContent(text);
+        if (FORBIDDEN.matcher(body).find() || META_LEAK.matcher(body).find()) {
+            return false;
+        }
+        return protagonist == null || protagonist.isBlank() || body.contains(protagonist);
+    }
+
     /** 输出层章契约：每拍必须给出正文原句证据，末章闭合时必须交出收束表。 */
     static final Pattern CONTRACT_PATTERN = Pattern.compile(
             "<!--\\s*拍兑现契约\\s*[:：]\\s*(\\{.*?\\})\\s*-->", Pattern.DOTALL);
@@ -138,6 +153,7 @@ public class DeriveWriteService {
                <!-- 拍兑现契约：{"beats":[{"seq":1,"evidence":"正文原句"}],"open_threads":["未解决悬念"],"closed_threads":["本章解决的悬念"]} -->
                beats 必须与输入拍实例完全一致（不多不少）；每个 evidence 必须从本章正文逐字摘录一句，
                不得改写、概括或编造；open_threads/closed_threads 没有时必须给空数组。
+            正文由你在本回合从零写出，所有材料已在输入中——禁止反问、禁止索要上一稿或既有正文。
             禁止输出字数估算、预算核对、"第N章——"式出戏旁白等任何过程话。
             不要输出任何解释、标题行或 markdown 围栏。
             """;
@@ -176,6 +192,7 @@ public class DeriveWriteService {
             14. 章注之后必须单独输出一行机器可读的「拍兑现契约」：
                <!-- 拍兑现契约：{"beats":[{"seq":1,"evidence":"正文原句"}],"open_threads":[],"closed_threads":[]} -->
                beats 与输入拍实例完全一致；evidence 从正文逐字摘录；无悬念时数组给空。
+            正文由你在本回合从零写出，所有材料已在输入中——禁止反问、禁止索要上一稿或既有正文。
             禁止输出字数估算、预算核对、"第N章——"式出戏旁白等任何过程话。
             不要输出任何解释、标题行或 markdown 围栏。
             """;
@@ -249,7 +266,9 @@ public class DeriveWriteService {
         String qcIssues = latestQcIssues(runId);
 
         String best = null;
+        boolean bestClean = false;
         String lastIssue = "";
+        String lastText = "";
         boolean lastWasLen = false;
         DeriveActivity.begin(runId, "⑦ 第 " + target.getChapterNo() + " 章正文"
                 + (target.getTitle() == null || target.getTitle().isBlank() ? "" : "《" + target.getTitle() + "》"));
@@ -272,6 +291,10 @@ public class DeriveWriteService {
                 }
                 if (attempt > 0) {
                     b.append("\n\n上一稿问题（必须修复）：").append(lastIssue);
+                    if (lastText != null && !lastText.isBlank()) {
+                        b.append("\n上一稿全文（在其上修复；禁止反问、禁止索要材料，直接输出修复后的完整正文）：\n")
+                                .append(lastText);
+                    }
                 }
                 u = b.toString();
             }
@@ -282,9 +305,13 @@ public class DeriveWriteService {
                     new LlmPort.ChatRequest(NODE_WRITE, novelId, null, runId, msgs, 0.7),
                     (think, piece) -> DeriveActivity.touch(runId, piece));
             String text = r.content() == null ? "" : r.content();
-            if (best == null || Math.abs(len(extractContent(text)) - budget)
-                    < Math.abs(len(extractContent(best)) - budget)) {
+            lastText = text;
+            boolean clean = contentClean(text, protagonist);
+            if (best == null || (clean && !bestClean)
+                    || (clean == bestClean && Math.abs(len(extractContent(text)) - budget)
+                    < Math.abs(len(extractContent(best)) - budget))) {
                 best = text;
+                bestClean = clean;
             }
             String issue = validate(text, lo, hi, protagonist, lenCheck, chBeats, requireClosure);
             if (issue == null) {
@@ -644,6 +671,20 @@ public class DeriveWriteService {
             return "正文为空";
         }
         String body = extractContent(text);
+        // 内容红线先行（run45 实弹）：占位助手话（"请提供第N章正文"）既缺契约也常缺主角名，
+        // 旧顺序先报「缺拍兑现契约/evidence 不在正文」会把模型推向反问索稿的死循环。
+        Matcher f = FORBIDDEN.matcher(body);
+        if (f.find()) {
+            return "正文含禁词「" + f.group() + "」（素材编号/来源痕迹），删除";
+        }
+        Matcher m = META_LEAK.matcher(body);
+        if (m.find()) {
+            return "正文含过程话「" + m.group() + "」（字数估算/助手反问/章号出戏旁白），删除只留故事本身，直接输出正文";
+        }
+        // 输出 gate：主角名必须出现（称谓漂移的最廉价硬信号；主角可被称为"他"的章也几乎必点名）
+        if (protagonist != null && !protagonist.isBlank() && !body.contains(protagonist)) {
+            return "正文未出现主角名「" + protagonist + "」（cast 锚点），人名与前文不一致，修正";
+        }
         if (beats != null && !beats.isEmpty()) {
             String contractIssue = validateContract(text, body, beats, requireClosure);
             if (contractIssue != null) {
@@ -653,18 +694,6 @@ public class DeriveWriteService {
         int n = len(body);
         if (lenCheck && (n < lo || n > hi)) {
             return "正文字数 " + n + " 超出预算带 [" + lo + "," + hi + "]（预算±10%），调整篇幅";
-        }
-        Matcher f = FORBIDDEN.matcher(body);
-        if (f.find()) {
-            return "正文含禁词「" + f.group() + "」（素材编号/来源痕迹），删除";
-        }
-        Matcher m = META_LEAK.matcher(body);
-        if (m.find()) {
-            return "正文含过程话「" + m.group() + "」（字数估算/章号出戏旁白），删除只留故事本身";
-        }
-        // 输出 gate：主角名必须出现（称谓漂移的最廉价硬信号；主角可被称为"他"的章也几乎必点名）
-        if (protagonist != null && !protagonist.isBlank() && !body.contains(protagonist)) {
-            return "正文未出现主角名「" + protagonist + "」（cast 锚点），人名与前文不一致，修正";
         }
         return null;
     }

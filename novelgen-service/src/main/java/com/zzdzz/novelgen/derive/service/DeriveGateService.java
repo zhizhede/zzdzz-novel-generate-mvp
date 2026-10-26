@@ -9,6 +9,7 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveGateReviewMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
@@ -21,6 +22,7 @@ import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
 import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveGateReviewDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.StoryThreadDO;
@@ -35,6 +37,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -150,6 +155,8 @@ public class DeriveGateService {
     private CharacterPlanMapper characterPlanMapper;
     @Autowired(required = false)
     private StoryThreadMapper storyThreadMapper;
+    @Autowired(required = false)
+    private DeriveGateReviewMapper gateReviewMapper;
 
     /** ⑥b→⑦ 之间跑一次立项评审。 */
     public GateVO gate(long runId) {
@@ -186,7 +193,12 @@ public class DeriveGateService {
         GateTruth gateTruth = resolveGateTruth(run, novel);
         String user = buildUser(run, novel, chapters, beats, motifs, gateTruth);
 
+        List<String> preflight = preflightIssues(chapters, beats);
         GateReview review;
+        if (!preflight.isEmpty()) {
+            review = new GateReview(List.of(), preflight, "");
+            log.warn("P6 结构预检拦截：runId={} issues={}", runId, preflight);
+        } else {
         DeriveActivity.begin(runId, "P6 立项闸评审（六判据）");
         try {
             review = llmJson.ask(
@@ -196,15 +208,21 @@ public class DeriveGateService {
         } finally {
             DeriveActivity.end(runId);
         }
+        }
 
         PlanValidationVO planCheck = planValidationService == null
                 ? null : planValidationService.validateBook(runId);
         GateDecision decision = decideGate(review, planCheck, prevRound);
 
+        String directive = review.directive() == null ? "" : review.directive().trim();
+        if (directive.isEmpty() && "REWORK".equals(decision.action())) {
+            directive = buildDirective(decision.issues(), decision.repairTarget());
+        }
         run.setStepStatus(withGate(
                 run.getStepStatus(), decision.action(), round, decision.issues(),
-                review.directive(), decision.repairTarget(), decision.criteria()));
+                directive, decision.repairTarget(), decision.criteria()));
         runMapper.updateStepStatus(runId, run.getStepStatus());
+        persistGateReview(runId, round, decision, directive);
         persistTruthContract(runId, gateTruth.resolution().contract());
         if ("REWORK".equals(decision.action())) {
             runMapper.updateStatus(runId, "REWORK", null);
@@ -213,10 +231,9 @@ public class DeriveGateService {
         }
         log.info("P6立项闸：runId={} round={} verdict={} action={} issues={} directive={}",
                 runId, round, decision.verdict(), decision.action(), decision.issues().size(),
-                review.directive().length() > 80
-                        ? review.directive().substring(0, 80) + "…" : review.directive());
+                directive.length() > 80 ? directive.substring(0, 80) + "…" : directive);
         return new GateVO(runId, novelId, decision.verdict(), decision.action(), round,
-                decision.issues(), review.directive(), decision.repairTarget(),
+                decision.issues(), directive, decision.repairTarget(),
                 decision.criteria());
     }
 
@@ -394,6 +411,71 @@ public class DeriveGateService {
         return new GateReview(criteria, issues, root.path("directive").asText(""));
     }
 
+    /**
+     * P6 directive 兜底（Task5）：模型漏写 directive 时，按裁决 issues 自动生成
+     * 可执行减法指令，保证回炉轮次始终带反馈，不再空转。
+     */
+    static String buildDirective(List<String> issues, String repairTarget) {
+        if (issues == null || issues.isEmpty()) {
+            return "";
+        }
+        String target = repairTarget == null || repairTarget.isBlank() ? "NONE" : repairTarget;
+        return "按 TruthContract 修复以下问题：" + String.join("；", issues)
+                + "；repairTarget=" + target;
+    }
+
+    /** P6 前结构预检：机械问题不消耗 LLM 评审轮次。 */
+    static List<String> preflightIssues(List<ChapterDO> chapters, List<BeatInstanceDO> beats) {
+        List<String> issues = new ArrayList<>();
+        Set<Integer> seqs = new HashSet<>();
+        Map<Integer, Integer> effective = new HashMap<>();
+        int finalReveal = 0;
+        for (BeatInstanceDO beat : beats) {
+            if ("SKIPPED".equals(beat.getStatus())) {
+                continue;
+            }
+            if (!seqs.add(beat.getSeq())) {
+                issues.add("PACK_DUPLICATE_GLOBAL_SEQ：seq=" + beat.getSeq() + " 重复");
+            }
+            if (beat.getChapterNo() == null) {
+                issues.add("PACK_BEAT_UNASSIGNED：seq=" + beat.getSeq() + " 没有章节归属");
+            } else {
+                effective.merge(beat.getChapterNo(), 1, Integer::sum);
+            }
+            if ("FINAL_REVEAL".equals(beat.getBeatRole())) {
+                finalReveal++;
+            }
+        }
+        for (ChapterDO chapter : chapters) {
+            if (effective.getOrDefault(chapter.getChapterNo(), 0) == 0) {
+                issues.add("PACK_EMPTY_CHAPTER：第" + chapter.getChapterNo() + "章没有有效拍");
+            }
+        }
+        if (finalReveal > 1) {
+            issues.add("REVEAL_NOT_UNIQUE：FINAL_REVEAL 出现 " + finalReveal + " 次");
+        }
+        return issues;
+    }
+
+    private void persistGateReview(long runId, int round, GateDecision decision, String directive) {
+        if (gateReviewMapper == null) {
+            return;
+        }
+        try {
+            DeriveGateReviewDO row = new DeriveGateReviewDO();
+            row.setRunId(runId);
+            row.setRound(round);
+            row.setVerdict(decision.verdict());
+            row.setAction(decision.action());
+            row.setIssues(STATIC_MAPPER.writeValueAsString(decision.issues()));
+            row.setCriteria(STATIC_MAPPER.writeValueAsString(decision.criteria()));
+            row.setDirective(directive);
+            row.setRepairTarget(decision.repairTarget());
+            gateReviewMapper.insertFull(row);
+        } catch (Exception e) {
+            log.warn("P6 历史评审落库失败（不影响裁决）：runId={} round={}", runId, round, e);
+        }
+    }
     /** Java 统一裁决：模型只报问题，放行/回炉/熔断与目标层级都在这里决定。 */
     static GateDecision decideGate(GateReview review, PlanValidationVO planCheck, int prevRound) {
         LinkedHashSet<String> issues = new LinkedHashSet<>(review.issues());
@@ -501,6 +583,12 @@ public class DeriveGateService {
         ObjectNode root = stepsRoot(stepStatus);
         ObjectNode gate = root.with("steps").withObject("GATE");
         int round = gate.path("round").asInt(0);
+        if ("PASS".equals(gate.path("status").asText(""))) {
+            // run45 实弹：P6 已 PASS 后被 ⑧ 质检打回清稿，下一轮 P6 是全新评审周期，
+            // 轮次必须归零——否则 round=5 的 PASS 会让复评第 6 轮直接熔断 FAILED。
+            // 回炉总次数仍由 ⑧ 自己的 qc_round（≤2 次 REWORK）兜底，不会失控。
+            round = 0;
+        }
         String directive = gate.path("directive").asText("");
         String repairTarget = gate.path("repairTarget").asText("NONE");
         List<String> issues = new ArrayList<>();

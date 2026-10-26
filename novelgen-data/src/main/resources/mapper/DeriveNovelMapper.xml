@@ -83,4 +83,13 @@
         WHERE id = #{id}
     </update>
 
+    <!-- P6 Task4 根因回炉：只清 brief/truth，保留 protagonist/cast 供角色合同重做读取 role/persona -->
+    <update id="clearDraftBriefTruth">
+        UPDATE novels
+        SET story_assets = (COALESCE(story_assets, '{"v":1}'::jsonb))
+                             - 'brief' - 'truth',
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

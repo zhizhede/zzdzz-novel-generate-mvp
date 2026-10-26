@@ -126,7 +126,17 @@ class DeriveGateServiceTest {
         String passed = DeriveGateService.withGate("{}", "PASS", 1, List.of(), "");
         String reset = DeriveGateService.gateReset(passed);
         assertFalse(DeriveGateService.gatePassed(reset), "⑥b 回炉后旧 PASS 必须作废");
-        assertEquals(1, DeriveGateService.gateRound(reset), "轮次保留供熔断计数");
+        // run45 实弹：PASS 后被 ⑧ 打回＝全新评审周期，轮次归零；
+        // 否则 round=5 的 PASS 会让复评第 6 轮直接熔断。回炉总次数由 qc_round 兜底。
+        assertEquals(0, DeriveGateService.gateRound(reset), "PASS 回炉轮次归零");
+    }
+
+    @Test
+    void gateReset_afterReworkStillPreservesRound() {
+        String rework = DeriveGateService.withGate("{}", "REWORK", 4, List.of("问题"), "指令");
+        String reset = DeriveGateService.gateReset(rework);
+        assertEquals(4, DeriveGateService.gateRound(reset),
+                "REWORK 回炉仍保留轮次，防同一矛盾无限重置回第 1 轮");
     }
 
     @Test

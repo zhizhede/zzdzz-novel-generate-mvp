@@ -40,8 +40,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -90,14 +92,14 @@ public class DeriveDraftService {
             """;
 
     static final String HEAD_B_PROMPT = """
-            你在为一部小说写"全局头 B：人物人设卡"（不是正文）。输入含：已定人名表（name/role/gender）、
+            你在为一部小说写"全局头 B：人物人设卡"（不是正文）。输入含：已定人名表（name/role/gender）、TruthContract（若有）、
             题材意图、域格、类别与节奏。
             要求：
             1. 给名单内每一个人各出一张五人设卡：禁止新增人名、禁止改名、禁止漏人；
             2. 五键必填且互不重复：temperament性格底色、conduct行为准则（什么绝不会做/什么一定做）、
             speech说话方式、desire核心欲望、flaw缺陷或恐惧；
             3. 每键 8~25 字，写具体可演的倾向，不写"善良勇敢"这类空话；
-            4. 与『题材意图』已有的性格与描写红线一致，禁止矛盾。
+            4. 与『题材意图』及 TruthContract 已有动作一致，禁止矛盾：若真相合同要求主角进入现场，persona 必须允许受控进入或明确授权，不得写成绝对禁止；
             输出 JSON 对象：
             {"persona":[{"name":"名单内人名","temperament":"…","conduct":"…","speech":"…",
                          "desire":"…","flaw":"…"}]}
@@ -139,7 +141,7 @@ public class DeriveDraftService {
                「谁 + 做了什么 + 结果/后果」，且至少出现一个 cast 名单内人名；
                禁止用「本窗不落位」「留待后续」「待定」「占位」等占位文本；
                确实用不上的拍才放进 skipped 数组，不能把拍写成占位句；skipped 只放没有出现在任何 beats 里的 seq，已经填实的 seq 不得再放进 skipped；
-            2. 本窗每章给 draft_outline（本章具体大纲 2~3 句）与 title 定稿（≤12字，可沿用或改）；
+            2. 本窗每章给 draft_outline（本章具体大纲 2~3 句）与 title 定稿（≤12字，可沿用或改）；相邻章 outline 必须引入新增信息，禁止复述前章事件、证据或转折；系统已机械分配 seq 与章节，模型输出的重复/错挂 seq 会被系统归一，但仍应尽量按给定 seq 填写；
             3. 人名、性别、称谓严格沿用全局头 cast 表，filled 与 draft_outline 中出现的
                每一个有名人名都必须是 cast 表内的逐字原名，禁止新造任何新名字（含路人、死者、
                被提及者）；需要无名人物的动作时写“一名守卫/一个路人”等无名描述，或改用表内人名；
@@ -180,6 +182,8 @@ public class DeriveDraftService {
     private CharacterPlanMapper characterPlanMapper;
     @Autowired(required = false)
     private StoryThreadMapper storyThreadMapper;
+    @Autowired(required = false)
+    private DeriveFactService factService;
 
     /** ⑥b：幂等推进一个单元（RESET/HEAD/BATCH/DONE，v3.7；客户端循环调用至 allDone）。 */
     public DraftVO draft(long runId) {
@@ -333,6 +337,20 @@ public class DeriveDraftService {
                     win.size(), filledCount, skippedCount, "BATCH", i + 1, wins.size(), false);
         }
 
+        DraftRepairResult repair = normalizeDraftContent(chapters, beats);
+        for (ChapterDO chapter : repair.changedChapters()) {
+            chapterMapper.updateDraftOutline(chapter.getId(), chapter.getTitle(),
+                    chapter.getDraftOutline());
+        }
+        for (BeatInstanceDO beat : repair.changedBeats()) {
+            beatInstanceMapper.updateRoute(beat);
+        }
+        if (factService != null) {
+            for (RepairEntry entry : repair.repairs()) {
+                factService.recordRepair(runId, "DRAFT", entry.repairType(),
+                        entry.before(), entry.after(), entry.reason(), "DRAFT");
+            }
+        }
         reconcileMissingBeats(runId, beats);
         globalReconcile(beats, chapters);
         runMapper.updateStatus(runId, "DRAFTING", null);
@@ -700,6 +718,7 @@ public class DeriveDraftService {
         }
         root.put("主角", assets.path("protagonist").asText(""));
         root.set("已定人名表", assets.path("cast"));
+        root.set("人物表角色与人设（persona 必须与 role 一致）", assets.path("cast"));
         return root.toString();
     }
 
@@ -758,6 +777,8 @@ public class DeriveDraftService {
             if ("ASSET".equals(b.getSource()) && b.getAssetId() != null) {
                 AssetBeatDO row = beatMapper.selectById(b.getAssetId());
                 labelBySeq.put(b.getSeq(), row == null ? "" : nullToEmpty(row.getLabelText(), row.getExtractedText()));
+                        } else if ("SYNTHETIC".equals(b.getSource())) {
+                labelBySeq.put(b.getSeq(), syntheticLabel(b));
             } else if (b.getArcId() != null) {
                 nativeLabels.computeIfAbsent(b.getArcId(), k -> {
                     List<AssetBeatDO> list = beatMapper.selectList(new LambdaQueryWrapper<AssetBeatDO>()
@@ -775,6 +796,14 @@ public class DeriveDraftService {
             }
         }
         return labelBySeq;
+    }
+
+    static String syntheticLabel(BeatInstanceDO beat) {
+        JsonNode route = readTreeSafe(beat.getRouteContract());
+        String goal = route.path("goal").asText("").trim();
+        return goal.isEmpty()
+                ? "系统补拍：推进本章新信息，禁止复述已有拍"
+                : goal;
     }
 
     // ---- 解析校验 ----
@@ -894,7 +923,89 @@ public class DeriveDraftService {
         return root;
     }
 
+    /** 机械归一：模型重复/错挂 seq 时以装箱结果为准，禁止整轮停摆。 */
+    static JsonNode normalizeBatchOutput(JsonNode root, BatchContext ctx) {
+        if (!root.isObject()) {
+            return root;
+        }
+        Map<Integer, List<ObjectNode>> candidatesBySeq = new LinkedHashMap<>();
+        Map<Integer, Integer> planned = ctx.seqChapters();
+        List<ObjectNode> sourceChapters = new ArrayList<>();
+        root.path("chapters").forEach(ch -> {
+            if (ch.isObject()) {
+                sourceChapters.add((ObjectNode) ch);
+            }
+        });
+        for (ObjectNode chapter : sourceChapters) {
+            int no = chapter.path("no").asInt(-1);
+            if (!ctx.windowChapters().contains(no)) {
+                continue;
+            }
+            chapter.path("beats").forEach(raw -> {
+                if (!raw.isObject()) {
+                    return;
+                }
+                ObjectNode beat = (ObjectNode) raw;
+                int seq = beat.path("seq").asInt(0);
+                if (seq == 0 || !ctx.windowSeqs().contains(seq)) {
+                    return;
+                }
+                Integer expected = planned.get(seq);
+                beat.put("chapter_no", no);
+                candidatesBySeq.computeIfAbsent(seq, key -> new ArrayList<>()).add(beat);
+            });
+        }
+        ObjectNode normalized = root.deepCopy();
+        normalized.putArray("chapters");
+        com.fasterxml.jackson.databind.node.ArrayNode chapters =
+                (com.fasterxml.jackson.databind.node.ArrayNode) normalized.path("chapters");
+        Map<Integer, ObjectNode> byNo = new LinkedHashMap<>();
+        for (Integer no : ctx.windowChapters()) {
+            ObjectNode chapter = null;
+            for (ObjectNode candidate : sourceChapters) {
+                if (candidate.path("no").asInt(-1) == no) {
+                    chapter = candidate.deepCopy();
+                    break;
+                }
+            }
+            if (chapter == null) {
+                chapter = STATIC_MAPPER.createObjectNode();
+                chapter.put("no", no);
+                chapter.put("title", "第" + no + "章");
+                chapter.put("draft_outline", "由本窗拍自动汇总");
+                chapter.put("time", "当晚");
+                chapter.putArray("state_changes");
+            }
+            chapter.putArray("beats");
+            byNo.put(no, chapter);
+            chapters.add(chapter);
+        }
+        Map<Integer, ObjectNode> beatsBySeq = new LinkedHashMap<>();
+        for (Map.Entry<Integer, List<ObjectNode>> entry : candidatesBySeq.entrySet()) {
+            int seq = entry.getKey();
+            Integer expected = planned.get(seq);
+            ObjectNode chosen = entry.getValue().stream()
+                    .filter(beat -> expected != null && expected == beat.path("chapter_no").asInt())
+                    .findFirst().orElse(entry.getValue().get(0));
+            log.warn("具体稿拍归属归一：seq={} 采用第{}章输出，忽略重复/错挂输出",
+                    seq, chosen.path("chapter_no").asInt());
+            beatsBySeq.put(seq, chosen);
+        }
+        for (ObjectNode beat : beatsBySeq.values()) {
+            int seq = beat.path("seq").asInt(0);
+            Integer no = planned.get(seq);
+            if (no == null || !byNo.containsKey(no)) {
+                no = beat.path("chapter_no").asInt(-1);
+            }
+            ObjectNode chapter = byNo.get(no);
+            if (chapter != null) {
+                ((com.fasterxml.jackson.databind.node.ArrayNode) chapter.path("beats")).add(beat);
+            }
+        }
+        return normalized;
+    }
     static JsonNode parseBatch(JsonNode root, BatchContext ctx) {
+        root = normalizeBatchOutput(root, ctx);
         JsonNode chArr = root.path("chapters");
         if (!chArr.isArray() || chArr.size() != ctx.windowChapters().size()) {
             throw new LlmJson.Bad("chapters 章数必须 = 本窗章数 " + ctx.windowChapters().size());
@@ -1279,6 +1390,236 @@ public class DeriveDraftService {
     /** 全局头是否齐（三段全成；REWORK 清头产物后自然回到 0 段）。 */
     static boolean headDone(NovelDO novel) {
         return headStage(novel, false) >= 3;
+    }
+
+    /** 具体稿终局内容修复结果：需要回写库的章与拍 + derive_repair_log 留痕条目。 */
+    record DraftRepairResult(List<ChapterDO> changedChapters,
+                             List<BeatInstanceDO> changedBeats,
+                             List<RepairEntry> repairs) {
+    }
+
+    /** 确定性修复留痕（Global Constraint：修复必须写 derive_repair_log）。 */
+    record RepairEntry(String repairType, String before, String after, String reason) {
+    }
+
+    static DraftRepairResult normalizeDraftContent(List<ChapterDO> chapters,
+                                                   List<BeatInstanceDO> beats) {
+        List<ChapterDO> changedChapters = new ArrayList<>();
+        List<BeatInstanceDO> changedBeats = new ArrayList<>();
+        List<RepairEntry> repairs = new ArrayList<>();
+        Map<Integer, Integer> effectiveCount = new HashMap<>();
+        for (BeatInstanceDO beat : beats) {
+            if (beat.getChapterNo() != null && isFilled(beat)) {
+                effectiveCount.merge(beat.getChapterNo(), 1, Integer::sum);
+            }
+        }
+        for (int i = 0; i < beats.size(); i++) {
+            BeatInstanceDO left = beats.get(i);
+            if (!isFilled(left) || left.getChapterNo() == null
+                    || isProtectedRole(left.getBeatRole())) {
+                continue;
+            }
+            for (int j = i + 1; j < beats.size(); j++) {
+                BeatInstanceDO right = beats.get(j);
+                if (!isFilled(right) || right.getChapterNo() == null
+                        || isProtectedRole(right.getBeatRole())
+                        || "SKIPPED".equals(right.getStatus())) {
+                    continue;
+                }
+                boolean adjacentChapter = right.getChapterNo() == left.getChapterNo()
+                        || Math.abs(right.getChapterNo() - left.getChapterNo()) == 1;
+                if (adjacentChapter
+                        && semanticSimilarity(left.getFilledText(), right.getFilledText()) >= 0.65
+                        && effectiveCount.getOrDefault(right.getChapterNo(), 0) > 1) {
+                    String beforeFill = right.getFilledText();
+                    right.setStatus("SKIPPED");
+                    changedBeats.add(right);
+                    effectiveCount.merge(right.getChapterNo(), -1, Integer::sum);
+                    repairs.add(new RepairEntry("DUPLICATE_BEAT",
+                            "seq=" + right.getSeq() + "：" + beforeFill, "SKIPPED",
+                            "与 seq=" + left.getSeq() + " 语义重复（相似度≥0.65）"));
+                    log.warn("具体稿语义去重：seq={} 与 seq={} 重复，后拍跳过",
+                            left.getSeq(), right.getSeq());
+                    break;
+                }
+            }
+        }
+        for (int i = 1; i < chapters.size(); i++) {
+            ChapterDO previous = chapters.get(i - 1);
+            ChapterDO current = chapters.get(i);
+            if (previous.getDraftOutline() == null || current.getDraftOutline() == null
+                    || previous.getDraftOutline().isBlank()
+                    || current.getDraftOutline().isBlank()) {
+                continue;
+            }
+            if (semanticSimilarity(previous.getDraftOutline(), current.getDraftOutline()) < 0.65) {
+                continue;
+            }
+            String rewritten = outlineFromBeats(beats, current.getChapterNo());
+            if (rewritten == null || rewritten.isBlank()
+                    || semanticSimilarity(previous.getDraftOutline(), rewritten) >= 0.65) {
+                rewritten = previous.getDraftOutline() + "；本章转入后续取证与行动，" + current.getTitle();
+            }
+            String beforeOutline = current.getDraftOutline();
+            current.setDraftOutline(rewritten);
+            changedChapters.add(current);
+            repairs.add(new RepairEntry("DUPLICATE_OUTLINE",
+                    "第" + current.getChapterNo() + "章：" + beforeOutline,
+                    "第" + current.getChapterNo() + "章：" + rewritten,
+                    "与第" + previous.getChapterNo() + "章 outline 语义重复，已从本章拍重写"));
+            log.warn("具体稿章纲去重：第{}章 outline 与第{}章重复并已重写",
+                    current.getChapterNo(), previous.getChapterNo());
+        }
+        repairs.addAll(rebalanceBeatLoad(chapters, beats, changedBeats));
+        return new DraftRepairResult(changedChapters, changedBeats, repairs);
+    }
+
+    /**
+     * P6 Task3 具体稿终局拍负载归一：单章有效拍超过
+     * max(2, ceil(总有效拍/章数*1.5)) 时，只把非保护角色拍搬到欠载章；
+     * seq 不变、每章至少 1 拍、route_contract.chapterNo 与章行同步。
+     * 搬动的拍加入 changedBeats 由调用方 updateRoute 落库。
+     */
+    static List<RepairEntry> rebalanceBeatLoad(List<ChapterDO> chapters,
+                                               List<BeatInstanceDO> beats,
+                                               List<BeatInstanceDO> changedBeats) {
+        List<RepairEntry> repairs = new ArrayList<>();
+        if (chapters == null || chapters.size() < 2 || beats == null || beats.isEmpty()) {
+            return repairs;
+        }
+        Map<Integer, Integer> load = new HashMap<>();
+        for (BeatInstanceDO beat : beats) {
+            if (beat.getChapterNo() != null && !"SKIPPED".equals(beat.getStatus())) {
+                load.merge(beat.getChapterNo(), 1, Integer::sum);
+            }
+        }
+        int total = load.values().stream().mapToInt(Integer::intValue).sum();
+        if (total == 0) {
+            return repairs;
+        }
+        int max = Math.max(2, (int) Math.ceil(total * 1.5 / chapters.size()));
+        Set<Integer> chapterNos = new HashSet<>();
+        chapters.forEach(c -> chapterNos.add(c.getChapterNo()));
+        while (true) {
+            Integer source = load.entrySet().stream()
+                    .filter(e -> e.getValue() > max)
+                    .map(Map.Entry::getKey)
+                    .findFirst().orElse(null);
+            if (source == null) {
+                break;
+            }
+            Integer target = chapterNos.stream()
+                    .filter(no -> !no.equals(source) && load.getOrDefault(no, 0) < max)
+                    .min(Comparator.comparingInt(no -> load.getOrDefault(no, 0)))
+                    .orElse(null);
+            if (target == null) {
+                break;
+            }
+            BeatInstanceDO candidate = null;
+            for (BeatInstanceDO beat : beats) {
+                if (beat.getChapterNo() != null && beat.getChapterNo() == source
+                        && !"SKIPPED".equals(beat.getStatus())
+                        && !isProtectedRole(beat.getBeatRole())) {
+                    candidate = beat;
+                    break;
+                }
+            }
+            if (candidate == null) {
+                break;
+            }
+            int from = candidate.getChapterNo();
+            candidate.setChapterNo(target);
+            candidate.setRouteContract(retargetRouteContract(candidate.getRouteContract(), target));
+            if (!changedBeats.contains(candidate)) {
+                changedBeats.add(candidate);
+            }
+            load.merge(from, -1, Integer::sum);
+            load.merge(target, 1, Integer::sum);
+            repairs.add(new RepairEntry("BEAT_LOAD_REBALANCE",
+                    "seq=" + candidate.getSeq() + " 第" + from + "章",
+                    "第" + target + "章",
+                    "单章有效拍超过上限 " + max + "，非保护角色拍搬移"));
+            log.warn("终局拍负载归一：seq={} 从第{}章移至第{}章",
+                    candidate.getSeq(), from, target);
+        }
+        return repairs;
+    }
+
+    /** 同步 route_contract.chapterNo，保持拍合同与章行一致。 */
+    private static String retargetRouteContract(String routeContract, int chapterNo) {
+        if (routeContract == null || routeContract.isBlank()) {
+            return routeContract;
+        }
+        try {
+            JsonNode node = STATIC_MAPPER.readTree(routeContract);
+            if (!(node instanceof ObjectNode object)) {
+                return routeContract;
+            }
+            object.put("chapterNo", chapterNo);
+            return object.toString();
+        } catch (Exception e) {
+            return routeContract;
+        }
+    }
+
+    static double semanticSimilarity(String left, String right) {
+        String a = normalizeSemanticText(left);
+        String b = normalizeSemanticText(right);
+        if (a.isEmpty() || b.isEmpty()) {
+            return a.equals(b) ? 1.0 : 0.0;
+        }
+        if (a.equals(b)) {
+            return 1.0;
+        }
+        Set<String> leftShingles = shingles(a);
+        Set<String> rightShingles = shingles(b);
+        Set<String> intersection = new HashSet<>(leftShingles);
+        intersection.retainAll(rightShingles);
+        Set<String> union = new HashSet<>(leftShingles);
+        union.addAll(rightShingles);
+        return union.isEmpty() ? 0.0 : (double) intersection.size() / union.size();
+    }
+
+    private static String normalizeSemanticText(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replaceAll("[^\\p{IsHan}A-Za-z0-9]", "").toLowerCase();
+    }
+
+    private static Set<String> shingles(String text) {
+        Set<String> out = new HashSet<>();
+        for (int i = 0; i + 1 < text.length(); i++) {
+            out.add(text.substring(i, i + 2));
+        }
+        return out;
+    }
+
+    private static boolean isFilled(BeatInstanceDO beat) {
+        return beat.getFilledText() != null && !beat.getFilledText().isBlank();
+    }
+
+    private static boolean isProtectedRole(String role) {
+        if (role == null) {
+            return false;
+        }
+        return Set.of("HOOK", "HIGHLIGHT", "CHARACTER_CHOICE", "COST",
+                "LOCAL_CLOSURE", "FINAL_CLOSURE", "NEXT_HOOK", "FINAL_REVEAL",
+                "RELATION_CONFLICT").contains(role);
+    }
+
+    private static String outlineFromBeats(List<BeatInstanceDO> beats, int chapterNo) {
+        List<String> parts = new ArrayList<>();
+        for (BeatInstanceDO beat : beats) {
+            if (beat.getChapterNo() != null && beat.getChapterNo() == chapterNo
+                    && isFilled(beat) && !"SKIPPED".equals(beat.getStatus())) {
+                parts.add(beat.getFilledText().trim());
+                if (parts.size() == 3) {
+                    break;
+                }
+            }
+        }
+        return parts.isEmpty() ? "" : String.join("；", parts);
     }
 
     /** 窗口遗漏的结构拍由系统收口为 SKIPPED，避免模型漏标导致整本停摆。 */

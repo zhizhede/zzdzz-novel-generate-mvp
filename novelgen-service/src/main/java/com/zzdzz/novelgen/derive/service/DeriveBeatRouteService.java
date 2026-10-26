@@ -12,6 +12,8 @@ import com.zzdzz.novelgen.derive.mapper.AssetOutlineMapper;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveBeatPoolMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveChapterContractMapper;
 import com.zzdzz.novelgen.derive.mapper.LabelIndexMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
@@ -26,6 +28,8 @@ import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.AssetBeatDO;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveBeatPoolDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveChapterContractDO;
 import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
 import com.zzdzz.novelgen.model.entity.derive.LabelIndexDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
@@ -71,6 +75,10 @@ public class DeriveBeatRouteService {
     private final CharacterPlanMapper characterPlanMapper;
     private final StoryThreadMapper storyThreadMapper;
     private final VolumePlanMapper volumePlanMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveBeatPoolMapper beatPoolMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveChapterContractMapper chapterContractMapper;
     private final LlmJson llmJson;
     private final PlatformTransactionManager transactionManager;
     private final DeriveStateLedgerService stateLedgerService;
@@ -113,6 +121,10 @@ public class DeriveBeatRouteService {
             plan = contractRepair.plan();
             log.info("局部合同修复：runId={} facts={}", runId, contractRepair.repairedFacts());
         }
+        // P6 Task3：合同修复可能新增 synthetic 拍，持久化前再做一次负载归一。
+        plan = dropUnknownThreadRefs(plan, context.threadKeys());
+        plan = rebalanceRouteLoad(plan, context);
+        plan = DeriveChapterPacker.pack(plan);
         List<PlanContracts.PlanIssue> issues = validateRoute(plan, context);
         if (!issues.isEmpty()) {
             throw new PlanJson.Bad(issues.get(0).message());
@@ -348,7 +360,12 @@ public class DeriveBeatRouteService {
             }
             String goal = node.path("goal").asText("").trim();
             if (goal.isEmpty()) {
-                goal = "补齐第" + chapterNo + "章 " + role.name() + " 结构功能，服务本卷合同与闭环";
+                PlanContracts.ChapterSlotContract slot = chapters.stream()
+                        .filter(item -> item.chapterNo() == chapterNo)
+                        .findFirst().orElse(null);
+                goal = slot == null
+                        ? "推进第" + chapterNo + "章既定目标；必须产生新增信息，禁止复述已有拍"
+                        : syntheticGoal(slot, role);
             }
             RouteContractFields fields = routeContract(node);
             synthetic.add(new PlanContracts.SyntheticAssignment(
@@ -388,6 +405,8 @@ public class DeriveBeatRouteService {
         PlanContracts.RoutePlan plan = new PlanContracts.RoutePlan(
                 volumeNo, chapters, assignments, synthetic, skipped);
         plan = recoverMissingAssignments(plan, ctx);
+        plan = dropUnknownThreadRefs(plan, ctx.threadKeys());
+        plan = rebalanceRouteLoad(plan, ctx);
         List<PlanContracts.PlanIssue> issues = validateRoute(plan, ctx);
         if (!issues.isEmpty()) {
             throw new PlanJson.Bad(issues.get(0).message());
@@ -740,6 +759,13 @@ public class DeriveBeatRouteService {
                     Integer futureWriter = anyWriter.get(required);
                     if (futureWriter != null && futureWriter > i) {
                         int anchor = earlierChapterBeat(assignments, current.chapterNo());
+                        if (anchor < 0) {
+                            // run45 实弹：首章拍即有后置知识缺口时 earlierChapterBeat 返回 -1，
+                            // 直接 get(-1) 抛 Index -1 out of bounds 停掉 auto-flow；回退到最早拍。
+                            anchor = 0;
+                            log.warn("知识因果修复：无更早章拍可用，缺口 {} 回退写入最早拍 seq={}",
+                                    required, assignments.get(0).seq());
+                        }
                         PlanContracts.BeatAssignment source = assignments.get(anchor);
                         List<String> writes = appendDistinct(source.writesKnowledge(), List.of(required));
                         assignments.set(anchor, new PlanContracts.BeatAssignment(
@@ -828,8 +854,7 @@ public class DeriveBeatRouteService {
                 out.add(new PlanContracts.SyntheticAssignment(
                         chapter.chapterNo(), defaultStoryLayer(role), role,
                         defaultBeatType(role),
-                        "补齐第" + chapter.chapterNo() + "章 " + role.name()
-                                + " 结构功能，服务本卷合同与闭环",
+                        syntheticGoal(chapter, role),
                         focusCharacters, isThreadPayoffRole(role) ? payoffThreads : List.of(),
                         PlanContracts.AppearanceMode.LIVE));
                 actual.add(role);
@@ -856,6 +881,19 @@ public class DeriveBeatRouteService {
         LinkedHashSet<String> out = new LinkedHashSet<>(values);
         out.addAll(additions);
         return new ArrayList<>(out);
+    }
+
+    /** synthetic 拍必须绑定本章既定推进目标，避免模型用空泛结构目标复述已有事件。 */
+    static String syntheticGoal(PlanContracts.ChapterSlotContract chapter, PlanContracts.BeatRole role) {
+        String target = chapter.mainMysteryAdvance();
+        if (target == null || target.isBlank()) {
+            target = chapter.localCaseGoal();
+        }
+        if (target == null || target.isBlank()) {
+            target = "本卷既定推进目标";
+        }
+        return "推进第" + chapter.chapterNo() + "章既定目标：" + target
+                + "；必须产生本章新增信息，禁止复述已有拍（结构功能=" + role.name() + "）";
     }
 
     static String defaultBeatType(PlanContracts.BeatRole role) {
@@ -915,6 +953,10 @@ public class DeriveBeatRouteService {
                 beatInstanceMapper.insertFull(row);
             }
             int seq = Math.max(ctx.syntheticSeqBase(), nextSeq(run.getId()) - 1);
+            Map<Integer, Integer> chapterSeq = new HashMap<>();
+            for (PlanContracts.BeatAssignment assignment : plan.assignments()) {
+                chapterSeq.merge(assignment.chapterNo(), 1, Integer::sum);
+            }
             for (PlanContracts.SyntheticAssignment synthetic : plan.synthetic()) {
                 BeatInstanceDO row = beatRow(run, volume, ++seq, synthetic.chapterNo(),
                         synthetic.storyLayer(), synthetic.beatRole(), toJson(synthetic),
@@ -922,10 +964,107 @@ public class DeriveBeatRouteService {
                 row.setSource("SYNTHETIC");
                 row.setBeatType(synthetic.beatType());
                 row.setPacing(new BigDecimal("0.50"));
+                row.setChapterSeq(chapterSeq.merge(synthetic.chapterNo(), 1, Integer::sum));
                 beatInstanceMapper.insertFull(row);
             }
+            persistPoolAndContracts(run, volume, plan);
             updateVolumeState(run, volume.volumeNo(), state);
         });
+    }
+
+    private void persistPoolAndContracts(RunDO run, PlanContracts.VolumeContract volume,
+                                        PlanContracts.RoutePlan plan) {
+        if (beatPoolMapper == null || chapterContractMapper == null) {
+            return;
+        }
+        // 新旧装箱版本通过 upsert 覆盖，保留其他卷的全局拍池行。
+        int seq = Math.max(ctxForPool(run), nextSeq(run.getId()) - 1);
+        for (PlanContracts.BeatAssignment beat : plan.assignments()) {
+            DeriveBeatPoolDO row = poolRow(run, beat.seq(), beat);
+            beatPoolMapper.insertFull(row);
+        }
+        for (PlanContracts.SyntheticAssignment beat : plan.synthetic()) {
+            DeriveBeatPoolDO row = poolRow(run, ++seq, beat);
+            beatPoolMapper.insertFull(row);
+        }
+        int chapterCount = plan.chapters().size();
+        int total = plan.assignments().size() + plan.synthetic().size();
+        int max = Math.max(2, (int) Math.ceil(total * 1.5 / Math.max(1, chapterCount)));
+        for (PlanContracts.ChapterSlotContract slot : plan.chapters()) {
+            DeriveChapterContractDO contract = new DeriveChapterContractDO();
+            contract.setRunId(run.getId());
+            contract.setChapterNo(slot.chapterNo());
+            contract.setVolumeNo(volume.volumeNo());
+            contract.setRequiredRoles(toJson(slot.requiredBeatRoles()));
+            contract.setTargetStateBefore(toJson(slot.requiredStateBefore()));
+            contract.setTargetStateAfter(toJson(slot.requiredStateAfter()));
+            contract.setRevealLevel(slot.requiredBeatRoles().contains(PlanContracts.BeatRole.FINAL_REVEAL) ? 2 : 0);
+            contract.setMinBeats(1);
+            contract.setMaxBeats(max);
+            contract.setOutlineContract(slot.chapterFunction());
+            contract.setPackVersion(1);
+            chapterContractMapper.insertFull(contract);
+        }
+    }
+
+    private int ctxForPool(RunDO run) {
+        return Math.max(0, nextSeq(run.getId()) - 1);
+    }
+
+    private DeriveBeatPoolDO poolRow(RunDO run, int seq, PlanContracts.BeatAssignment beat) {
+        DeriveBeatPoolDO row = new DeriveBeatPoolDO();
+        row.setRunId(run.getId());
+        row.setBeatKey("B" + seq);
+        row.setPoolSeq(seq);
+        row.setBeatRole(beat.beatRole().name());
+        row.setSource("MODEL");
+        row.setGoal(routeGoal(toJson(beat)));
+        row.setNovelty(routeGoal(toJson(beat)));
+        row.setStateBefore(toJson(beat.requiresState()));
+        row.setStateAfter(toJson(beat.changesState()));
+        row.setDependsOn(toJson(beat.dependsOn()));
+        row.setFocusCharacters(toJson(beat.focusCharacters()));
+        row.setThreadRefs(toJson(beat.threadRefs()));
+        row.setRequiresKnowledge(toJson(beat.requiresKnowledge()));
+        row.setWritesKnowledge(toJson(beat.writesKnowledge()));
+        row.setRevealLevel(beat.beatRole() == PlanContracts.BeatRole.FINAL_REVEAL ? 2 : 0);
+        row.setRequired(isProtectedRole(beat.beatRole().name()));
+        row.setProtectedBeat(isProtectedRole(beat.beatRole().name()));
+        row.setStatus("PLANNED");
+        row.setContract(toJson(beat));
+        return row;
+    }
+
+    private DeriveBeatPoolDO poolRow(RunDO run, int seq, PlanContracts.SyntheticAssignment beat) {
+        DeriveBeatPoolDO row = new DeriveBeatPoolDO();
+        row.setRunId(run.getId());
+        row.setBeatKey("B" + seq);
+        row.setPoolSeq(seq);
+        row.setBeatRole(beat.beatRole().name());
+        row.setSource("BRIDGE");
+        row.setGoal(beat.goal());
+        row.setNovelty(beat.goal());
+        row.setStateBefore(toJson(beat.requiresState()));
+        row.setStateAfter(toJson(beat.changesState()));
+        row.setDependsOn(toJson(beat.dependsOn()));
+        row.setFocusCharacters(toJson(beat.focusCharacters()));
+        row.setThreadRefs(toJson(beat.threadRefs()));
+        row.setRequiresKnowledge(toJson(beat.requiresKnowledge()));
+        row.setWritesKnowledge(toJson(beat.writesKnowledge()));
+        row.setRevealLevel(beat.beatRole() == PlanContracts.BeatRole.FINAL_REVEAL ? 2 : 0);
+        row.setRequired(isProtectedRole(beat.beatRole().name()));
+        row.setProtectedBeat(isProtectedRole(beat.beatRole().name()));
+        row.setStatus("PLANNED");
+        row.setContract(toJson(beat));
+        return row;
+    }
+
+    private String routeGoal(String contract) {
+        try {
+            return readTreeSafe(contract).path("goal").asText("推进本章新增信息");
+        } catch (Exception e) {
+            return "推进本章新增信息";
+        }
     }
 
     private Map<Integer, ChapterDO> ensureChapters(
@@ -973,6 +1112,9 @@ public class DeriveBeatRouteService {
         row.setStoryLayer(storyLayer == null ? null : storyLayer.name());
         row.setBeatRole(beatRole == null ? null : beatRole.name());
         row.setRouteContract(routeContract);
+        row.setBeatKey("B" + seq);
+        row.setChapterSeq(null);
+        row.setPackVersion(1);
         return row;
     }
 
@@ -1286,6 +1428,134 @@ public class DeriveBeatRouteService {
                 issues.add(issue("ROUTE_UNKNOWN_" + type, "拍 " + seq + " 引用未知" + type + ": " + ref));
             }
         }
+    }
+
+    /**
+     * P6 run45 实弹：模型会自由发明 threadRefs（线程账只有 REL-C1-C4 却引用 REL-C1-C2）。
+     * 未知关系线引用按“机械字段系统归一”原则剔除，不再整轮拒绝（3 轮重试耗尽即停摆）。
+     * 只剔除不在 allowed 内的引用；拍本身保留。
+     */
+    static PlanContracts.RoutePlan dropUnknownThreadRefs(PlanContracts.RoutePlan plan,
+                                                         Set<String> allowed) {
+        boolean changed = false;
+        List<PlanContracts.BeatAssignment> assignments = new ArrayList<>();
+        for (PlanContracts.BeatAssignment a : plan.assignments()) {
+            List<String> kept = a.threadRefs().stream()
+                    .map(DeriveBeatRouteService::normalizeThreadRef)
+                    .filter(allowed::contains)
+                    .distinct().toList();
+            if (kept.size() != a.threadRefs().size()) {
+                log.warn("路由归一：拍 {} 剔除未知线程引用 {} -> {}",
+                        a.seq(), a.threadRefs(), kept);
+                changed = true;
+            }
+            assignments.add(kept.size() == a.threadRefs().size() ? a
+                    : new PlanContracts.BeatAssignment(
+                    a.seq(), a.chapterNo(), a.storyLayer(), a.beatRole(),
+                    a.focusCharacters(), kept, a.dependsOn(), a.payoffTarget(),
+                    a.appearanceMode(), a.requiresKnowledge(), a.writesKnowledge(),
+                    a.requiresState(), a.changesState()));
+        }
+        List<PlanContracts.SyntheticAssignment> synthetic = new ArrayList<>();
+        for (PlanContracts.SyntheticAssignment s : plan.synthetic()) {
+            List<String> kept = s.threadRefs().stream()
+                    .map(DeriveBeatRouteService::normalizeThreadRef)
+                    .filter(allowed::contains)
+                    .distinct().toList();
+            if (kept.size() != s.threadRefs().size()) {
+                log.warn("路由归一：synthetic(第{}章 {}) 剔除未知线程引用 {} -> {}",
+                        s.chapterNo(), s.beatRole(), s.threadRefs(), kept);
+                changed = true;
+            }
+            synthetic.add(kept.size() == s.threadRefs().size() ? s
+                    : new PlanContracts.SyntheticAssignment(
+                    s.chapterNo(), s.storyLayer(), s.beatRole(), s.beatType(), s.goal(),
+                    s.focusCharacters(), kept, s.appearanceMode(), s.dependsOn(),
+                    s.payoffTarget(), s.requiresKnowledge(), s.writesKnowledge(),
+                    s.requiresState(), s.changesState()));
+        }
+        return changed ? new PlanContracts.RoutePlan(
+                plan.volumeNo(), plan.chapters(), assignments, synthetic, plan.skipped())
+                : plan;
+    }
+    /** 在路由阶段摊平普通推进拍，required roles 与 closure 拍保持原章。 */
+    static PlanContracts.RoutePlan rebalanceRouteLoad(PlanContracts.RoutePlan plan,
+                                                      RouteContext ctx) {
+        if (plan.chapters().size() < 2) {
+            return plan;
+        }
+        Map<Integer, Integer> load = new HashMap<>();
+        for (PlanContracts.BeatAssignment assignment : plan.assignments()) {
+            if (assignment.chapterNo() != null) {
+                load.merge(assignment.chapterNo(), 1, Integer::sum);
+            }
+        }
+        for (PlanContracts.SyntheticAssignment synthetic : plan.synthetic()) {
+            if (synthetic.chapterNo() != null) {
+                load.merge(synthetic.chapterNo(), 1, Integer::sum);
+            }
+        }
+        int total = load.values().stream().mapToInt(Integer::intValue).sum();
+        int max = Math.max(2, (int) Math.ceil(total * 1.5 / plan.chapters().size()));
+        Map<Integer, Set<String>> requiredRoles = new HashMap<>();
+        for (PlanContracts.ChapterSlotContract chapter : plan.chapters()) {
+            requiredRoles.put(chapter.chapterNo(),
+                    chapter.requiredBeatRoles().stream()
+                            .map(Enum::name)
+                            .collect(java.util.stream.Collectors.toSet()));
+        }
+        List<PlanContracts.BeatAssignment> assignments = new ArrayList<>(plan.assignments());
+        while (true) {
+            Integer source = load.entrySet().stream()
+                    .filter(entry -> entry.getValue() > max)
+                    .map(Map.Entry::getKey)
+                    .findFirst().orElse(null);
+            if (source == null) {
+                break;
+            }
+            Integer target = plan.chapters().stream()
+                    .map(PlanContracts.ChapterSlotContract::chapterNo)
+                    .filter(no -> !no.equals(source) && load.getOrDefault(no, 0) < max)
+                    .min(java.util.Comparator.comparingInt(no -> load.getOrDefault(no, 0)))
+                    .orElse(null);
+            if (target == null) {
+                break;
+            }
+            int finalSource = source;
+            int candidateIndex = -1;
+            for (int i = 0; i < assignments.size(); i++) {
+                PlanContracts.BeatAssignment candidate = assignments.get(i);
+                if (finalSource == candidate.chapterNo()
+                        && !isProtectedRole(candidate.beatRole().name())
+                        && !requiredRoles.getOrDefault(finalSource, Set.of())
+ .contains(candidate.beatRole().name())) {
+                    candidateIndex = i;
+                    break;
+                }
+            }
+            if (candidateIndex < 0) {
+                break;
+            }
+            PlanContracts.BeatAssignment candidate = assignments.get(candidateIndex);
+            assignments.set(candidateIndex, new PlanContracts.BeatAssignment(
+                    candidate.seq(), target, candidate.storyLayer(), candidate.beatRole(),
+                    candidate.focusCharacters(), candidate.threadRefs(), candidate.dependsOn(),
+                    candidate.payoffTarget(), candidate.appearanceMode(),
+                    candidate.requiresKnowledge(), candidate.writesKnowledge(),
+                    candidate.requiresState(), candidate.changesState()));
+            load.merge(source, -1, Integer::sum);
+            load.merge(target, 1, Integer::sum);
+            log.warn("路由拍负载归一：seq={} 从第{}章移至第{}章",
+                    candidate.seq(), source, target);
+        }
+        return new PlanContracts.RoutePlan(plan.volumeNo(), plan.chapters(), assignments,
+                plan.synthetic(), plan.skipped());
+    }
+
+    private static boolean isProtectedRole(String role) {
+        return Set.of("HOOK", "HIGHLIGHT", "CHARACTER_CHOICE", "COST",
+                "LOCAL_CLOSURE", "FINAL_CLOSURE", "NEXT_HOOK", "FINAL_REVEAL",
+                "RELATION_CONFLICT").contains(role);
     }
 
     private static PlanContracts.PlanIssue issue(String code, String message) {

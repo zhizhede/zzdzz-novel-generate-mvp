@@ -44,4 +44,10 @@ public interface NovelMapper extends BaseMapper<NovelDO> {
 
     /** ⑥b REWORK 回炉（v3.7）：清头产物键，逼 ⑥b-0 重跑（style_profile 等其他键保留）。 */
     int clearDraftAssets(@Param("id") long id);
+
+    /**
+     * P6 Task4 根因回炉：只清 brief/truth，保留 protagonist/cast——
+     * 角色合同（CHARACTERS）重做时必须能读到已有 role/persona。
+     */
+    int clearDraftBriefTruth(@Param("id") long id);
 }

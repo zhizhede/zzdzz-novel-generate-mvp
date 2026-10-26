@@ -72,7 +72,7 @@ public final class StoryPlanningPrompts {
 
     public static final String CHARACTERS = """
             你在为一部多卷小说建立角色叙事计划，不写正文。
-            输入含卷合同、故事脊柱、创作框架；若带“上轮立项闸减法指令”，它是最高优先级，角色职能和关系必须与指令后的唯一真相一致。
+            输入含卷合同、故事脊柱、创作框架、cast role/persona/brief；若带“上轮立项闸减法指令”，它是最高优先级，角色职能、arcBefore/arcAfter、highlightChoice 和关系必须与人物表 persona 及唯一真相一致，禁止生成与人物表 role 互斥的角色状态。
             要求：
             1. characterKey 使用 C1..Cn 且全书唯一；displayNameHint 可空；
             2. function 只能取 DETECTIVE/ACCESS/KNOWLEDGE/SOCIAL/ACTION/CHALLENGE/SUPPORT/OPPOSITION；
@@ -96,10 +96,10 @@ public final class StoryPlanningPrompts {
             输入含卷合同、角色计划、线程账、剩余无指向拍和本卷章功能模板；若带“上轮立项闸减法指令”，它是最高优先级，禁止恢复指令要求删除的案情或关系线。
             要求：
             1. chapters 必须覆盖本卷全部章号，每章给功能目标、主案推进和必需 beatRole；
-            2. assignments 和 skipped 合起来必须恰好覆盖输入的全部剩余拍 seq，每拍只能出现一次；forcedSkips 中的 seq 禁止出现在 assignments，系统会自动写入 skipped；
+            2. assignments 和 skipped 合起来必须恰好覆盖输入的全部剩余拍 seq，每拍只能出现一次；系统会在输出后按全局拍池重新机械装箱，模型给出的 chapterNo 仅作初值；桥段不足时可用 syntheticSlots 补充新增过渡拍，但禁止复用已有事件或提前揭露终局；forcedSkips 中的 seq 禁止出现在 assignments，系统会自动写入 skipped；
             3. 每章至少分配1拍；具体拍数按剧情需要安排，不再限制单章上限；无关拍进 skipped 并写非空 reason；
             4. focusCharacters 只能使用输入角色 key；threadRefs 只能使用输入线程 key；
-            5. 结构与功能缺失时可给 syntheticSlots，系统会生成 SYNTHETIC 补拍；syntheticSlots 与 assignments 共用 focusCharacters/threadRefs/dependsOn/payoffTarget/appearanceMode/requiresKnowledge/writesKnowledge/requiresState/changesState，建立前置知识的补拍必须写 writesKnowledge；
+            5. 结构与功能缺失时可给 syntheticSlots，系统会生成 SYNTHETIC 补拍；syntheticSlots 与 assignments 共用 focusCharacters/threadRefs/dependsOn/payoffTarget/appearanceMode/requiresKnowledge/writesKnowledge/requiresState/changesState，建立前置知识的补拍必须写 writesKnowledge；syntheticSlots 的 goal 必须推进本章新信息，禁止复述已有 seq 的事件、证据或转折；
             6. 每卷末章必须有 LOCAL_CLOSURE；非末卷还要有 NEXT_HOOK，最终卷用 FINAL_CLOSURE；
             7. appearanceMode 只能取 LIVE/MEMORY/DREAM/CORPSE/RELIC/TESTIMONY/LETTER/RECORDING；
             8. storyLayer、beatRole 只能取合同枚举值；

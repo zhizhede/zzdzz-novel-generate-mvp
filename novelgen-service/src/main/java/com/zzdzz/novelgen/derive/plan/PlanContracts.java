@@ -170,7 +170,8 @@ public final class PlanContracts {
             Integer conflictVolume,
             Integer payoffVolume,
             String arcBefore,
-            String arcAfter) {
+            String arcAfter,
+            String castRole) {
     }
 
     public record ChapterSlotContract(

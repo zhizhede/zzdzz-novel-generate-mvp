@@ -134,7 +134,7 @@ class DerivePlanValidationServiceTest {
         var character = new PlanContracts.CharacterContract(
                 "C1", "调查者", PlanContracts.CharacterFunction.DETECTIVE, "唯一", "查清", "执着",
                 List.of(), List.of("C3"), "冲突", "选择", "代价", List.of("REL-C1-C3"),
-                "兑现", 1, 1, 1, "开始", "结束");
+                "兑现", 1, 1, 1, "开始", "结束", "受托追查失踪案的调查者");
 
         var issues = DerivePlanValidationService.validateContractClosure(
                 List.of(volume), List.of(thread), List.of(character));
