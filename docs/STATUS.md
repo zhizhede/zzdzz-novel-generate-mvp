@@ -854,7 +854,7 @@ V38/V39/V40/V41 逐个应用、人物账回填 99+86 行并与源快照逐字对
 - **V31**：prompt_templates.phase varchar(16)→32、node→64（新段名 plan_budget_without=18 字符超长曾致启动失败）。
 - **AI 大纲材料边界修正**（衍生语义二修）：样本剧情骨架彻底退出 AI 生成材料（骨架只用于预填路径）；世界约束注入改为**用户勾选驱动**（cloneAssets.world 勾=同世界衍生注入，不勾=完全自由创作）——选择权在前端按钮，后端不硬编码。两模式实弹：勾=同世界新故事（制香/空嗅），不勾=自由创作（雾陵市都市深海系），均无原书桥段。
 - 83/83 单测、vite build 绿；实弹：11 段落库、新建/删除/替换渲染全验。
-- 坑实录：AGENTS 块#1 heredoc 反斜杠再次三连（正则 、
+- 坑实录：AGENTS 块#1 heredoc 反斜杠再次三连（正则 b、
  转义、三引号嵌套）——全部回归 Edit 工具修复。**教训固化：改代码只准 Edit。**
 
 ## 审校衍生豁免 + 会话完成可回看（2026-09-25，未提交）
@@ -1800,3 +1800,11 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - **P1 机械字段系统化**：scaffold 按 scope 章数生成；路由章号按 scaffold 归一；`REVERSAL/RECORD` 等枚举别名归一；`state_changes` 空关系噪声丢弃；`LlmJson` 修复多闭括号、单字符串对象、缺逗号/裸引号；窗口遗漏的 PLANNED 拍由终局对账补为 `SKIPPED`，不再因模型漏标整本停摆。
 - **验证**：新增/扩展 `DeriveTruthContractServiceTest`、`DeriveStoryPlanTruthContractTest`、`DeriveBeatRouteServiceTest`（关系线/别名/章号归一）、`DeriveResetServiceTest`、`DeriveDraftBatchTest`、`LlmJsonTest` 等；最终全量 `mvn -q test` 通过。最终 derive jar SHA256=`C666A81B133E89CD56F53E049A63D5AD7E0BF7EF5CAAF0D057507B697514AEA1`，已部署宝塔并重启，服务 active，Flyway schema=125。
 - **run44 实测**：多次 `clear-planning + auto?direct=false` 实跑；机械链已能稳定通过 ⑥a/⑥b、知识因果修复、关系线兑现、终局漏拍收口。最后一轮 run44 走到 P6 round=6 后按熔断终止（`FAILED`，novel_id=106）；剩余6条均为内容质量类 FIXABLE（第4/5章重复、事件拍过密、乔晚 persona 与独自重返动作冲突、角色 arcBefore 不一致等），不再出现 P0/P1 的双真相、未知关系线、漏拍停摆或 JSON 解析死循环。若要继续到 PASSED，需要单独做 P6 内容合同/章纲重排修复，不应再回退 P0/P1。
+## DeriveFlow Phase1~6 全局拍池/机械装箱实施与 run47 实测（2026-10-26）
+
+- **备份**：线上 derive_gen 的 beat_instance、chapters 整表已先备份到 /www/backup/novelgen-derive/20261026-phase1/，SHA256 分别为 977d0e0238bae14aafec33be648a81850764b7031b0ae545bf07c537a238b079、51751a31e3577b2986058361cef352f6db9824a411bd0c60d74be3ec9aeea9e0。
+- **迁移**：新增 V126 derive_beat_pool、V127 derive_chapter_contract、V128 beat_instance(beat_key,chapter_seq,pack_version,novelty_key)、V129 derive_gate_review；线上 Flyway 已从 v125 迁到 v129。
+- **代码**：新增 DeriveChapterPacker、全局拍池/章节合同/GateReview 实体与 Mapper；路由持久化写入全局拍池和章节合同；P6 前增加结构预检；P6 每轮落 derive_gate_review；具体稿解析增加重复/错挂 seq 的机械归一与缺章补齐；新增 DeriveChapterPackerTest、DeriveDraftBatchRepairTest。
+- **验证**：全量 mvn -q test 通过；derive jar SHA256=CC8D8FD44D3B004A03FB27BFC357AE14F1755AB36E1CFA639D5CC60697B7AA1。
+- **run47 实测**：seed=450049，novel_id=112；成功建立 24 条全局拍、14 条章节合同、24 条 beat_instance（全部有 chapter_no/beat_key），机械装箱与具体稿 seq 归一生效。流程进入 DRAFTING/P6，但 P6 连续回炉后 round=6 熔断 FAILED，repairTarget=PLAN_VOLUME:1。最终 issues 仍是内容/合同类：三张便条语义重复、ch13 四拍过密、线索卡 planted_chapter 与章纲错位、reveal_chapter=12 与实际 ch13-14 不一致、调查者疑似第四角色、KNOWLEDGE_NOT_ACQUIRED。
+- **结论**：Phase1~6 的表结构、装箱、预检、审计与具体稿容错已落地；run47 未达到 PASSED，剩余问题是内容合同/真相卡元数据未随装箱重排同步，不能用 direct=true 绕过。
