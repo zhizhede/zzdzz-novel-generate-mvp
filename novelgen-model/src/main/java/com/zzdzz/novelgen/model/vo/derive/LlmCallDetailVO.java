@@ -14,6 +14,8 @@ public record LlmCallDetailVO(
         String node,
         String model,
         String status,
+        String effectiveStatus,
+        String effectiveStatusLabel,
         int promptTokens,
         int cachedTokens,
         int completionTokens,

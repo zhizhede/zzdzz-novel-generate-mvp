@@ -1,0 +1,25 @@
+CREATE TABLE derive_character_profile (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+    character_key VARCHAR(16) NOT NULL,
+    display_name VARCHAR(64) NOT NULL,
+    public_goal TEXT NOT NULL,
+    private_need TEXT NOT NULL,
+    contradiction TEXT NOT NULL,
+    wound TEXT,
+    capability TEXT,
+    limitation TEXT,
+    secret TEXT,
+    decision_rule TEXT NOT NULL,
+    speech_pattern TEXT,
+    behavior_pattern TEXT,
+    current_status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    arc_state VARCHAR(32) NOT NULL DEFAULT 'START',
+    profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_user_id BIGINT,
+    updated_user_id BIGINT,
+    CONSTRAINT uq_derive_character_profile_run_key UNIQUE (run_id, character_key)
+);
+CREATE INDEX idx_derive_character_profile_run ON derive_character_profile(run_id, character_key);

@@ -3,6 +3,8 @@ package com.zzdzz.novelgen.derive.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zzdzz.novelgen.common.web.BizException;
@@ -18,9 +20,13 @@ import com.zzdzz.novelgen.derive.mapper.LabelIndexMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
 import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
+import com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry;
+import com.zzdzz.novelgen.derive.contract.ChapterScheduleProjector;
+import com.zzdzz.novelgen.derive.contract.StoryContract;
 import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.derive.plan.PlanJson;
 import com.zzdzz.novelgen.derive.plan.PlanJsonViews;
+import com.zzdzz.novelgen.derive.plan.compiler.RouteNarrativeContract;
 import com.zzdzz.novelgen.derive.plan.PlanV2StateCodec;
 import com.zzdzz.novelgen.derive.plan.StoryPlanningPrompts;
 import com.zzdzz.novelgen.llm.LlmJson;
@@ -73,6 +79,8 @@ public class DeriveBeatRouteService {
     private final AssetBeatMapper beatMapper;
     private final LabelIndexMapper labelIndexMapper;
     private final CharacterPlanMapper characterPlanMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveCharacterBusinessModelService businessModelService;
     private final StoryThreadMapper storyThreadMapper;
     private final VolumePlanMapper volumePlanMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -83,6 +91,15 @@ public class DeriveBeatRouteService {
     private final PlatformTransactionManager transactionManager;
     private final DeriveStateLedgerService stateLedgerService;
     private final DeriveContractRepairService contractRepairService;
+    /** 章级日程（合同的机械投影）：路由的唯一章号来源；未装配时按旧口径（无日程约束）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveChapterScheduleService scheduleService;
+    /** 冻结合同：日程允许章之外不得引用线索 key，ensureScheduleBeats 需要线索文本。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveContractService contractService;
+
+    /** 单章功能槽上限（日程角色优先保留，超限丢基础角色）。 */
+    static final int MAX_CHAPTER_ROLES = 4;
 
     /** 单卷路由；解析成功后才在短事务内替换该卷路由。 */
     public BeatRouteVO routeVolume(long runId, int volumeNo) {
@@ -125,6 +142,9 @@ public class DeriveBeatRouteService {
         plan = dropUnknownThreadRefs(plan, context.threadKeys());
         plan = rebalanceRouteLoad(plan, context);
         plan = DeriveChapterPacker.pack(plan);
+        // 装箱/归一可能搬拍或剔除引用：日程约束必须再收敛一次才落库。
+        plan = normalizeClueThreadRefs(plan, context.schedule());
+        plan = ensureScheduleBeats(plan, context.schedule(), context.contract());
         List<PlanContracts.PlanIssue> issues = validateRoute(plan, context);
         if (!issues.isEmpty()) {
             throw new PlanJson.Bad(issues.get(0).message());
@@ -258,7 +278,283 @@ public class DeriveBeatRouteService {
                 }
             }
         }
+        issues.addAll(validateSchedule(plan, ctx));
         return issues;
+    }
+
+    /**
+     * 日程级结构校验：每条 clue 在 plant 章恰有 1 个 CLUE_PLANT、payoff 章恰有 1 个 CLUE_PAYOFF，
+     * 不存在日程外引用，reveal 章有 FINAL_REVEAL。日程为空（旧 run/单测）时跳过。
+     */
+    static List<PlanContracts.PlanIssue> validateSchedule(PlanContracts.RoutePlan plan,
+                                                          RouteContext ctx) {
+        List<PlanContracts.PlanIssue> issues = new ArrayList<>();
+        if (ctx.schedule() == null || ctx.schedule().isEmpty()) {
+            return issues;
+        }
+        Map<String, int[]> windows = clueChapters(ctx.schedule());
+        for (ChapterScheduleEntry entry : ctx.schedule()) {
+            for (String key : entry.mustPlant()) {
+                long count = countRoleInChapter(plan, entry.chapterNo(),
+                        PlanContracts.BeatRole.CLUE_PLANT, key);
+                if (count != 1) {
+                    issues.add(issue("ROUTE_CLUE_PLANT_MISSING", "第" + entry.chapterNo()
+                            + "章必须有且只有 1 个 CLUE_PLANT 拍引用 " + key + "（实际 " + count + "）"));
+                }
+            }
+            for (String key : entry.mustPayoff()) {
+                long count = countRoleInChapter(plan, entry.chapterNo(),
+                        PlanContracts.BeatRole.CLUE_PAYOFF, key);
+                if (count != 1) {
+                    issues.add(issue("ROUTE_CLUE_PAYOFF_MISSING", "第" + entry.chapterNo()
+                            + "章必须有且只有 1 个 CLUE_PAYOFF 拍引用 " + key + "（实际 " + count + "）"));
+                }
+            }
+            if (entry.reveal()
+                    && countRoleInChapter(plan, entry.chapterNo(),
+                    PlanContracts.BeatRole.FINAL_REVEAL, null) < 1) {
+                issues.add(issue("ROUTE_REVEAL_CHAPTER",
+                        "第" + entry.chapterNo() + "章是揭示章，必须有 FINAL_REVEAL 拍"));
+            }
+        }
+        for (PlanContracts.BeatAssignment assignment : plan.assignments()) {
+            for (String ref : assignment.threadRefs()) {
+                String key = normalizeThreadRef(ref);
+                if (!windows.containsKey(key)) {
+                    continue;
+                }
+                if (!allowedClueRef(windows.get(key), assignment.chapterNo(),
+                        assignment.beatRole())) {
+                    issues.add(issue("ROUTE_CLUE_STRAY", "拍 " + assignment.seq() + " 在第"
+                            + assignment.chapterNo() + "章（" + assignment.beatRole()
+                            + "）引用了日程外的线索 " + key));
+                }
+            }
+        }
+        for (PlanContracts.SyntheticAssignment item : plan.synthetic()) {
+            for (String ref : item.threadRefs()) {
+                String key = normalizeThreadRef(ref);
+                if (!windows.containsKey(key)) {
+                    continue;
+                }
+                if (!allowedClueRef(windows.get(key), item.chapterNo(), item.beatRole())) {
+                    issues.add(issue("ROUTE_CLUE_STRAY", "补拍（第" + item.chapterNo() + "章 "
+                            + item.beatRole() + "）引用了日程外的线索 " + key));
+                }
+            }
+        }
+        return issues;
+    }
+
+    /** clueKey → {plantChapter, payoffChapter}（只取日程里出现的线索）。 */
+    static Map<String, int[]> clueChapters(List<ChapterScheduleEntry> schedule) {
+        Map<String, int[]> out = new LinkedHashMap<>();
+        for (ChapterScheduleEntry entry : schedule) {
+            for (String key : entry.mustPlant()) {
+                out.computeIfAbsent(key, ignored -> new int[]{entry.chapterNo(), -1})[0] =
+                        entry.chapterNo();
+            }
+            for (String key : entry.mustPayoff()) {
+                out.computeIfAbsent(key, ignored -> new int[]{-1, entry.chapterNo()})[1] =
+                        entry.chapterNo();
+            }
+        }
+        return out;
+    }
+
+    /** 线索引用是否落在允许的章/拍型上：plant→CLUE_PLANT、payoff→CLUE_PAYOFF、之间→CLUE_ECHO。 */
+    static boolean allowedClueRef(int[] window, Integer chapterNo, PlanContracts.BeatRole role) {
+        if (window == null || chapterNo == null || role == null) {
+            return false;
+        }
+        int plant = window[0];
+        int payoff = window[1];
+        if (role == PlanContracts.BeatRole.CLUE_PLANT && chapterNo == plant) {
+            return true;
+        }
+        if (role == PlanContracts.BeatRole.CLUE_PAYOFF && chapterNo == payoff) {
+            return true;
+        }
+        return role == PlanContracts.BeatRole.CLUE_ECHO
+                && plant > 0 && payoff > 0 && chapterNo > plant && chapterNo < payoff;
+    }
+
+    private static long countRoleInChapter(PlanContracts.RoutePlan plan, int chapterNo,
+                                          PlanContracts.BeatRole role, String clueKey) {
+        java.util.stream.Stream<List<String>> refs = java.util.stream.Stream.concat(
+                plan.assignments().stream()
+                        .filter(item -> item.chapterNo() != null && item.chapterNo() == chapterNo
+                                && item.beatRole() == role)
+                        .map(PlanContracts.BeatAssignment::threadRefs),
+                plan.synthetic().stream()
+                        .filter(item -> item.chapterNo() == chapterNo && item.beatRole() == role)
+                        .map(PlanContracts.SyntheticAssignment::threadRefs));
+        return refs.filter(list -> clueKey == null
+                        || list.stream().map(DeriveBeatRouteService::normalizeThreadRef)
+                        .anyMatch(clueKey::equals))
+                .count();
+    }
+
+    /**
+     * 日程外的线索引用机械归一（幂等）：非 plant/payoff/echo 允许章的 clue 引用删除并告警；
+     * 同章同 key 的重复 plant/payoff 只保留第一个引用。REL-* 与其他线程一律保留。
+     */
+    static PlanContracts.RoutePlan normalizeClueThreadRefs(
+            PlanContracts.RoutePlan plan, List<ChapterScheduleEntry> schedule) {
+        if (schedule == null || schedule.isEmpty()) {
+            return plan;
+        }
+        Map<String, int[]> windows = clueChapters(schedule);
+        Set<String> seenPlantPayoff = new HashSet<>();
+        boolean changed = false;
+        List<PlanContracts.BeatAssignment> assignments = new ArrayList<>();
+        for (PlanContracts.BeatAssignment item : plan.assignments()) {
+            List<String> kept = new ArrayList<>();
+            for (String ref : item.threadRefs()) {
+                String key = normalizeThreadRef(ref);
+                if (!windows.containsKey(key)) {
+                    kept.add(key);
+                    continue;
+                }
+                boolean allowed = allowedClueRef(windows.get(key), item.chapterNo(),
+                        item.beatRole());
+                boolean duplicate = (item.beatRole() == PlanContracts.BeatRole.CLUE_PLANT
+                        || item.beatRole() == PlanContracts.BeatRole.CLUE_PAYOFF)
+                        && !seenPlantPayoff.add(item.chapterNo() + "|" + item.beatRole() + "|" + key);
+                if (allowed && !duplicate) {
+                    kept.add(key);
+                } else {
+                    changed = true;
+                    log.warn("路由日程归一：拍 seq={} 第{}章 {} 剔除线索引用 {}（allowed={} duplicate={}）",
+                            item.seq(), item.chapterNo(), item.beatRole(), key, allowed, duplicate);
+                }
+            }
+            assignments.add(kept.size() == item.threadRefs().size() ? item
+                    : new PlanContracts.BeatAssignment(item.seq(), item.chapterNo(),
+                    item.storyLayer(), item.beatRole(), item.focusCharacters(), kept,
+                    item.dependsOn(), item.payoffTarget(), item.appearanceMode(),
+                    item.requiresKnowledge(), item.writesKnowledge(), item.requiresState(),
+                    item.changesState()));
+        }
+        List<PlanContracts.SyntheticAssignment> synthetic = new ArrayList<>();
+        for (PlanContracts.SyntheticAssignment item : plan.synthetic()) {
+            List<String> kept = new ArrayList<>();
+            for (String ref : item.threadRefs()) {
+                String key = normalizeThreadRef(ref);
+                if (!windows.containsKey(key)) {
+                    kept.add(key);
+                    continue;
+                }
+                boolean allowed = allowedClueRef(windows.get(key), item.chapterNo(),
+                        item.beatRole());
+                boolean duplicate = (item.beatRole() == PlanContracts.BeatRole.CLUE_PLANT
+                        || item.beatRole() == PlanContracts.BeatRole.CLUE_PAYOFF)
+                        && !seenPlantPayoff.add(item.chapterNo() + "|" + item.beatRole() + "|" + key);
+                if (allowed && !duplicate) {
+                    kept.add(key);
+                } else {
+                    changed = true;
+                    log.warn("路由日程归一：补拍 第{}章 {} 剔除线索引用 {}（allowed={} duplicate={}）",
+                            item.chapterNo(), item.beatRole(), key, allowed, duplicate);
+                }
+            }
+            synthetic.add(kept.size() == item.threadRefs().size() ? item
+                    : new PlanContracts.SyntheticAssignment(item.chapterNo(), item.storyLayer(),
+                    item.beatRole(), item.beatType(), item.goal(), item.focusCharacters(),
+                    kept, item.appearanceMode(), item.dependsOn(), item.payoffTarget(),
+                    item.requiresKnowledge(), item.writesKnowledge(), item.requiresState(),
+                    item.changesState()));
+        }
+        return changed ? new PlanContracts.RoutePlan(plan.volumeNo(), plan.chapters(),
+                assignments, synthetic, plan.skipped()) : plan;
+    }
+
+    /**
+     * 机械注入日程必需的埋设/兑现/揭示拍（幂等）：模型没安排或归一后被剔除时由 Java 补齐，
+     * 保证“每条 clue 恰好 1 plant + 1 payoff”不依赖模型自觉。
+     */
+    static PlanContracts.RoutePlan ensureScheduleBeats(PlanContracts.RoutePlan plan,
+                                                       List<ChapterScheduleEntry> schedule,
+                                                       StoryContract contract) {
+        if (schedule == null || schedule.isEmpty()) {
+            return plan;
+        }
+        Map<String, StoryContract.Clue> clueByKey = new LinkedHashMap<>();
+        if (contract != null) {
+            contract.clues().forEach(clue -> clueByKey.put(clue.clueKey(), clue));
+        }
+        List<PlanContracts.SyntheticAssignment> added = new ArrayList<>();
+        for (ChapterScheduleEntry entry : schedule) {
+            for (String key : entry.mustPlant()) {
+                if (countRoleInChapter(plan, entry.chapterNo(),
+                        PlanContracts.BeatRole.CLUE_PLANT, key) > 0
+                        || hasAdded(added, entry.chapterNo(), PlanContracts.BeatRole.CLUE_PLANT, key)) {
+                    continue;
+                }
+                added.add(clueBeat(entry.chapterNo(), PlanContracts.BeatRole.CLUE_PLANT, "铺垫",
+                        "埋设线索 " + key + "：" + clueText(clueByKey.get(key)),
+                        key, clueByKey.get(key)));
+            }
+            for (String key : entry.mustPayoff()) {
+                if (countRoleInChapter(plan, entry.chapterNo(),
+                        PlanContracts.BeatRole.CLUE_PAYOFF, key) > 0
+                        || hasAdded(added, entry.chapterNo(), PlanContracts.BeatRole.CLUE_PAYOFF, key)) {
+                    continue;
+                }
+                added.add(clueBeat(entry.chapterNo(), PlanContracts.BeatRole.CLUE_PAYOFF, "收束",
+                        "兑现线索 " + key + "：" + clueText(clueByKey.get(key)),
+                        key, clueByKey.get(key)));
+            }
+            if (entry.reveal()
+                    && countRoleInChapter(plan, entry.chapterNo(),
+                    PlanContracts.BeatRole.FINAL_REVEAL, null) == 0
+                    && added.stream().noneMatch(item -> item.chapterNo() == entry.chapterNo()
+                    && item.beatRole() == PlanContracts.BeatRole.FINAL_REVEAL)) {
+                String truth = contract == null || contract.truth() == null
+                        ? "" : contract.truth().finalTruth();
+                added.add(new PlanContracts.SyntheticAssignment(
+                        entry.chapterNo(), PlanContracts.StoryLayer.MAIN_MYSTERY,
+                        PlanContracts.BeatRole.FINAL_REVEAL, "收束",
+                        "揭示最终真相：" + (truth.isBlank() ? "按冻结合同兑现真凶/动机/手法" : truth),
+                        defaultFocus(contract), List.of(), PlanContracts.AppearanceMode.LIVE));
+            }
+        }
+        if (added.isEmpty()) {
+            return plan;
+        }
+        List<PlanContracts.SyntheticAssignment> synthetic = new ArrayList<>(plan.synthetic());
+        synthetic.addAll(added);
+        log.info("路由机械补日程拍：volume={} 新增={}（plant/payoff/reveal）",
+                plan.volumeNo(), added.size());
+        return new PlanContracts.RoutePlan(plan.volumeNo(), plan.chapters(),
+                plan.assignments(), synthetic, plan.skipped());
+    }
+
+    private static boolean hasAdded(List<PlanContracts.SyntheticAssignment> added, int chapterNo,
+                                    PlanContracts.BeatRole role, String key) {
+        return added.stream().anyMatch(item -> item.chapterNo() == chapterNo
+                && item.beatRole() == role && item.threadRefs().contains(key));
+    }
+
+    private static PlanContracts.SyntheticAssignment clueBeat(int chapterNo,
+                                                              PlanContracts.BeatRole role,
+                                                              String beatType, String goal,
+                                                              String key, StoryContract.Clue clue) {
+        return new PlanContracts.SyntheticAssignment(
+                chapterNo, PlanContracts.StoryLayer.LOCAL_CASE, role, beatType, goal,
+                clue == null || clue.ownerKey() == null || clue.ownerKey().isBlank()
+                        ? List.of("C1") : List.of(clue.ownerKey()),
+                List.of(key), PlanContracts.AppearanceMode.LIVE);
+    }
+
+    private static String clueText(StoryContract.Clue clue) {
+        return clue == null || clue.clue() == null || clue.clue().isBlank()
+                ? "按冻结合同的可观测现象" : clue.clue();
+    }
+
+    private static List<String> defaultFocus(StoryContract contract) {
+        return contract == null || contract.cast().isEmpty()
+                ? List.of("C1") : List.of(contract.cast().get(0).key());
     }
 
     /** assignments 与 syntheticSlots 共用的扁平 route_contract 字段，避免两类补拍漏读契约。 */
@@ -272,6 +568,72 @@ public class DeriveBeatRouteService {
             List<String> writesKnowledge,
             Map<String, Object> requiresState,
             Map<String, Object> changesState) {
+    }
+
+    static Map<String, List<String>> parseLegacyStateMap(
+            String json, RouteContext ctx, String field) {
+        ObjectMapper strict = JsonMapper.builder()
+                .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                .build();
+        try {
+            return legacyStateMap(strict.readTree(json), ctx, field);
+        } catch (PlanJson.Bad e) {
+            throw e;
+        } catch (Exception e) {
+            String message = e.getMessage() == null ? "" : e.getMessage();
+            if (message.contains("Duplicate field") || message.contains("重复键")) {
+                throw new PlanJson.Bad("[SCHEMA_DUPLICATE_KEY] path=" + field
+                        + " expected=unique character key actual=C1");
+            }
+            throw new PlanJson.Bad("[SCHEMA_FIELD_INVALID] path=" + field
+                    + " expected=legacy state object: " + message);
+        }
+    }
+
+    static Map<String, List<String>> legacyStateMap(
+            JsonNode node, RouteContext ctx, String field) {
+        if (node == null || node.isMissingNode()) {
+            return Map.of();
+        }
+        if (!node.isObject()) {
+            throw new PlanJson.Bad("[SCHEMA_FIELD_INVALID] path=" + field
+                    + " expected=object");
+        }
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        node.fields().forEachRemaining(entry -> {
+            String key = entry.getKey();
+            if (!ctx.characterKeys().contains(key)) {
+                throw new PlanJson.Bad("[DOMAIN_UNKNOWN_CHARACTER] path=" + field + "." + key
+                        + " expected=character key actual=" + key);
+            }
+            JsonNode value = entry.getValue();
+            if (value.isTextual()) {
+                out.put(key, List.of(value.asText()));
+                return;
+            }
+            if (!value.isArray()) {
+                throw new PlanJson.Bad("[SCHEMA_FIELD_INVALID] path=" + field + "." + key
+                        + " expected=string or string array");
+            }
+            List<String> states = new ArrayList<>();
+            for (JsonNode item : value) {
+                String raw = item.asText("");
+                try {
+                    PlanContracts.StateChangeKind.valueOf(raw);
+                } catch (IllegalArgumentException e) {
+                    throw new PlanJson.Bad("[SCHEMA_ENUM_INVALID] path=" + field + "." + key
+                            + " expected=StateChangeKind actual=" + raw);
+                }
+                states.add(raw);
+            }
+            out.put(key, List.copyOf(states));
+        });
+        return Map.copyOf(out);
+    }
+
+    static RouteNarrativeContract.ParseResult parseLegacyRouteNarrative(
+            JsonNode root, RouteNarrativeContract.RouteContractKeys keys) {
+        return RouteNarrativeContract.parse(root, keys);
     }
 
     static RouteContractFields routeContract(JsonNode node) {
@@ -294,6 +656,7 @@ public class DeriveBeatRouteService {
             throw new PlanJson.Bad("route.volumeNo 必须为 " + ctx.volume().volumeNo());
         }
         List<PlanContracts.ChapterSlotContract> chapters = new ArrayList<>();
+        int chapterIndex = 0;
         for (JsonNode node : root.path("chapters")) {
             chapters.add(new PlanContracts.ChapterSlotContract(
                     node.path("chapterNo").asInt(0),
@@ -304,12 +667,15 @@ public class DeriveBeatRouteService {
                     node.path("relationshipGoal").asText("").trim(),
                     roles(node.path("requiredBeatRoles")),
                     strings(node.path("forbiddenAppearances")),
-                    map(node.path("requiredStateBefore")),
-                    map(node.path("requiredStateAfter"))));
+                    legacyStateMap(node.path("requiredStateBefore"), ctx,
+                            "$.chapters[" + chapterIndex + "].requiredStateBefore"),
+                    legacyStateMap(node.path("requiredStateAfter"), ctx,
+                            "$.chapters[" + chapterIndex + "].requiredStateAfter")));
+            chapterIndex++;
         }
         chapters = normalizeRouteChapters(chapters, ctx);
         if (ctx.volume().toChapter() - ctx.volume().fromChapter() + 1 >= 6) {
-            chapters = mergeRequiredSlots(chapters, ctx.volume());
+            chapters = mergeRequiredSlots(chapters, ctx.volume(), ctx.schedule());
         }
         List<PlanContracts.BeatAssignment> assignments = new ArrayList<>();
         for (JsonNode node : root.path("assignments")) {
@@ -407,6 +773,9 @@ public class DeriveBeatRouteService {
         plan = recoverMissingAssignments(plan, ctx);
         plan = dropUnknownThreadRefs(plan, ctx.threadKeys());
         plan = rebalanceRouteLoad(plan, ctx);
+        // 日程是硬约束：先剔除日程不允许的线索引用，再机械注入必有的埋设/兑现拍（幂等）。
+        plan = normalizeClueThreadRefs(plan, ctx.schedule());
+        plan = ensureScheduleBeats(plan, ctx.schedule(), ctx.contract());
         List<PlanContracts.PlanIssue> issues = validateRoute(plan, ctx);
         if (!issues.isEmpty()) {
             throw new PlanJson.Bad(issues.get(0).message());
@@ -541,7 +910,7 @@ public class DeriveBeatRouteService {
                 dropped++;
             }
         }
-        for (PlanContracts.ChapterSlotContract template : chapterSlots(ctx.volume())) {
+        for (PlanContracts.ChapterSlotContract template : chapterSlots(ctx.volume(), ctx.schedule())) {
             byNo.putIfAbsent(template.chapterNo(), template);
         }
         if (dropped > 0 || byNo.size() != parsed.size()) {
@@ -554,9 +923,10 @@ public class DeriveBeatRouteService {
     }
     static List<PlanContracts.ChapterSlotContract> mergeRequiredSlots(
             List<PlanContracts.ChapterSlotContract> parsed,
-            PlanContracts.VolumeContract volume) {
+            PlanContracts.VolumeContract volume,
+            List<ChapterScheduleEntry> schedule) {
         Map<Integer, PlanContracts.ChapterSlotContract> templates = new LinkedHashMap<>();
-        chapterSlots(volume).forEach(slot -> templates.put(slot.chapterNo(), slot));
+        chapterSlots(volume, schedule).forEach(slot -> templates.put(slot.chapterNo(), slot));
         List<PlanContracts.ChapterSlotContract> out = new ArrayList<>();
         for (PlanContracts.ChapterSlotContract slot : parsed) {
             PlanContracts.ChapterSlotContract template = templates.get(slot.chapterNo());
@@ -564,10 +934,16 @@ public class DeriveBeatRouteService {
                 out.add(slot);
                 continue;
             }
+            // 日程角色优先：模板已把 CLUE_PLANT/PAYOFF/FINAL_REVEAL 排在最前，cap 时不会先丢它们。
             LinkedHashSet<PlanContracts.BeatRole> roles =
                     new LinkedHashSet<>(template.requiredBeatRoles());
-            roles.addAll(slot.requiredBeatRoles());
-            List<PlanContracts.BeatRole> capped = roles.stream().limit(4).toList();
+            for (PlanContracts.BeatRole role : slot.requiredBeatRoles()) {
+                if (roles.size() >= MAX_CHAPTER_ROLES) {
+                    break;
+                }
+                roles.add(role);
+            }
+            List<PlanContracts.BeatRole> capped = roles.stream().limit(MAX_CHAPTER_ROLES).toList();
             String characterGoal = containsCharacterKey(slot.characterGoal())
                     ? slot.characterGoal() : template.characterGoal();
             String relationshipGoal = containsCharacterKey(slot.relationshipGoal())
@@ -849,6 +1225,12 @@ public class DeriveBeatRouteService {
                     chapter.characterGoal(), chapter.relationshipGoal(), chapter.localCaseGoal());
             for (PlanContracts.BeatRole role : chapter.requiredBeatRoles()) {
                 if (actual.contains(role)) {
+                    continue;
+                }
+                // 线索三拍只由 ensureScheduleBeats 生成（必须带 threadRefs）；通用补拍不带引用会变 stray。
+                if (role == PlanContracts.BeatRole.CLUE_PLANT
+                        || role == PlanContracts.BeatRole.CLUE_PAYOFF
+                        || role == PlanContracts.BeatRole.FINAL_REVEAL) {
                     continue;
                 }
                 out.add(new PlanContracts.SyntheticAssignment(
@@ -1191,9 +1573,12 @@ public class DeriveBeatRouteService {
                         new LambdaQueryWrapper<StoryThreadDO>()
                                 .eq(StoryThreadDO::getRunId, run.getId()))
                 .stream().map(StoryThreadDO::getThreadKey).collect(java.util.stream.Collectors.toSet());
+        List<ChapterScheduleEntry> schedule = scheduleService == null
+                ? List.of() : scheduleService.load(run);
+        StoryContract contract = contractService == null ? null : contractService.load(run);
         return new RouteContext(volume, new ArrayList<>(remain.values()), characters, threads,
                 Math.max(full.size(), nextSeq(run.getId()) - 1), forcedSkips,
-                scaffoldChapters(run));
+                scaffoldChapters(run), schedule, contract);
     }
 
     private Map<Integer, Integer> scaffoldChapters(RunDO run) {
@@ -1328,7 +1713,26 @@ public class DeriveBeatRouteService {
             node.put("arcSlot", beat.arcSlot());
             node.put("label", beat.labelText());
         }
-        root.set("chapterSlots", MAPPER.valueToTree(chapterSlots(volume)));
+        root.set("chapterSlots", MAPPER.valueToTree(chapterSlots(volume, ctx.schedule())));
+        ArrayNode scheduleArr = root.putArray("chapterSchedule");
+        for (ChapterScheduleEntry entry : ctx.schedule()) {
+            ObjectNode item = scheduleArr.addObject();
+            item.put("chapterNo", entry.chapterNo());
+            item.set("mustPlant", MAPPER.valueToTree(entry.mustPlant()));
+            item.set("mustPayoff", MAPPER.valueToTree(entry.mustPayoff()));
+            item.put("reveal", entry.reveal());
+        }
+        ArrayNode rules = root.putArray("scheduleRules");
+        rules.add("mustPlant 的线索必须在本章安排 CLUE_PLANT 拍且 threadRefs 含该 key；"
+                + "mustPayoff 必须安排 CLUE_PAYOFF 拍；缺拍 Java 会机械补齐（内容固定，不如自己写）");
+        rules.add("其他拍不得引用线索 key（REL-* 关系线例外）；CLUE_ECHO 只允许在 plant<payoff 之间");
+        rules.add("reveal=true 的章必须有 FINAL_REVEAL 拍");
+        rules.add("不得新增合同外线索/机关/证据；不得改真凶/动机/手法/线索章号");
+        StoryContract contract = ctx.contract();
+        if (contract != null && contractService != null) {
+            root.set("FROZEN_CONTRACT（唯一合同：cast/真相/线索/线程/禁令，禁止改写）",
+                    readTreeSafe(contractService.promptContext(contract)));
+        }
         return root.toString();
     }
 
@@ -1357,45 +1761,42 @@ public class DeriveBeatRouteService {
         return terms.stream().anyMatch(text::contains);
     }
 
+    /**
+     * 章功能槽 = 通用职能戏（HOOK/CASE_SETUP/FUNCTION_USE/高光/闭合）+ **日程角色**。
+     *
+     * <p>位置模板不再猜线索：旧代码“第 3 章必 CLUE_PLANT、倒数第 2 章必 CLUE_ECHO”正是
+     * run58 漂移的源头。线索拍只由日程（mustPlant/mustPayoff/reveal）决定；日程角色优先保留，
+     * 超过 {@link #MAX_CHAPTER_ROLES} 时丢基础角色，保证线索拍不被 cap 吃掉。
+     */
     static List<PlanContracts.ChapterSlotContract> chapterSlots(
-            PlanContracts.VolumeContract volume) {
+            PlanContracts.VolumeContract volume, List<ChapterScheduleEntry> schedule) {
+        Map<Integer, ChapterScheduleEntry> byNo = ChapterScheduleProjector.byChapter(schedule);
         List<PlanContracts.ChapterSlotContract> out = new ArrayList<>();
         int count = volume.toChapter() - volume.fromChapter() + 1;
-        int highlightAt = Math.max(1, count - 1);
         for (int i = 1; i <= count; i++) {
             int no = volume.fromChapter() + i - 1;
-            List<PlanContracts.BeatRole> roles;
-            if (i == 1) {
-                roles = List.of(PlanContracts.BeatRole.HOOK);
-            } else if (i == 2) {
-                roles = List.of(PlanContracts.BeatRole.CASE_SETUP);
-            } else if (i == 3) {
-                roles = List.of(PlanContracts.BeatRole.CLUE_PLANT);
-            } else if (i == 4) {
-                roles = List.of(PlanContracts.BeatRole.FUNCTION_USE);
-            } else if (i == highlightAt) {
-                roles = List.of(
-                        PlanContracts.BeatRole.HIGHLIGHT,
-                        PlanContracts.BeatRole.CHARACTER_CHOICE,
-                        PlanContracts.BeatRole.COST,
-                        PlanContracts.BeatRole.LOCAL_CLOSURE);
-            } else if (i == count) {
-                roles = "FINAL".equals(volume.globalRole())
-                        ? List.of(PlanContracts.BeatRole.CLUE_PAYOFF,
-                                PlanContracts.BeatRole.FINAL_CLOSURE)
-                        : List.of(PlanContracts.BeatRole.CLUE_PAYOFF,
-                                PlanContracts.BeatRole.NEXT_HOOK);
-            } else if (i == count - 2) {
-                roles = List.of(
-                        PlanContracts.BeatRole.RELATION_CONFLICT,
-                        PlanContracts.BeatRole.CLUE_ECHO);
-            } else if (i == count - 3) {
-                roles = List.of(
-                        PlanContracts.BeatRole.FALSE_ANSWER,
-                        PlanContracts.BeatRole.MAIN_ADVANCE);
-            } else {
-                roles = List.of(PlanContracts.BeatRole.MAIN_ADVANCE);
+            List<PlanContracts.BeatRole> roles = new ArrayList<>();
+            ChapterScheduleEntry entry = byNo.get(no);
+            if (entry != null) {
+                if (!entry.mustPlant().isEmpty()) {
+                    roles.add(PlanContracts.BeatRole.CLUE_PLANT);
+                }
+                if (!entry.mustPayoff().isEmpty()) {
+                    roles.add(PlanContracts.BeatRole.CLUE_PAYOFF);
+                }
+                if (entry.reveal()) {
+                    roles.add(PlanContracts.BeatRole.FINAL_REVEAL);
+                }
             }
+            for (PlanContracts.BeatRole base : baseRoles(volume, i, count)) {
+                if (roles.size() >= MAX_CHAPTER_ROLES) {
+                    break;
+                }
+                if (!roles.contains(base)) {
+                    roles.add(base);
+                }
+            }
+            roles = roles.stream().limit(MAX_CHAPTER_ROLES).toList();
             out.add(new PlanContracts.ChapterSlotContract(
                     no, "CH" + i, volume.localQuestion(), volume.mainMysteryAdvance(),
                     volume.focusCharacters().isEmpty() ? "" : volume.focusCharacters().get(0),
@@ -1403,6 +1804,34 @@ public class DeriveBeatRouteService {
                     Map.of(), Map.of()));
         }
         return out;
+    }
+
+    /** 通用职能戏基座（不是故事事实，保留）：首章钩子、次章立案、第 4 章职能戏、高光章、末章闭合。 */
+    private static List<PlanContracts.BeatRole> baseRoles(
+            PlanContracts.VolumeContract volume, int index, int count) {
+        List<PlanContracts.BeatRole> roles = new ArrayList<>();
+        if (index == 1) {
+            roles.add(PlanContracts.BeatRole.HOOK);
+        }
+        if (index == 2) {
+            roles.add(PlanContracts.BeatRole.CASE_SETUP);
+        }
+        if (index == 4) {
+            roles.add(PlanContracts.BeatRole.FUNCTION_USE);
+        }
+        if (count >= 3 && index == count - 1) {
+            roles.add(PlanContracts.BeatRole.HIGHLIGHT);
+            roles.add(PlanContracts.BeatRole.CHARACTER_CHOICE);
+            roles.add(PlanContracts.BeatRole.COST);
+            roles.add(PlanContracts.BeatRole.LOCAL_CLOSURE);
+        }
+        if (index == count) {
+            roles.add(PlanContracts.BeatRole.LOCAL_CLOSURE);
+            roles.add("FINAL".equals(volume.globalRole())
+                    ? PlanContracts.BeatRole.FINAL_CLOSURE
+                    : PlanContracts.BeatRole.NEXT_HOOK);
+        }
+        return roles;
     }
 
     private int nextSeq(long runId) {
@@ -1521,12 +1950,17 @@ public class DeriveBeatRouteService {
             if (target == null) {
                 break;
             }
+            if (target < source) {
+                break;
+            }
             int finalSource = source;
             int candidateIndex = -1;
             for (int i = 0; i < assignments.size(); i++) {
                 PlanContracts.BeatAssignment candidate = assignments.get(i);
                 if (finalSource == candidate.chapterNo()
                         && !isProtectedRole(candidate.beatRole().name())
+                        && !carriesClueRef(candidate.threadRefs())
+                        && !carriesDependencyOrKnowledge(candidate)
                         && !requiredRoles.getOrDefault(finalSource, Set.of())
  .contains(candidate.beatRole().name())) {
                     candidateIndex = i;
@@ -1555,7 +1989,29 @@ public class DeriveBeatRouteService {
     private static boolean isProtectedRole(String role) {
         return Set.of("HOOK", "HIGHLIGHT", "CHARACTER_CHOICE", "COST",
                 "LOCAL_CLOSURE", "FINAL_CLOSURE", "NEXT_HOOK", "FINAL_REVEAL",
-                "RELATION_CONFLICT").contains(role);
+                "CLUE_PLANT", "CLUE_PAYOFF", "RELATION_CONFLICT").contains(role);
+    }
+
+    /** 带线索引用的拍不可搬：搬走就等于把合同章号改掉。 */
+    private static boolean carriesClueRef(List<String> threadRefs) {
+        return threadRefs != null && threadRefs.stream()
+                .map(DeriveBeatRouteService::normalizeThreadRef)
+                .anyMatch(key -> key.startsWith("GM-CLUE-"));
+    }
+
+    /** 带知识/状态依赖的拍不可搬；倒搬会破坏章序。 */
+    private static boolean carriesDependencyOrKnowledge(PlanContracts.BeatAssignment beat) {
+        return nonEmpty(beat.threadRefs()) || nonEmpty(beat.dependsOn())
+                || nonEmpty(beat.requiresKnowledge()) || nonEmpty(beat.writesKnowledge())
+                || nonEmpty(beat.requiresState()) || nonEmpty(beat.changesState());
+    }
+
+    private static boolean nonEmpty(List<?> values) {
+        return values != null && !values.isEmpty();
+    }
+
+    private static boolean nonEmpty(java.util.Map<?, ?> values) {
+        return values != null && !values.isEmpty();
     }
 
     private static PlanContracts.PlanIssue issue(String code, String message) {
@@ -1707,13 +2163,16 @@ public class DeriveBeatRouteService {
             Set<String> threadKeys,
             int syntheticSeqBase,
             Map<Integer, String> forcedSkips,
-            Map<Integer, Integer> scaffoldChapters) {
+            Map<Integer, Integer> scaffoldChapters,
+            List<ChapterScheduleEntry> schedule,
+            StoryContract contract) {
         RouteContext(PlanContracts.VolumeContract volume,
                      List<DerivePlanService.InvBeat> inventory,
                      Set<String> characterKeys,
                      Set<String> threadKeys,
                      int syntheticSeqBase) {
-            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase, Map.of(), Map.of());
+            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase,
+                    Map.of(), Map.of(), List.of(), null);
         }
 
         RouteContext(PlanContracts.VolumeContract volume,
@@ -1722,13 +2181,41 @@ public class DeriveBeatRouteService {
                      Set<String> threadKeys,
                      int syntheticSeqBase,
                      Map<Integer, String> forcedSkips) {
-            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase, forcedSkips, Map.of());
+            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase, forcedSkips,
+                    Map.of(), List.of(), null);
+        }
+
+        RouteContext(PlanContracts.VolumeContract volume,
+                     List<DerivePlanService.InvBeat> inventory,
+                     Set<String> characterKeys,
+                     Set<String> threadKeys,
+                     int syntheticSeqBase,
+                     Map<Integer, String> forcedSkips,
+                     Map<Integer, Integer> scaffoldChapters) {
+            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase, forcedSkips,
+                    scaffoldChapters, List.of(), null);
+        }
+
+        RouteContext(PlanContracts.VolumeContract volume,
+                     List<DerivePlanService.InvBeat> inventory,
+                     Set<String> characterKeys,
+                     Set<String> threadKeys,
+                     int syntheticSeqBase,
+                     Map<Integer, String> forcedSkips,
+                     Map<Integer, Integer> scaffoldChapters,
+                     List<ChapterScheduleEntry> schedule) {
+            this(volume, inventory, characterKeys, threadKeys, syntheticSeqBase, forcedSkips,
+                    scaffoldChapters, schedule, null);
         }
 
         Map<Integer, DerivePlanService.InvBeat> inventoryBySeq() {
             Map<Integer, DerivePlanService.InvBeat> map = new LinkedHashMap<>();
             inventory.forEach(beat -> map.put(beat.tempSeq(), beat));
             return map;
+        }
+
+        Map<Integer, ChapterScheduleEntry> scheduleByChapter() {
+            return ChapterScheduleProjector.byChapter(schedule);
         }
     }
 

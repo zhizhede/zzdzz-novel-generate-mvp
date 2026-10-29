@@ -28,6 +28,25 @@
         WHERE id = #{chapterId}
     </update>
 
+    <update id="clearDraftOutlinesByVolume">
+        UPDATE chapters
+        SET draft_outline = NULL,
+            updated_time = NOW()
+        WHERE novel_id = #{novelId}
+          AND volume_no = #{volumeNo}
+    </update>
+
+    <update id="clearDraftOutlinesByChapters">
+        UPDATE chapters
+        SET draft_outline = NULL,
+            updated_time = NOW()
+        WHERE novel_id = #{novelId}
+          AND chapter_no IN
+        <foreach collection="chapterNos" item="no" open="(" separator="," close=")">
+            #{no}
+        </foreach>
+    </update>
+
     <update id="clearPlanByVolume">
         UPDATE chapters
         SET plan_contract = '{}'::jsonb,
@@ -60,5 +79,34 @@
             updated_time = NOW()
         WHERE id = #{id}
     </update>
+
+    <update id="updateContentIfRevision">
+        UPDATE chapters
+        SET content = #{content},
+            char_count = #{charCount},
+            status = #{status},
+            updated_time = NOW()
+        WHERE novel_id = #{novelId}
+          AND chapter_no = #{chapterNo}
+          AND plan_revision = #{planRevision}
+          AND EXISTS (
+              SELECT 1 FROM run r
+              WHERE r.novel_id = #{novelId}
+                AND r.active_plan_revision = #{planRevision}
+          )
+    </update>
+    <select id="insertPlanChapter" resultType="long">
+        INSERT INTO chapters (
+            novel_id, chapter_no, title, budget, pace_plan, status, plan_revision
+        ) VALUES (
+            #{p.novelId}, #{p.chapterNo}, #{p.title}, #{p.budget}, #{p.pacePlan}, #{p.status}, #{p.planRevision}
+        )
+        RETURNING id
+    </select>
+
+    <delete id="deleteByNovelId">
+        DELETE FROM chapters
+        WHERE novel_id = #{novelId}
+    </delete>
 
 </mapper>

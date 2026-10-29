@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveOrganizationMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_organization (
+            run_id, org_key, org_type, name, public_goal, private_goal, resource,
+            rule, weakness, pressure, members, contract
+        ) VALUES (
+            #{p.runId}, #{p.orgKey}, #{p.orgType}, #{p.name}, #{p.publicGoal}, #{p.privateGoal}, #{p.resource},
+            #{p.rule}, #{p.weakness}, #{p.pressure}, #{p.members}::jsonb, #{p.contract}::jsonb
+        ) RETURNING id
+    </select>
+</mapper>

@@ -92,4 +92,11 @@
         WHERE id = #{id}
     </update>
 
+    <update id="updateChapterCount">
+        UPDATE novels
+        SET chapter_count = #{chapterCount},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

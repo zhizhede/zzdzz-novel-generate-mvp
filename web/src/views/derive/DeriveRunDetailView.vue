@@ -102,8 +102,8 @@
           </el-table-column>
           <el-table-column label="结果" width="80">
             <template #default="{ row }">
-              <el-tag size="small" :type="row.status === 'ok' ? 'success' : 'danger'">
-                {{ row.status === 'ok' ? '成功' : '失败' }}
+              <el-tag size="small" :type="row.effectiveStatus === 'ACCEPTED' ? 'success' : (row.effectiveStatus === 'CONTENT_REJECTED' ? 'warning' : 'danger')">
+                {{ row.effectiveStatusLabel || (row.status === 'ok' ? '成功' : '失败') }}
               </el-tag>
             </template>
           </el-table-column>

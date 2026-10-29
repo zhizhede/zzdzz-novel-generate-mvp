@@ -103,7 +103,7 @@ public class DeriveQueryService {
     public List<com.zzdzz.novelgen.model.vo.derive.LlmTrailVO> listLlmTrail(long runId) {
         return llmCallLogMapper.findPageByRun(runId, "derive_", 40, 0).stream()
                 .map(r -> new com.zzdzz.novelgen.model.vo.derive.LlmTrailVO(
-                        r.getId(), r.getNode(), r.getStatus(),
+                        r.getId(), r.getNode(), r.getStatus(), effectiveStatus(r.getStatus(), r.getErrorMsg()).name(), effectiveStatus(r.getStatus(), r.getErrorMsg()).label(),
                         r.getPromptTokens(), r.getCompletionTokens(), r.getTotalTokens(),
                         r.getLatencyMs(),
                         r.getErrorMsg() == null ? "" : abbreviate(r.getErrorMsg(), 400),
@@ -128,10 +128,14 @@ public class DeriveQueryService {
                 ? row.getReasoningText() : message.path("reasoning_content").asText("");
         return new com.zzdzz.novelgen.model.vo.derive.LlmCallDetailVO(
                 row.getId(), row.getRunId(), row.getNovelId(), row.getNode(), row.getModel(),
-                row.getStatus(), row.getPromptTokens(), row.getCachedTokens(), row.getCompletionTokens(),
+                row.getStatus(), effectiveStatus(row.getStatus(), row.getErrorMsg()).name(), effectiveStatus(row.getStatus(), row.getErrorMsg()).label(),                row.getPromptTokens(), row.getCachedTokens(), row.getCompletionTokens(),
                 row.getTotalTokens(), row.getLatencyMs(), row.getErrorMsg(), reasoning, messages,
                 row.getRequestJson(), message.path("content").asText(""), row.getResponseJson(),
                 row.getCreatedTime());
+    }
+
+    private static com.zzdzz.novelgen.model.enums.LlmCallEffectiveStatusEnum effectiveStatus(String status, String error) {
+        return com.zzdzz.novelgen.model.enums.LlmCallEffectiveStatusEnum.effectiveStatus(status, error);
     }
 
     private JsonNode readJson(String json) {
@@ -442,7 +446,7 @@ public class DeriveQueryService {
         }
         if (notBlank(q.keyword())) {
             String kw = q.keyword().strip().toLowerCase(Locale.ROOT);
-            String haystack = ((row.novelTitle() == null ? "" : row.novelTitle()) + "\n"
+            String haystack = ((row.novelTitle() == null ? "" : row.novelTitle()) + ""
                     + (row.intent() == null ? "" : row.intent())).toLowerCase(Locale.ROOT);
             if (!haystack.contains(kw)) {
                 return false;
@@ -480,7 +484,7 @@ public class DeriveQueryService {
         }
         if (notBlank(q.keyword())) {
             String kw = q.keyword().strip().toLowerCase(Locale.ROOT);
-            String haystack = ((row.title() == null ? "" : row.title()) + "\n"
+            String haystack = ((row.title() == null ? "" : row.title()) + ""
                     + (row.author() == null ? "" : row.author())).toLowerCase(Locale.ROOT);
             if (!haystack.contains(kw)) {
                 return false;

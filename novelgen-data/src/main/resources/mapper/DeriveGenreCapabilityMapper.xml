@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveGenreCapabilityMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_genre_capability (
+            run_id, capability_key, enabled, required_contract, forbidden_rules,
+            event_roles, validation_rules, priority
+        ) VALUES (
+            #{p.runId}, #{p.capabilityKey}, #{p.enabled}, #{p.requiredContract}::jsonb,
+            #{p.forbiddenRules}::jsonb, #{p.eventRoles}::jsonb, #{p.validationRules}::jsonb, #{p.priority}
+        ) RETURNING id
+    </select>
+</mapper>

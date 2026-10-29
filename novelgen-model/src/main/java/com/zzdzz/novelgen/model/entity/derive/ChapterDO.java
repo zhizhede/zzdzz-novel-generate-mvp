@@ -48,4 +48,7 @@ public class ChapterDO extends DeriveBaseDO {
 
     /** 章功能槽合同：本章职责、必需拍角色和状态边界。 */
     private String planContract;
+
+    /** 本章所属计划快照 revision（V139；旧运行为空）。 */
+    private Integer planRevision;
 }

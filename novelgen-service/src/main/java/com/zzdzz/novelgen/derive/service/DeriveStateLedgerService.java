@@ -26,7 +26,7 @@ public class DeriveStateLedgerService {
                     assignment.beatRole().name()));
         }
         for (PlanContracts.SyntheticAssignment item : synthetic) {
-            steps.add(new Step(item.chapterNo(), Integer.MAX_VALUE,
+            steps.add(new Step(item.chapterNo(), Integer.MIN_VALUE,
                     item.focusCharacters(), item.requiresKnowledge(),
                     item.writesKnowledge(), item.threadRefs(), item.beatRole().name()));
         }
@@ -42,9 +42,10 @@ public class DeriveStateLedgerService {
         List<String> errors = new ArrayList<>();
         for (Step step : steps) {
             for (String fact : step.requires()) {
-                Set<String> readers = known.computeIfAbsent(step.focus().isEmpty()
-                        ? "C1" : step.focus().get(0), key -> new LinkedHashSet<>());
-                if (!readers.contains(fact)) {
+                boolean knownByFocus = step.focus().stream()
+                        .map(key -> known.computeIfAbsent(key, ignored -> new LinkedHashSet<>()))
+                        .anyMatch(knowledge -> knowledge.contains(fact));
+                if (!knownByFocus) {
                     errors.add("第" + step.chapterNo() + "拍" + step.seq()
                             + "要求知识未获得：" + fact);
                 }

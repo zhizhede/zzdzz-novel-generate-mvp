@@ -11,6 +11,8 @@ public final class PlanContracts {
 
     public enum PlanUnit {
         SCALE,
+        CONTRACT,
+        SCHEDULE,
         SPINE,
         VOLUMES,
         CHARACTERS,
@@ -92,8 +94,29 @@ public final class PlanContracts {
         CLOSED
     }
 
+    public enum StateChangeKind {
+        LOCATION,
+        PRESENT,
+        ABSENT,
+        DEAD,
+        IDENTITY,
+        POSSESSION_GAIN,
+        POSSESSION_LOSS,
+        RELATIONSHIP
+    }
+
+    public enum ThreadEffectKind {
+        OPEN,
+        ECHO,
+        PAYOFF,
+        CLOSE
+    }
+
     public enum RepairScope {
         NONE,
+        CONTRACT,
+        COMPILE_PLAN,
+        EXPAND_SCRIPTS,
         DRAFT,
         PLAN_VOLUME,
         SPINE,
@@ -183,8 +206,8 @@ public final class PlanContracts {
             String relationshipGoal,
             List<BeatRole> requiredBeatRoles,
             List<String> forbiddenAppearances,
-            Map<String, Object> requiredStateBefore,
-            Map<String, Object> requiredStateAfter) {
+            Map<String, List<String>> requiredStateBefore,
+            Map<String, List<String>> requiredStateAfter) {
     }
 
     public record BeatAssignment(

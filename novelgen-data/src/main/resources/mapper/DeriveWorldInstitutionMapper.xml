@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveWorldInstitutionMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_world_institution (
+            run_id, institution_key, institution_type, name, law_or_doctrine, enforcement,
+            benefit, cost, affected_characters, contract
+        ) VALUES (
+            #{p.runId}, #{p.institutionKey}, #{p.institutionType}, #{p.name}, #{p.lawOrDoctrine}, #{p.enforcement},
+            #{p.benefit}, #{p.cost}, #{p.affectedCharacters}::jsonb, #{p.contract}::jsonb
+        ) RETURNING id
+    </select>
+</mapper>

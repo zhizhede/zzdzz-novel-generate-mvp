@@ -29,6 +29,7 @@ import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
 import com.zzdzz.novelgen.model.vo.derive.RunVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -102,6 +103,9 @@ public class DeriveSampleService {
     private final LabelIndexMapper labelIndexMapper;
     private final DomainCellMapper domainCellMapper;
     private final RunMapper runMapper;
+    @Autowired(required = false)
+    private DeriveContractService contractService;
+    private DeriveCharacterBusinessModelService businessModelService;
     private final WorkFingerprintMapper fingerprintMapper;
     private final com.zzdzz.novelgen.derive.mapper.CalibrationMapper calibrationMapper;
     private final LlmJson llmJson;
@@ -443,6 +447,12 @@ public class DeriveSampleService {
         run.setAntiRepro(antiRepro);
         run.setStepStatus("{\"v\":1,\"steps\":{\"SAMPLE\":{\"status\":\"RUNNING\"}}}");
         long runId = runMapper.insertFull(run);
+        run.setId(runId);
+        // 合同不再在建 run 时写占位行：唯一故事合同在 ⑥a 的 CONTRACT 单元生成并冻结
+        //（占位行会让“合同已存在”的判定失真，见 derive-contract-first 计划 §2）。
+        if (businessModelService != null) {
+            businessModelService.initializeCapabilities(runId, tags, effectiveIntent, outcome);
+        }
 
         // ---- 5.3 焊接（K≥2 时 LLM；K<2 直接进 PLANNING）----
         String weldedCode = null;

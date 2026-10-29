@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveChapterScheduleMapper">
+
+    <insert id="insertFull">
+        INSERT INTO derive_chapter_schedule (
+            run_id, contract_version, chapter_no, volume_no, reveal, must_plant, must_payoff
+        ) VALUES (
+            #{p.runId}, #{p.contractVersion}, #{p.chapterNo}, #{p.volumeNo}, #{p.reveal},
+            #{p.mustPlant}::jsonb, #{p.mustPayoff}::jsonb
+        )
+    </insert>
+
+    <delete id="deleteByRun">
+        DELETE FROM derive_chapter_schedule WHERE run_id = #{runId}
+    </delete>
+
+    <select id="selectByRun" resultType="com.zzdzz.novelgen.model.entity.derive.DeriveChapterScheduleDO">
+        SELECT id, run_id, contract_version, chapter_no, volume_no, reveal,
+               must_plant, must_payoff, created_time, updated_time,
+               created_user_id, updated_user_id
+        FROM derive_chapter_schedule
+        WHERE run_id = #{runId}
+        ORDER BY chapter_no
+    </select>
+
+    <select id="selectByRunAndVersion" resultType="com.zzdzz.novelgen.model.entity.derive.DeriveChapterScheduleDO">
+        SELECT id, run_id, contract_version, chapter_no, volume_no, reveal,
+               must_plant, must_payoff, created_time, updated_time,
+               created_user_id, updated_user_id
+        FROM derive_chapter_schedule
+        WHERE run_id = #{runId} AND contract_version = #{version}
+        ORDER BY chapter_no
+    </select>
+
+</mapper>

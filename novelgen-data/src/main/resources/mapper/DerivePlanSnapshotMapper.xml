@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DerivePlanSnapshotMapper">
+
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_plan_snapshot (
+            run_id, revision, contract_version, contract_hash, status,
+            plan_hash, graph, admission_report
+        ) VALUES (
+            #{p.runId}, #{p.revision}, #{p.contractVersion}, #{p.contractHash}, #{p.status},
+            #{p.planHash}, #{p.graph}::jsonb, #{p.admissionReport}::jsonb
+        )
+        RETURNING id
+    </select>
+
+    <select id="findMaxRevision"
+            resultType="com.zzdzz.novelgen.model.entity.derive.DerivePlanSnapshotDO">
+        SELECT id, run_id, revision, contract_version, contract_hash, status,
+               plan_hash, graph::text AS graph, admission_report::text AS admission_report,
+               created_time, updated_time, created_user_id, updated_user_id
+        FROM derive_plan_snapshot
+        WHERE run_id = #{runId}
+        ORDER BY revision DESC
+        LIMIT 1
+    </select>
+
+    <select id="findRevision"
+            resultType="com.zzdzz.novelgen.model.entity.derive.DerivePlanSnapshotDO">
+        SELECT id, run_id, revision, contract_version, contract_hash, status,
+               plan_hash, graph::text AS graph, admission_report::text AS admission_report,
+               created_time, updated_time, created_user_id, updated_user_id
+        FROM derive_plan_snapshot
+        WHERE run_id = #{runId} AND revision = #{revision}
+    </select>
+
+    <update id="admit">
+        UPDATE derive_plan_snapshot
+        SET status = 'ADMITTED',
+            admission_report = #{reportJson}::jsonb,
+            plan_hash = #{planHash},
+            updated_time = NOW()
+        WHERE run_id = #{runId}
+          AND revision = #{revision}
+          AND status = 'DRAFT'
+    </update>
+
+    <update id="supersedeOtherAdmitted">
+        UPDATE derive_plan_snapshot
+        SET status = 'SUPERSEDED',
+            updated_time = NOW()
+        WHERE run_id = #{runId}
+          AND revision &lt;&gt; #{keepRevision}
+          AND status = 'ADMITTED'
+    </update>
+
+    <update id="updateRunActiveRevision">
+        UPDATE run
+        SET active_plan_revision = #{revision},
+            updated_time = NOW()
+        WHERE id = #{runId}
+    </update>
+
+</mapper>

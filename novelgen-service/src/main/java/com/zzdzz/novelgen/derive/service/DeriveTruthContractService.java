@@ -49,8 +49,13 @@ public class DeriveTruthContractService {
         }
         LinkedHashSet<String> forbidden = new LinkedHashSet<>();
         appendTexts(card, forbidden, "forbidden", "forbiddenReveals");
-        appendTexts(spine, forbidden, "forbidden", "forbiddenReveals");
-        appendTexts(volumeContracts, forbidden, "forbidden", "forbiddenReveals");
+        // 真相卡已经是唯一真相源时，旧脊柱/卷合同的 forbidden 只能当历史噪声，
+        // 不能再并进 canonical contract（run56 实弹：旧“陈先生/室友勒索”文本被
+        // 带进新真相卡，P6 直接判两套案情串写）。
+        if (forbidden.isEmpty()) {
+            appendTexts(spine, forbidden, "forbidden", "forbiddenReveals");
+            appendTexts(volumeContracts, forbidden, "forbidden", "forbiddenReveals");
+        }
         LinkedHashSet<String> threads = new LinkedHashSet<>();
         appendTexts(card, threads, "evidenceThreads", "requiredThreads", "threadKey");
         appendTexts(spine, threads, "evidenceThreads", "requiredThreads", "threadKey");

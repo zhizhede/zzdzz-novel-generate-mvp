@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveStoryContractMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_story_contract (
+            run_id, version, status, truth_kernel, character_slots, event_kernel,
+            clue_registry, knowledge_ledger, constraint_kernel, source_hash
+        ) VALUES (
+            #{p.runId}, #{p.version}, #{p.status},
+            #{p.truthKernel}::jsonb, #{p.characterSlots}::jsonb, #{p.eventKernel}::jsonb,
+            #{p.clueRegistry}::jsonb, #{p.knowledgeLedger}::jsonb, #{p.constraintKernel}::jsonb,
+            #{p.sourceHash}
+        ) RETURNING id
+    </select>
+    <update id="updateKernels">
+        UPDATE derive_story_contract
+        SET constraint_kernel = #{constraintKernel}::jsonb,
+            source_hash = #{sourceHash},
+            updated_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+</mapper>

@@ -18,5 +18,19 @@ public interface BeatInstanceMapper extends BaseMapper<BeatInstanceDO> {
 
     int resetFilledByRun(@Param("runId") long runId);
 
+    /** DRAFT 局部回炉：只重置问题章内的拍（filled_text/status）。 */
+    int resetFilledByChapters(@Param("runId") long runId,
+                              @Param("chapterNos") java.util.List<Integer> chapterNos);
+
     int clearByVolume(@Param("runId") long runId, @Param("volumeNo") int volumeNo);
+
+    /** 计划投影：删除本 run 的旧拍实例。 */
+    int deleteByRun(@Param("runId") long runId);
+    /** 正文闭环：仅当前 run+beat_key+active plan revision 可写场景正文。 */
+    int updateFilledIfRevision(@Param("runId") long runId,
+                               @Param("beatKey") String beatKey,
+                               @Param("planRevision") int planRevision,
+                               @Param("filledText") String filledText,
+                               @Param("status") String status);
+
 }

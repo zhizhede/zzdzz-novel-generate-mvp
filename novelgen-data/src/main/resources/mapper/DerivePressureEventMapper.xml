@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DerivePressureEventMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_pressure_event (
+            run_id, event_key, event_type, title, trigger_character_key, target_character_keys,
+            organization_key, institution_key, public_surface, hidden_pressure, before_state,
+            after_state, relationship_changes, character_changes, chapter_no, seq, status
+        ) VALUES (
+            #{p.runId}, #{p.eventKey}, #{p.eventType}, #{p.title}, #{p.triggerCharacterKey}, #{p.targetCharacterKeys}::jsonb,
+            #{p.organizationKey}, #{p.institutionKey}, #{p.publicSurface}, #{p.hiddenPressure}, #{p.beforeState}::jsonb,
+            #{p.afterState}::jsonb, #{p.relationshipChanges}::jsonb, #{p.characterChanges}::jsonb, #{p.chapterNo}, #{p.seq}, #{p.status}
+        ) RETURNING id
+    </select>
+</mapper>

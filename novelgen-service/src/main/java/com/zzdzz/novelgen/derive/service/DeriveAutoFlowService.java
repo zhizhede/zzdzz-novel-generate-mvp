@@ -169,8 +169,9 @@ public class DeriveAutoFlowService {
                             // 必须看 plan() 的 allDone；未完成时本轮只推进一步，下一轮继续。
                             PlanVO plan = planService.plan(auto.runId);
                             if (!plan.allDone()) {
-                                auto.stage = "⑥a 章节计划 窗 " + plan.windowIndex() + "/" + plan.windowTotal()
-                                        + "（已排 " + plan.plannedChapters() + "/" + plan.chapterCount() + " 章）";
+                                auto.stage = "⑥a 规划单元 " + plan.unit() + "（窗 " + plan.windowIndex() + "/"
+                                        + plan.windowTotal() + "，已排 " + plan.plannedChapters() + "/"
+                                        + plan.chapterCount() + " 章）";
                             } else {
                                 auto.stage = "⑥b 具体稿（逐单元推进）";
                                 DraftVO d = draftService.draft(auto.runId);
@@ -197,14 +198,22 @@ public class DeriveAutoFlowService {
                                 }
                                 auto.stage = "结构回炉：重排第" + volumeNo + "卷拍路由";
                                 beatRouteService.replanVolume(auto.runId, volumeNo);
+                                // 局部修复只碰这一卷：清该卷章纲后回 PLANNING，让 ⑥b 增量重做该卷；
+                                // 绝不调用整本 draft()——那会走 REWORK 整本清稿，把局部问题放大成全书重生成。
+                                draftService.resetVolumeDraft(auto.runId, volumeNo);
+                                auto.stage = "结构回炉：只重做第" + volumeNo + "卷具体稿（其余卷保留）";
+                                auto.steps++;
+                                continue;
                             } else if ("SPINE".equals(target) || "SCALE".equals(target)) {
                                 auto.stage = "根因回炉：从 " + target + " 重建故事规划";
                                 resetService.replanFrom(auto.runId, target);
                                 auto.steps++;
                                 continue;
                             }
-                            auto.stage = "回炉：清稿并按规划合同重做具体稿";
-                            draftService.draft(auto.runId);
+                            auto.stage = "回炉：只清问题章的章纲与拍，其它章保留";
+                            draftService.resetForRepair(auto.runId);
+                            auto.steps++;
+                            continue;
                         }
                         case "DRAFTING" -> {
                             if (!DeriveGateService.gatePassed(run.getStepStatus())) {

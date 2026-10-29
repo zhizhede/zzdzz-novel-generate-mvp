@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
+import com.zzdzz.novelgen.derive.contract.StoryContract;
 import com.zzdzz.novelgen.derive.mapper.AssetBeatMapper;
 import com.zzdzz.novelgen.derive.mapper.AssetWorldMapper;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
@@ -48,6 +49,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * ⑥b 生成具体稿（v3.7 分批：全局头 ⑥b-0 + 连续章段窗 ⑥b-1..n，幂等单元制）。
@@ -66,8 +69,22 @@ public class DeriveDraftService {
 
     /** 窗宽 4 章（2026-10-18 提速：今晚模型单窗 8 章输出失控屡超 10 分钟；4 章减半单次输出）。 */
     static final int WINDOW_CHAPTERS = 4;
-    /** 单窗拍数上限：章数不再是唯一负荷指标，9 拍一次容易漏填。 */
     static final int WINDOW_BEATS = 6;
+
+    /** 称谓式人名（X先生/X老师/X警官…）：模型新造人名的高发形态。 */
+    static final Pattern PERSON_HONORIFIC = Pattern.compile(
+            "([\u4e00-\u9fa5]{1,3})(先生|小姐|女士|老师|师傅|警官|医生|大夫|掌柜|老板|船长|店长|队长|主管|经理|阿姨|大叔|大爷|婆婆|爷爷|奶奶|同志)");
+
+    /** 章纲里禁止出现的素材编号（GM- 线索 / REL- 关系 / OBJ- 器物）。 */
+    static final Pattern ASSET_KEY = Pattern.compile("GM-[A-Z0-9-]+|REL-[A-Z0-9-]+|OBJ-[A-Z0-9-]+");
+
+    /** 整词噪声：候选恰好是这些词就放行（那位/我先生…不是人名）。 */
+    static final Set<String> NAME_NOISE = Set.of(
+            "那位", "这位", "某位", "每个", "各位", "我", "你", "他", "她", "它", "咱",
+            "大家", "有人", "本人", "对方", "死者", "生者", "前者", "后者");
+
+    /** 字符级噪声：候选含这些字一律放行（指示词/量词/人称前缀）。 */
+    static final String NOISE_CHARS = "那这某每该本一位个些种的我你他她它们";
 
     static final ObjectMapper STATIC_MAPPER = new ObjectMapper();
 
@@ -80,7 +97,7 @@ public class DeriveDraftService {
             你在为一部小说写"全局头 A：定名与人物表"（不是正文，不写章纲）。输入含：域格、类别与节奏、
             结局形状、世界观、主线、题材意图、章节计划（只作规模参考）。
             要求：
-            1. 起作品名、一句话概括、主角名，并给出 cast 全书人物表（主角排首，含配角与关键路人）；
+            1. 起作品名、一句话概括、主角名，并给出 cast 全书人物表（主角排首，**固定恰好 3 人，不得增加路人/死者/画外角色**）；
             2. 人名 2~3 字；主角名不得出现在禁用名单里，不得用"沈X"式单姓+单字套路名；
             3. role=身份一句话（≤20字），gender=男或女；
             4. 此表是全书唯一合法人名来源，后续步骤不得再新增任何名字（含路人）；
@@ -107,7 +124,7 @@ public class DeriveDraftService {
             """;
 
     static final String HEAD_C_PROMPT = """
-            你在为一部小说写"全局头 C：叙述摘要与真相卡"（不是正文，不写章纲）。输入含：已定书名/
+            你在为一部小说写"全局头 C：叙述摘要"（不是正文，不写章纲）。输入含：已定书名/
             主角/cast 人名表、域格、类别与节奏、结局形状、主线、章节计划（章号与预算）。
             要求：
             1. brief 拆分：{"premise":"人物设定/世界观/氛围/描写红线（全程可用，≤300字）",
@@ -116,19 +133,9 @@ public class DeriveDraftService {
             1b. 若输入带『目标文风』：premise 里的氛围与描写红线必须服从该文风——不许把腔调写成
                 冷硬文书/卷宗/文言体，除非目标文风本身就是那个调子；premise 只约束"写什么可信"，
                 不负责指定"用什么语体写"；
-            2. 类别含「推理」或「悬疑」时必须额外输出真相卡 truth（其余体裁省略 truth 键）：
-            {"reveal_chapter":揭示章, "clues":[{"clue":"可观测现象","planted_chapter":章号}],
-            "timeline_anchors":[{"fact":"纯数字或时刻事实","chapter":章号}],
-            "solution":{"culprit":"凶手（必须是 cast 名单内人名）","motive":"…","method":"…"}}
-            solution 的三个键名必须逐字照抄 culprit / motive / method，禁止缩写、改写拼写或另起键名；
-            —— reveal_chapter 不得早于最晚 planted_chapter；clues 至少 3 条；clue 只写可观测现象，
-            禁止写成解释，禁止出现 culprit 姓名与 solution 内容；anchors 不得含因果结论；
-            3. 所有章号必须是输入章节计划里出现过的章号。
-            输出 JSON 对象：
-            {"brief":{"premise":"…","ending":"…"},
-             "truth":{"reveal_chapter":12,"clues":[{"clue":"…","planted_chapter":3}],
-                      "timeline_anchors":[{"fact":"…","chapter":5}],
-                      "solution":{"culprit":"…","motive":"…","method":"…"}}}
+            2. 真相卡、真凶、动机、手法、线索章号一律由冻结合同决定，你不输出、也不得改写。
+            只输出 JSON 对象：
+            {"brief":{"premise":"…","ending":"…"}}
             只输出 JSON 对象，无其他文字。
             """;
 
@@ -155,10 +162,20 @@ public class DeriveDraftService {
                （本章造成、后续不可回退的变更；没有就给空数组）；
             6. 若输入带『题材意图』：走向与红线以它为准，拍清单只作结构骨架；
             7. 只输出本窗章纲结构，不写正文，不提素材来源与编号（对外只出现 seq）。
+            8. 章级日程是硬约束：mustPlant 的每条线索必须在**本章** draft_outline 写出可观测现象（不写结论），
+               并在 clueEvents 记 {"key":"…","act":"PLANT"}；mustPayoff 必须写出兑现动作并记 act=PAYOFF；
+               其他章不得复述这些线索现象，禁止提前埋设/重复兑现。
+            9. reveal=true 的**这一章**必须用 closingActs 覆盖 CULPRIT/MOTIVE/METHOD 三项；
+               draft_outline 必须逐字写出 culpritName 与 motiveTag（两者都在输入里）；
+               其后各章只写收束/余韵；reveal 之前不得出现真凶姓名+手法结论。
+            10. 不得新增合同 clue 之外的证据/机关/线人；需要障碍时用无名环境描写（如"一块铁板"→改为"一处障碍"）。
+            11. 输出 clueEvents/closingActs；没有就空数组，禁止省略。
             输出 JSON 对象：
             {"chapters":[{"no":1,"title":"…","draft_outline":"…","time":"当晚",
                           "state_changes":[{"who":"布兰","what":"死亡"},
                                            {"who":"薇拉","what":"得知","detail":"布兰与卧房案有关"}],
+                          "clueEvents":[{"key":"GM-CLUE-01","act":"PLANT"}],
+                          "closingActs":["CULPRIT","MOTIVE","METHOD"],
                           "beats":[{"seq":1,"filled":"…"}]}],
              "skipped":[…]}
             state_changes.what 只允许：死亡 / 离场 / 被囚 / 失去身份 / 关系改变 / 物件易主 / 得知
@@ -167,6 +184,8 @@ public class DeriveDraftService {
             """;
 
     private final RunMapper runMapper;
+    @Autowired(required = false)
+    private DeriveContractService contractService;
     private final NovelMapper novelMapper;
     private final ChapterMapper chapterMapper;
     private final BeatInstanceMapper beatInstanceMapper;
@@ -184,6 +203,178 @@ public class DeriveDraftService {
     private StoryThreadMapper storyThreadMapper;
     @Autowired(required = false)
     private DeriveFactService factService;
+    @Autowired(required = false)
+    private DeriveCharacterBusinessModelService businessModelService;
+    /** 章级日程（合同投影）：⑥b 每章 mustPlant/mustPayoff/reveal 的唯一来源。 */
+    @Autowired(required = false)
+    private DeriveChapterScheduleService scheduleService;
+
+    /**
+     * PLAN_VOLUME 局部回炉：只清目标卷的章纲（拍已由 replanVolume 重建），状态回 PLANNING，
+     * GATE 轮次与减法指令保留。绝不清整本——局部修复不许放大成整本重生成。
+     */
+    public void resetVolumeDraft(long runId, int volumeNo) {
+        RunDO run = runMapper.selectById(runId);
+        if (run == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
+        }
+        if (run.getNovelId() == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "run 未挂成品书，无法局部回炉");
+        }
+        int cleared = chapterMapper.clearDraftOutlinesByVolume(run.getNovelId(), volumeNo);
+        runMapper.updateStatus(runId, "PLANNING", null);
+        runMapper.updateStepStatus(runId, DeriveGateService.gateReset(run.getStepStatus()));
+        log.info("PLAN_VOLUME 局部回炉：runId={} volumeNo={} 清章纲={}（其余卷具体稿保留）",
+                runId, volumeNo, cleared);
+    }
+
+    /** DRAFT 局部回炉的作用域：受影响章号（升序）与受影响窗数。 */
+    record ResetScope(List<Integer> affectedChapters, int windows) {
+    }
+
+    /**
+     * DRAFT 级回炉：只清问题涉及的章纲与已填拍，**不清 cast/brief/truth，也不清整本**。
+     *
+     * <p>回炉目标由 P6 的 GATE issues/directive 里抽章号并只展开到受影响窗；抽不到才回退全章。
+     * GATE 轮次与减法指令保留，供同一轮熔断计数。
+     */
+    public ResetScope resetForRepair(long runId) {
+        RunDO run = runMapper.selectById(runId);
+        if (run == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
+        }
+        return resetForRepair(run);
+    }
+
+    ResetScope resetForRepair(RunDO run) {
+        long runId = run.getId();
+        if (run.getNovelId() == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "run 未挂成品书，无法局部回炉");
+        }
+        String repairTarget = DeriveGateService.repairTarget(run.getStepStatus());
+        if (repairTarget.startsWith("PLAN_VOLUME:")) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "PLAN_VOLUME 回炉必须走 replanVolume + resetVolumeDraft（" + repairTarget + "）");
+        }
+        long novelId = run.getNovelId();
+        List<ChapterDO> chapters = chapterMapper.selectList(new LambdaQueryWrapper<ChapterDO>()
+                .eq(ChapterDO::getNovelId, novelId)
+                .orderByAsc(ChapterDO::getChapterNo));
+        List<Integer> chapterNos = chapters.stream().map(ChapterDO::getChapterNo).toList();
+        int chapterCount = chapterNos.stream().mapToInt(Integer::intValue).max().orElse(0);
+        List<Integer> affected = repairChapters(run.getStepStatus(), chapterCount);
+        List<BeatInstanceDO> beats = beatInstanceMapper.selectList(
+                new LambdaQueryWrapper<BeatInstanceDO>().eq(BeatInstanceDO::getRunId, runId));
+        List<List<Integer>> allWindows =
+                windowsByBeats(chapterNos, beats, WINDOW_CHAPTERS, WINDOW_BEATS);
+        if (affected.isEmpty()) {
+            affected = chapterNos;
+            log.warn("DRAFT 回炉抽不到问题章，回退全章：runId={} 抽到={}",
+                    runId, repairedChaptersForLog(run.getStepStatus(), chapterCount));
+        } else {
+            Set<Integer> affectedSet = new HashSet<>(affected);
+            affected = allWindows.stream()
+                    .filter(window -> window.stream().anyMatch(affectedSet::contains))
+                    .flatMap(List::stream).sorted().distinct().toList();
+            if (affected.size() == chapterNos.size()) {
+                log.warn("DRAFT 回炉覆盖全部窗，等价全书重写：runId={}", runId);
+            }
+        }
+        chapterMapper.clearDraftOutlinesByChapters(novelId, affected);
+        beatInstanceMapper.resetFilledByChapters(runId, affected);
+        runMapper.updateStatus(runId, "PLANNING", null);
+        runMapper.updateStepStatus(runId, dropDraftStateForChapters(run.getStepStatus(), affected));
+        int windows = affectedWindows(chapterNos, beats, affected);
+        int first = affected.isEmpty() ? 0 : affected.get(0);
+        int last = affected.isEmpty() ? 0 : affected.get(affected.size() - 1);
+        log.info("DRAFT 局部回炉：runId={} 清章纲 {} 章（窗 {}/{}，章节 {}-{}），未受影响章保留",
+                runId, affected.size(), windows, allWindows.size(), first, last);
+        return new ResetScope(affected, Math.max(1, windows));
+    }
+
+    /** 从 GATE issues/directive 抽受影响的章号（区间/单点/英文 ch 三种写法；越界丢弃）。 */
+    static List<Integer> repairChapters(String stepStatus, int chapterCount) {
+        if (chapterCount < 1) {
+            return List.of();
+        }
+        Set<Integer> chapters = new java.util.TreeSet<>();
+        java.util.List<String> texts = new ArrayList<>();
+        JsonNode gate = readTreeSafe(stepStatus).path("steps").path("GATE");
+        gate.path("issues").forEach(node -> texts.add(node.asText("")));
+        texts.add(gate.path("directive").asText(""));
+        for (String text : texts) {
+            if (text == null || text.isBlank()) {
+                continue;
+            }
+            Matcher range = java.util.regex.Pattern
+                    .compile("第\\s*(\\d+)\\s*[~\\-至]\\s*(\\d+)\\s*章").matcher(text);
+            while (range.find()) {
+                int from = Integer.parseInt(range.group(1));
+                int to = Integer.parseInt(range.group(2));
+                for (int no = Math.min(from, to); no <= Math.max(from, to); no++) {
+                    addChapter(chapters, no, chapterCount);
+                }
+            }
+            Matcher single = java.util.regex.Pattern.compile("第\\s*(\\d+)\\s*章").matcher(text);
+            while (single.find()) {
+                addChapter(chapters, Integer.parseInt(single.group(1)), chapterCount);
+            }
+            Matcher english = java.util.regex.Pattern
+                    .compile("ch(?:apter)?\\s*(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                    .matcher(text);
+            while (english.find()) {
+                addChapter(chapters, Integer.parseInt(english.group(1)), chapterCount);
+            }
+        }
+        return List.copyOf(chapters);
+    }
+
+    private static void addChapter(Set<Integer> chapters, int chapterNo, int chapterCount) {
+        if (chapterNo >= 1 && chapterNo <= chapterCount) {
+            chapters.add(chapterNo);
+        }
+    }
+
+    private static List<Integer> repairedChaptersForLog(String stepStatus, int chapterCount) {
+        return repairChapters(stepStatus, chapterCount);
+    }
+
+    /** 受影响的窗数：按窗宽切分后，任一受影响章落在窗内即计入。 */
+    static int affectedWindows(List<Integer> chapterNos, List<BeatInstanceDO> beats,
+                               List<Integer> affected) {
+        if (chapterNos.isEmpty()) {
+            return 0;
+        }
+        Set<Integer> target = new HashSet<>(affected);
+        int count = 0;
+        for (List<Integer> window : windowsByBeats(chapterNos, beats,
+                WINDOW_CHAPTERS, WINDOW_BEATS)) {
+            if (window.stream().anyMatch(target::contains)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** 清掉受影响章在 step_status.DRAFT.changes 里的旧状态（这些章会被整窗重写）。 */
+    static String dropDraftStateForChapters(String stepStatus, List<Integer> affected) {
+        JsonNode parsed = readTreeSafe(stepStatus);
+        ObjectNode root = parsed.isObject()
+                ? (ObjectNode) parsed.deepCopy() : STATIC_MAPPER.createObjectNode();
+        ObjectNode steps = root.path("steps").isObject()
+                ? (ObjectNode) root.path("steps") : root.putObject("steps");
+        ObjectNode draft = steps.path("DRAFT").isObject()
+                ? (ObjectNode) steps.path("DRAFT") : steps.putObject("DRAFT");
+        Set<Integer> target = new HashSet<>(affected);
+        ArrayNode kept = STATIC_MAPPER.createArrayNode();
+        draft.path("changes").forEach(change -> {
+            if (!target.contains(change.path("no").asInt(-1))) {
+                kept.add(change);
+            }
+        });
+        draft.set("changes", kept);
+        return root.toString();
+    }
 
     /** ⑥b：幂等推进一个单元（RESET/HEAD/BATCH/DONE，v3.7；客户端循环调用至 allDone）。 */
     public DraftVO draft(long runId) {
@@ -240,20 +431,16 @@ public class DeriveDraftService {
                 chapterNos, beats, WINDOW_CHAPTERS, WINDOW_BEATS);
 
         if ("REWORK".equals(run.getStatus())) {
-            archiveRejectedDrafts(run, novelId, chapters);
-            chapterMapper.clearForRewrite(novelId);
-            chapterMapper.clearDraftOutlines(novelId);
-            novelMapper.clearDraftAssets(novelId);
-            if (worldStateMapper != null) {
-                worldStateMapper.deleteByNovel(novelId);
+            String repairTarget = DeriveGateService.repairTarget(run.getStepStatus());
+            if (repairTarget.startsWith("PLAN_VOLUME:")) {
+                // 单一路径：PLAN_VOLUME 由 auto-flow 的 replanVolume + resetVolumeDraft 处理，
+                // 这里再清一次会把局部修复放大成整本重生成。
+                throw new BizException(ErrorCode.PARAM_ERROR,
+                        "PLAN_VOLUME 回炉必须走 replanVolume + resetVolumeDraft 单一路径（"
+                                + repairTarget + "），不要在 ⑥b 入口整体清稿");
             }
-            beatInstanceMapper.resetFilledByRun(runId);
-            runMapper.updateStatus(runId, "PLANNING", null);
-            runMapper.updateStepStatus(runId,
-                    DeriveGateService.gateReset(clearDraftState(run.getStepStatus())));
-            log.info("⑥b REWORK 回炉清稿：runId={} novelId={} 窗数={}（GATE 作废，客户端续调从头跑）",
-                    runId, novelId, wins.size());
-            return new DraftVO(runId, novelId, "", "", 0, 0, 0, "RESET", 0, wins.size(), false);
+            ResetScope scope = resetForRepair(run);
+            return new DraftVO(runId, novelId, "", "", 0, 0, 0, "RESET", 0, scope.windows(), false);
         }
 
         NovelDO novel = novelMapper.selectById(novelId);
@@ -267,6 +454,9 @@ public class DeriveDraftService {
 
         JsonNode assets = readTreeSafe(novel.getStoryAssets());
         Map<Integer, String> labelBySeq = buildLabelBySeq(beats);
+        List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule =
+                scheduleService == null ? List.of() : scheduleService.load(run);
+        StoryContract batchContract = contractService == null ? null : contractService.load(run);
         for (int i = 0; i < wins.size(); i++) {
             List<Integer> win = wins.get(i);
             if (windowDone(win, chapters)) {
@@ -284,16 +474,31 @@ public class DeriveDraftService {
             Map<Integer, Integer> seqChapter = new HashMap<>();
             winBeats.forEach(b -> seqChapter.put(b.getSeq(), b.getChapterNo()));
             BatchContext ctx = new BatchContext(
-                    new ArrayList<>(winSeqs), win, castNames, seqChapter);
+                    new ArrayList<>(winSeqs), win, castNames, seqChapter, schedule);
             JsonNode priorChanges = readDraftState(run.getStepStatus());
             String user = buildBatchUser(run, chapters, win, winBeats, labelBySeq, worldLabel(run),
-                    assets, gateDirective, priorChanges);
+                    assets, gateDirective, priorChanges, schedule, batchContract);
             beginProgress(runId, "窗 " + (i + 1) + "/" + wins.size()
                     + "（章 " + win.get(0) + "-" + win.get(win.size() - 1) + "）");
             JsonNode out = llmJson.ask(
                     new LlmPort.ChatRequest(NODE_DRAFT, novelId, null, runId,
                             List.of(LlmPort.Message.system(BATCH_PROMPT), LlmPort.Message.user(user)), 0.4),
-                    root -> parseBatch(root, ctx), 3, (think, piece) -> touchProgress(runId, piece));
+                    root -> {
+                        JsonNode parsed = parseBatch(root, ctx);
+                        if (batchContract != null) {
+                            List<String> drift = validateBatch(parsed, batchContract);
+                            if (!drift.isEmpty()) {
+                                throw new LlmJson.Bad(
+                                        "CONTRACT_NAME_DRIFT：" + String.join("；", drift));
+                            }
+                            List<String> scheduleDrift = validateScheduleEvents(
+                                    parsed, schedule, batchContract);
+                            if (!scheduleDrift.isEmpty()) {
+                                throw new LlmJson.Bad(String.join("；", scheduleDrift));
+                            }
+                        }
+                        return parsed;
+                    }, 3, (think, piece) -> touchProgress(runId, piece));
             Map<Integer, String> filled = new HashMap<>();
             for (JsonNode c : out.path("chapters")) {
                 for (JsonNode b : c.path("beats")) {
@@ -328,6 +533,10 @@ public class DeriveDraftService {
                 ch.setDraftOutline(c.path("draft_outline").asText(""));
                 chapterMapper.updateDraftOutline(
                         ch.getId(), ch.getTitle(), ch.getDraftOutline());
+                // 日程证据（clueEvents/closingActs）并入章功能合同，供 P6 与审计直接查库对表。
+                String planContract = mergePlanContractEvents(ch.getPlanContract(), c);
+                ch.setPlanContract(planContract);
+                chapterMapper.updatePlanContract(ch.getId(), planContract);
             }
             runMapper.updateStepStatus(runId, appendDraftState(run.getStepStatus(), out.path("chapters")));
             log.info("⑥b-1 分批窗：runId={} novelId={} 窗{}/{} 章{}-{} 填实{} 跳过{} 状态变更{}",
@@ -337,7 +546,7 @@ public class DeriveDraftService {
                     win.size(), filledCount, skippedCount, "BATCH", i + 1, wins.size(), false);
         }
 
-        DraftRepairResult repair = normalizeDraftContent(chapters, beats);
+        DraftRepairResult repair = normalizeDraftContent(chapters, beats, schedule);
         for (ChapterDO chapter : repair.changedChapters()) {
             chapterMapper.updateDraftOutline(chapter.getId(), chapter.getTitle(),
                     chapter.getDraftOutline());
@@ -418,13 +627,14 @@ public class DeriveDraftService {
                             List.of(LlmPort.Message.system(HEAD_A_PROMPT), LlmPort.Message.user(user)), 0.4),
                     root -> parseHeadBasic(root, ctx), 3, (think, piece) -> touchProgress(runId, piece));
             novelMapper.updateMeta(novelId, out.path("title").asText(""), out.path("summary").asText(""));
-            novelMapper.updateCast(novelId, out.path("protagonist").asText(""),
-                    bindCharacterKeys(runId, out.path("cast")));
-            log.info("⑥b-0a 定名：runId={} novelId={} 书名={} 主角={} cast={}",
-                    runId, novelId, out.path("title").asText(""), out.path("protagonist").asText(""),
-                    out.path("cast").size());
-            return new DraftVO(runId, novelId, out.path("title").asText(""), out.path("protagonist").asText(""),
-                    0, 0, 0, "HEAD", 1, 3, false);
+            ObjectNode castOut = materializeCastFromContract(run, out);
+            novelMapper.updateCast(novelId, castOut.path("protagonist").asText(""),
+                    bindCharacterKeys(runId, castOut.path("cast")));
+            log.info("⑥b-0a 定名：runId={} novelId={} 书名={} 主角={} cast={}（人名一律取自冻结合同）",
+                    runId, novelId, out.path("title").asText(""),
+                    castOut.path("protagonist").asText(""), castOut.path("cast").size());
+            return new DraftVO(runId, novelId, out.path("title").asText(""),
+                    castOut.path("protagonist").asText(""), 0, 0, 0, "HEAD", 1, 3, false);
         }
         JsonNode assets = readTreeSafe(novel.getStoryAssets());
         String protagonist = assets.path("protagonist").asText("");
@@ -443,21 +653,167 @@ public class DeriveDraftService {
         }
         HeadContext ctx = new HeadContext(chapterNos, List.of(), reasoning);
         String user = buildBriefUser(run, assets, chapters, worldLabel, gateDirective);
-        beginProgress(runId, "全局头C 摘要与真相卡");
-        JsonNode out = llmJson.ask(
-                new LlmPort.ChatRequest(NODE_DRAFT, novelId, null, runId,
-                        List.of(LlmPort.Message.system(HEAD_C_PROMPT), LlmPort.Message.user(user)), 0.3),
-                root -> parseBriefTruth(root, ctx), 3, (think, piece) -> touchProgress(runId, piece));
+        beginProgress(runId, "全局头C 叙述摘要");
+        // 真相卡只读冻结合同：HEAD C 不再让 LLM 写真相（run58 的 HEAD_C 漂移/降级由此消失）。
+        StoryContract contract = contractService == null ? null : contractService.load(run);
+        LlmPort.ChatRequest briefRequest = new LlmPort.ChatRequest(NODE_DRAFT, novelId, null, runId,
+                List.of(LlmPort.Message.system(HEAD_C_PROMPT), LlmPort.Message.user(user)), 0.3);
+        JsonNode out = llmJson.ask(briefRequest, root -> parseBriefTruth(root, ctx), 3,
+                (think, piece) -> touchProgress(runId, piece));
         novelMapper.updateBrief(novelId, out.path("brief").toString());
-        if (out.path("truth").isObject()) {
-            novelMapper.updateTruth(novelId, out.path("truth").toString());
+        JsonNode truth = contract == null ? null : contractService.frozenTruthCard(run);
+        if ((truth == null || !truth.isObject()) && out.path("truth").isObject()) {
+            // 无合同旧 run 的兼容回退（新链路合同必在 CONTRACT 单元冻结）。
+            truth = out.path("truth");
         }
-        log.info("⑥b-0c 摘要与真相卡：runId={} novelId={} 有真相卡={}",
-                runId, novelId, out.path("truth").isObject());
+        if (truth != null && truth.isObject()) {
+            novelMapper.updateTruth(novelId, truth.toString());
+        }
+        log.info("⑥b-0c 叙述摘要：runId={} novelId={} 有真相卡={}",
+                runId, novelId, truth != null && truth.isObject());
         return new DraftVO(runId, novelId, assets.path("title").asText(""), protagonist,
                 0, 0, 0, "HEAD", 3, 3, false);
     }
 
+    /** 单测钩子：直接推进全局头某一段（跳过 draftInner 的幂等判定）。 */
+    DraftVO headStepForTest(RunDO run, NovelDO novel, int stage, List<ChapterDO> chapters,
+                            List<Integer> chapterNos, boolean reasoning, String gateDirective) {
+        return headStep(run, novel, stage, chapters, chapterNos, reasoning, gateDirective);
+    }
+
+    /**
+     * 合同 cast → novel.cast：protagonist 固定为合同 C1，cast 只允许合同里那三个人。
+     * LLM 在 HEAD A 只出 title/summary；它给出的任何人名一律丢弃并留痕。
+     */
+    ObjectNode materializeCastFromContract(RunDO run, JsonNode llmOut) {
+        ObjectNode out = llmOut != null && llmOut.isObject()
+                ? (ObjectNode) llmOut.deepCopy() : STATIC_MAPPER.createObjectNode();
+        if (contractService == null) {
+            log.warn("合同服务未装配，HEAD A 退回 LLM cast（违反合同前置）：runId={}", run.getId());
+            return out;
+        }
+        StoryContract contract = contractService.require(run);
+        ArrayNode cast = out.putArray("cast");
+        for (StoryContract.CharacterSlot slot : contract.cast()) {
+            ObjectNode member = cast.addObject();
+            member.put("characterKey", slot.key());
+            member.put("name", slot.name());
+            member.put("role", slot.identity());
+            member.put("function", slot.role());
+            member.put("gender", slot.gender());
+        }
+        String protagonist = contract.cast().stream()
+                .filter(slot -> "C1".equals(slot.key()))
+                .map(StoryContract.CharacterSlot::name)
+                .findFirst()
+                .orElseGet(() -> out.path("protagonist").asText(""));
+        out.put("protagonist", protagonist);
+        JsonNode llmCast = llmOut == null ? null : llmOut.path("cast");
+        if (llmCast != null && llmCast.isArray()) {
+            for (JsonNode member : llmCast) {
+                String name = member.path("name").asText("").trim();
+                boolean known = contract.cast().stream()
+                        .anyMatch(slot -> slot.name().equals(name));
+                if (!name.isEmpty() && !known) {
+                    log.warn("HEAD A 给出合同外人名，已按合同丢弃：runId={} name={}", run.getId(), name);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 分批窗产出与合同比对：合同外人名（称谓式）、合同外线程/线索 key、揭示章前写出
+     * 真凶+手法结论，都判 CONTRACT_NAME_DRIFT / CONTRACT_DRIFT。
+     *
+     * @return 漂移问题清单（空=一致）
+     */
+    static List<String> validateBatch(JsonNode out, StoryContract contract) {
+        List<String> drift = new ArrayList<>();
+        if (contract == null || out == null) {
+            return drift;
+        }
+        StringBuilder prose = new StringBuilder();
+        for (JsonNode chapter : out.path("chapters")) {
+            prose.append(chapter.path("draft_outline").asText("")).append(" ");
+            prose.append(chapter.path("title").asText("")).append(" ");
+            for (JsonNode beat : chapter.path("beats")) {
+                prose.append(beat.path("filled").asText("")).append(" ");
+            }
+            for (JsonNode change : chapter.path("state_changes")) {
+                prose.append(change.path("who").asText("")).append(" ");
+            }
+        }
+        String text = prose.toString();
+        for (String name : unknownPersonNames(text, contract)) {
+            drift.add("CONTRACT_NAME_DRIFT：出现合同 cast 外的人名称谓「" + name + "」");
+        }
+        Set<String> threadKeys = new LinkedHashSet<>();
+        contract.threads().forEach(thread -> threadKeys.add(thread.threadKey()));
+        Matcher keyMatcher = ASSET_KEY.matcher(text);
+        while (keyMatcher.find()) {
+            String key = keyMatcher.group();
+            if (!threadKeys.contains(key)) {
+                drift.add("CONTRACT_THREAD_DRIFT：章纲里出现合同外编号 " + key);
+            }
+        }
+        if (contract.truth() != null) {
+            String culprit = contract.truth().culpritName();
+            String method = contract.truth().method();
+            int reveal = contract.truth().revealChapter();
+            if (!culprit.isEmpty() && !method.isEmpty()) {
+                for (JsonNode chapter : out.path("chapters")) {
+                    int no = chapter.path("no").asInt(-1);
+                    String outline = chapter.path("draft_outline").asText("");
+                    if (no > 0 && no < reveal
+                            && outline.contains(culprit) && outline.contains(method)) {
+                        drift.add("CONTRACT_DRIFT：第 " + no + " 章在揭示章 " + reveal
+                                + " 前写出了真凶与手法结论");
+                    }
+                }
+            }
+        }
+        return drift;
+    }
+
+    /**
+     * 抓“称谓式人名”（X先生/X老师/X警官…）：这是模型新造人名最常见的形态。
+     * 指示词/量词前缀（那位/一位/我先生…）与合同 cast 的任何交集都放行，避免误杀。
+     */
+    static List<String> unknownPersonNames(String text, StoryContract contract) {
+        List<String> out = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return out;
+        }
+        Set<String> castNames = new LinkedHashSet<>();
+        contract.cast().forEach(slot -> castNames.add(slot.name()));
+        Matcher matcher = PERSON_HONORIFIC.matcher(text);
+        while (matcher.find()) {
+            String candidate = matcher.group(1);
+            if (candidate.isEmpty() || NAME_NOISE.contains(candidate)) {
+                continue;
+            }
+            boolean noisy = false;
+            for (char ch : candidate.toCharArray()) {
+                if (NOISE_CHARS.indexOf(ch) >= 0) {
+                    noisy = true;
+                    break;
+                }
+            }
+            if (noisy) {
+                continue;
+            }
+            boolean related = castNames.stream().anyMatch(name ->
+                    name.contains(candidate) || candidate.contains(name));
+            if (related) {
+                continue;
+            }
+            if (!out.contains(matcher.group())) {
+                out.add(matcher.group());
+            }
+        }
+        return out;
+    }
     /** 人设卡回填进已有 cast（按 name 对齐，保持原顺序与字段）。 */
     static String mergePersona(JsonNode cast, JsonNode personas) {
         Map<String, JsonNode> byName = new HashMap<>();
@@ -568,6 +924,16 @@ public class DeriveDraftService {
                           List<BeatInstanceDO> winBeats, Map<Integer, String> labelBySeq,
                           String worldLabel, JsonNode assets, String gateDirective,
                           JsonNode priorChanges) {
+        return buildBatchUser(run, chapters, window, winBeats, labelBySeq, worldLabel, assets,
+                gateDirective, priorChanges, List.of(), null);
+    }
+
+    String buildBatchUser(RunDO run, List<ChapterDO> chapters, List<Integer> window,
+                          List<BeatInstanceDO> winBeats, Map<Integer, String> labelBySeq,
+                          String worldLabel, JsonNode assets, String gateDirective,
+                          JsonNode priorChanges,
+                          List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule,
+                          StoryContract contract) {
         ObjectNode root = STATIC_MAPPER.createObjectNode();
         fillCommon(root, run, worldLabel);
         if (gateDirective != null && !gateDirective.isBlank()) {
@@ -595,6 +961,9 @@ public class DeriveDraftService {
                 new LambdaQueryWrapper<CharacterPlanDO>()
                         .eq(CharacterPlanDO::getRunId, run.getId())
                         .orderByAsc(CharacterPlanDO::getCharacterKey))));
+        if (businessModelService != null) {
+            root.set("角色业务模型", businessModelService.context(run.getId()));
+        }
         root.set("线程计划", storyThreadMapper == null ? STATIC_MAPPER.createArrayNode()
                 : PlanJsonViews.threads(storyThreadMapper.selectList(
                 new LambdaQueryWrapper<StoryThreadDO>()
@@ -645,12 +1014,27 @@ public class DeriveDraftService {
                     "本窗含全书终章。终章必须做三件事：总结当前局面、复盘主线真相、交代主要角色的后续；"
                             + "不得继续引入新的追捕/反转/未解困局，不得用悬念收尾。最后一拍必须落在稳定结局。");
         }
+        Map<Integer, com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> scheduleByChapter =
+                com.zzdzz.novelgen.derive.contract.ChapterScheduleProjector.byChapter(schedule);
+        Map<String, StoryContract.Clue> clueByKey = new HashMap<>();
+        if (contract != null) {
+            contract.clues().forEach(clue -> clueByKey.put(clue.clueKey(), clue));
+        }
         for (ChapterDO c : chapters) {
             if (window.contains(c.getChapterNo())) {
                 var n = chArr.addObject();
                 n.put("no", c.getChapterNo());
                 n.put("title", c.getTitle());
                 n.put("budget", c.getBudget());
+                com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry entry =
+                        scheduleByChapter.get(c.getChapterNo());
+                mustArray(n, "mustPlant", entry == null ? List.of() : entry.mustPlant(), clueByKey);
+                mustArray(n, "mustPayoff", entry == null ? List.of() : entry.mustPayoff(), clueByKey);
+                n.put("reveal", entry != null && entry.reveal());
+                n.put("culpritName", contract == null || contract.truth() == null
+                        ? "" : contract.truth().culpritName());
+                n.put("motiveTag", contract == null || contract.truth() == null
+                        ? "" : contract.truth().motiveTag());
                 n.set("planContract", readTreeSafe(c.getPlanContract()));
             }
         }
@@ -669,6 +1053,117 @@ public class DeriveDraftService {
             n.put("label", label);
         }
         return root.toString();
+    }
+
+    /** 每章 mustPlant/mustPayoff 的结构化输入（key + 合同线索文本 + ownerKey）。 */
+    private static void mustArray(ObjectNode chapter, String field, List<String> keys,
+                                  Map<String, StoryContract.Clue> clueByKey) {
+        ArrayNode arr = chapter.putArray(field);
+        for (String key : keys) {
+            StoryContract.Clue clue = clueByKey.get(key);
+            ObjectNode item = arr.addObject();
+            item.put("key", key);
+            item.put("text", clue == null || clue.clue() == null ? "" : clue.clue());
+            item.put("ownerKey", clue == null || clue.ownerKey() == null ? "" : clue.ownerKey());
+        }
+    }
+
+    /** 把本窗章的 clueEvents/closingActs 并入 chapters.plan_contract（读旧值再 merge）。 */
+    static String mergePlanContractEvents(String planContract, JsonNode chapter) {
+        JsonNode existing = readTreeSafe(planContract);
+        ObjectNode node = existing.isObject()
+                ? (ObjectNode) existing.deepCopy() : STATIC_MAPPER.createObjectNode();
+        node.set("clueEvents", chapter.path("clueEvents").isArray()
+                ? chapter.path("clueEvents").deepCopy() : STATIC_MAPPER.createArrayNode());
+        node.set("closingActs", chapter.path("closingActs").isArray()
+                ? chapter.path("closingActs").deepCopy() : STATIC_MAPPER.createArrayNode());
+        return node.toString();
+    }
+
+    /**
+     * ⑥b 日程硬校验：逐章 PLANT/PAYOFF 集合必须等于日程、禁重复/合同外 key；
+     * 揭示章前不得出现 closingActs，揭示章必须覆盖 CULPRIT/MOTIVE/METHOD 且写出真凶姓名。
+     *
+     * @return 漂移问题（空=一致）；调用方在 LlmJson.ask 内抛 Bad 触发 3 轮喂回
+     */
+    static List<String> validateScheduleEvents(
+            JsonNode out, List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule,
+            StoryContract contract) {
+        List<String> drift = new ArrayList<>();
+        if (out == null || schedule == null || schedule.isEmpty()
+                || contract == null || contract.truth() == null) {
+            return drift;
+        }
+        Map<Integer, com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> byNo =
+                com.zzdzz.novelgen.derive.contract.ChapterScheduleProjector.byChapter(schedule);
+        int reveal = contract.truth().revealChapter();
+        String culprit = contract.truth().culpritName();
+        String motiveTag = contract.truth().motiveTag() == null
+                ? "" : contract.truth().motiveTag().trim();
+        Set<String> allowedActs = Set.of("PLANT", "PAYOFF");
+        Set<String> closingNeeded = Set.of("CULPRIT", "MOTIVE", "METHOD");
+        for (JsonNode chapter : out.path("chapters")) {
+            int no = chapter.path("no").asInt(-1);
+            com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry entry = byNo.get(no);
+            if (entry == null) {
+                continue;
+            }
+            List<String> plants = new ArrayList<>();
+            List<String> payoffs = new ArrayList<>();
+            boolean duplicate = false;
+            for (JsonNode event : chapter.path("clueEvents")) {
+                String key = event.path("key").asText("").trim();
+                String act = event.path("act").asText("").trim().toUpperCase();
+                if (key.isEmpty() || !allowedActs.contains(act)) {
+                    drift.add("CONTRACT_CLUE_DRIFT：第" + no + "章 clueEvents 有非法条目（key="
+                            + key + " act=" + act + "）");
+                    continue;
+                }
+                List<String> bucket = "PLANT".equals(act) ? plants : payoffs;
+                if (bucket.contains(key)) {
+                    duplicate = true;
+                }
+                bucket.add(key);
+            }
+            if (duplicate) {
+                drift.add("CONTRACT_CLUE_DRIFT：第" + no + "章 clueEvents 有重复 act/key");
+            }
+            if (!new LinkedHashSet<>(plants).equals(new LinkedHashSet<>(entry.mustPlant()))) {
+                drift.add("CONTRACT_CLUE_DRIFT：第" + no + "章 PLANT 必须等于日程 "
+                        + entry.mustPlant() + "，实际 " + plants);
+            }
+            if (!new LinkedHashSet<>(payoffs).equals(new LinkedHashSet<>(entry.mustPayoff()))) {
+                drift.add("CONTRACT_CLUE_DRIFT：第" + no + "章 PAYOFF 必须等于日程 "
+                        + entry.mustPayoff() + "，实际 " + payoffs);
+            }
+            Set<String> acts = new LinkedHashSet<>();
+            chapter.path("closingActs").forEach(node -> {
+                String act = node.asText("").trim().toUpperCase();
+                if (!act.isEmpty()) {
+                    acts.add(act);
+                }
+            });
+            if (reveal > 0 && no < reveal && !acts.isEmpty()) {
+                drift.add("CONTRACT_CLUE_DRIFT：第" + no + "章在揭示章 " + reveal
+                        + " 前写了 closingActs " + acts);
+            }
+            if (no == reveal) {
+                if (!acts.equals(closingNeeded)) {
+                    drift.add("CONTRACT_CLUE_DRIFT：揭示章第" + no + "章 closingActs 必须为 "
+                            + closingNeeded + "，实际 " + acts);
+                }
+                String outline = chapter.path("draft_outline").asText("");
+                if (!culprit.isBlank() && !outline.contains(culprit)) {
+                    drift.add("CONTRACT_CLUE_DRIFT：揭示章第" + no
+                            + "章 draft_outline 必须逐字写出真凶「" + culprit + "」");
+                }
+                if (!motiveTag.isBlank() && !outline.contains(motiveTag)) {
+                    drift.add("CONTRACT_CLOSURE_DRIFT：揭示章第" + no
+                            + "章 draft_outline 必须逐字写出 motiveTag「" + motiveTag + "」");
+                }
+            }
+        }
+        return drift;
     }
 
     private VolumePlanDO findVolume(long runId, List<Integer> window, List<ChapterDO> chapters) {
@@ -699,13 +1194,22 @@ public class DeriveDraftService {
             root.put("题材意图", run.getParamIntent());
         }
         root.put("世界观", worldLabel);
-        JsonNode truthContract = readTreeSafe(run.getStepStatus())
-                .path("steps").path("TRUTH_CONTRACT");
-        if (truthContract.isObject() && !truthContract.path("finalTruth").asText("").isBlank()) {
-            root.put("主线", truthContract.path("finalTruth").asText(""));
-            root.set("TruthContract（唯一真相合同，冲突时以此为准）", truthContract);
+        StoryContract contract = contractService == null ? null : contractService.load(run);
+        if (contract != null && !contract.truth().finalTruth().isBlank()) {
+            String promptContext = contractService.promptContext(contract);
+            root.put("主线", contract.truth().finalTruth());
+            root.set("FROZEN_CONTRACT（唯一合同：cast/真相/线索/线程/禁令，禁止改写）",
+                    readTreeSafe(promptContext));
+            root.set("TruthContract（唯一真相合同，冲突时以此为准）", readTreeSafe(promptContext));
         } else {
-            root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+            JsonNode truthContract = readTreeSafe(run.getStepStatus())
+                    .path("steps").path("TRUTH_CONTRACT");
+            if (truthContract.isObject() && !truthContract.path("finalTruth").asText("").isBlank()) {
+                root.put("主线", truthContract.path("finalTruth").asText(""));
+                root.set("TruthContract（唯一真相合同，冲突时以此为准）", truthContract);
+            } else {
+                root.put("主线", run.getWelded() == null ? "" : run.getWelded());
+            }
         }
     }
 
@@ -817,14 +1321,20 @@ public class DeriveDraftService {
     }
 
     record BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters,
-                        Set<String> castNames, Map<Integer, Integer> seqChapters) {
+                        Set<String> castNames, Map<Integer, Integer> seqChapters,
+                        List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule) {
         BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters) {
-            this(windowSeqs, windowChapters, Set.of(), Map.of());
+            this(windowSeqs, windowChapters, Set.of(), Map.of(), List.of());
         }
 
         BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters,
                      Set<String> castNames) {
-            this(windowSeqs, windowChapters, castNames, Map.of());
+            this(windowSeqs, windowChapters, castNames, Map.of(), List.of());
+        }
+
+        BatchContext(List<Integer> windowSeqs, List<Integer> windowChapters,
+                     Set<String> castNames, Map<Integer, Integer> seqChapters) {
+            this(windowSeqs, windowChapters, castNames, seqChapters, List.of());
         }
     }
 
@@ -903,22 +1413,15 @@ public class DeriveDraftService {
     }
 
     /**
-     * 头 C：brief 拆分 + 推理体裁真相卡。
-     * 真相卡是写作上下文而非交付物——不合规只记日志降级放行，绝不掐断全流程
-     * （run 29 实弹：一个 clue 措辞连废 3 轮，整本 12 万字停摆 9 小时）。
-     * brief.premise 仍是硬要求：正文全靠它定人物/世界观/描写红线。
+     * 头 C：只校验 brief.premise（人物/世界观/氛围/红线摘要）。
+     *
+     * <p>真相卡已移出 ⑥b：truth 由冻结合同投影写入，LLM 输出里即便带了 truth 也不参与落库，
+     * 故这里不再做 truth 三要素/clue 泄露/揭示章校验（那些方法保留给旧数据与单测）。
      */
     static JsonNode parseBriefTruth(JsonNode root, HeadContext ctx) {
         JsonNode brief = root.path("brief");
         if (!brief.isObject() || brief.path("premise").asText("").trim().isEmpty()) {
             throw new LlmJson.Bad("必须输出 brief.premise（人物/世界观/氛围/红线摘要，≤300字）");
-        }
-        if (ctx.reasoning()) {
-            normalizeSolution(root);
-            List<String> issues = truthIssues(root.path("truth"), ctx.chapterNos());
-            if (!issues.isEmpty()) {
-                log.warn("truth 真相卡不合规，降级放行（不影响写作，问题留痕）：{}", String.join("；", issues));
-            }
         }
         return root;
     }
@@ -1404,6 +1907,17 @@ public class DeriveDraftService {
 
     static DraftRepairResult normalizeDraftContent(List<ChapterDO> chapters,
                                                    List<BeatInstanceDO> beats) {
+        return normalizeDraftContent(chapters, beats, List.of());
+    }
+
+    /**
+     * 具体稿确定性归一。日程模式下 I1 拍章号不可变：只允许同章内语义去重，
+     * 跳过终局拍负载归一；legacy 模式保留旧行为以兼容无日程历史 run。
+     */
+    static DraftRepairResult normalizeDraftContent(
+            List<ChapterDO> chapters, List<BeatInstanceDO> beats,
+            List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule) {
+        boolean scheduleMode = schedule != null && !schedule.isEmpty();
         List<ChapterDO> changedChapters = new ArrayList<>();
         List<BeatInstanceDO> changedBeats = new ArrayList<>();
         List<RepairEntry> repairs = new ArrayList<>();
@@ -1416,19 +1930,23 @@ public class DeriveDraftService {
         for (int i = 0; i < beats.size(); i++) {
             BeatInstanceDO left = beats.get(i);
             if (!isFilled(left) || left.getChapterNo() == null
-                    || isProtectedRole(left.getBeatRole())) {
+                    || isProtectedRole(left.getBeatRole())
+                    || hasKnowledgeOrStateContract(left)) {
                 continue;
             }
             for (int j = i + 1; j < beats.size(); j++) {
                 BeatInstanceDO right = beats.get(j);
                 if (!isFilled(right) || right.getChapterNo() == null
                         || isProtectedRole(right.getBeatRole())
+                        || hasKnowledgeOrStateContract(right)
                         || "SKIPPED".equals(right.getStatus())) {
                     continue;
                 }
-                boolean adjacentChapter = right.getChapterNo() == left.getChapterNo()
-                        || Math.abs(right.getChapterNo() - left.getChapterNo()) == 1;
-                if (adjacentChapter
+                boolean mergeAllowed = scheduleMode
+                        ? right.getChapterNo().intValue() == left.getChapterNo().intValue()
+                        : (right.getChapterNo().intValue() == left.getChapterNo().intValue()
+                        || Math.abs(right.getChapterNo() - left.getChapterNo()) == 1);
+                if (mergeAllowed
                         && semanticSimilarity(left.getFilledText(), right.getFilledText()) >= 0.65
                         && effectiveCount.getOrDefault(right.getChapterNo(), 0) > 1) {
                     String beforeFill = right.getFilledText();
@@ -1470,7 +1988,12 @@ public class DeriveDraftService {
             log.warn("具体稿章纲去重：第{}章 outline 与第{}章重复并已重写",
                     current.getChapterNo(), previous.getChapterNo());
         }
-        repairs.addAll(rebalanceBeatLoad(chapters, beats, changedBeats));
+        if (scheduleMode) {
+            log.info("日程模式：跳过终局拍负载归一：chapters={} beats={}",
+                    chapters == null ? 0 : chapters.size(), beats == null ? 0 : beats.size());
+        } else {
+            repairs.addAll(rebalanceBeatLoad(chapters, beats, changedBeats));
+        }
         return new DraftRepairResult(changedChapters, changedBeats, repairs);
     }
 
@@ -1518,8 +2041,10 @@ public class DeriveDraftService {
             BeatInstanceDO candidate = null;
             for (BeatInstanceDO beat : beats) {
                 if (beat.getChapterNo() != null && beat.getChapterNo() == source
+                        && target >= source
                         && !"SKIPPED".equals(beat.getStatus())
-                        && !isProtectedRole(beat.getBeatRole())) {
+                        && !isProtectedRole(beat.getBeatRole())
+                        && !hasKnowledgeOrStateContract(beat)) {
                     candidate = beat;
                     break;
                 }
@@ -1599,13 +2124,43 @@ public class DeriveDraftService {
         return beat.getFilledText() != null && !beat.getFilledText().isBlank();
     }
 
+    /** 带线程/知识/状态契约的拍不可参与去重合并或负载搬移，避免时序与事实链断裂。 */
+    private static boolean hasKnowledgeOrStateContract(BeatInstanceDO beat) {
+        JsonNode route = readTreeSafe(beat.getRouteContract());
+        return hasContractValue(route.path("threadRefs"))
+                || hasContractValue(route.path("writesKnowledge"))
+                || hasContractValue(route.path("requiresKnowledge"))
+                || hasContractValue(route.path("changesState"))
+                || hasContractValue(route.path("requiresState"))
+                || hasContractValue(route.path("dependsOn"));
+    }
+
+    private static boolean hasContractValue(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return false;
+        }
+        if (node.isArray()) {
+            return !node.isEmpty();
+        }
+        if (node.isObject()) {
+            return !node.isEmpty();
+        }
+        if (node.isTextual()) {
+            return !node.asText("").isBlank();
+        }
+        if (node.isNumber()) {
+            return node.asDouble() != 0;
+        }
+        return node.isBoolean();
+    }
+
     private static boolean isProtectedRole(String role) {
         if (role == null) {
             return false;
         }
         return Set.of("HOOK", "HIGHLIGHT", "CHARACTER_CHOICE", "COST",
                 "LOCAL_CLOSURE", "FINAL_CLOSURE", "NEXT_HOOK", "FINAL_REVEAL",
-                "RELATION_CONFLICT").contains(role);
+                "CLUE_PLANT", "CLUE_PAYOFF", "RELATION_CONFLICT").contains(role);
     }
 
     private static String outlineFromBeats(List<BeatInstanceDO> beats, int chapterNo) {

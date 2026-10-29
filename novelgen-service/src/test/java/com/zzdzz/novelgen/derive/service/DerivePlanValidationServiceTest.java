@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 写作前角色状态、知识、钩子与线程闭环校验。 */
@@ -160,5 +161,63 @@ class DerivePlanValidationServiceTest {
         row.setCharacterKey(key);
         row.setSpotlightVolume(spotlightVolume);
         return row;
+    }
+
+    private static com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO routedBeat(
+            int seq, int chapterNo) {
+        var beat = new com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO();
+        beat.setId((long) seq);
+        beat.setRunId(58L);
+        beat.setSeq(seq);
+        beat.setBeatKey("BK-" + seq);
+        beat.setChapterNo(chapterNo);
+        beat.setVolumeNo(1);
+        beat.setBeatRole("MAIN_ADVANCE");
+        beat.setStatus("PLANNED");
+        return beat;
+    }
+
+    @Test
+    void beatPoolChapterMismatchReported() throws Exception {
+        var poolMapper = org.mockito.Mockito.mock(
+                com.zzdzz.novelgen.derive.mapper.DeriveBeatPoolMapper.class);
+        var pool = new com.zzdzz.novelgen.model.entity.derive.DeriveBeatPoolDO();
+        pool.setId(1L);
+        pool.setRunId(58L);
+        pool.setBeatKey("BK-22");
+        pool.setContract("{\"chapterNo\":14}");
+        org.mockito.Mockito.when(poolMapper.selectList(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(pool));
+        var service = new DerivePlanValidationService(null, null, null, null, null, null, null);
+        var field = DerivePlanValidationService.class.getDeclaredField("beatPoolMapper");
+        field.setAccessible(true);
+        field.set(service, poolMapper);
+
+        var issues = service.beatPoolChapterIssues(58L, List.of(routedBeat(22, 1)));
+
+        assertEquals(1, issues.size());
+        assertEquals("BEAT_POOL_CHAPTER_MISMATCH", issues.get(0).code());
+        assertEquals(PlanContracts.RepairScope.PLAN_VOLUME, issues.get(0).repairScope());
+        assertEquals(List.of(22), issues.get(0).seqs());
+    }
+
+    @Test
+    void beatPoolChapterMismatchAbsentWhenConsistent() throws Exception {
+        var poolMapper = org.mockito.Mockito.mock(
+                com.zzdzz.novelgen.derive.mapper.DeriveBeatPoolMapper.class);
+        var pool = new com.zzdzz.novelgen.model.entity.derive.DeriveBeatPoolDO();
+        pool.setId(1L);
+        pool.setRunId(58L);
+        pool.setBeatKey("BK-22");
+        pool.setContract("{\"chapterNo\":14}");
+        org.mockito.Mockito.when(poolMapper.selectList(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(List.of(pool));
+        var service = new DerivePlanValidationService(null, null, null, null, null, null, null);
+        var field = DerivePlanValidationService.class.getDeclaredField("beatPoolMapper");
+        field.setAccessible(true);
+        field.set(service, poolMapper);
+
+        assertTrue(service.beatPoolChapterIssues(
+                58L, List.of(routedBeat(22, 14))).isEmpty());
     }
 }

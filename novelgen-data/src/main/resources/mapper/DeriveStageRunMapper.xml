@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveStageRunMapper">
+
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_stage_run (
+            run_id, stage, status, attempt, lease_owner, lease_until,
+            error_code, error_path, message, output_revision
+        ) VALUES (
+            #{p.runId}, #{p.stage}, #{p.status}, #{p.attempt}, #{p.leaseOwner}, #{p.leaseUntil},
+            #{p.errorCode}, #{p.errorPath}, #{p.message}, #{p.outputRevision,jdbcType=INTEGER}
+        )
+        RETURNING id
+    </select>
+
+    <insert id="insertPendingIfAbsent">
+        INSERT INTO derive_stage_run (run_id, stage, status, attempt)
+        VALUES (#{runId}, #{stage}, 'PENDING', #{attempt})
+        ON CONFLICT (run_id, stage, attempt) DO NOTHING
+    </insert>
+
+    <select id="findLatest"
+            resultType="com.zzdzz.novelgen.model.entity.derive.DeriveStageRunDO">
+        SELECT id, run_id, stage, status, attempt, lease_owner, lease_until,
+               error_code, error_path, message, output_revision,
+               created_time, updated_time, created_user_id, updated_user_id
+        FROM derive_stage_run
+        WHERE run_id = #{runId} AND stage = #{stage}
+        ORDER BY attempt DESC
+        LIMIT 1
+    </select>
+
+    <select id="findOpen"
+            resultType="com.zzdzz.novelgen.model.entity.derive.DeriveStageRunDO">
+        SELECT id, run_id, stage, status, attempt, lease_owner, lease_until,
+               error_code, error_path, message, output_revision,
+               created_time, updated_time, created_user_id, updated_user_id
+        FROM derive_stage_run
+        WHERE run_id = #{runId}
+          AND (status IN ('PENDING', 'FAILED')
+               OR (status = 'RUNNING' AND lease_until &gt; NOW()))
+        ORDER BY id
+    </select>
+
+    <select id="findAll"
+            resultType="com.zzdzz.novelgen.model.entity.derive.DeriveStageRunDO">
+        SELECT id, run_id, stage, status, attempt, lease_owner, lease_until,
+               error_code, error_path, message, output_revision,
+               created_time, updated_time, created_user_id, updated_user_id
+        FROM derive_stage_run
+        WHERE run_id = #{runId}
+        ORDER BY stage, attempt DESC
+    </select>
+
+    <update id="claim">
+        UPDATE derive_stage_run
+        SET status = 'RUNNING',
+            lease_owner = #{leaseOwner},
+            lease_until = #{leaseUntil},
+            error_code = NULL,
+            error_path = NULL,
+            message = NULL,
+            updated_time = NOW()
+        WHERE run_id = #{runId}
+          AND stage = #{stage}
+          AND attempt = #{attempt}
+          AND (status IN ('PENDING', 'FAILED')
+               OR (status = 'RUNNING' AND lease_until &lt;= NOW()))
+    </update>
+
+    <update id="finish">
+        UPDATE derive_stage_run
+        SET status = #{state},
+            error_code = #{code},
+            error_path = #{path},
+            message = #{message},
+            output_revision = #{outputRevision,jdbcType=INTEGER},
+            lease_owner = NULL,
+            lease_until = NULL,
+            updated_time = NOW()
+        WHERE id = #{id}
+          AND status = 'RUNNING'
+          AND lease_owner = #{leaseOwner}
+    </update>
+
+    <update id="cancelOpen">
+        UPDATE derive_stage_run
+        SET status = 'CANCELLED',
+            lease_owner = NULL,
+            lease_until = NULL,
+            updated_time = NOW()
+        WHERE run_id = #{runId}
+          AND status IN ('PENDING', 'RUNNING', 'FAILED')
+    </update>
+
+</mapper>
+
+

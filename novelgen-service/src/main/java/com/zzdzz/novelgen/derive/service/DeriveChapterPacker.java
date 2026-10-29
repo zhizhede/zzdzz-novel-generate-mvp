@@ -52,7 +52,7 @@ public final class DeriveChapterPacker {
             if (source < 0) {
                 break;
             }
-            Integer moved = movableAssignment(assignments, source, required);
+            Integer moved = movableAssignment(assignments, source, chapter.chapterNo(), required);
             if (moved != null) {
                 PlanContracts.BeatAssignment beat = assignments.get(moved);
                 assignments.set(moved, withChapter(beat, chapter.chapterNo()));
@@ -76,7 +76,7 @@ public final class DeriveChapterPacker {
             if (target == null) {
                 break;
             }
-            Integer moved = movableAssignment(assignments, source, required);
+            Integer moved = movableAssignment(assignments, source, target, required);
             if (moved == null) {
                 break;
             }
@@ -90,14 +90,19 @@ public final class DeriveChapterPacker {
     }
 
     private static Integer movableAssignment(List<PlanContracts.BeatAssignment> assignments,
-                                             int source, Map<Integer, Set<String>> required) {
+                                             int source, int target,
+                                             Map<Integer, Set<String>> required) {
+        if (target < source) {
+            return null;
+        }
         for (int i = 0; i < assignments.size(); i++) {
             PlanContracts.BeatAssignment beat = assignments.get(i);
             if (beat.chapterNo() == null || beat.chapterNo() != source) {
                 continue;
             }
             String role = beat.beatRole().name();
-            if (protectedRole(role)) {
+            if (protectedRole(role) || carriesClueRef(beat.threadRefs())
+                    || carriesDependencyOrKnowledge(beat)) {
                 continue;
             }
             if (required.getOrDefault(source, Set.of()).contains(role)) {
@@ -108,10 +113,31 @@ public final class DeriveChapterPacker {
         return null;
     }
 
+    /** 带线索引用的拍不可搬：搬走等于把合同章号改掉。 */
+    private static boolean carriesClueRef(List<String> threadRefs) {
+        return threadRefs != null && threadRefs.stream()
+                .anyMatch(ref -> ref != null && ref.trim().startsWith("GM-CLUE-"));
+    }
+
+    /** 带知识/状态依赖的拍不可搬：搬动会让前置知识或状态跨越章序。 */
+    private static boolean carriesDependencyOrKnowledge(PlanContracts.BeatAssignment beat) {
+        return nonEmpty(beat.threadRefs()) || nonEmpty(beat.dependsOn())
+                || nonEmpty(beat.requiresKnowledge()) || nonEmpty(beat.writesKnowledge())
+                || nonEmpty(beat.requiresState()) || nonEmpty(beat.changesState());
+    }
+
+    private static boolean nonEmpty(List<?> values) {
+        return values != null && !values.isEmpty();
+    }
+
+    private static boolean nonEmpty(Map<?, ?> values) {
+        return values != null && !values.isEmpty();
+    }
+
     private static boolean protectedRole(String role) {
         return Set.of("HOOK", "HIGHLIGHT", "CHARACTER_CHOICE", "COST",
                 "LOCAL_CLOSURE", "FINAL_CLOSURE", "NEXT_HOOK", "FINAL_REVEAL",
-                "RELATION_CONFLICT").contains(role);
+                "CLUE_PLANT", "CLUE_PAYOFF", "RELATION_CONFLICT").contains(role);
     }
 
     private static PlanContracts.BeatAssignment withChapter(

@@ -6,11 +6,11 @@
         INSERT INTO beat_instance (
             run_id, seq, source, asset_id, arc_id, arc_seg_no, beat_type,
             pacing, chapter_no, volume_no, filled_text, status,
-            beat_key, chapter_seq, pack_version, novelty_key, story_layer, beat_role, route_contract
+            beat_key, chapter_seq, pack_version, novelty_key, story_layer, beat_role, route_contract, plan_revision
         ) VALUES (
             #{p.runId}, #{p.seq}, #{p.source}, #{p.assetId}, #{p.arcId}, #{p.arcSegNo}, #{p.beatType},
             #{p.pacing}, #{p.chapterNo}, #{p.volumeNo}, #{p.filledText}, #{p.status},
-            #{p.beatKey}, #{p.chapterSeq}, #{p.packVersion}, #{p.noveltyKey}, #{p.storyLayer}, #{p.beatRole}, #{p.routeContract}::jsonb
+            #{p.beatKey}, #{p.chapterSeq}, #{p.packVersion}, #{p.noveltyKey}, #{p.storyLayer}, #{p.beatRole}, #{p.routeContract}::jsonb, #{p.planRevision,jdbcType=INTEGER}
         )
         RETURNING id
     </select>
@@ -24,6 +24,7 @@
             story_layer = #{p.storyLayer},
             beat_role = #{p.beatRole},
             route_contract = #{p.routeContract}::jsonb,
+            plan_revision = COALESCE(#{p.planRevision,jdbcType=INTEGER}, plan_revision),
             beat_key = #{p.beatKey},
             chapter_seq = #{p.chapterSeq},
             pack_version = #{p.packVersion},
@@ -40,6 +41,20 @@
         WHERE id = #{id}
     </update>
 
+    <update id="updateFilledIfRevision">
+        UPDATE beat_instance
+        SET filled_text = #{filledText},
+            status = #{status},
+            updated_time = NOW()
+        WHERE run_id = #{runId}
+          AND beat_key = #{beatKey}
+          AND plan_revision = #{planRevision}
+          AND EXISTS (
+              SELECT 1 FROM run r
+              WHERE r.id = #{runId}
+                AND r.active_plan_revision = #{planRevision}
+          )
+    </update>
     <update id="updateStatus">
         UPDATE beat_instance
         SET status = #{status},
@@ -55,10 +70,27 @@
         WHERE run_id = #{runId}
     </update>
 
+    <update id="resetFilledByChapters">
+        UPDATE beat_instance
+        SET filled_text = NULL,
+            status = 'PLANNED',
+            updated_time = NOW()
+        WHERE run_id = #{runId}
+          AND chapter_no IN
+        <foreach collection="chapterNos" item="no" open="(" separator="," close=")">
+            #{no}
+        </foreach>
+    </update>
+
     <delete id="clearByVolume">
         DELETE FROM beat_instance
         WHERE run_id = #{runId}
           AND volume_no = #{volumeNo}
+    </delete>
+
+    <delete id="deleteByRun">
+        DELETE FROM beat_instance
+        WHERE run_id = #{runId}
     </delete>
 
 </mapper>

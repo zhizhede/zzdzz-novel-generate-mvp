@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveCharacterProfileMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_character_profile (
+            run_id, character_key, display_name, public_goal, private_need, contradiction,
+            wound, capability, limitation, secret, decision_rule, speech_pattern,
+            behavior_pattern, current_status, arc_state, profile
+        ) VALUES (
+            #{p.runId}, #{p.characterKey}, #{p.displayName}, #{p.publicGoal}, #{p.privateNeed}, #{p.contradiction},
+            #{p.wound}, #{p.capability}, #{p.limitation}, #{p.secret}, #{p.decisionRule}, #{p.speechPattern},
+            #{p.behaviorPattern}, #{p.currentStatus}, #{p.arcState}, #{p.profile}::jsonb
+        ) RETURNING id
+    </select>
+</mapper>

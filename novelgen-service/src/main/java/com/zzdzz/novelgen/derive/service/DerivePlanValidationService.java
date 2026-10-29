@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveBeatPoolMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
+import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
@@ -39,12 +41,19 @@ public class DerivePlanValidationService {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveContractService contractService;
+
     private final RunMapper runMapper;
     private final NovelMapper novelMapper;
     private final VolumePlanMapper volumePlanMapper;
     private final CharacterPlanMapper characterPlanMapper;
+    private final ChapterMapper chapterMapper;
     private final StoryThreadMapper storyThreadMapper;
     private final BeatInstanceMapper beatInstanceMapper;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveBeatPoolMapper beatPoolMapper;
 
     /** 校验单卷拍路由。 */
     public PlanValidationVO validateBeatRoute(long runId, int volumeNo) {
@@ -185,6 +194,13 @@ public class DerivePlanValidationService {
             JsonNode cast = novel == null ? null
                     : readTreeSafe(novel.getStoryAssets()).path("cast");
             issues.addAll(validatePersonaAlignment(characters, cast));
+        if (onlyVolume == null && run.getNovelId() != null) {
+            issues.addAll(validateTruthMetadata(novel,
+                    chapterMapper == null ? List.of() : chapterMapper.selectList(
+                            new LambdaQueryWrapper<com.zzdzz.novelgen.model.entity.derive.ChapterDO>()
+                                    .eq(com.zzdzz.novelgen.model.entity.derive.ChapterDO::getNovelId, run.getNovelId())
+                                    .orderByAsc(com.zzdzz.novelgen.model.entity.derive.ChapterDO::getChapterNo))));
+        }
         }
         issues.addAll(validateVolumeHooks(volumes));
         issues.addAll(validateContractClosure(volumes, threads, characterContracts));
@@ -224,6 +240,22 @@ public class DerivePlanValidationService {
                 paidThreads.addAll(strings(route.path("threadRefs")));
             }
         }
+        if (onlyVolume == null && contractService != null) {
+            com.zzdzz.novelgen.derive.contract.StoryContract contract = contractService.load(run);
+            if (contract != null) {
+                Set<String> referenced = new LinkedHashSet<>();
+                for (BeatInstanceDO beat : beats) {
+                    referenced.addAll(strings(readTreeSafe(beat.getRouteContract()).path("threadRefs")));
+                }
+                for (com.zzdzz.novelgen.derive.contract.StoryContract.Clue clue : contract.clues()) {
+                    if (!referenced.contains(clue.clueKey())) {
+                        issues.add(warning("CLUE_PLANT_MISMATCH",
+                                PlanContracts.RepairScope.PLAN_VOLUME, clue.plantedChapter(),
+                                "线索 " + clue.clueKey() + " 未被任何拍的 threadRefs 引用（结构缺失，非措辞问题）"));
+                    }
+                }
+            }
+        }
         Map<String, CharacterState> initial = new HashMap<>();
         characters.forEach(c -> initial.put(c.getCharacterKey(),
                 new CharacterState(true, new LinkedHashSet<>())));
@@ -234,6 +266,51 @@ public class DerivePlanValidationService {
                 .anyMatch(v -> "FINAL".equals(v.globalRole()));
         if (onlyVolume == null && containsFinal) {
             issues.addAll(validateThreadClosure(threads, paidThreads));
+        }
+        issues.addAll(beatPoolChapterIssues(runId, beats));
+        return issues;
+    }
+
+    /**
+     * I2 池拍一致：按 beat_key 对齐 derive_beat_pool.contract.chapterNo 与 beat_instance.chapter_no。
+     *
+     * <p>池缺失或 beat_key 为空的历史行不参与比较，避免把旧运行误报成章号漂移。
+     */
+    List<PlanContracts.PlanIssue> beatPoolChapterIssues(long runId,
+                                                        List<BeatInstanceDO> beats) {
+        List<PlanContracts.PlanIssue> issues = new ArrayList<>();
+        if (beatPoolMapper == null) {
+            return issues;
+        }
+        List<com.zzdzz.novelgen.model.entity.derive.DeriveBeatPoolDO> poolRows =
+                beatPoolMapper.selectList(new LambdaQueryWrapper<
+                        com.zzdzz.novelgen.model.entity.derive.DeriveBeatPoolDO>()
+                        .eq(com.zzdzz.novelgen.model.entity.derive.DeriveBeatPoolDO::getRunId, runId));
+        Map<String, Integer> poolChapterByBeatKey = new HashMap<>();
+        for (com.zzdzz.novelgen.model.entity.derive.DeriveBeatPoolDO row : poolRows) {
+            if (row.getBeatKey() == null || row.getBeatKey().isBlank()) {
+                continue;
+            }
+            JsonNode contract = readTreeSafe(row.getContract());
+            if (contract.path("chapterNo").isNumber()) {
+                poolChapterByBeatKey.put(row.getBeatKey(), contract.path("chapterNo").asInt());
+            }
+        }
+        for (BeatInstanceDO beat : beats) {
+            if (beat.getBeatKey() == null || beat.getBeatKey().isBlank()
+                    || beat.getChapterNo() == null) {
+                continue;
+            }
+            Integer poolChapter = poolChapterByBeatKey.get(beat.getBeatKey());
+            if (poolChapter == null || poolChapter.intValue() == beat.getChapterNo().intValue()) {
+                continue;
+            }
+            Integer volumeNo = beat.getVolumeNo() == null ? 1 : beat.getVolumeNo();
+            issues.add(new PlanContracts.PlanIssue("ERROR", "BEAT_POOL_CHAPTER_MISMATCH",
+                    PlanContracts.RepairScope.PLAN_VOLUME, volumeNo, beat.getChapterNo(),
+                    List.of(beat.getSeq()),
+                    "拍 seq=" + beat.getSeq() + "(" + beat.getBeatKey() + ") 实际第 "
+                            + beat.getChapterNo() + " 章，路由合同第 " + poolChapter + " 章"));
         }
         return issues;
     }
@@ -386,8 +463,12 @@ public class DerivePlanValidationService {
                                     + "但 function=DETECTIVE（主视角）"));
                 }
             }
+            boolean hasDetective = rows.stream().anyMatch(other ->
+                    PlanContracts.CharacterFunction.DETECTIVE == enumOr(
+                            PlanContracts.CharacterFunction.class, other.getFunctionCode(),
+                            PlanContracts.CharacterFunction.SUPPORT));
             if ("C1".equals(row.getCharacterKey())
-                    && function != PlanContracts.CharacterFunction.DETECTIVE) {
+                    && function != PlanContracts.CharacterFunction.DETECTIVE && !hasDetective) {
                 issues.add(error("PERSONA_ROLE_MISMATCH",
                         PlanContracts.RepairScope.DRAFT, null,
                         "C1 必须是 DETECTIVE 主视角，当前 function=" + function));
@@ -412,6 +493,43 @@ public class DerivePlanValidationService {
         return issues;
     }
 
+    /** 真相卡元数据与章纲/拍合同对账：先在 P6 前拦截，避免语义轮空转。 */
+    static List<PlanContracts.PlanIssue> validateTruthMetadata(
+            NovelDO novel, List<com.zzdzz.novelgen.model.entity.derive.ChapterDO> chapters) {
+        List<PlanContracts.PlanIssue> issues = new ArrayList<>();
+        if (novel == null || chapters == null || chapters.isEmpty()) {
+            return issues;
+        }
+        JsonNode truth = readTreeSafe(novel.getStoryAssets()).path("truth");
+        int declaredReveal = truth.path("reveal_chapter").asInt(-1);
+        int actualReveal = chapters.stream()
+                .filter(c -> c.getDraftOutline() != null
+                        && (c.getDraftOutline().contains("坦承") || c.getDraftOutline().contains("揭穿")
+                        || c.getDraftOutline().contains("真相")))
+                .map(com.zzdzz.novelgen.model.entity.derive.ChapterDO::getChapterNo)
+                .min(Integer::compareTo).orElse(-1);
+        if (declaredReveal > 0 && actualReveal > 0 && declaredReveal != actualReveal) {
+            issues.add(warning("REVEAL_CHAPTER_MISMATCH", PlanContracts.RepairScope.PLAN_VOLUME, 1,
+                    "真相卡 reveal_chapter=" + declaredReveal + "，但最早出现坦承/揭穿/真相的章为 " + actualReveal));
+        }
+        JsonNode clues = truth.path("clues");
+        if (clues.isArray()) {
+            for (JsonNode clue : clues) {
+                int planted = clue.path("planted_chapter").asInt(-1);
+                String text = clue.path("clue").asText("").trim();
+                var target = chapters.stream()
+                        .filter(c -> c.getChapterNo() == planted).findFirst().orElse(null);
+                if (planted > 0 && (target == null || target.getDraftOutline() == null
+                        || text.length() < 6 || !target.getDraftOutline().contains(text.substring(0, 6)))) {
+                    // 真相卡与章纲由两个独立 LLM 节点生成，线索措辞不可能天然逐字一致。
+                    // 只要线索 key 与章号对得上，措辞不同一律 WARN，绝不当 P6 硬错误。
+                    issues.add(warning("CLUE_PROSE_DIFF", PlanContracts.RepairScope.PLAN_VOLUME, planted,
+                            "clue planted_chapter=" + planted + " 的措辞与章纲不同（语义已兑现即可）"));
+                }
+            }
+        }
+        return issues;
+    }
     /** 角色计划中与 persona 判定相关的文本。 */
     private static String personaPlanText(CharacterPlanDO row) {
         JsonNode contract = readTreeSafe(row.getContract());

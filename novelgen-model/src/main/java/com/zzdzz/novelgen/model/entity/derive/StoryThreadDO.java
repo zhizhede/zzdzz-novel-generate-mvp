@@ -18,6 +18,10 @@ public class StoryThreadDO extends DeriveBaseDO {
     private Integer openedVolume;
     private Integer payoffVolume;
     private String ownerCharacterKey;
+    /** 合同线索埋设章（V138）：CLUE 线程由合同投影，其余线程为空。 */
+    private Integer plantChapter;
+    /** 合同线索兑现章（V138）。 */
+    private Integer payoffChapter;
     private String status;
     private String contract;
 }

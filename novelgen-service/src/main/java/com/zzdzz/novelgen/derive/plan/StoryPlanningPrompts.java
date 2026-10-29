@@ -1,5 +1,9 @@
 package com.zzdzz.novelgen.derive.plan;
 
+import com.zzdzz.novelgen.llm.PromptCatalog;
+import com.zzdzz.novelgen.llm.contract.JsonSchemaSupport;
+import java.util.Arrays;
+import java.util.Objects;
 /** 故事规划 V2 的提示词。 */
 public final class StoryPlanningPrompts {
 
@@ -8,6 +12,7 @@ public final class StoryPlanningPrompts {
     public static final String NODE_VOLUMES = "derive_plan";
     public static final String NODE_CHARACTERS = "derive_plan";
     public static final String NODE_ROUTE = "derive_plan";
+    public static final String NODE_CONTRACT = "derive_contract";
 
     private StoryPlanningPrompts() {
     }
@@ -30,6 +35,11 @@ public final class StoryPlanningPrompts {
              "scopeEvidence":["支持该判断的用户原文"],"reason":"≤60字理由"}
             """;
 
+    /**
+     * 旧 SPINE 提示词：SPINE 现已由冻结合同确定性重建（{@code spineFromContract}），不再调 LLM。
+     * 保留常量只为兼容历史 run 与提示词目录引用，新代码禁止再使用。
+     */
+    @Deprecated
     public static final String SPINE = """
             你在为一部多卷小说设计故事脊柱，不写卷纲、章纲或正文。
             输入含规模、创作框架、主线、类别、结局形状；若带“上轮立项闸减法指令”，它是最高优先级，必须删除与之冲突的案情、角色和手法。
@@ -61,6 +71,8 @@ public final class StoryPlanningPrompts {
             4. 每卷必须有 localClosureProof；非末卷 nextHook 非空，最终卷 nextHook 为空；
             5. 最终卷 globalRole=FINAL，其余 LOCAL；
             6. focusCharacters 只能引用稳定角色 key 或“未定”，不得凭空增加卷。
+            7. fromChapter/toChapter 必须与输入 volumeRanges 完全一致，不得自行改分卷边界；
+               requiredThreads 里每条线索的埋设/兑现章必须在合同给出的章号范围内。
             只输出 JSON 对象：
             {"volumes":[{"volumeNo":1,"fromChapter":1,"toChapter":12,"arc":"…",
               "localQuestion":"…","falseAnswer":"…","trueAnswer":"…",
@@ -91,35 +103,73 @@ public final class StoryPlanningPrompts {
               "arcBefore":"…","arcAfter":"…","payoffProof":"…"}]}
             """;
 
-    public static final String ROUTE = """
-            你在为当前卷做章节功能槽与无指向拍路由，不写正文。
-            输入含卷合同、角色计划、线程账、剩余无指向拍和本卷章功能模板；若带“上轮立项闸减法指令”，它是最高优先级，禁止恢复指令要求删除的案情或关系线。
+    /** ROUTE v2 的带 token 模板：目录与代码共用同一份文本。 */
+    public static final String ROUTE_TEMPLATE =
+            Objects.requireNonNull(PromptCatalog.contentOf(NODE_ROUTE, "system"),
+                    "PromptCatalog 缺少 derive_plan/system ROUTE 模板");
+
+    /** ROUTE v2 渲染后的 system prompt：token 已解析并追加 ROUTE v2 schema 片段。 */
+    public static final String ROUTE = renderRouteSystemPrompt();
+
+    /**
+     * 渲染 ROUTE v2 system prompt。
+     *
+     * @return 解析全部枚举 token 并追加 schema 片段后的提示词
+     */
+    public static String renderRouteSystemPrompt() {
+        String rendered = ROUTE_TEMPLATE
+                .replace("{{BEAT_ROLES}}", enumBulletList(PlanContracts.BeatRole.values()))
+                .replace("{{STORY_LAYERS}}", enumBulletList(PlanContracts.StoryLayer.values()))
+                .replace("{{APPEARANCE_MODES}}", enumBulletList(PlanContracts.AppearanceMode.values()))
+                .replace("{{STATE_CHANGE_KINDS}}", enumBulletList(PlanContracts.StateChangeKind.values()))
+                .replace("{{THREAD_EFFECT_KINDS}}", enumBulletList(PlanContracts.ThreadEffectKind.values()));
+        return rendered + "\n\n" + PlanContractSchemas.routeNarrative().promptFragment();
+    }
+
+    private static String enumBulletList(Enum<?>[] values) {
+        return JsonSchemaSupport.bulletList(
+                Arrays.stream(values).map(Enum::name).toList());
+    }
+    public static final String CONTRACT = """
+            你在为一部小说冻结唯一故事合同，不写卷纲、章纲或正文。
+            输入含：创作框架、类别、结局形状、产品形态、焊接主线、scaffold facts、章数/卷数、maxNamedCharacters。
+            你的输出一旦冻结，后续所有规划、⑥b、P6、正文都必须服从它，任何下游节点都不得改写。
             要求：
-            1. chapters 必须覆盖本卷全部章号，每章给功能目标、主案推进和必需 beatRole；
-            2. assignments 和 skipped 合起来必须恰好覆盖输入的全部剩余拍 seq，每拍只能出现一次；系统会在输出后按全局拍池重新机械装箱，模型给出的 chapterNo 仅作初值；桥段不足时可用 syntheticSlots 补充新增过渡拍，但禁止复用已有事件或提前揭露终局；forcedSkips 中的 seq 禁止出现在 assignments，系统会自动写入 skipped；
-            3. 每章至少分配1拍；具体拍数按剧情需要安排，不再限制单章上限；无关拍进 skipped 并写非空 reason；
-            4. focusCharacters 只能使用输入角色 key；threadRefs 只能使用输入线程 key；
-            5. 结构与功能缺失时可给 syntheticSlots，系统会生成 SYNTHETIC 补拍；syntheticSlots 与 assignments 共用 focusCharacters/threadRefs/dependsOn/payoffTarget/appearanceMode/requiresKnowledge/writesKnowledge/requiresState/changesState，建立前置知识的补拍必须写 writesKnowledge；syntheticSlots 的 goal 必须推进本章新信息，禁止复述已有 seq 的事件、证据或转折；
-            6. 每卷末章必须有 LOCAL_CLOSURE；非末卷还要有 NEXT_HOOK，最终卷用 FINAL_CLOSURE；
-            7. appearanceMode 只能取 LIVE/MEMORY/DREAM/CORPSE/RELIC/TESTIMONY/LETTER/RECORDING；
-            8. storyLayer、beatRole 只能取合同枚举值；
-            9. requiresKnowledge 只写正文中角色可感知的事实/现象，不填 GM-/REL-/VC-/OBJ- 线程 key；
-               writesKnowledge 同理只写事实文本。
-            10. 知识因果必须按人物成立：一条事实首次被 writesKnowledge 时，只有该拍 focusCharacters
-                中的角色算“已知”；后续任何角色 requiresKnowledge 前，必须有一场同时聚焦该角色、
-                且写入该事实的前置拍。若缺这个前置拍，补 syntheticSlots 或在现有拍中调整
-                focusCharacters，不能默认全员共享知识。输入若带「返工问题」，必须逐条消除并重新输出
-                完整本卷路由，禁止原样重复上一版。
+            1. 恰好 3 名有名角色；cast.key 固定 C1/C2/C3；主角为 C1；OPPOSITION 必须是其中一名；
+               role 只能取 DETECTIVE/ACCESS/KNOWLEDGE/SOCIAL/ACTION/CHALLENGE/SUPPORT/OPPOSITION，
+               identity 写一句话身份（≤20字），name 是全书唯一合法人名来源（2~3 字，不得用禁用名单里的名字）；
+            2. culpritKey 必须是 cast.key；culpritName 必须等于该 cast.name；
+            3. 只允许一个主案；motive/method/finalTruth 必须能解释全部关键事实；
+            4. revealChapter 必须在 1..chapterCount；clues 至少 3 条，plantedChapter/payoffChapter
+               均在 1..chapterCount 且 payoffChapter > plantedChapter；clueKey 形如 GM-CLUE-01 且互不重复；
+            5. forbidden 必须是 JSON 字符串数组，禁止写成字符串化的 JSON；
+            6. 多卷时必须给每卷 volumeTruth，卷号连续覆盖 1..volumeCount；单卷也给 volumeNo=1 一条；
+            7. 自洽自检（冻结前必须逐条核对）：
+               - method 里“谁做了什么”必须能解释每条 clue 的现象；不得出现“某人抄录”与“笔迹不是他”并存；
+               - finalTruth 对方法的描述必须与 method 同义，不得一个说“抄录”、一个说“出自某人手笔”；
+               - 若 clue 依赖某人的笔迹/字迹，method 必须写清该笔迹为何偏离其平日（例如失控状态下誊抄），
+                 禁止留下“抄录/代笔”二义；
+            8. revealChapter 必须至少等于一条 clue 的 payoffChapter：揭示章必须有一件线索当场兑现，
+               否则结局三要素会悬空；
+            9. 额外输出两个短标签（4~20 字，禁止空、禁止只写“复仇/阴谋”这类空词）：
+               motiveTag：motive 的核心短语（例：夺凭证控据点）；
+               methodTag：method 的核心短语（例：符号引诱+催眠控心）；
+               这两个标签会被下游章纲逐字引用并做确定性校验。
+            10. 不得引入焊接主线之外的新主案、第二起案件、死亡或超自然解释，除非创作框架明确允许；
+            11. 非推理/悬疑题材同样要填满 truth：culprit 写最终揭示或对决的关键对立角色，
+               motive/method 写其动机与关键手段，clues 写可观察的伏笔线索，revealChapter 写答案揭晓章；
+            12. threads 至少覆盖每条线索（threadKey 与 clueKey 同名），kind 取 CLUE/RELATIONSHIP/OBJECT，
+               openedVolume/payoffVolume 在 1..volumeCount 且 payoffVolume >= openedVolume。
             只输出 JSON 对象：
-            {"volumeNo":1,"chapters":[{"chapterNo":1,"chapterFunction":"HOOK",
-              "localCaseGoal":"…","mainMysteryAdvance":"…","characterGoal":"…",
-              "relationshipGoal":"…","requiredBeatRoles":["HOOK"],
-              "forbiddenAppearances":[],"requiredStateBefore":{},"requiredStateAfter":{}}],
-             "assignments":[{"seq":1,"chapterNo":1,"storyLayer":"LOCAL_CASE",
-               "beatRole":"HOOK","focusCharacters":["C1"],"threadRefs":["GM-CLUE-01"],
-               "dependsOn":[],"payoffTarget":"VC1","appearanceMode":"LIVE",
-               "requiresKnowledge":[],"writesKnowledge":["门底有2厘米文件缝"],
-               "requiresState":{},"changesState":{}}],
-             "syntheticSlots":[],"skipped":[{"seq":2,"reason":"…"}]}
+            {"cast":[{"key":"C1","name":"…","role":"DETECTIVE","gender":"…","identity":"…"},
+                      {"key":"C2","name":"…","role":"ACCESS","gender":"…","identity":"…"},
+                      {"key":"C3","name":"…","role":"OPPOSITION","gender":"…","identity":"…"}],
+             "truth":{"culpritKey":"C3","culpritName":"…","motive":"…","method":"…",
+                      "finalTruth":"…","finalChoice":"…","revealChapter":12,
+                      "motiveTag":"…","methodTag":"…"},
+             "clues":[{"clueKey":"GM-CLUE-01","clue":"可观测现象","plantedChapter":3,"payoffChapter":11,"ownerKey":"C1"}],
+             "threads":[{"threadKey":"GM-CLUE-01","kind":"CLUE","openedVolume":1,"payoffVolume":1,"ownerKey":"C1"}],
+             "forbidden":["…"],
+             "volumeTruth":[{"volumeNo":1,"reveal":"…","forbidden":["…"]}]}
             """;
 }

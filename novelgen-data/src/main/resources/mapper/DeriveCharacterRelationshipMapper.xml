@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveCharacterRelationshipMapper">
+    <select id="insertFull" resultType="long">
+        INSERT INTO derive_character_relationship (
+            run_id, from_character_key, to_character_key, relationship_type, public_relation,
+            hidden_relation, initial_state, target_state, debt, trust, intimacy, conflict,
+            history, current_turn, payoff, status
+        ) VALUES (
+            #{p.runId}, #{p.fromCharacterKey}, #{p.toCharacterKey}, #{p.relationshipType}, #{p.publicRelation},
+            #{p.hiddenRelation}, #{p.initialState}::jsonb, #{p.targetState}::jsonb, #{p.debt}, #{p.trust},
+            #{p.intimacy}, #{p.conflict}, #{p.history}, #{p.currentTurn}, #{p.payoff}, #{p.status}
+        ) RETURNING id
+    </select>
+</mapper>

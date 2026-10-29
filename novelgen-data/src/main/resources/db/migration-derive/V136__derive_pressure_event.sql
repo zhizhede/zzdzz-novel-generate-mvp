@@ -1,0 +1,26 @@
+CREATE TABLE derive_pressure_event (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+    event_key VARCHAR(64) NOT NULL,
+    event_type VARCHAR(32) NOT NULL,
+    title VARCHAR(256) NOT NULL,
+    trigger_character_key VARCHAR(16),
+    target_character_keys JSONB NOT NULL DEFAULT '[]'::jsonb,
+    organization_key VARCHAR(64),
+    institution_key VARCHAR(64),
+    public_surface TEXT NOT NULL,
+    hidden_pressure TEXT NOT NULL,
+    before_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    after_state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    relationship_changes JSONB NOT NULL DEFAULT '{}'::jsonb,
+    character_changes JSONB NOT NULL DEFAULT '{}'::jsonb,
+    chapter_no INTEGER,
+    seq INTEGER,
+    status VARCHAR(16) NOT NULL DEFAULT 'PLANNED',
+    created_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_user_id BIGINT,
+    updated_user_id BIGINT,
+    CONSTRAINT uq_derive_pressure_event_run_key UNIQUE (run_id, event_key)
+);
+CREATE INDEX idx_derive_pressure_event_run ON derive_pressure_event(run_id, chapter_no, seq);

@@ -14,6 +14,8 @@ import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
 import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.derive.contract.ScaffoldContract;
+import com.zzdzz.novelgen.derive.contract.StoryContract;
+import com.zzdzz.novelgen.derive.contract.StoryContractValidator;
 import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.derive.plan.PlanJson;
 import com.zzdzz.novelgen.derive.plan.PlanV2StateCodec;
@@ -28,6 +30,7 @@ import com.zzdzz.novelgen.model.entity.derive.StoryThreadDO;
 import com.zzdzz.novelgen.model.entity.derive.VolumePlanDO;
 import com.zzdzz.novelgen.model.vo.derive.PlanVO;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -46,6 +49,7 @@ import java.util.regex.Pattern;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class DeriveStoryPlanService {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -58,8 +62,15 @@ public class DeriveStoryPlanService {
     private final CharacterPlanMapper characterPlanMapper;
     private final StoryThreadMapper storyThreadMapper;
     private final VolumePlanMapper volumePlanMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.zzdzz.novelgen.derive.mapper.ChapterMapper chapterMapper;
     private final LlmJson llmJson;
     private final DeriveScaffoldService scaffoldService;
+    private final DeriveCharacterBusinessModelService businessModelService;
+    private final DeriveContractService contractService;
+    /** 章级日程：CONTRACT 之后、SPINE 之前的纯函数投影（@Autowired 保留既有构造器签名）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveChapterScheduleService scheduleService;
 
     /** 推进一个 PLAN_V2 单元。 */
     public PlanVO advance(long runId) {
@@ -72,8 +83,12 @@ public class DeriveStoryPlanService {
             }
             state = PlanV2StateCodec.initial();
         }
+        state = backfillLegacyContract(run, state);
+        state = ensureScheduleForLegacy(run, state);
         return switch (state.currentUnit()) {
             case SCALE -> advanceScale(run, state);
+            case CONTRACT -> advanceContract(run, state);
+            case SCHEDULE -> advanceSchedule(run, state);
             case SPINE -> advanceSpine(run, state);
             case VOLUMES -> advanceVolumes(run, state);
             case CHARACTERS -> advanceCharacters(run, state);
@@ -106,9 +121,9 @@ public class DeriveStoryPlanService {
             run.setNovelId(novelId);
         }
         PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
-                PlanContracts.PlanUnit.SPINE, state.completedUnits(), scope, state.volumeUnits());
+                PlanContracts.PlanUnit.CONTRACT, state.completedUnits(), scope, state.volumeUnits());
         writePlanState(run, next);
-        return planVO(run, scope, "SPINE", false);
+        return planVO(run, scope, "CONTRACT", false);
     }
 
     private PlanVO advanceScale(RunDO run, PlanContracts.PlanV2State oldState) {
@@ -136,41 +151,116 @@ public class DeriveStoryPlanService {
         }
 
         long novelId = run.getNovelId() == null ? createNovel(run) : run.getNovelId();
+
         PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
-                PlanContracts.PlanUnit.SPINE,
+                PlanContracts.PlanUnit.CONTRACT,
                 append(oldState.completedUnits(), PlanContracts.PlanUnit.SCALE),
                 scope, oldState.volumeUnits());
         writePlanState(run, next);
         return planVO(run, scope, "SCALE", false);
     }
 
+    /**
+     * CONTRACT 单元：SCALE 之后、SPINE 之前生成并冻结唯一故事合同。
+     *
+     * <p>合同生成失败即 fail-fast，禁止回退 {@code run.welded} 走旧路径；业务模型（能力包/制度/组织）
+     * 在此并入合同快照，且只更新 constraint_kernel，不产生新合同版本。
+     */
+    private PlanVO advanceContract(RunDO run, PlanContracts.PlanV2State oldState) {
+        if (oldState.scope() == null || run.getNovelId() == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "CONTRACT 缺少规模或成品书骨架");
+        }
+        ScaffoldContract scaffold = readScaffold(run);
+        StoryContract contract = contractService.generateIfAbsent(run, oldState.scope(), scaffold);
+        List<PlanContracts.CharacterContract> slots = castCharacters(contract, oldState.scope());
+        businessModelService.ensureWorldOrganizations(run.getId(), slots, oldState.scope());
+        businessModelService.ensureCharactersRelationshipsEvents(run.getId(), slots, oldState.scope());
+        contractService.assertUnchanged(contract, contractService.require(run), "CONTRACT 单元");
+        PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
+                PlanContracts.PlanUnit.SCHEDULE,
+                append(oldState.completedUnits(), PlanContracts.PlanUnit.CONTRACT),
+                oldState.scope(), oldState.volumeUnits());
+        writePlanState(run, next);
+        return planVO(run, oldState.scope(), "CONTRACT", false);
+    }
+
+    /**
+     * SCHEDULE 单元：合同 → 章级日程的纯函数投影并落库（不调 LLM）。
+     *
+     * <p>日程是 ROUTE/⑥b/P6 唯一的章号来源；投影失败即 fail-fast（CONTRACT_SCHEDULE_INVALID），
+     * 禁止带着不自洽的合同继续往下走。
+     */
+    private PlanVO advanceSchedule(RunDO run, PlanContracts.PlanV2State oldState) {
+        if (oldState.scope() == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "SCHEDULE 缺少规模合同");
+        }
+        if (scheduleService == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "SCHEDULE 单元未装配日程服务");
+        }
+        StoryContract contract = contractService.require(run);
+        List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> entries =
+                scheduleService.persist(run, scheduleService.project(run));
+        PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
+                PlanContracts.PlanUnit.SPINE,
+                append(oldState.completedUnits(), PlanContracts.PlanUnit.SCHEDULE),
+                oldState.scope(), oldState.volumeUnits());
+        writePlanState(run, next);
+        log.info("SCHEDULE 单元完成：runId={} contractVersion={} 日程章数={}",
+                run.getId(), contract.version(), entries.size());
+        return planVO(run, oldState.scope(), "SCHEDULE", false);
+    }
+
+    /**
+     * 旧 run 兼容：已在 SPINE 及之后但没有日程行时补投影；日程版本落后于合同时告警并覆盖。
+     * 合同不存在时不在此处造日程（由 backfillLegacyContract 先退回 CONTRACT）。
+     */
+    PlanContracts.PlanV2State ensureScheduleForLegacy(RunDO run,
+                                                      PlanContracts.PlanV2State state) {
+        if (state == null || scheduleService == null) {
+            return state;
+        }
+        PlanContracts.PlanUnit unit = state.currentUnit();
+        boolean downstream = unit == PlanContracts.PlanUnit.SPINE
+                || unit == PlanContracts.PlanUnit.VOLUMES
+                || unit == PlanContracts.PlanUnit.CHARACTERS
+                || unit == PlanContracts.PlanUnit.SLOT_ROUTE
+                || unit == PlanContracts.PlanUnit.VALIDATE
+                || unit == PlanContracts.PlanUnit.DONE;
+        if (!downstream) {
+            return state;
+        }
+        StoryContract contract = contractService.load(run);
+        if (contract == null) {
+            return state;
+        }
+        List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> existing =
+                scheduleService.load(run);
+        if (existing.isEmpty()) {
+            scheduleService.persist(run, scheduleService.project(run));
+            log.info("旧 run 补投影章级日程：runId={} 原单元={} 合同版本={}",
+                    run.getId(), unit, contract.version());
+            return state;
+        }
+        try {
+            scheduleService.assertCurrent(run);
+        } catch (BizException stale) {
+            log.warn("旧 run 日程版本落后于合同，重新投影覆盖：runId={} 原因={}",
+                    run.getId(), stale.getMessage());
+            scheduleService.persist(run, scheduleService.project(run));
+        }
+        return state;
+    }
+
+    /**
+     * SPINE：合同存在时只做确定性重建，不再调 LLM——同一份冻结合同永远得到同一根脊柱，
+     * 从机制上消灭“脊柱与真相卡两套案情”。没有合同一律 CONTRACT_REQUIRED，绝不回退 welded。
+     */
     private PlanVO advanceSpine(RunDO run, PlanContracts.PlanV2State oldState) {
+        StoryContract contract = contractService.require(run);
         if (oldState.scope() == null || run.getNovelId() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "SPINE 缺少规模或成品书骨架");
         }
-        ObjectNode user = MAPPER.createObjectNode();
-        user.put("创作框架", nullToEmpty(run.getParamIntent()));
-        putMainline(user, run);
-        user.put("类别", nullToEmpty(run.getParamTags()));
-        user.put("结局形状", run.getParamOutcome());
-        user.put("volumeCount", oldState.scope().volumeCount());
-        user.put("chapterCount", oldState.scope().chapterCount());
-        putGateDirective(user, run);
-        putTruthContract(user, run);
-        JsonNode existingContract = readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
-        PlanContracts.StorySpine spine;
-        if (existingContract.isObject()
-                && !existingContract.path("finalTruth").asText("").isBlank()) {
-            spine = spineFromTruthContract(oldState.scope(), existingContract);
-        } else {
-            spine = llmJson.ask(
-                    new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_SPINE, run.getNovelId(), null,
-                            run.getId(),
-                            List.of(LlmPort.Message.system(StoryPlanningPrompts.SPINE),
-                                    LlmPort.Message.user(user.toString())),
-                            0.3),
-                    root -> parseSpine(root, oldState.scope(), existingContract), 3);
-        }
+        PlanContracts.StorySpine spine = spineFromContract(contract, oldState.scope());
         persistSpine(run, spine);
         PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
                 PlanContracts.PlanUnit.VOLUMES,
@@ -179,37 +269,43 @@ public class DeriveStoryPlanService {
         writePlanState(run, next);
         return planVO(run, oldState.scope(), "SPINE", false);
     }
-
+    /**
+     * VOLUMES：卷合同只细化冻结合同——trueAnswer/forbidden/requiredThreads/focusCharacters
+     * 一律取自合同，LLM 只负责 localQuestion/falseAnswer/arc 等叙述字段。
+     */
     private PlanVO advanceVolumes(RunDO run, PlanContracts.PlanV2State oldState) {
         if (oldState.scope() == null || run.getNovelId() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "VOLUMES 缺少规模或成品书骨架");
         }
+        StoryContract contract = contractService.require(run);
+        ScaffoldContract scaffold = readScaffold(run);
         ObjectNode user = MAPPER.createObjectNode();
         user.set("scope", MAPPER.valueToTree(oldState.scope()));
         user.set("storySpine", readSteps(run.getStepStatus()).path("STORY_SPINE"));
+        if (scaffold != null && scaffold.volumeRanges() != null
+                && !scaffold.volumeRanges().isEmpty()) {
+            user.set("volumeRanges（只读：分卷边界必须逐字一致）",
+                    MAPPER.valueToTree(scaffold.volumeRanges()));
+        }
+        putFrozenContract(user, contract);
         user.put("创作框架", nullToEmpty(run.getParamIntent()));
         putMainline(user, run);
         putGateDirective(user, run);
         putTruthContract(user, run);
-        JsonNode volumeContract = readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
-        List<PlanContracts.VolumeContract> volumes;
-        if (volumeContract.isObject()
-                && !volumeContract.path("finalTruth").asText("").isBlank()) {
-            volumes = List.of(volumeFromTruthContract(oldState.scope(), volumeContract));
-        } else {
-            volumes = llmJson.ask(
-                    new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_VOLUMES, run.getNovelId(), null,
-                            run.getId(),
-                            List.of(LlmPort.Message.system(StoryPlanningPrompts.VOLUMES),
-                                    LlmPort.Message.user(user.toString())),
-                            0.3),
-                    root -> {
-                        List<PlanContracts.VolumeContract> parsed =
-                                parseVolumes(root, oldState.scope());
-                        requireTruthAlignment(parsed, volumeContract);
-                        return parsed;
-                    }, 3);
-        }
+        List<PlanContracts.VolumeContract> volumes = llmJson.ask(
+                new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_VOLUMES, run.getNovelId(), null,
+                        run.getId(),
+                        List.of(LlmPort.Message.system(StoryPlanningPrompts.VOLUMES),
+                                LlmPort.Message.user(user.toString())),
+                        0.3),
+                root -> {
+                    List<PlanContracts.VolumeContract> parsed =
+                            parseVolumes(root, oldState.scope());
+                    requireTruthAlignment(parsed, canonicalContract(run));
+                    return parsed;
+                }, 3);
+        volumes = reconcileVolumes(volumes, contract, oldState.scope());
+        validateVolumeSchedule(volumes, contract, scaffold);
         persistVolumes(run, volumes);
         PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
                 PlanContracts.PlanUnit.CHARACTERS,
@@ -218,19 +314,23 @@ public class DeriveStoryPlanService {
         writePlanState(run, next);
         return planVO(run, oldState.scope(), "VOLUMES", false);
     }
-
+    /**
+     * CHARACTERS：角色叙事计划只能细化合同 cast——key 与职能来自合同槽位，姓名不许改，
+     * 不许出现合同之外的第四个角色（CONTRACT_CAST_DRIFT）。
+     */
     private PlanVO advanceCharacters(RunDO run, PlanContracts.PlanV2State oldState) {
         if (oldState.scope() == null || run.getNovelId() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "CHARACTERS 缺少规模或成品书骨架");
         }
+        StoryContract contract = contractService.require(run);
         ObjectNode user = MAPPER.createObjectNode();
         user.set("scope", MAPPER.valueToTree(oldState.scope()));
         user.set("storySpine", readSteps(run.getStepStatus()).path("STORY_SPINE"));
         user.set("volumes", MAPPER.valueToTree(loadVolumeContracts(run.getId())));
+        putFrozenContract(user, contract);
         NovelDO novel = novelMapper.selectById(run.getNovelId());
         if (novel != null) {
             JsonNode assets = readTreeSafe(novel.getStoryAssets());
-            user.set("cast", assets.path("cast"));
             user.set("brief", assets.path("brief"));
         }
         user.put("创作框架", nullToEmpty(run.getParamIntent()));
@@ -242,7 +342,12 @@ public class DeriveStoryPlanService {
                         List.of(LlmPort.Message.system(StoryPlanningPrompts.CHARACTERS),
                                 LlmPort.Message.user(user.toString())),
                         0.3),
-                root -> parseCharacters(root, oldState.scope()), 3);
+                root -> reconcileCharacters(parseCharacters(root, oldState.scope()), contract,
+                        oldState.scope()), 3);
+        List<String> drift = StoryContractValidator.validateCharacters(characters, contract);
+        if (!drift.isEmpty()) {
+            throw new PlanJson.Bad(String.join(";", drift));
+        }
         persistCharacters(run, characters);
         // P6 Task4：角色合同回炉重做时，已 VALIDATE 的卷路由保留（局部修复，禁止整本重路由）。
         Map<Integer, PlanContracts.PlanUnit> volumeUnits = new java.util.LinkedHashMap<>();
@@ -259,6 +364,344 @@ public class DeriveStoryPlanService {
         return planVO(run, oldState.scope(), "CHARACTERS", false);
     }
 
+    /** 把冻结合同放进提示词输入（结构化节点，模型只能照抄不能改写）。 */
+    private void putFrozenContract(ObjectNode user, StoryContract contract) {
+        user.set("FROZEN_CONTRACT（唯一合同：cast/真相/线索/线程/禁令，禁止改写）",
+                readTreeSafe(contractService.promptContext(contract)));
+    }
+
+    /** 读 ⑥a SCALE 段落下的结构骨架（合同提示词的结构事实来源）。 */
+    private ScaffoldContract readScaffold(RunDO run) {
+        JsonNode node = readSteps(run.getStepStatus()).path("SCAFFOLD");
+        if (!node.isObject()) {
+            return null;
+        }
+        try {
+            return MAPPER.treeToValue(node, ScaffoldContract.class);
+        } catch (Exception e) {
+            log.warn("SCAFFOLD 子合同反序列化失败，合同生成降级为无骨架输入：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 合同 cast → 角色叙事计划槽位（业务模型阶段与角色计划共用同一份角色 key）。 */
+    static List<PlanContracts.CharacterContract> castCharacters(StoryContract contract,
+                                                                PlanContracts.ScopeContract scope) {
+        List<PlanContracts.CharacterContract> out = new ArrayList<>();
+        List<String> keys = contract.castKeys();
+        for (int i = 0; i < contract.cast().size(); i++) {
+            StoryContract.CharacterSlot slot = contract.cast().get(i);
+            List<String> targets = keys.stream().filter(key -> !key.equals(slot.key())).toList();
+            out.add(new PlanContracts.CharacterContract(
+                    slot.key(), slot.name(), functionOf(slot.role()),
+                    isBlank(slot.identity()) ? "承担不可替代的剧情条件" : slot.identity(),
+                    "完成公开目标", "无法独自承担代价", List.of(), targets,
+                    isBlank(slot.identity()) ? "角色职能与共同代价冲突" : slot.identity(),
+                    "在代价出现时做出选择", "承担不可撤销的代价", List.of(),
+                    "关系与代价在结局闭合", 1, Math.max(1, scope.volumeCount()),
+                    Math.max(1, scope.volumeCount()), "START", "PAYOFF",
+                    isBlank(slot.identity()) ? "" : slot.identity()));
+        }
+        return out;
+    }
+
+    private static PlanContracts.CharacterFunction functionOf(String role) {
+        if (role == null || role.isBlank()) {
+            return PlanContracts.CharacterFunction.SUPPORT;
+        }
+        try {
+            return PlanContracts.CharacterFunction.valueOf(role.trim().toUpperCase());
+        } catch (Exception e) {
+            return PlanContracts.CharacterFunction.SUPPORT;
+        }
+    }
+
+    /**
+     * 合同 → 故事脊柱（确定性，不调 LLM）：mainMystery/finalTruth/finalChoice 取自合同真相核，
+     * 真相阶梯取每卷 volumeTruth 切片，全局线程取合同线程——同一合同永远得到同一根脊柱。
+     */
+    static PlanContracts.StorySpine spineFromContract(StoryContract contract,
+                                                      PlanContracts.ScopeContract scope) {
+        StoryContract.Truth truth = contract.truth();
+        String finalTruth = truth.finalTruth();
+        String finalChoice = truth.finalChoice() == null || truth.finalChoice().isBlank()
+                ? "按唯一真相合同完成最终选择：" + finalTruth : truth.finalChoice();
+        List<PlanContracts.TruthStep> ladder = new ArrayList<>();
+        for (int volumeNo = 1; volumeNo <= scope.volumeCount(); volumeNo++) {
+            StoryContract.VolumeTruth slice = volumeSlice(contract, volumeNo);
+            String reveal = slice == null || slice.reveal().isBlank() ? finalTruth : slice.reveal();
+            List<String> forbidden = slice != null && !slice.forbidden().isEmpty()
+                    ? slice.forbidden() : contract.forbidden();
+            List<String> evidence = new ArrayList<>();
+            for (StoryContract.ThreadRef thread : contract.threads()) {
+                if (thread.openedVolume() <= volumeNo) {
+                    evidence.add(thread.threadKey());
+                }
+            }
+            ladder.add(new PlanContracts.TruthStep(volumeNo, List.of(reveal), forbidden, evidence));
+        }
+        List<PlanContracts.ThreadContract> threads = new ArrayList<>();
+        for (StoryContract.ThreadRef ref : contract.threads()) {
+            String title = ref.threadKey();
+            for (StoryContract.Clue clue : contract.clues()) {
+                if (clue.clueKey().equals(ref.threadKey())) {
+                    title = clue.clue();
+                    break;
+                }
+            }
+            PlanContracts.ThreadKind kind;
+            try {
+                kind = PlanContracts.ThreadKind.valueOf(ref.kind() == null ? "CLUE" : ref.kind());
+            } catch (Exception e) {
+                kind = PlanContracts.ThreadKind.CLUE;
+            }
+            // 合同线索的章号必须随脊柱一起投影下去：下游（route/P6/审计）只认这一份。
+            Map<String, Object> extra = new LinkedHashMap<>();
+            for (StoryContract.Clue clue : contract.clues()) {
+                if (clue.clueKey().equals(ref.threadKey())) {
+                    extra.put("plantChapter", clue.plantedChapter());
+                    extra.put("payoffChapter", clue.payoffChapter());
+                    break;
+                }
+            }
+            threads.add(new PlanContracts.ThreadContract(ref.threadKey(), kind, title,
+                    ref.openedVolume(), ref.payoffVolume(), ref.ownerKey(),
+                    PlanContracts.ThreadStatus.OPEN, extra));
+        }
+        return new PlanContracts.StorySpine(finalTruth, finalTruth, finalChoice, ladder, threads);
+    }
+
+    /** 合同某卷的真相切片；单卷书保证至少有一条 volumeNo=1。 */
+    static StoryContract.VolumeTruth volumeSlice(StoryContract contract, int volumeNo) {
+        for (StoryContract.VolumeTruth slice : contract.volumeTruth()) {
+            if (slice.volumeNo() == volumeNo) {
+                return slice;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 卷合同与合同比对：trueAnswer 与合同真相切片语义不一致即 CONTRACT_DRIFT（喂回重试）。
+     */
+    static void requireVolumeTruthContract(PlanContracts.VolumeContract volume, StoryContract contract) {
+        if (contract == null || contract.truth() == null) {
+            return;
+        }
+        StoryContract.VolumeTruth slice = volumeSlice(contract, volume.volumeNo());
+        String expect = slice == null || slice.reveal().isBlank()
+                ? contract.truth().finalTruth() : slice.reveal();
+        if (DeriveTruthContractService.truthConflicts(expect, volume.trueAnswer())) {
+            throw new PlanJson.Bad("CONTRACT_DRIFT：第 " + volume.volumeNo()
+                    + " 卷 trueAnswer 与合同真相切片不一致：" + volume.trueAnswer());
+        }
+    }
+
+    /** 卷合同收敛到合同：trueAnswer/forbiddenReveals/requiredThreads/focusCharacters 只来自合同。 */
+    static List<PlanContracts.VolumeContract> reconcileVolumes(
+            List<PlanContracts.VolumeContract> volumes, StoryContract contract,
+            PlanContracts.ScopeContract scope) {
+        List<PlanContracts.VolumeContract> out = new ArrayList<>();
+        Set<String> threadKeys = new LinkedHashSet<>();
+        contract.threads().forEach(thread -> threadKeys.add(thread.threadKey()));
+        Set<String> castKeys = new LinkedHashSet<>(contract.castKeys());
+        for (PlanContracts.VolumeContract volume : volumes) {
+            StoryContract.VolumeTruth slice = volumeSlice(contract, volume.volumeNo());
+            String trueAnswer = slice == null || slice.reveal().isBlank()
+                    ? contract.truth().finalTruth() : slice.reveal();
+            List<String> forbidden = slice != null && !slice.forbidden().isEmpty()
+                    ? slice.forbidden() : contract.forbidden();
+            List<String> required = volume.requiredThreads().stream()
+                    .filter(threadKeys::contains).distinct().toList();
+            if (required.isEmpty()) {
+                required = contract.threads().stream()
+                        .filter(thread -> thread.openedVolume() <= volume.volumeNo())
+                        .map(StoryContract.ThreadRef::threadKey).distinct().toList();
+            }
+            List<String> focus = volume.focusCharacters().stream()
+                    .filter(castKeys::contains).distinct().toList();
+            if (focus.isEmpty()) {
+                focus = List.of("C1");
+            }
+            out.add(new PlanContracts.VolumeContract(
+                    volume.volumeNo(), volume.fromChapter(), volume.toChapter(), volume.arc(),
+                    volume.localQuestion(), volume.falseAnswer(), trueAnswer,
+                    volume.mainMysteryAdvance(), focus, volume.relationshipChanges(), required,
+                    forbidden, volume.localClosureProof(), volume.nextHook(),
+                    volume.globalRole()));
+        }
+        return out;
+    }
+
+    /**
+     * 卷合同 × 日程一致性：分卷边界必须与 scaffold 逐字一致，合同线索的埋设/兑现章必须落在
+     * 其线程声明的卷范围内——不一致即 CONTRACT_SCHEDULE_DRIFT（喂回重试，不许下游自己改章号）。
+     */
+    static void validateVolumeSchedule(List<PlanContracts.VolumeContract> volumes,
+                                       StoryContract contract, ScaffoldContract scaffold) {
+        if (scaffold != null && scaffold.volumeRanges() != null
+                && !scaffold.volumeRanges().isEmpty()) {
+            for (PlanContracts.VolumeContract volume : volumes) {
+                ScaffoldContract.VolumeRange range = scaffold.volumeRanges().stream()
+                        .filter(item -> item.volumeNo() == volume.volumeNo())
+                        .findFirst().orElse(null);
+                if (range == null
+                        || range.fromChapter() != volume.fromChapter()
+                        || range.toChapter() != volume.toChapter()) {
+                    throw new PlanJson.Bad("CONTRACT_SCHEDULE_DRIFT：第" + volume.volumeNo()
+                            + "卷范围 " + volume.fromChapter() + ".." + volume.toChapter()
+                            + " 与 scaffold 不一致（期望 "
+                            + (range == null ? "缺失" : range.fromChapter() + ".." + range.toChapter())
+                            + "）");
+                }
+            }
+        }
+        if (contract == null || contract.clues() == null) {
+            return;
+        }
+        Map<String, StoryContract.Clue> clueByKey = new LinkedHashMap<>();
+        contract.clues().forEach(clue -> clueByKey.put(clue.clueKey(), clue));
+        for (StoryContract.ThreadRef thread : contract.threads()) {
+            StoryContract.Clue clue = clueByKey.get(thread.threadKey());
+            if (clue == null) {
+                continue;
+            }
+            PlanContracts.VolumeContract opened = volumeOfNo(volumes, thread.openedVolume());
+            PlanContracts.VolumeContract payoff = volumeOfNo(volumes, thread.payoffVolume());
+            if (opened != null && !inRange(clue.plantedChapter(), opened)) {
+                throw new PlanJson.Bad("CONTRACT_SCHEDULE_DRIFT：线索 " + clue.clueKey()
+                        + " 埋设章 " + clue.plantedChapter() + " 不在第" + opened.volumeNo()
+                        + "卷（" + opened.fromChapter() + ".." + opened.toChapter() + "）");
+            }
+            if (payoff != null && !inRange(clue.payoffChapter(), payoff)) {
+                throw new PlanJson.Bad("CONTRACT_SCHEDULE_DRIFT：线索 " + clue.clueKey()
+                        + " 兑现章 " + clue.payoffChapter() + " 不在第" + payoff.volumeNo()
+                        + "卷（" + payoff.fromChapter() + ".." + payoff.toChapter() + "）");
+            }
+        }
+    }
+
+    private static PlanContracts.VolumeContract volumeOfNo(
+            List<PlanContracts.VolumeContract> volumes, int volumeNo) {
+        return volumes.stream().filter(volume -> volume.volumeNo() == volumeNo)
+                .findFirst().orElse(null);
+    }
+
+    private static boolean inRange(int chapterNo, PlanContracts.VolumeContract volume) {
+        return chapterNo >= volume.fromChapter() && chapterNo <= volume.toChapter();
+    }
+
+    /** 角色计划收敛到合同 cast：合同外的 key 直接拒绝，职能与姓名按合同槽位回填。 */
+    static List<PlanContracts.CharacterContract> reconcileCharacters(
+            List<PlanContracts.CharacterContract> characters, StoryContract contract,
+            PlanContracts.ScopeContract scope) {
+        Map<String, StoryContract.CharacterSlot> slots = new LinkedHashMap<>();
+        contract.cast().forEach(slot -> slots.put(slot.key(), slot));
+        List<PlanContracts.CharacterContract> out = new ArrayList<>();
+        for (PlanContracts.CharacterContract character : characters) {
+            StoryContract.CharacterSlot slot = slots.get(character.characterKey());
+            if (slot == null) {
+                throw new PlanJson.Bad("CONTRACT_CAST_DRIFT：角色 key "
+                        + character.characterKey() + " 不在合同 cast " + contract.castKeys());
+            }
+            PlanContracts.CharacterFunction function = character.function();
+            PlanContracts.CharacterFunction contractFunction = functionOf(slot.role());
+            String displayName = isBlank(character.displayNameHint())
+                    ? slot.name() : character.displayNameHint();
+            if (!slot.name().equals(displayName)) {
+                log.warn("角色计划姓名与合同不一致，按合同回填：key={} 合同={} 计划={}",
+                        slot.key(), slot.name(), displayName);
+                displayName = slot.name();
+            }
+            if (function != contractFunction) {
+                log.warn("角色计划职能与合同槽位不一致，按合同回填：key={} 合同={} 计划={}",
+                        slot.key(), contractFunction, function);
+                function = contractFunction;
+            }
+            out.add(new PlanContracts.CharacterContract(
+                    character.characterKey(), displayName, function,
+                    character.uniqueContribution(), character.want(), character.flaw(),
+                    character.requiredSetup(), character.conflictTargets(),
+                    character.functionalConflict(), character.highlightChoice(),
+                    character.highlightCost(), character.relationshipChanges(),
+                    character.payoffProof(), character.spotlightVolume(),
+                    character.conflictVolume(), character.payoffVolume(),
+                    character.arcBefore(), character.arcAfter(),
+                    isBlank(slot.identity()) ? character.castRole() : slot.identity()));
+        }
+        Set<String> seen = new LinkedHashSet<>();
+        out.forEach(character -> seen.add(character.characterKey()));
+        for (StoryContract.CharacterSlot slot : contract.cast()) {
+            if (!seen.contains(slot.key())) {
+                throw new PlanJson.Bad("CONTRACT_CAST_DRIFT：合同角色 " + slot.key() + "（"
+                        + slot.name() + "）在角色计划中缺失");
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 旧 run 兼容：规划已过 SCALE 但没有冻结合同、且尚未写正文时，退回 CONTRACT 补冻结合同；
+     * 已有正文的 run 拒绝自动迁移（LEGACY_TEXT_REQUIRES_MANUAL），要求新建 run 或人工处理。
+     */
+    private PlanContracts.PlanV2State backfillLegacyContract(RunDO run,
+                                                             PlanContracts.PlanV2State state) {
+        if (state == null) {
+            return state;
+        }
+        PlanContracts.PlanUnit unit = state.currentUnit();
+        if (unit == PlanContracts.PlanUnit.SCALE
+                || unit == PlanContracts.PlanUnit.CONTRACT
+                || unit == PlanContracts.PlanUnit.SCHEDULE
+                || unit == PlanContracts.PlanUnit.NEED_SCOPE) {
+            return state;
+        }
+        if (contractService.load(run) != null) {
+            return state;
+        }
+        if (hasWrittenText(run)) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "LEGACY_TEXT_REQUIRES_MANUAL：该 run 已有正文却没有冻结合同，请新建 run 或人工处理，禁止自动迁移");
+        }
+        if (state.scope() == null) {
+            return state;
+        }
+        PlanContracts.PlanV2State backfill = new PlanContracts.PlanV2State(
+                PlanContracts.PlanUnit.CONTRACT, state.completedUnits(), state.scope(),
+                state.volumeUnits());
+        writePlanState(run, backfill);
+        log.info("旧 run 补冻结合同：runId={} 原单元={} → CONTRACT", run.getId(), unit);
+        return backfill;
+    }
+
+    /** 该 run 是否已有正文（决定能否自动补合同）。 */
+    private boolean hasWrittenText(RunDO run) {
+        if (chapterMapper == null || run.getNovelId() == null) {
+            return false;
+        }
+        return chapterMapper.selectList(new LambdaQueryWrapper<com.zzdzz.novelgen.model.entity.derive.ChapterDO>()
+                        .eq(com.zzdzz.novelgen.model.entity.derive.ChapterDO::getNovelId, run.getNovelId()))
+                .stream()
+                .anyMatch(chapter -> chapter.getContent() != null && !chapter.getContent().isBlank());
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    /** 合同 map 里的章号（缺省/坏值一律 null，让线程行保持可空）。 */
+    private static Integer intOrNull(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Integer.parseInt(text.trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
     /** SPINE 校验：逐卷真相阶梯、全局线程 key 与回收卷。 */
     static PlanContracts.StorySpine parseSpine(JsonNode root, PlanContracts.ScopeContract scope) {
         return parseSpine(root, scope, null);
@@ -330,6 +773,20 @@ public class DeriveStoryPlanService {
         return new PlanContracts.StorySpine(mainMystery, finalTruth, finalChoice, ladder, threads);
     }
 
+    /** 在旧角色计划尚未生成时，用稳定槽位为业务模型阶段提供可闭合的角色 key。 */
+    private static List<PlanContracts.CharacterContract> temporaryCharacters(RunDO run) {
+        List<PlanContracts.CharacterContract> out = new ArrayList<>();
+        for (int i = 1; i <= 3; i++) {
+            String key = "C" + i;
+            out.add(new PlanContracts.CharacterContract(key, "角色" + i,
+                    PlanContracts.CharacterFunction.SUPPORT, "承担共同体选择", "完成公开目标",
+                    "无法独自承担代价", List.of(), List.of(), "组织规则与私人需求冲突",
+                    "在代价出现时保护重要关系", "承担不可撤销的选择", List.of(),
+                    "关系和制度代价在结局闭合", 1, i, 1, "START", "PAYOFF", ""));
+        }
+        return out;
+    }
+
     private void persistSpine(RunDO run, PlanContracts.StorySpine spine) {
         long runId = run.getId();
         long novelId = run.getNovelId();
@@ -349,6 +806,8 @@ public class DeriveStoryPlanService {
             row.setOpenedVolume(thread.openedVolume());
             row.setPayoffVolume(thread.payoffVolume());
             row.setOwnerCharacterKey(thread.ownerCharacterKey());
+            row.setPlantChapter(intOrNull(thread.contract().get("plantChapter")));
+            row.setPayoffChapter(intOrNull(thread.contract().get("payoffChapter")));
             row.setStatus(thread.status().name());
             row.setContract(toJson(thread.contract()));
             storyThreadMapper.insertFull(row);
@@ -829,8 +1288,8 @@ public class DeriveStoryPlanService {
                 truth, "", "FINAL");
     }
 
-    private static void putMainline(ObjectNode user, RunDO run) {
-        JsonNode contract = readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
+    private void putMainline(ObjectNode user, RunDO run) {
+        JsonNode contract = canonicalContract(run);
         if (contract.isObject() && !contract.path("finalTruth").asText("").isBlank()) {
             user.put("主线", contract.path("finalTruth").asText(""));
         } else {
@@ -838,11 +1297,23 @@ public class DeriveStoryPlanService {
         }
     }
 
-    private static void putTruthContract(ObjectNode user, RunDO run) {
-        JsonNode contract = readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
+    private void putTruthContract(ObjectNode user, RunDO run) {
+        JsonNode contract = canonicalContract(run);
         if (contract.isObject()) {
             user.set("TruthContract（唯一真相合同，冲突时以此为准）", contract);
         }
+    }
+
+    /** 优先读已冻结合同表；没有冻结真相时才退回 step_status 的旧合同。 */
+    private JsonNode canonicalContract(RunDO run) {
+        if (contractService != null) {
+            JsonNode frozen = contractService.frozenContractNode(run);
+            if (frozen != null && frozen.isObject()
+                    && !frozen.path("finalTruth").asText("").isBlank()) {
+                return frozen;
+            }
+        }
+        return readSteps(run.getStepStatus()).path("TRUTH_CONTRACT");
     }
 
     static void requireTruthAlignment(List<PlanContracts.VolumeContract> volumes,

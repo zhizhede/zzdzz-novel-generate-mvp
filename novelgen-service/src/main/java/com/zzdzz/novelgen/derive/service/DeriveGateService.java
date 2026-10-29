@@ -9,6 +9,9 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
+import com.zzdzz.novelgen.derive.plan.PlanContracts;
+import com.zzdzz.novelgen.derive.contract.StoryContract;
+import com.zzdzz.novelgen.derive.contract.StoryContractValidator;
 import com.zzdzz.novelgen.derive.mapper.DeriveGateReviewMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
@@ -17,6 +20,12 @@ import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
 import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.derive.mapper.WordlistMapper;
 import com.zzdzz.novelgen.derive.plan.PlanJsonViews;
+import com.zzdzz.novelgen.derive.plan.audit.PlanAdmissionDecision;
+import com.zzdzz.novelgen.derive.plan.audit.PlanAdmissionResult;
+import com.zzdzz.novelgen.derive.plan.audit.PlanAuditIssue;
+import com.zzdzz.novelgen.derive.plan.audit.PlanAuditReport;
+import com.zzdzz.novelgen.derive.plan.compiler.PlanSnapshotService;
+import com.zzdzz.novelgen.model.entity.derive.DerivePlanSnapshotDO;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
@@ -71,6 +80,9 @@ public class DeriveGateService {
             真相卡（若有）、brief、全书章纲（每章 no/title/outline）、拍清单（seq/拍型/归属章/状态/filled 情节点）、
             母题黑名单（跨稿复读母题，命中要换写）。
             只依据给出材料评审。TruthContract 是唯一真相合同；真相卡、卷合同、主线或章纲与它冲突时，必须判为合同冲突，不得把两套案情当成同一个故事。你的职责是“诊断”，不是决定放行或熔断；最终动作由系统按结构化结果计算。
+            合同与章级日程是只读事实：不得在 directive 中要求移动线索章号、改真凶/动机/手法、增删角色；
+            揭示章的 motiveTag 与 culpritName 是合同事实，不得在 directive 中改写；
+            directive 只能描述“重写第 X 章的哪些句子”。
             六判据逐项输出 pass、severity、note、issues、repairTarget：
             1. 规则单轨：真相卡存在时，诡计/手法层只允许一套可理性化规则——超自然只能做氛围，
                不得进入解释通道；两套规则并存判 fail；
@@ -137,7 +149,13 @@ public class DeriveGateService {
 
     record GateTruth(
             DeriveTruthContractService.TruthResolution resolution,
-            JsonNode volumes) {
+            JsonNode volumes,
+            StoryContract contract,
+            List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule) {
+        GateTruth(DeriveTruthContractService.TruthResolution resolution, JsonNode volumes,
+                  StoryContract contract) {
+            this(resolution, volumes, contract, List.of());
+        }
     }
 
     private final RunMapper runMapper;
@@ -150,6 +168,10 @@ public class DeriveGateService {
     @Autowired(required = false)
     private DerivePlanValidationService planValidationService;
     @Autowired(required = false)
+    private DeriveContractService contractService;
+    @Autowired(required = false)
+    private DeriveCharacterBusinessModelService businessModelService;
+    @Autowired(required = false)
     private VolumePlanMapper volumePlanMapper;
     @Autowired(required = false)
     private CharacterPlanMapper characterPlanMapper;
@@ -157,6 +179,12 @@ public class DeriveGateService {
     private StoryThreadMapper storyThreadMapper;
     @Autowired(required = false)
     private DeriveGateReviewMapper gateReviewMapper;
+    /** 章级日程（合同投影）：P6 只读；缺失/版本不一致即 CONTRACT_INVALID 终态。 */
+    @Autowired(required = false)
+    private DeriveChapterScheduleService scheduleService;
+    /** compiler-v1 快照存在时，/gate 只读兼容准入报告，不再调用自由模型改写结构。 */
+    @Autowired(required = false)
+    private PlanSnapshotService planSnapshotService;
 
     /** ⑥b→⑦ 之间跑一次立项评审。 */
     public GateVO gate(long runId) {
@@ -167,6 +195,9 @@ public class DeriveGateService {
         if (!"DRAFTING".equals(run.getStatus()) || run.getNovelId() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR,
                     "run 应处于 DRAFTING（⑥b 已完成），当前 " + run.getStatus());
+        }
+        if (run.getActivePlanRevision() != null && planSnapshotService != null) {
+            return gateFromAdmission(run, gateRound(run.getStepStatus()) + 1);
         }
         long novelId = run.getNovelId();
         List<ChapterDO> chapters = chapterMapper.selectList(new LambdaQueryWrapper<ChapterDO>()
@@ -191,9 +222,31 @@ public class DeriveGateService {
                         .eq(WordlistDO::getGrp, "MOTIF"))
                 .stream().map(WordlistDO::getWord).filter(w -> w != null && !w.isBlank()).toList();
         GateTruth gateTruth = resolveGateTruth(run, novel);
+        // 合同级漂移是上游节点违反冻结合同，属终态失败：不进 LLM 评审，也不给回炉放大器。
+        List<String> contractIssues = contractIssues(run, gateTruth, chapters, beats);
+        if (!contractIssues.isEmpty()) {
+            String message = "CONTRACT_INVALID：" + String.join("；", contractIssues);
+            run.setStepStatus(withGate(run.getStepStatus(), "FAILED", round, contractIssues,
+                    message, "CONTRACT_INVALID"));
+            runMapper.updateStepStatus(runId, run.getStepStatus());
+            persistGateReview(runId, round,
+                    new GateDecision("REJECT", "FAILED", "CONTRACT_INVALID",
+                            contractIssues, List.of()), message);
+            runMapper.updateStatus(runId, "FAILED", null);
+            log.warn("P6 合同预检拦截（终态 FAILED）：runId={} issues={}", runId, contractIssues);
+            return new GateVO(runId, novelId, "REJECT", "FAILED", round, contractIssues,
+                    message, "CONTRACT_INVALID", List.of());
+        }
         String user = buildUser(run, novel, chapters, beats, motifs, gateTruth);
 
-        List<String> preflight = preflightIssues(chapters, beats);
+        List<String> preflight = new java.util.ArrayList<>(preflightIssues(chapters, beats));
+        preflight.addAll(revealNameIssues(chapters, gateTruth.schedule(), gateTruth.contract()));
+        if (businessModelService != null) {
+            preflight.addAll(businessModelService.validateStatic(runId));
+            if (!preflight.isEmpty()) {
+                log.warn("P6-A 状态一致性检查拦截：runId={} issues={}", runId, preflight);
+            }
+        }
         GateReview review;
         if (!preflight.isEmpty()) {
             review = new GateReview(List.of(), preflight, "");
@@ -237,22 +290,110 @@ public class DeriveGateService {
                 decision.criteria());
     }
 
+
+    /** /gate 兼容适配：只读 ADMITTED 快照，按 admission 决策映射旧 GO/REWORK/REJECT。 */
+    private GateVO gateFromAdmission(RunDO run, int round) {
+        DerivePlanSnapshotDO snapshot = planSnapshotService.requireActive(run.getId());
+        PlanAuditReport report;
+        try {
+            report = STATIC_MAPPER.readValue(
+                    snapshot.getAdmissionReport() == null ? "{}" : snapshot.getAdmissionReport(),
+                    PlanAuditReport.class);
+        } catch (Exception e) {
+            report = new PlanAuditReport(List.of());
+        }
+        PlanAdmissionDecision decision = report.admitted()
+                ? PlanAdmissionDecision.ADMIT
+                : PlanAdmissionDecision.REJECT;
+        GateDecision gateDecision = gateDecisionFor(decision, report.issues(),
+                gateRound(run.getStepStatus()));
+        List<String> issues = report.issues().stream()
+                .map(issue -> issue.code() + "：" + issue.message())
+                .toList();
+        String directive = "按结构化计划审计报告修复；不得改写合同、日程或计划 revision";
+        run.setStepStatus(withGate(run.getStepStatus(), gateDecision.action(), round,
+                issues, directive, gateDecision.repairTarget()));
+        runMapper.updateStepStatus(run.getId(), run.getStepStatus());
+        persistGateReview(run.getId(), round, gateDecision, directive);
+        if ("REWORK".equals(gateDecision.action())) {
+            runMapper.updateStatus(run.getId(), "REWORK", null);
+        } else if ("FAILED".equals(gateDecision.action())) {
+            runMapper.updateStatus(run.getId(), "FAILED", null);
+        }
+        return new GateVO(run.getId(), run.getNovelId(), gateDecision.verdict(),
+                gateDecision.action(), round, issues, directive,
+                gateDecision.repairTarget(), List.of());
+    }
+
+    /** admission 决策到旧 P6 动作的唯一映射；没有自由模型 directive 通道。 */
+    static GateDecision gateDecisionFor(PlanAdmissionDecision decision,
+                                        List<PlanAuditIssue> issues,
+                                        int prevRound) {
+        List<String> values = issues == null ? List.of() : issues.stream()
+                .map(issue -> issue.code() + "：" + issue.message())
+                .toList();
+        return switch (decision) {
+            case ADMIT -> new GateDecision("GO", "PASS", "NONE",
+                    new ArrayList<>(values), List.of());
+            case REPAIR -> prevRound >= 5
+                    ? new GateDecision("REJECT", "FAILED", "PLAN_VOLUME",
+                    new ArrayList<>(values), List.of())
+                    : new GateDecision("REWORK", "REWORK", "PLAN_VOLUME",
+                    new ArrayList<>(values), List.of());
+            case REJECT -> new GateDecision("REJECT", "FAILED", "CONTRACT",
+                    new ArrayList<>(values), List.of());
+        };
+    }
     // ---- 输入构造 ----
 
-    private GateTruth resolveGateTruth(RunDO run, NovelDO novel) {
-        JsonNode assets = DeriveDraftService.readTreeSafe(novel.getStoryAssets());
-        JsonNode spine = DeriveDraftService.readTreeSafe(run.getStepStatus())
-                .path("steps").path("STORY_SPINE");
+    /**
+     * P6 的真相输入只有一份：冻结合同（唯一事实源）。合同存在时不再合并 STORY_SPINE、
+     * 旧卷合同或焊接到的主线——那些正是“两套案情”的来源。
+     */
+    GateTruth resolveGateTruth(RunDO run, NovelDO novel) {
         JsonNode volumes = volumePlanMapper == null
                 ? STATIC_MAPPER.createArrayNode()
                 : PlanJsonViews.volumes(volumePlanMapper.selectList(
                         new LambdaQueryWrapper<VolumePlanDO>()
                                 .eq(VolumePlanDO::getRunId, run.getId())
                                 .orderByAsc(VolumePlanDO::getVolumeNo)));
+        // 日程只读加载（不 require）：缺失/过期由 contractIssues 判 CONTRACT_INVALID 终态，
+        // 避免抛裸异常让 auto-flow 只记 lastError 就去停下。
+        List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule =
+                scheduleService == null ? List.of() : scheduleService.load(run);
+        if (!schedule.isEmpty() && scheduleService != null) {
+            try {
+                scheduleService.assertCurrent(run);
+            } catch (BizException stale) {
+                log.warn("P6 读取到期日程（将在合同预检判终态）：runId={} 原因={}",
+                        run.getId(), stale.getMessage());
+            }
+        }
+        if (contractService != null) {
+            StoryContract contract = contractService.load(run);
+            if (contract != null && !contract.truth().finalTruth().isBlank()) {
+                String finalChoice = contract.truth().finalChoice();
+                if (finalChoice == null || finalChoice.isBlank()) {
+                    finalChoice = "按唯一真相合同完成最终选择：" + contract.truth().finalTruth();
+                }
+                List<String> threads = new ArrayList<>();
+                contract.threads().forEach(thread -> threads.add(thread.threadKey()));
+                String truthId = "T-" + Integer.toHexString((run.getId() + ":"
+                        + contract.truth().finalTruth() + ":" + finalChoice).hashCode());
+                com.zzdzz.novelgen.derive.contract.TruthContract canonical =
+                        new com.zzdzz.novelgen.derive.contract.TruthContract(truthId,
+                                contract.truth().finalTruth(), finalChoice,
+                                contract.forbidden(), threads);
+                return new GateTruth(new DeriveTruthContractService.TruthResolution(
+                        canonical, List.of()), volumes, contract, schedule);
+            }
+        }
+        JsonNode assets = DeriveDraftService.readTreeSafe(novel.getStoryAssets());
+        JsonNode spine = DeriveDraftService.readTreeSafe(run.getStepStatus())
+                .path("steps").path("STORY_SPINE");
         return new GateTruth(truthContractService.resolve(
-                run.getId(), spine, assets.path("truth"), volumes), volumes);
+                run.getId(), spine, assets.path("truth"), volumes), volumes, null, schedule);
     }
-
     private void persistTruthContract(long runId,
                                       com.zzdzz.novelgen.derive.contract.TruthContract contract) {
         RunDO current = runMapper.selectById(runId);
@@ -264,6 +405,186 @@ public class DeriveGateService {
         runMapper.updateStepStatus(runId, root.toString());
     }
 
+    /**
+     * 合同级预检：角色计划/卷合同/章纲与冻结合同的结构比对（cast、线程 key、揭示章泄底）。
+     * 只判结构漂移，不判文笔；命中即 CONTRACT_INVALID（终态）。
+     */
+    List<String> contractIssues(RunDO run, GateTruth gateTruth, List<ChapterDO> chapters) {
+        return contractIssues(run, gateTruth, chapters, List.of());
+    }
+
+    /**
+     * 合同级预检：角色计划/卷合同/章纲/拍/日程与冻结合同的结构比对。
+     * 只判结构漂移，不判文笔；命中即 CONTRACT_INVALID（终态）。
+     */
+    List<String> contractIssues(RunDO run, GateTruth gateTruth, List<ChapterDO> chapters,
+                                List<BeatInstanceDO> beats) {
+        StoryContract contract = gateTruth.contract();
+        if (contract == null) {
+            return List.of();
+        }
+        List<PlanContracts.VolumeContract> volumes = new ArrayList<>();
+        if (volumePlanMapper != null) {
+            for (VolumePlanDO row : volumePlanMapper.selectList(
+                    new LambdaQueryWrapper<VolumePlanDO>().eq(VolumePlanDO::getRunId, run.getId()))) {
+                try {
+                    volumes.add(STATIC_MAPPER.readValue(row.getContract(),
+                            PlanContracts.VolumeContract.class));
+                } catch (Exception e) {
+                    log.warn("卷合同 JSON 损坏，跳过合同预检：runId={} rowId={}", run.getId(), row.getId());
+                }
+            }
+        }
+        List<PlanContracts.CharacterContract> characters = new ArrayList<>();
+        if (characterPlanMapper != null) {
+            for (CharacterPlanDO row : characterPlanMapper.selectList(
+                    new LambdaQueryWrapper<CharacterPlanDO>().eq(CharacterPlanDO::getRunId, run.getId()))) {
+                try {
+                    characters.add(STATIC_MAPPER.readValue(row.getContract(),
+                            PlanContracts.CharacterContract.class));
+                } catch (Exception e) {
+                    log.warn("角色合同 JSON 损坏，跳过合同预检：runId={} rowId={}", run.getId(), row.getId());
+                }
+            }
+        }
+        List<String> issues = new ArrayList<>(
+                StoryContractValidator.validateAgainstPlan(contract, volumes, characters, chapters));
+        issues.addAll(scheduleIssues(run, gateTruth.schedule(), beats));
+        return issues;
+    }
+
+    /** 日程级预检：缺失/过期、拍引用日程外线索、缺埋设/兑现/揭示拍——都是上游违约（终态）。 */
+    private List<String> scheduleIssues(RunDO run,
+                                        List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule,
+                                        List<BeatInstanceDO> beats) {
+        List<String> issues = new ArrayList<>();
+        if (schedule == null || schedule.isEmpty()) {
+            issues.add("CONTRACT_SCHEDULE_MISSING：章级日程缺失（SCHEDULE 单元未完成）");
+            return issues;
+        }
+        if (scheduleService != null) {
+            try {
+                scheduleService.assertCurrent(run);
+            } catch (BizException stale) {
+                issues.add("CONTRACT_SCHEDULE_STALE：" + stale.getMessage());
+            }
+        }
+        Map<String, int[]> windows = DeriveBeatRouteService.clueChapters(schedule);
+        Map<Integer, List<BeatInstanceDO>> byChapter = new HashMap<>();
+        for (BeatInstanceDO beat : beats) {
+            if ("SKIPPED".equals(beat.getStatus()) || beat.getChapterNo() == null) {
+                continue;
+            }
+            byChapter.computeIfAbsent(beat.getChapterNo(), key -> new ArrayList<>()).add(beat);
+        }
+        for (com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry entry : schedule) {
+            List<BeatInstanceDO> chapterBeats =
+                    byChapter.getOrDefault(entry.chapterNo(), List.of());
+            for (String key : entry.mustPlant()) {
+                if (countBeat(chapterBeats, "CLUE_PLANT", key) != 1) {
+                    issues.add("CONTRACT_CLUE_PLANT_MISSING：第" + entry.chapterNo()
+                            + "章缺 1 个 CLUE_PLANT 拍引用 " + key);
+                }
+            }
+            for (String key : entry.mustPayoff()) {
+                if (countBeat(chapterBeats, "CLUE_PAYOFF", key) != 1) {
+                    issues.add("CONTRACT_CLUE_PAYOFF_MISSING：第" + entry.chapterNo()
+                            + "章缺 1 个 CLUE_PAYOFF 拍引用 " + key);
+                }
+            }
+            if (entry.reveal() && entry.mustPayoff().isEmpty()) {
+                issues.add("CONTRACT_REVEAL_NO_PAYOFF：日程揭示章第" + entry.chapterNo()
+                        + "章没有任何 clue payoff");
+            }
+            if (entry.reveal() && countBeat(chapterBeats, "FINAL_REVEAL", null) < 1) {
+                issues.add("CONTRACT_REVEAL_MISSING：揭示章第" + entry.chapterNo()
+                        + "章缺 FINAL_REVEAL 拍");
+            }
+        }
+        for (BeatInstanceDO beat : beats) {
+            if ("SKIPPED".equals(beat.getStatus()) || beat.getChapterNo() == null) {
+                continue;
+            }
+            for (String ref : threadRefs(beat.getRouteContract())) {
+                int[] window = windows.get(ref);
+                if (window == null) {
+                    continue;
+                }
+                if (!DeriveBeatRouteService.allowedClueRef(window, beat.getChapterNo(),
+                        roleOf(beat.getBeatRole()))) {
+                    issues.add("CONTRACT_CLUE_STRAY：拍 seq=" + beat.getSeq() + " 在第"
+                            + beat.getChapterNo() + "章（" + beat.getBeatRole()
+                            + "）引用了日程外的线索 " + ref);
+                }
+            }
+        }
+        return issues;
+    }
+
+    private static long countBeat(List<BeatInstanceDO> beats, String role, String clueKey) {
+        return beats.stream()
+                .filter(beat -> role.equals(beat.getBeatRole()))
+                .filter(beat -> clueKey == null
+                        || threadRefs(beat.getRouteContract()).contains(clueKey))
+                .count();
+    }
+
+    /** route_contract.threadRefs（解析失败按空处理）。 */
+    static List<String> threadRefs(String routeContract) {
+        List<String> out = new ArrayList<>();
+        JsonNode node = DeriveDraftService.readTreeSafe(routeContract);
+        node.path("threadRefs").forEach(item -> {
+            String ref = item.asText("").trim();
+            if (!ref.isEmpty()) {
+                out.add(ref);
+            }
+        });
+        return out;
+    }
+
+    private static PlanContracts.BeatRole roleOf(String role) {
+        try {
+            return role == null ? null : PlanContracts.BeatRole.valueOf(role.trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 揭示章及其后必须逐字写出真凶姓名（章纲文字问题，DRAFT 目标，允许重写修复）。 */
+    static List<String> revealNameIssues(List<ChapterDO> chapters,
+                                         List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> schedule,
+                                         StoryContract contract) {
+        List<String> issues = new ArrayList<>();
+        if (contract == null || contract.truth() == null || schedule == null || schedule.isEmpty()) {
+            return issues;
+        }
+        String culprit = contract.truth().culpritName();
+        String motiveTag = contract.truth().motiveTag() == null
+                ? "" : contract.truth().motiveTag().trim();
+        int reveal = contract.truth().revealChapter();
+        if ((culprit == null || culprit.isBlank()) && motiveTag.isBlank()) {
+            return issues;
+        }
+        if (reveal < 1) {
+            return issues;
+        }
+        for (ChapterDO chapter : chapters) {
+            if (chapter.getChapterNo() < reveal) {
+                continue;
+            }
+            String outline = chapter.getDraftOutline() == null ? "" : chapter.getDraftOutline();
+            if (!culprit.isBlank() && !outline.contains(culprit)) {
+                issues.add("REVEAL_NAME_MISSING：第" + chapter.getChapterNo()
+                        + "章（揭示章 " + reveal + " 及之后）章纲未写出真凶「" + culprit + "」");
+            }
+            if (!motiveTag.isBlank() && !outline.contains(motiveTag)) {
+                issues.add("REVEAL_MOTIVE_TAG_MISSING：第" + chapter.getChapterNo()
+                        + "章（揭示章 " + reveal + " 及之后）章纲未逐字写出 motiveTag「"
+                        + motiveTag + "」");
+            }
+        }
+        return issues;
+    }
     String buildUser(RunDO run, NovelDO novel, List<ChapterDO> chapters,
                      List<BeatInstanceDO> beats, List<String> motifs) {
         return buildUser(run, novel, chapters, beats, motifs, resolveGateTruth(run, novel));
@@ -278,10 +599,14 @@ public class DeriveGateService {
         root.put("字数带", run.getParamWordsMin() + "~" + run.getParamWordsMax());
         root.put("结局形状", run.getParamOutcome());
         String canonicalMainline = gateTruth.resolution().contract().finalTruth();
-        if (canonicalMainline == null || canonicalMainline.isBlank()) {
+        if ((canonicalMainline == null || canonicalMainline.isBlank()) && gateTruth.contract() == null) {
             canonicalMainline = run.getWelded() == null ? "" : run.getWelded();
         }
-        root.put("主线", canonicalMainline);
+        root.put("主线", canonicalMainline == null ? "" : canonicalMainline);
+        if (gateTruth.contract() != null) {
+            root.set("FROZEN_CONTRACT（唯一合同：cast/真相/线索/线程/禁令，禁止改写）",
+                    DeriveDraftService.readTreeSafe(contractService.promptContext(gateTruth.contract())));
+        }
         JsonNode assets = DeriveDraftService.readTreeSafe(novel.getStoryAssets());
         root.set("人物表", assets.path("cast"));
         root.put("protagonist", assets.path("protagonist").asText(""));
@@ -333,6 +658,18 @@ public class DeriveGateService {
         }
         ArrayNode mArr = root.putArray("母题黑名单");
         motifs.forEach(mArr::add);
+        ArrayNode scheduleArr = root.putArray("chapterSchedule");
+        for (com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry entry : gateTruth.schedule()) {
+            ObjectNode item = scheduleArr.addObject();
+            item.put("chapterNo", entry.chapterNo());
+            item.set("mustPlant", STATIC_MAPPER.valueToTree(entry.mustPlant()));
+            item.set("mustPayoff", STATIC_MAPPER.valueToTree(entry.mustPayoff()));
+            item.put("reveal", entry.reveal());
+        }
+        ArrayNode rules = root.putArray("scheduleRules");
+        rules.add("日程与合同是硬约束：你的 directive 只能描述章纲文字重写，"
+                + "不得要求移动线索章号、改真凶/动机/手法、增删角色");
+        rules.add("directive 提到的章号必须是本书已有章；不得出现「把线索改到第 X 章」这类改合同的指令");
         return root.toString();
     }
 
@@ -492,6 +829,17 @@ public class DeriveGateService {
                 issues.add(issue.code() + "：" + issue.message());
                 targets.add(issue.repairTarget());
             }
+        }
+        // 结构预检拦截（无 criteria 但有 issues）必须阻塞在 REWORK，不得因“没有判据项”判 GO。
+        if (review.criteria().isEmpty() && !issues.isEmpty() && targets.isEmpty()) {
+            String target = planCheck == null || planCheck.passed() || planCheck.hardErrors().isEmpty()
+                    ? "DRAFT"
+                    : mostUpstreamTarget(planCheck.hardErrors().stream()
+                    .map(PlanValidationVO.Issue::repairTarget).toList());
+            boolean exhausted = prevRound >= 5;
+            return new GateDecision(exhausted ? "REJECT" : "REWORK",
+                    exhausted ? "FAILED" : "REWORK", target,
+                    new ArrayList<>(issues), review.criteria());
         }
         if (targets.isEmpty()) {
             return new GateDecision("GO", "PASS", "NONE",

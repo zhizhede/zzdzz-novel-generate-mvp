@@ -5,10 +5,11 @@
     <select id="insertFull" resultType="long">
         INSERT INTO derive_story_thread (
             run_id, novel_id, thread_key, kind, title, opened_volume,
-            payoff_volume, owner_character_key, status, contract
+            payoff_volume, owner_character_key, plant_chapter, payoff_chapter, status, contract
         ) VALUES (
             #{p.runId}, #{p.novelId}, #{p.threadKey}, #{p.kind}, #{p.title}, #{p.openedVolume},
-            #{p.payoffVolume}, #{p.ownerCharacterKey}, #{p.status}, #{p.contract}::jsonb
+            #{p.payoffVolume}, #{p.ownerCharacterKey}, #{p.plantChapter}, #{p.payoffChapter},
+            #{p.status}, #{p.contract}::jsonb
         )
         RETURNING id
     </select>
@@ -21,6 +22,8 @@
             opened_volume = #{p.openedVolume},
             payoff_volume = #{p.payoffVolume},
             owner_character_key = #{p.ownerCharacterKey},
+            plant_chapter = #{p.plantChapter},
+            payoff_chapter = #{p.payoffChapter},
             status = #{p.status},
             contract = #{p.contract}::jsonb,
             updated_time = NOW()

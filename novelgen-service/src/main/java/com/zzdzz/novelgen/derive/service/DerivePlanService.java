@@ -278,7 +278,7 @@ public class DerivePlanService {
     private PlanVO planV2(RunDO run) {
         PlanContracts.PlanV2State state = readPlanV2(run.getStepStatus());
         return switch (state.currentUnit()) {
-            case SCALE, SPINE, VOLUMES, CHARACTERS ->
+            case SCALE, CONTRACT, SCHEDULE, SPINE, VOLUMES, CHARACTERS ->
                     storyPlanService.advance(run.getId());
             case NEED_SCOPE -> new PlanVO(run.getId(), run.getNovelId() == null ? 0 : run.getNovelId(),
                     state.scope() == null ? 0 : state.scope().chapterCount(),

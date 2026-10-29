@@ -45,6 +45,33 @@ class DeriveChapterPackerTest {
                 .anyMatch(a -> a.seq() == 7 && a.chapterNo() == 2));
     }
 
+    @Test
+    void doesNotMoveClueBeats() {
+        PlanContracts.RoutePlan packed = DeriveChapterPacker.pack(plan(
+                assignment(1, 1, PlanContracts.BeatRole.HOOK),
+                clue(2, 1, PlanContracts.BeatRole.CLUE_PLANT),
+                clue(3, 1, PlanContracts.BeatRole.CLUE_PAYOFF),
+                assignment(4, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(5, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(6, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(7, 1, PlanContracts.BeatRole.MAIN_ADVANCE)));
+
+        assertTrue(packed.assignments().stream()
+                        .filter(a -> a.beatRole() == PlanContracts.BeatRole.CLUE_PLANT
+                                || a.beatRole() == PlanContracts.BeatRole.CLUE_PAYOFF)
+                        .allMatch(a -> a.chapterNo() == 1),
+                "线索拍不得被装箱搬走：" + packed.assignments());
+        assertEquals(1, packed.assignments().stream()
+                .filter(a -> a.chapterNo() == 2).count(), "空章仍应由普通拍补齐");
+    }
+
+    private static PlanContracts.BeatAssignment clue(int seq, int chapter,
+                                                     PlanContracts.BeatRole role) {
+        return new PlanContracts.BeatAssignment(seq, chapter, PlanContracts.StoryLayer.MAIN_MYSTERY,
+                role, List.of("C1"), List.of("GM-CLUE-01"), List.of(), "",
+                PlanContracts.AppearanceMode.LIVE, List.of(), List.of(), Map.of(), Map.of());
+    }
+
     private static PlanContracts.RoutePlan plan(PlanContracts.BeatAssignment... beats) {
         return new PlanContracts.RoutePlan(1, List.of(
                 slot(1), slot(2)), List.of(beats), List.of(), List.of());
@@ -60,5 +87,41 @@ class DeriveChapterPackerTest {
         return new PlanContracts.BeatAssignment(seq, chapter, PlanContracts.StoryLayer.MAIN_MYSTERY,
                 role, List.of("C1"), List.of(), List.of(), "", PlanContracts.AppearanceMode.LIVE,
                 List.of(), List.of(), Map.of(), Map.of());
+    }
+
+    private static PlanContracts.BeatAssignment knowledgeBeat(
+            int seq, int chapter, List<String> knowledge) {
+        return new PlanContracts.BeatAssignment(seq, chapter, PlanContracts.StoryLayer.LOCAL_CASE,
+                PlanContracts.BeatRole.MAIN_ADVANCE, List.of("C1"), List.of(), List.of(), "",
+                PlanContracts.AppearanceMode.LIVE, knowledge, List.of(), Map.of(), Map.of());
+    }
+
+    @Test
+    void doesNotMoveKnowledgeBeat() {
+        var knowledge = knowledgeBeat(1, 1, List.of("旧楼门禁记录"));
+
+        var packed = DeriveChapterPacker.pack(plan(knowledge,
+                assignment(2, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(3, 1, PlanContracts.BeatRole.MAIN_ADVANCE)));
+
+        assertEquals(1, packed.assignments().stream()
+                .filter(a -> a.seq() == 1 && a.chapterNo() == 1).count(),
+                "带知识依赖的拍不得被装箱搬章");
+    }
+
+    @Test
+    void doesNotMoveThreadBeat() {
+        var thread = new PlanContracts.BeatAssignment(1, 1,
+                PlanContracts.StoryLayer.MAIN_MYSTERY, PlanContracts.BeatRole.MAIN_ADVANCE,
+                List.of("C1"), List.of("REL-C1-C2"), List.of(), "",
+                PlanContracts.AppearanceMode.LIVE, List.of(), List.of(), Map.of(), Map.of());
+
+        var packed = DeriveChapterPacker.pack(plan(thread,
+                assignment(2, 1, PlanContracts.BeatRole.MAIN_ADVANCE),
+                assignment(3, 1, PlanContracts.BeatRole.MAIN_ADVANCE)));
+
+        assertEquals(1, packed.assignments().stream()
+                .filter(a -> a.seq() == 1 && a.chapterNo() == 1).count(),
+                "带线程依赖的拍不得被装箱搬章");
     }
 }

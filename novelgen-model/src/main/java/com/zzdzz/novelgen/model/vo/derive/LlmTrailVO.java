@@ -7,6 +7,8 @@ public record LlmTrailVO(
         long id,
         String node,
         String status,
+        String effectiveStatus,
+        String effectiveStatusLabel,
         int promptTokens,
         int completionTokens,
         int totalTokens,

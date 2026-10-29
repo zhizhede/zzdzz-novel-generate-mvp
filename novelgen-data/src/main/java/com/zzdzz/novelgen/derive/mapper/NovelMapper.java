@@ -50,4 +50,7 @@ public interface NovelMapper extends BaseMapper<NovelDO> {
      * 角色合同（CHARACTERS）重做时必须能读到已有 role/persona。
      */
     int clearDraftBriefTruth(@Param("id") long id);
+
+    /** 计划投影后只同步章数，不触碰 jsonb 列。 */
+    int updateChapterCount(@Param("id") long id, @Param("chapterCount") int chapterCount);
 }

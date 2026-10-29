@@ -71,4 +71,7 @@ public class BeatInstanceDO extends DeriveBaseDO {
 
     /** 出场方式、角色/线程引用、依赖、知识和状态变化。 */
     private String routeContract;
+
+    /** 本拍所属计划快照 revision（V139；旧运行为空）。 */
+    private Integer planRevision;
 }

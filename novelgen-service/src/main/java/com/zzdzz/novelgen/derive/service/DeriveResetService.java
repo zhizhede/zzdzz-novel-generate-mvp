@@ -12,6 +12,8 @@ import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.DeriveBeatPoolMapper;
 import com.zzdzz.novelgen.derive.mapper.DeriveChapterContractMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryContractMapper;
+import com.zzdzz.novelgen.model.entity.derive.DeriveStoryContractDO;
 import com.zzdzz.novelgen.derive.mapper.DeriveGateReviewMapper;
 import com.zzdzz.novelgen.derive.mapper.DraftHistoryMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
@@ -67,6 +69,11 @@ public class DeriveResetService {
     private DeriveChapterContractMapper chapterContractMapper;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private DeriveGateReviewMapper gateReviewMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveStoryContractMapper storyContractMapper;
+    /** 章级日程：与合同同一生命周期（清空/SCALE 回炉连表一起删；SPINE 回炉保留）。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeriveChapterScheduleService scheduleService;
     private final ObjectMapper objectMapper;
 
     @Transactional
@@ -77,6 +84,15 @@ public class DeriveResetService {
         }
         if (DeriveAutoFlowService.autoRunning(runId) || DeriveWriteService.loopRunning(runId)) {
             throw new BizException(ErrorCode.PARAM_ERROR, "run 正在执行，先停止全流程/连跑再清空");
+        }
+        // 清空规划＝合同一并作废：下次从 SCALE 走 CONTRACT 重新冻结（新 version=1 起）。
+        if (storyContractMapper != null) {
+            storyContractMapper.delete(new LambdaQueryWrapper<DeriveStoryContractDO>()
+                    .eq(DeriveStoryContractDO::getRunId, runId));
+        }
+        // 日程是合同的机械投影：合同作废时日程必须一起删，避免旧章号被继续使用。
+        if (scheduleService != null) {
+            scheduleService.deleteByRun(runId);
         }
 
         long novelId = run.getNovelId() == null ? 0 : run.getNovelId();
@@ -142,6 +158,14 @@ public class DeriveResetService {
         if (!("REWORK".equals(run.getStatus()) || "DRAFTING".equals(run.getStatus()))) {
             throw new BizException(ErrorCode.PARAM_ERROR,
                     "根因回炉需要 run 处于 REWORK/DRAFTING（当前 " + run.getStatus() + "）");
+        }
+        // 合同冻结口径：SPINE 回炉保留冻结合同（只重建下游）；SCALE 回炉连合同一起作废重来。
+        if ("SCALE".equals(target) && storyContractMapper != null) {
+            storyContractMapper.delete(new LambdaQueryWrapper<DeriveStoryContractDO>()
+                    .eq(DeriveStoryContractDO::getRunId, runId));
+        }
+        if ("SCALE".equals(target) && scheduleService != null) {
+            scheduleService.deleteByRun(runId);
         }
         long novelId = run.getNovelId() == null ? 0 : run.getNovelId();
         List<ChapterDO> chapters = novelId == 0 ? List.of()
@@ -220,6 +244,11 @@ public class DeriveResetService {
                         old.scope(), Map.of());
             } else {
                 next = PlanV2StateCodec.initial();
+                // SCALE 回炉连合同缓存一起清（合同行由 replanFrom 删除）。
+                steps.remove("TRUTH_CONTRACT");
+                steps.remove("STORY_CONTRACT");
+                // 日程是合同投影：合同作废则日程快照与表行都必须清（表行由调用方删）。
+                steps.remove("CHAPTER_SCHEDULE");
             }
             steps.set("PLAN_V2", new ObjectMapper().valueToTree(next));
             steps.remove("STORY_SPINE");
@@ -248,6 +277,8 @@ public class DeriveResetService {
             steps.remove("PLAN_V2");
             steps.remove("STORY_SPINE");
             steps.remove("TRUTH_CONTRACT");
+            steps.remove("STORY_CONTRACT");
+            steps.remove("CHAPTER_SCHEDULE");
             steps.remove("DRAFT");
             steps.remove("GATE");
             steps.remove("QC");
