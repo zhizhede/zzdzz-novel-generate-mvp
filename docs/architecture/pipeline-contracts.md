@@ -281,6 +281,36 @@ single_rule / budget / motive_chain / closure / function_lock / motif_dedup
 - **`AI_REVIEW_REVISE` 的两块基准有优先级**：`【事实基准】` 里「上一章结束时的事实状态」是时间/位置/物品的账，时间口径一律以它为准；其下的「上一章发生了什么」只是情节梗概，跨度与账冲突时不得据它改正文。
 - **提示词参数个数由测试钉死**（`ReskinPromptArityTest`）：`PromptTemplateService.formatSafe` 是 fail-open 的，`%s` 个数与调用点实参不匹配会**静默回退代码模板且不报错**——「库内编辑过的版本被悄悄忽略」正是这族漂移的隐蔽点。
 
+### 流 S2：章级日程（single-context schedule，2026-10-28 增补）
+
+**一句话**：合同是唯一写者，日程是它的**纯函数投影**；ROUTE/⑥b/P6 只读日程，章号不再由任何 LLM 决定。
+
+| 对象 | 存放 | 谁写 | 谁读 |
+|---|---|---|---|
+| 故事合同 | `derive_story_contract`（1 行 FROZEN） | CONTRACT 单元 | 全部下游 + P6 |
+| 章级日程 | `derive_chapter_schedule`（V138） | SCHEDULE 单元（`ChapterScheduleProjector`，不调 LLM） | ROUTE / ⑥b / P6 |
+| 线程章号 | `derive_story_thread.plant_chapter/payoff_chapter` | SPINE 投影 | ROUTE / P6 / 审计 |
+| 章功能槽 | `derive_chapter_contract` + `chapters.plan_contract` | SLOT_ROUTE（日程派生） | ⑥b / P6 |
+| 日程证据 | `chapters.plan_contract.clueEvents/closingActs` | ⑥b BATCH（逐窗 merge） | P6 / 审计 |
+
+**状态机**：`SCALE → CONTRACT → SCHEDULE → SPINE → VOLUMES → CHARACTERS → SLOT_ROUTE → VALIDATE`。
+`SCHEDULE` 失败即 `CONTRACT_SCHEDULE_INVALID`（合同自相矛盾：线索章越界、payoff ≤ plant、章号与线程卷号不一致），fail-fast。
+
+1. **投影规则**（`ChapterScheduleProjector`，纯函数）：每章恰好一条 `mustPlant/mustPayoff/reveal`；线索按 clueKey 稳定排序；同章多条允许（>3 条只 WARN）。
+2. **范围解析顺序**：`step_status.SCAFFOLD` → `derive_volume_plan` 行 → 单卷兜底 `[{1,1,N}]`。**禁止按平均分卷猜**。
+3. **版本守卫**：日程行带 `contract_version`；与合同 version 不一致即 `SCHEDULE_STALE`（P6 判 `CONTRACT_INVALID` 终态）。
+4. **ROUTE**：`chapterSlots(volume, schedule)` 由日程派生 `CLUE_PLANT/CLUE_PAYOFF/FINAL_REVEAL`（日程角色优先、单章封顶 4）；旧的位置模板（第 3 章必埋、倒数第 2 章必回声）已删除。`parseRoute` 内 `normalizeClueThreadRefs`（剔除日程外引用、同章重复只留第一个）→ `ensureScheduleBeats`（机械注入缺失的埋设/兑现/揭示拍）→ `validateRoute`（`ROUTE_CLUE_PLANT_MISSING/ROUTE_CLUE_PAYOFF_MISSING/ROUTE_CLUE_STRAY/ROUTE_REVEAL_CHAPTER`）。装箱与负载归一都不许搬走带线索/知识/状态/依赖契约的拍，也不允许倒搬；SLOT_ROUTE 落库后的拍章号不再被 ⑥b 改动。
+5. **⑥b BATCH 输出契约**：每章新增 `clueEvents:[{key,act:PLANT|PAYOFF}]` 与 `closingActs:[CULPRIT|MOTIVE|METHOD]`。硬校验 `validateScheduleEvents`：逐章 PLANT/PAYOFF 集合必须等于日程、禁重复/合同外 key；`chapter < reveal` 不得有 closingActs；`reveal` 章必须三项齐全且 `draft_outline` 逐字写出 culpritName 与 motiveTag。违反即 `CONTRACT_CLUE_DRIFT`（喂回 3 轮，仍失败则该窗失败、run 停在 PLANNING/DRAFTING，不进 P6）。
+6. **HEAD C 不再写真相**：HEAD C 只输出 `brief`；真相卡一律取 `contractService.frozenTruthCard`（无合同旧 run 才回退 LLM truth）。`validateHeadC` 已删除。
+7. **P6**：`GateTruth` 携带只读日程；合同预检新增日程缺失/过期、拍引用日程外线索、缺埋设/兑现/揭示拍 → `CONTRACT_INVALID` 终态（不进 LLM、不进轮次循环）；`reveal..end` 章纲未写出 culpritName/motiveTag 属文字问题，走 preflight（`DRAFT` 目标）；日程 reveal 行缺 payoff 则是 `CONTRACT_REVEAL_NO_PAYOFF` 终态。**预检 issues 现在会阻塞**（原先 criteria 为空时仍判 GO/PASS 的 bug 已修）。
+8. **回炉最小化**：`DRAFT` 只把 P6 点名的章展开到其所在连续窗（`chapters.draft_outline` + 窗内 `beat_instance.filled_text`），不清 cast/brief/truth、不清整本；抽不到章号才回退全书；`PLAN_VOLUME:n` 仍走 `replanVolume + resetVolumeDraft` 单一路径；`SCALE` 才删合同与日程表。
+9. **I1 拍章号不可变**：`beat_instance.chapter_no` 由 SLOT_ROUTE 冻结后，⑥b 的去重、修复与负载归一只允许同章操作；只有显式 `replanVolume` 可重排。
+10. **I2 池拍一致**：按 `beat_key` 对齐 `derive_beat_pool.contract.chapterNo` 与 `beat_instance.chapter_no`，任何不一致都是 `BEAT_POOL_CHAPTER_MISMATCH`（`PLAN_VOLUME`，P6 前拦截）。
+11. **I3 揭示必兑现**：新合同 `validateForFreeze` 要求 `revealChapter == 至少一条 clue.payoffChapter`，并冻结非空 `motiveTag/methodTag`；旧合同读取仍走宽松 `validate`，但 P6 对 reveal 章继续强制 culpritName + motiveTag。
+12. **I4 跨章不合并**：日程模式下 ⑥b 语义去重只允许同一章内，带线程/知识/状态/依赖的拍不参与合并。
+13. **I5 回炉按窗**：`DRAFT` 按受影响章所在窗清稿，不再因“超过半本”放大成全书重写；抽不到章号才回退全书。
+14. **I6 冻结校验分层**：`validateForFreeze` 只用于新合同生成；旧合同继续 `load → validate` 宽松兼容。
+
 ### 流 C：无人续跑链
 
 ```mermaid
@@ -499,3 +529,9 @@ flowchart LR
    而调用方与报告 `passed` 位都只读 `verdict` ⇒ 「仅注水比超标则按连贯性优先放行」这条已写进注释与
    `TuningDefaults` 的口径**从未真正生效**（真库 132 条读者报告里有 29 条 fat 超软阈值、其中 5 条结构性四问全过，
    本应降级却照常按 BLOCKER 走重写/转人工）。现在两条降级分支都真改 `verdict`，并保留 `raw_verdict` 与 `note` 供回看。
+
+## DeriveFlow 阶段4正文闭环状态语义（2026-10-30 修复）
+
+- **阶段顺序**：正文闭环固定为 `DRAFT → FINAL_AUDIT → COMPLETE`，以 `derive_stage_run` 为持久事实源；任一阶段 FAILED 时编排器不得推进到下一阶段。
+- **DRAFT**：`FullDraftCompletionService` 只在 `missingChapters` 为空时返回完成；存在缺章时由 `DraftStageHandler` 返回 `DRAFT_INCOMPLETE`，稳定 path 为 `chapter[<missingNo>]`。`PLAN_REVISION_STALE` 与数据库/契约/NPE 类异常原样上抛；只有 `SceneDraftException` 允许在本章范围内局部重试，不得改写成 `DRAFT_CHAPTER_EMPTY`。
+- **FINAL_AUDIT**：终检报告为只读报告；active revision 读取失败、run 未关联正文目标、缺章、空章或 meta leak 都是 BLOCKER 且 `FinalQuality=FAILED`。`FinalAuditStageHandler` 只对 `FAILED` 或 BLOCKER 报告返回阶段失败；PASS/ADVISORY/DEGRADED 可 DONE，degraded 只落读数不改正文。
