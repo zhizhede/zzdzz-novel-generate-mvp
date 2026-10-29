@@ -7,6 +7,9 @@ import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.zzdzz.novelgen.llm.contract.ContractViolation;
+import com.zzdzz.novelgen.llm.contract.JsonSchemaSupport;
+import com.zzdzz.novelgen.llm.contract.NodeOutputContract;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
@@ -84,6 +87,185 @@ public class LlmJson {
             log.warn("LLM JSON 输出不合规（第 {}/{} 轮）node={} 原因: {}", i, tries, request.node(), feedback);
         }
         throw new IllegalStateException("LLM JSON 输出连续 " + tries + " 轮不合规，末次原因：" + feedback, last);
+    }
+
+
+    /**
+     * 调用节点契约版 LLM JSON：先追加契约提示片段，再按 JSON 语法、schema、解析器和领域校验的顺序校验。
+     * 每轮不合规都把带路径的原因写入调用账本并喂回模型；全部失败保留最后一轮 violations。
+     */
+    public <T> T askStructured(NodeOutputContract<T> contract,
+                               LlmPort.ChatRequest request,
+                               int tries) {
+        if (contract == null) {
+            throw new IllegalArgumentException("contract 不能为空");
+        }
+        if (tries < 1) {
+            throw new IllegalArgumentException("tries 必须大于 0");
+        }
+        LlmPort.ChatRequest baseRequest = withPromptFragment(contract.promptFragment(), request);
+        String feedback = "";
+        Exception last = null;
+        for (int i = 1; i <= tries; i++) {
+            LlmPort.ChatRequest req = withFeedback(baseRequest, feedback);
+            LlmPort.ChatResult result;
+            try {
+                result = llm.chat(req);
+            } catch (LlmException e) {
+                if (e.getMessage() != null && e.getMessage().contains("响应缺少 content")) {
+                    feedback = "[SCHEMA_SYNTAX_INVALID] path=$ expected=JSON object actual=empty content：响应 content 为空";
+                    last = e;
+                    log.warn("LLM 空 content（第 {}/{} 轮）node={}，喂回重试", i, tries, contract.node());
+                    continue;
+                }
+                throw e;
+            }
+            JsonNode root;
+            List<ContractViolation> violations;
+            try {
+                root = read(result.content());
+            } catch (Exception e) {
+                violations = List.of(readViolation(e));
+                feedback = feedbackText(violations);
+                markContractCall(result.callLogId(), feedback);
+                last = e;
+                log.warn("LLM JSON 输出不合规（第 {}/{} 轮）node={} 原因: {}",
+                        i, tries, contract.node(), feedback);
+                continue;
+            }
+            try {
+                if (contract.schemaView() != null) {
+                    violations = JsonSchemaSupport.validate(contract.schemaView(), root);
+                    if (violations.isEmpty()) {
+                        T value = contract.parser().apply(root);
+                        violations = contract.domainValidator() == null
+                                ? List.of()
+                                : safeDomainValidate(contract, value);
+                        if (violations.isEmpty()) {
+                            return value;
+                        }
+                    } else {
+                        last = null;
+                    }
+                } else {
+                    T value = contract.parser().apply(root);
+                    violations = contract.domainValidator() == null
+                            ? List.of()
+                            : safeDomainValidate(contract, value);
+                    if (violations.isEmpty()) {
+                        return value;
+                    }
+                }
+            } catch (Exception e) {
+                violations = List.of(parserViolation(e));
+                last = e;
+            }
+            feedback = feedbackText(violations);
+            markContractCall(result.callLogId(), feedback);
+            log.warn("LLM 结构化输出不合规（第 {}/{} 轮）node={} 原因: {}", i, tries, contract.node(), feedback);
+        }
+        throw new IllegalStateException(
+                "LLM 结构化输出连续 " + tries + " 轮不合规，末次 violations：" + feedback, last);
+    }
+
+    private <T> List<ContractViolation> safeDomainValidate(NodeOutputContract<T> contract, T value) {
+        try {
+            List<ContractViolation> violations = contract.domainValidator().apply(value);
+            return violations == null ? List.of() : violations;
+        } catch (Exception e) {
+            return List.of(new ContractViolation(
+                    "DOMAIN_INVALID", "$", e.getMessage() == null ? "领域校验失败" : e.getMessage(),
+                    "domain-valid value", String.valueOf(value)));
+        }
+    }
+
+    private ContractViolation readViolation(Exception e) {
+        if (isDuplicateField(e)) {
+            return new ContractViolation(
+                    "SCHEMA_DUPLICATE_KEY",
+                    "$",
+                    "JSON 对象存在重复键",
+                    "unique object key",
+                    duplicateFieldName(e));
+        }
+        return new ContractViolation(
+                "SCHEMA_SYNTAX_INVALID",
+                "$",
+                "JSON 语法无效",
+                "valid JSON object",
+                truncateForFeedback(e.getMessage()));
+    }
+
+    private ContractViolation parserViolation(Exception e) {
+        if (e instanceof Bad && e.getMessage() != null && e.getMessage().startsWith("[")) {
+            ContractViolation parsed = parseFeedbackLine(e.getMessage());
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+        return new ContractViolation(
+                "SCHEMA_FIELD_INVALID",
+                "$",
+                e.getMessage() == null ? "解析器拒绝输出" : e.getMessage(),
+                "contract-compliant value",
+                truncateForFeedback(e.getMessage()));
+    }
+
+    private ContractViolation parseFeedbackLine(String text) {
+        int pathStart = text.indexOf(" path=");
+        int expectedStart = text.indexOf(" expected=", pathStart + 1);
+        int actualStart = text.indexOf(" actual=", expectedStart + 1);
+        int messageStart = text.lastIndexOf("：");
+        int codeEnd = text.indexOf(']');
+        if (pathStart < 0 || expectedStart < 0 || actualStart < 0
+                || messageStart <= actualStart || codeEnd <= 1) {
+            return null;
+        }
+        String code = text.substring(1, codeEnd);
+        String path = text.substring(pathStart + " path=".length(), expectedStart);
+        String expected = text.substring(expectedStart + " expected=".length(), actualStart);
+        String actual = text.substring(actualStart + " actual=".length(), messageStart);
+        String message = text.substring(messageStart + "：".length());
+        return new ContractViolation(code, path, message, expected, actual);
+    }
+
+    private String feedbackText(List<ContractViolation> violations) {
+        if (violations == null || violations.isEmpty()) {
+            return "[DOMAIN_INVALID] path=$ expected=contract-compliant value actual=unknown：契约校验失败";
+        }
+        return violations.stream()
+                .map(ContractViolation::feedbackLine)
+                .collect(java.util.stream.Collectors.joining("\n"));
+    }
+
+    private void markContractCall(long callLogId, String feedback) {
+        if (callLogId <= 0 || feedback == null || feedback.isBlank()) {
+            return;
+        }
+        markCall(callLogId, "CONTRACT_REJECTED|" + feedback);
+    }
+
+    private String truncateForFeedback(String value) {
+        if (value == null) {
+            return "unknown";
+        }
+        return value.length() <= 500 ? value : value.substring(0, 500) + "...";
+    }
+
+    private LlmPort.ChatRequest withPromptFragment(String fragment, LlmPort.ChatRequest request) {
+        if (fragment == null || fragment.isBlank()) {
+            return request;
+        }
+        List<LlmPort.Message> messages = new ArrayList<>(request.messages());
+        if (messages.isEmpty()) {
+            messages.add(LlmPort.Message.user(fragment));
+        } else {
+            LlmPort.Message last = messages.get(messages.size() - 1);
+            messages.set(messages.size() - 1,
+                    new LlmPort.Message(last.role(), last.content() + "\n\n" + fragment));
+        }
+        return new LlmPort.ChatRequest(request.node(), request.novelId(), request.chapterId(),
+                request.runId(), messages, request.temperature());
     }
 
     /** 把本轮不合规原因落到该次调用行：HTTP 成功但内容不合规，status 仍 ok，原因进 error_msg。 */
@@ -345,14 +527,19 @@ public class LlmJson {
     private static String duplicateFieldName(Exception e) {
         String message = e.getMessage() == null ? "" : e.getMessage();
         int start = message.indexOf("Duplicate field '");
-        if (start < 0) {
-            return "未知";
+        if (start >= 0) {
+            int from = start + "Duplicate field '".length();
+            int end = message.indexOf('\'', from);
+            return end > from ? message.substring(from, end) : "未知";
         }
-        int from = start + "Duplicate field '".length();
-        int end = message.indexOf('\'', from);
-        return end > from ? message.substring(from, end) : "未知";
+        int chineseStart = message.indexOf("重复键：");
+        if (chineseStart >= 0) {
+            int from = chineseStart + "重复键：".length();
+            int end = message.indexOf('；', from);
+            return end > from ? message.substring(from, end) : "未知";
+        }
+        return "未知";
     }
-
     /**
      * 修复缺逗号：在「值结束（字符串/数字/true/false/null/}/]）」与「下一值起始（" { [ 数字…）」
      * 之间且缺分隔符时补逗号（含数组元素间）。跳过字符串内部；数字/关键字整 token 消费

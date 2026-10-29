@@ -33,9 +33,95 @@ public final class PromptCatalog {
         return d == null ? null : d.content();
     }
 
+    private static String routeTemplate() {
+        return """
+                你在为当前卷做章节叙事效果路由，不写正文。
+                输入含卷合同、角色计划、线程账、剩余无指向拍和本卷章功能模板；若带“上轮立项闸减法指令”，它是最高优先级，禁止恢复指令要求删除的案情或关系线。
+                契约标识 derive.route_narrative@2；schemaVersion=2。
+                ROUTE v2 只描述拍的叙事效果，不决定结构字段。
+                要求：
+                1. 只输出 beatNarratives 与 skipped 两个根字段；
+                2. beatNarratives 每项只能包含 beatKey、goal、knowledgeEffects、stateEffects、threadEffects；
+                3. beatKey 必须逐字使用输入给出的剩余拍 key，禁止自造 beat key；
+                4. goal 写该拍要完成的叙事目标，不写章号或拍序号；
+                5. knowledgeEffects 每项包含 characterKeys 与 fact：characterKeys 只能使用输入角色 key，fact 只写正文可感知的事实或现象；
+                6. stateEffects 是数组；每项包含 characterKey、kind、detail，kind 只能取 StateChangeKind 白名单；
+                7. threadEffects 是数组；每项包含 threadKey、effect、detail：threadKey 只能使用输入线程 key，effect 只能取 ThreadEffectKind 白名单；
+                8. skipped 每项只能包含 beatKey 与 reason，reason 必须说明该拍为何不进入本卷；
+                9. 禁止输出 beatRole、chapterNo、seq、storyLayer、appearanceMode、syntheticSlots、chapters 或任何结构字段；
+                10. 禁止自造 thread/clue/person key；线索、人物、章节和拍身份全部由输入或 Java 编译器决定；
+                11. 知识因果必须按人物成立：一条事实首次出现时，只有该拍 knowledgeEffects.characterKeys 中的角色算“已知”；
+                12. 输入若带「返工问题」，必须逐条消除并重新输出完整本卷叙事效果。
+                枚举白名单（模板 token 由代码按 Java 枚举解析；beatRole/storyLayer/appearanceMode 仅供理解输入，不得出现在输出）：
+                beatRole：
+                {{BEAT_ROLES}}
+                storyLayer：
+                {{STORY_LAYERS}}
+                appearanceMode：
+                {{APPEARANCE_MODES}}
+                stateEffects.kind：
+                {{STATE_CHANGE_KINDS}}
+                threadEffects.effect：
+                {{THREAD_EFFECT_KINDS}}
+                只输出 JSON 对象，示例：
+                {"beatNarratives":[{"beatKey":"B01","goal":"调查者发现门缝里有被压扁的纸屑",
+                  "knowledgeEffects":[{"characterKeys":["C1"],"fact":"门缝里有被压扁的纸屑"}],
+                  "stateEffects":[{"characterKey":"C1","kind":"LOCATION","detail":"来到旧仓房门口"}],
+                  "threadEffects":[{"threadKey":"GM-CLUE-01","effect":"OPEN","detail":"纸屑线索首次出现"}]}],
+                 "skipped":[{"beatKey":"B07","reason":"与本卷无第二案件的红线冲突"}]}
+                """ ;
+    }
     private PromptCatalog() {}
 
     public static final List<TemplateDef> ALL = List.of(
+
+        // ===== 衍生：ROUTE（与 StoryPlanningPrompts.ROUTE_TEMPLATE 逐字一致，ContractPromptArityTest 钉住） =====
+        new TemplateDef("derive_plan", "system", "衍生·章节功能槽与无指向拍路由", true,
+                routeTemplate()),
+        // ===== 衍生：冻结唯一故事合同（与 StoryPlanningPrompts.CONTRACT 逐字一致，ContractPromptArityTest 钉住） =====
+        new TemplateDef("derive_contract", "system", "衍生·冻结唯一故事合同", true,
+                """
+            你在为一部小说冻结唯一故事合同，不写卷纲、章纲或正文。
+            输入含：创作框架、类别、结局形状、产品形态、焊接主线、scaffold facts、章数/卷数、maxNamedCharacters。
+            你的输出一旦冻结，后续所有规划、⑥b、P6、正文都必须服从它，任何下游节点都不得改写。
+            要求：
+            1. 恰好 3 名有名角色；cast.key 固定 C1/C2/C3；主角为 C1；OPPOSITION 必须是其中一名；
+               role 只能取 DETECTIVE/ACCESS/KNOWLEDGE/SOCIAL/ACTION/CHALLENGE/SUPPORT/OPPOSITION，
+               identity 写一句话身份（≤20字），name 是全书唯一合法人名来源（2~3 字，不得用禁用名单里的名字）；
+            2. culpritKey 必须是 cast.key；culpritName 必须等于该 cast.name；
+            3. 只允许一个主案；motive/method/finalTruth 必须能解释全部关键事实；
+            4. revealChapter 必须在 1..chapterCount；clues 至少 3 条，plantedChapter/payoffChapter
+               均在 1..chapterCount 且 payoffChapter > plantedChapter；clueKey 形如 GM-CLUE-01 且互不重复；
+            5. forbidden 必须是 JSON 字符串数组，禁止写成字符串化的 JSON；
+            6. 多卷时必须给每卷 volumeTruth，卷号连续覆盖 1..volumeCount；单卷也给 volumeNo=1 一条；
+            7. 自洽自检（冻结前必须逐条核对）：
+               - method 里“谁做了什么”必须能解释每条 clue 的现象；不得出现“某人抄录”与“笔迹不是他”并存；
+               - finalTruth 对方法的描述必须与 method 同义，不得一个说“抄录”、一个说“出自某人手笔”；
+               - 若 clue 依赖某人的笔迹/字迹，method 必须写清该笔迹为何偏离其平日（例如失控状态下誊抄），
+                 禁止留下“抄录/代笔”二义；
+            8. revealChapter 必须至少等于一条 clue 的 payoffChapter：揭示章必须有一件线索当场兑现，
+               否则结局三要素会悬空；
+            9. 额外输出两个短标签（4~20 字，禁止空、禁止只写“复仇/阴谋”这类空词）：
+               motiveTag：motive 的核心短语（例：夺凭证控据点）；
+               methodTag：method 的核心短语（例：符号引诱+催眠控心）；
+               这两个标签会被下游章纲逐字引用并做确定性校验。
+            10. 不得引入焊接主线之外的新主案、第二起案件、死亡或超自然解释，除非创作框架明确允许；
+            11. 非推理/悬疑题材同样要填满 truth：culprit 写最终揭示或对决的关键对立角色，
+               motive/method 写其动机与关键手段，clues 写可观察的伏笔线索，revealChapter 写答案揭晓章；
+            12. threads 至少覆盖每条线索（threadKey 与 clueKey 同名），kind 取 CLUE/RELATIONSHIP/OBJECT，
+               openedVolume/payoffVolume 在 1..volumeCount 且 payoffVolume >= openedVolume。
+            只输出 JSON 对象：
+            {"cast":[{"key":"C1","name":"…","role":"DETECTIVE","gender":"…","identity":"…"},
+                      {"key":"C2","name":"…","role":"ACCESS","gender":"…","identity":"…"},
+                      {"key":"C3","name":"…","role":"OPPOSITION","gender":"…","identity":"…"}],
+             "truth":{"culpritKey":"C3","culpritName":"…","motive":"…","method":"…",
+                      "finalTruth":"…","finalChoice":"…","revealChapter":12,
+                      "motiveTag":"…","methodTag":"…"},
+             "clues":[{"clueKey":"GM-CLUE-01","clue":"可观测现象","plantedChapter":3,"payoffChapter":11,"ownerKey":"C1"}],
+             "threads":[{"threadKey":"GM-CLUE-01","kind":"CLUE","openedVolume":1,"payoffVolume":1,"ownerKey":"C1"}],
+             "forbidden":["…"],
+             "volumeTruth":[{"volumeNo":1,"reveal":"…","forbidden":["…"]}]}
+            """),
 
         // ===== 章纲 =====
         new TemplateDef(LlmNode.OUTLINE, "system", "AI 章纲系统提示", true,
@@ -95,6 +181,11 @@ public final class PromptCatalog {
                 - 每条规则具体到写作动作（写什么/怎么写/禁止什么），不要空话。
                 """),
 
+        new TemplateDef(LlmNode.SCENE_DRAFT, "contract_system", "计划快照正文闭环·单场散文系统提示", true,
+                "你只按已冻结计划中的当前场景写小说散文。"
+                        + "输出必须是纯正文；禁止 JSON、markdown 围栏、标题、章注、解释、预算核对、状态包说明或任何过程话。"
+                        + "只使用输入给出的当前场景目标、知识、当前状态、前章摘要与文风约束，"
+                        + "不得自行改写计划、重排场景或补写其他场景。"),
         new TemplateDef(LlmNode.SCENE_DRAFT, "user", "场景正文生成", true, """
                 任务：写第 %d 章场景 %d。
                 本章章题：%s
