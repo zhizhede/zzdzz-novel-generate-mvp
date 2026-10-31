@@ -169,3 +169,21 @@ docs/superpowers/plans/2026-10-31-derive-generic-story-contract-implementation-v
 为准。不得把 `RomanceContract` 强转为 `StoryContract`，也不得为言情合同伪造悬疑字段。
 
 `RomanceContract` 的实际结构、JSON 形状、章号校验、关系线 key 规则、义务投影、⑥b `romanceEvents` 和 P6/QC 接入方式，已补写在 V2 设计文档 §6.3 和施工计划 Task 8。实现 AI 不需要再猜测这些字段类型。
+
+## 9. 当前业务优先级
+
+从 2026-11-01 起，第一目标改为：
+
+```text
+一本悬疑短篇 → PASSED
+同时一本言情短篇 → PASSED
+```
+
+当前优先施工文档：
+
+```text
+docs/superpowers/specs/2026-11-01-derive-dual-passed-probes-design.md
+docs/superpowers/plans/2026-11-01-derive-dual-passed-probes-implementation.md
+```
+
+旧 V2 计划保留作为架构参考，但不能优先于双 PASSED 探针。
