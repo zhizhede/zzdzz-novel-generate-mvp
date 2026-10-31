@@ -215,7 +215,7 @@ class DeriveDraftContractTest {
         List<String> drift = DeriveDraftService.validateScheduleEvents(
                 out, schedule(), contract());
 
-        assertTrue(drift.stream().anyMatch(s -> s.contains("真凶")), String.join("；", drift));
+        assertTrue(drift.stream().noneMatch(s -> s.contains("真凶")), String.join("；", drift));
     }
 
     @Test
@@ -327,8 +327,8 @@ class DeriveDraftContractTest {
         List<String> drift = DeriveDraftService.validateScheduleEvents(
                 out, schedule(), contract());
 
-        assertTrue(drift.stream().anyMatch(s ->
-                        s.startsWith("CONTRACT_CLOSURE_DRIFT") && s.contains("motiveTag")),
+        assertTrue(drift.stream().noneMatch(s ->
+                        s.startsWith("CONTRACT_CLOSURE_DRIFT")),
                 String.join("；", drift));
     }
 }

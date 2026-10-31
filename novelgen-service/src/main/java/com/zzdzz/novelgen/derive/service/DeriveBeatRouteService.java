@@ -1573,6 +1573,13 @@ public class DeriveBeatRouteService {
                         new LambdaQueryWrapper<StoryThreadDO>()
                                 .eq(StoryThreadDO::getRunId, run.getId()))
                 .stream().map(StoryThreadDO::getThreadKey).collect(java.util.stream.Collectors.toSet());
+        if (contractService != null) {
+            var genreContract = contractService.loadGenreContract(run);
+            if (genreContract instanceof com.zzdzz.novelgen.derive.genre.RomanceContract romance) {
+                threads.add(romance.primaryRelationship().threadKey());
+                romance.cast().forEach(slot -> characters.add(slot.key()));
+            }
+        }
         List<ChapterScheduleEntry> schedule = scheduleService == null
                 ? List.of() : scheduleService.load(run);
         StoryContract contract = contractService == null ? null : contractService.load(run);

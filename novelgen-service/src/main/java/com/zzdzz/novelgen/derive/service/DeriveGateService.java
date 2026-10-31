@@ -13,6 +13,8 @@ import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.derive.contract.StoryContract;
 import com.zzdzz.novelgen.derive.contract.StoryContractValidator;
 import com.zzdzz.novelgen.derive.mapper.DeriveGateReviewMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationEvidenceMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
@@ -25,6 +27,18 @@ import com.zzdzz.novelgen.derive.plan.audit.PlanAdmissionResult;
 import com.zzdzz.novelgen.derive.plan.audit.PlanAuditIssue;
 import com.zzdzz.novelgen.derive.plan.audit.PlanAuditReport;
 import com.zzdzz.novelgen.derive.plan.compiler.PlanSnapshotService;
+import com.zzdzz.novelgen.derive.genre.GenreGateAuditor;
+import com.zzdzz.novelgen.derive.genre.GenreProfile;
+import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
+import com.zzdzz.novelgen.derive.genre.MysteryGateAuditor;
+import com.zzdzz.novelgen.derive.genre.MysteryProfile;
+import com.zzdzz.novelgen.derive.genre.GenreContract;
+import com.zzdzz.novelgen.derive.story.StoryKernel;
+import com.zzdzz.novelgen.derive.story.StoryObligation;
+import com.zzdzz.novelgen.derive.story.StoryKernelAssembler;
+import com.zzdzz.novelgen.derive.story.StoryObligationEvidence;
+import com.zzdzz.novelgen.derive.story.StoryEvidenceIndex;
+import com.zzdzz.novelgen.derive.story.StoryThread;
 import com.zzdzz.novelgen.model.entity.derive.DerivePlanSnapshotDO;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -32,6 +46,8 @@ import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
 import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
 import com.zzdzz.novelgen.model.entity.derive.DeriveGateReviewDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationEvidenceDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.StoryThreadDO;
@@ -179,6 +195,16 @@ public class DeriveGateService {
     private StoryThreadMapper storyThreadMapper;
     @Autowired(required = false)
     private DeriveGateReviewMapper gateReviewMapper;
+    @Autowired(required = false)
+    private DeriveStoryObligationMapper obligationMapper;
+    @Autowired(required = false)
+    private DeriveStoryObligationEvidenceMapper evidenceMapper;
+    @Autowired(required = false)
+    private GenreProfileRegistry genreProfileRegistry;
+    @Autowired(required = false)
+    private GenreGateAuditor genreGateAuditor;
+    @Autowired(required = false)
+    private MysteryGateAuditor mysteryGateAuditor;
     /** 章级日程（合同投影）：P6 只读；缺失/版本不一致即 CONTRACT_INVALID 终态。 */
     @Autowired(required = false)
     private DeriveChapterScheduleService scheduleService;
@@ -291,6 +317,20 @@ public class DeriveGateService {
         return new GateVO(runId, novelId, decision.verdict(), decision.action(), round,
                 decision.issues(), directive, decision.repairTarget(),
                 decision.criteria());
+    }
+
+    /**
+     * direct 模式的确定性审计：不调用 LLM 立项模型，但合同、义务、闭合与预算问题仍必须拦截。
+     */
+    public List<String> deterministicAudit(long runId) {
+        RunDO run = runMapper.selectById(runId);
+        if (run == null) {
+            throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
+        }
+        if (obligationMapper == null || storyThreadMapper == null) {
+            return List.of();
+        }
+        return genreIssues(run);
     }
 
 
@@ -453,7 +493,123 @@ public class DeriveGateService {
         List<String> issues = new ArrayList<>(
                 StoryContractValidator.validateAgainstPlan(contract, volumes, characters, chapters));
         issues.addAll(scheduleIssues(run, gateTruth.schedule(), beats));
+        issues.addAll(genreIssues(run));
         return issues;
+    }
+
+    List<String> genreIssues(RunDO run) {
+        if (obligationMapper == null) {
+            return List.of();
+        }
+        List<StoryObligation> obligations = new ArrayList<>();
+        for (DeriveStoryObligationDO row : obligationMapper.selectByRun(run.getId())) {
+            obligations.add(new StoryObligation(row.getObligationKey(),
+                    row.getChapterNo() == null ? 0 : row.getChapterNo(), row.getKind(),
+                    row.getTargetKey(), Boolean.TRUE.equals(row.getRequired()),
+                    Boolean.TRUE.equals(row.getForbidden()), row.getSeverity(),
+                    row.getSourceContract(), readJsonObject(row.getPayload())));
+        }
+        if (obligations.isEmpty()) {
+            return List.of();
+        }
+        List<StoryThread> threads = new ArrayList<>();
+        if (storyThreadMapper != null) {
+            for (var row : storyThreadMapper.selectList(new LambdaQueryWrapper<StoryThreadDO>()
+                    .eq(StoryThreadDO::getRunId, run.getId()))) {
+                threads.add(new StoryThread(row.getThreadKey(), row.getKind(), row.getTitle(),
+                        row.getPlantChapter(), row.getStatus(), row.getOwnerCharacterKey(),
+                        row.getPayoffChapter(), Map.of()));
+            }
+        }
+        StoryEvidenceIndex evidenceIndex = evidenceIndex(run.getId());
+        StoryContract contract = null;
+        if (contractService != null) {
+            try {
+                contract = contractService.require(run);
+            } catch (RuntimeException ignored) {
+                contract = null;
+            }
+        }
+        StoryKernel kernel = new StoryKernelAssembler().assemble(run, contract, List.of(),
+                List.of(), List.of(), threads, obligations, evidenceIndex);
+        GenreProfile profile = profile(run);
+        List<com.zzdzz.novelgen.derive.plan.PlanContracts.PlanIssue> issues =
+                "MYSTERY".equals(profile.genre()) && mysteryGateAuditor != null
+                        ? mysteryGateAuditor.audit(kernel, profile)
+                        : auditGenreGate(run, profile, kernel, evidenceIndex);
+        return issues.stream()
+                .map(issue -> issue.code() + "：" + issue.message())
+                .toList();
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private List<com.zzdzz.novelgen.derive.plan.PlanContracts.PlanIssue> auditGenreGate(
+            RunDO run, GenreProfile profile, StoryKernel kernel, StoryEvidenceIndex evidenceIndex) {
+        GenreContract contract = contractService == null ? null : contractService.loadGenreContract(run);
+        if (contract != null) {
+            return profile.auditGate(contract, kernel, evidenceIndex);
+        }
+        return genreGateAuditor == null ? List.of() : genreGateAuditor.audit(kernel, profile);
+    }
+
+    private StoryEvidenceIndex evidenceIndex(long runId) {
+        StoryEvidenceIndex.Builder builder = StoryEvidenceIndex.builder();
+        if (evidenceMapper == null) {
+            return builder.build();
+        }
+        for (DeriveStoryObligationEvidenceDO row : evidenceMapper.selectByRun(runId)) {
+            builder.addObligationEvidence(new StoryObligationEvidence(
+                    row.getObligationKey(),
+                    row.getChapterNo() == null ? 0 : row.getChapterNo(),
+                    row.getEvidenceKind(),
+                    row.getEventKey() == null ? "DB:" + row.getId() : row.getEventKey(),
+                    row.getBeatSeq(),
+                    readJsonStringList(row.getEntityKeys()),
+                    readJsonStringList(row.getThreadKeys()),
+                    row.getFact(),
+                    row.getSource(),
+                    row.getConfidence() == null ? 1.0 : row.getConfidence()));
+        }
+        return builder.build();
+    }
+
+    private Map<String, Object> readJsonObject(String json) {
+        try {
+            JsonNode node = STATIC_MAPPER.readTree(json == null || json.isBlank() ? "{}" : json);
+            if (!node.isObject()) {
+                return Map.of();
+            }
+            return STATIC_MAPPER.convertValue(node, Map.class);
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private List<String> readJsonStringList(String json) {
+        try {
+            JsonNode node = STATIC_MAPPER.readTree(json == null || json.isBlank() ? "[]" : json);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            node.forEach(item -> {
+                if (item.isTextual() && !item.asText("").isBlank()) {
+                    out.add(item.asText(""));
+                }
+            });
+            return out;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private GenreProfile profile(RunDO run) {
+        GenreProfileRegistry registry = genreProfileRegistry;
+        if (registry == null) {
+            registry = new GenreProfileRegistry(List.of(new MysteryProfile()));
+        }
+        return registry.require(run.getGenre() == null || run.getGenre().isBlank()
+                ? "MYSTERY" : run.getGenre());
     }
 
     /** 日程级预检：缺失/过期、拍引用日程外线索、缺埋设/兑现/揭示拍——都是上游违约（终态）。 */

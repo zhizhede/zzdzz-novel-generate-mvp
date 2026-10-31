@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
+import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
+import com.zzdzz.novelgen.derive.genre.MysteryProfile;
 import com.zzdzz.novelgen.derive.mapper.AssetBeatMapper;
 import com.zzdzz.novelgen.derive.mapper.AssetOutlineMapper;
 import com.zzdzz.novelgen.derive.mapper.AssetWorldMapper;
@@ -110,6 +112,8 @@ public class DeriveSampleService {
     private final com.zzdzz.novelgen.derive.mapper.CalibrationMapper calibrationMapper;
     private final LlmJson llmJson;
     private final ObjectMapper om;
+    @Autowired(required = false)
+    private GenreProfileRegistry genreProfileRegistry;
 
     public static final String NODE_TAG_NORM = "derive_tag_norm";
 
@@ -175,6 +179,7 @@ public class DeriveSampleService {
     /** 建 run：5.1 → 5.2 → 插档（SAMPLING）→ 5.3 焊接 → 回填（PLANNING）。无事务（LLM 不进事务）。 */
     public RunVO create(RunCreateDTO dto) {
         validate(dto);
+        String genre = normalizeGenre(dto.genre(), resolveGenreRegistry());
         // ---- 输入思路 AI 优化（v1，开关默认关）：预审通过则以优化稿顶替 intent 进后续链路 ----
         IntakeResult intake = Boolean.TRUE.equals(dto.intakeOptimize())
                 ? optimizeIntake(dto)
@@ -419,6 +424,7 @@ public class DeriveSampleService {
 
         // ---- 插档（SAMPLING；jsonb 七列走 insertFull）----
         RunDO run = new RunDO();
+        applyRunMetadata(run, genre);
         run.setSeed(seed);
         run.setParamWordsMin(wordsMin);
         run.setParamWordsMax(wordsMax);
@@ -494,6 +500,26 @@ public class DeriveSampleService {
         return new RunVO(runId, seed, b0, pMin, pMax, wordsPred,
                 pickedOutlines.size(), pickedBeats.size(), form, outcome,
                 cell.getName(), weldedCode, "PLANNING", tags);
+    }
+
+    static String normalizeGenre(String genre, GenreProfileRegistry registry) {
+        String normalized = genre == null || genre.isBlank() ? "MYSTERY"
+                : genre.strip().toUpperCase(java.util.Locale.ROOT);
+        registry.require(normalized);
+        return normalized;
+    }
+
+    static void applyRunMetadata(RunDO run, String genre) {
+        run.setGenre(genre);
+        run.setStoryKernelVersion(1);
+        run.setGenreContractVersion(1);
+    }
+
+    private GenreProfileRegistry resolveGenreRegistry() {
+        if (genreProfileRegistry != null) {
+            return genreProfileRegistry;
+        }
+        return new GenreProfileRegistry(List.of(new MysteryProfile()));
     }
 
     // ================= 池加载 =================

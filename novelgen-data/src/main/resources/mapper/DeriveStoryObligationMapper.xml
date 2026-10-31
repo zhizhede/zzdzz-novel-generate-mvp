@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationMapper">
+
+    <insert id="insertFull">
+        INSERT INTO derive_story_obligation (
+            run_id, obligation_key, chapter_no, kind, target_key, required, forbidden,
+            severity, source_contract, status, payload
+        ) VALUES (
+            #{p.runId}, #{p.obligationKey}, #{p.chapterNo}, #{p.kind}, #{p.targetKey},
+            COALESCE(#{p.required}, FALSE), COALESCE(#{p.forbidden}, FALSE),
+            COALESCE(#{p.severity}, 'HARD'), #{p.sourceContract}, COALESCE(#{p.status}, 'PLANNED'),
+            #{p.payload}::jsonb
+        )
+    </insert>
+
+    <delete id="deleteByRun">
+        DELETE FROM derive_story_obligation WHERE run_id = #{runId}
+    </delete>
+
+    <select id="selectByRun" resultType="com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationDO">
+        SELECT id, run_id, obligation_key, chapter_no, kind, target_key, required, forbidden,
+               severity, source_contract, status, payload, created_time, updated_time,
+               created_user_id, updated_user_id
+        FROM derive_story_obligation
+        WHERE run_id = #{runId}
+        ORDER BY chapter_no, obligation_key
+    </select>
+</mapper>

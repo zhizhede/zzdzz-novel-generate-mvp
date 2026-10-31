@@ -12,13 +12,20 @@ import com.zzdzz.novelgen.derive.contract.StoryContract;
 import com.zzdzz.novelgen.derive.contract.StoryContractParser;
 import com.zzdzz.novelgen.derive.contract.StoryContractValidator;
 import com.zzdzz.novelgen.derive.contract.TruthContract;
+import com.zzdzz.novelgen.derive.genre.GenreProfile;
+import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
+import com.zzdzz.novelgen.derive.genre.GenreContract;
+import com.zzdzz.novelgen.derive.genre.MysteryContract;
+import com.zzdzz.novelgen.derive.genre.MysteryProfile;
 import com.zzdzz.novelgen.derive.mapper.DeriveStoryContractMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveGenreContractMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.derive.plan.StoryPlanningPrompts;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.DeriveStoryContractDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveGenreContractDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +64,12 @@ public class DeriveContractService {
     private final LlmJson llmJson;
     @Autowired(required = false)
     private com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper fingerprintMapper;
+    @Autowired(required = false)
+    private GenreProfileRegistry genreProfileRegistry;
+    @Autowired(required = false)
+    private com.zzdzz.novelgen.derive.genre.GenreContractCodecRegistry genreContractCodecRegistry;
+    @Autowired(required = false)
+    private DeriveGenreContractMapper genreContractMapper;
 
     // ------------------------------------------------------------------
     // 合同生成与读取（合同前置主链路）
@@ -83,28 +96,51 @@ public class DeriveContractService {
             throw new BizException(ErrorCode.PARAM_ERROR,
                     "CONTRACT_REQUIRED：缺少规模合同，无法冻结故事合同");
         }
+        GenreProfile<?> profile = profileForRun(run, resolveGenreRegistry());
         String user = buildContractUser(run, scope, scaffold);
-        StoryContract parsed = llmJson.ask(
+        GenreContract parsedContract = llmJson.ask(
                 new LlmPort.ChatRequest(StoryPlanningPrompts.NODE_CONTRACT, run.getNovelId(), null,
                         run.getId(),
                         List.of(LlmPort.Message.system(StoryPlanningPrompts.CONTRACT),
                                 LlmPort.Message.user(user)),
                         0.3),
                 root -> {
-                    StoryContract contract = StoryContractParser.parse(root, scope);
-                    List<String> errors = StoryContractValidator.validateForFreeze(contract, scope);
-                    if (!errors.isEmpty()) {
-                        throw new LlmJson.Bad(String.join("；", errors));
+                    try {
+                        return profile.parseContract(root, scope);
+                    } catch (IllegalArgumentException e) {
+                        throw new LlmJson.Bad(e.getMessage());
                     }
-                    return contract;
                 }, MAX_TRIES);
+        if (!(parsedContract instanceof MysteryContract mysteryContract)) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "当前旧合同入口只支持 MYSTERY；请走通用类型合同入口");
+        }
+        StoryContract parsed = mysteryContract.story();
         DeriveStoryContractDO row = persistContract(run.getId(), parsed);
+        persistGenreContract(run, new MysteryContract(parsed), scope);
         StoryContract saved = rowToContract(row, scope);
         writeContractCaches(run.getId(), saved);
         log.info("唯一故事合同已冻结：runId={} version={} culprit={} revealChapter={} clues={} threads={}",
                 run.getId(), saved.version(), saved.truth().culpritName(),
                 saved.truth().revealChapter(), saved.clues().size(), saved.threads().size());
         return saved;
+    }
+
+    static GenreProfile<?> profileForRun(RunDO run, GenreProfileRegistry registry) {
+        String genre = run == null || run.getGenre() == null || run.getGenre().isBlank()
+                ? "MYSTERY" : run.getGenre();
+        try {
+            return registry.require(genre);
+        } catch (IllegalArgumentException e) {
+            throw new BizException(ErrorCode.PARAM_ERROR, e.getMessage());
+        }
+    }
+
+    private GenreProfileRegistry resolveGenreRegistry() {
+        if (genreProfileRegistry != null) {
+            return genreProfileRegistry;
+        }
+        return new GenreProfileRegistry(List.of(new MysteryProfile()));
     }
 
     /** 读取可用合同；返回 null 表示尚无合同或历史残缺行（残缺行由 generateIfAbsent 升版本重建）。 */
@@ -135,6 +171,94 @@ public class DeriveContractService {
                     "CONTRACT_REQUIRED：唯一故事合同尚未冻结（先推进 CONTRACT 单元）");
         }
         return contract;
+    }
+
+    /** 读取通用类型合同；旧悬疑 run 无新表时通过 MysteryCodec 兼容读取。 */
+    public GenreContract loadGenreContract(RunDO run) {
+        if (run == null) {
+            return null;
+        }
+        if (genreContractMapper != null && genreContractCodecRegistry != null) {
+            DeriveGenreContractDO row = genreContractMapper.findByRun(run.getId());
+            if (row != null) {
+                try {
+                    return genreContractCodecRegistry.require(row.getGenre()).decode(
+                            readTreeSafe(row.getPayload()), scopeFromJson(row.getScope()));
+                } catch (RuntimeException e) {
+                    log.warn("类型合同读取失败：runId={} genre={} 原因={}",
+                            run.getId(), row.getGenre(), e.getMessage());
+                }
+            }
+        }
+        StoryContract legacy = load(run);
+        return legacy == null ? null : new MysteryContract(legacy);
+    }
+
+    /** 必须已有冻结合同；否则 fail-fast。 */
+    public GenreContract requireGenreContract(RunDO run) {
+        GenreContract contract = loadGenreContract(run);
+        if (contract == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR,
+                    "CONTRACT_REQUIRED：类型合同尚未冻结（先推进 CONTRACT 单元）");
+        }
+        return contract;
+    }
+
+    /** 冻结通用类型合同；悬疑类型同时写旧合同表以保持旧链兼容。 */
+    public GenreContract freezeGenreContract(RunDO run, GenreContract contract,
+                                             PlanContracts.ScopeContract scope) {
+        if (run == null || run.getId() == null || contract == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "CONTRACT_REQUIRED：缺少 run 或类型合同");
+        }
+        persistGenreContract(run, contract, scope);
+        return contract;
+    }
+
+    private void persistGenreContract(RunDO run, GenreContract contract,
+                                      PlanContracts.ScopeContract scope) {
+        if (genreContractMapper == null || genreContractCodecRegistry == null) {
+            return;
+        }
+        String genre = contract instanceof MysteryContract ? "MYSTERY"
+                : contract instanceof com.zzdzz.novelgen.derive.genre.RomanceContract
+                ? "ROMANCE" : "";
+        if (genre.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR, "GENRE_CONTRACT_INVALID：未知合同类型");
+        }
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        com.zzdzz.novelgen.derive.genre.GenreContractCodec codec =
+                genreContractCodecRegistry.require(genre);
+        DeriveGenreContractDO row = new DeriveGenreContractDO();
+        row.setRunId(run.getId());
+        row.setGenre(genre);
+        row.setContractVersion(contract instanceof MysteryContract
+                ? ((MysteryContract) contract).story().version()
+                : ((com.zzdzz.novelgen.derive.genre.RomanceContract) contract).version());
+        row.setScope(toJson(scope));
+        row.setPayload(codec.encode(contract).toString());
+        row.setStatus("FROZEN");
+        genreContractMapper.deleteByRun(run.getId());
+        genreContractMapper.insertFull(row);
+    }
+
+    private PlanContracts.ScopeContract scopeFromJson(String json) {
+        try {
+            JsonNode node = readTreeSafe(json);
+            if (!node.isObject()) {
+                return null;
+            }
+            return MAPPER.treeToValue(node, PlanContracts.ScopeContract.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return MAPPER.writeValueAsString(value == null ? Map.of() : value);
+        } catch (Exception e) {
+            throw new IllegalStateException("JSON 序列化失败", e);
+        }
     }
 
     /** 断言合同没被下游改写：cast/真相核/线索/线程/禁令任一变化即 CONTRACT_DRIFT。 */

@@ -8,13 +8,16 @@
                          param_form, param_outcome, param_intent, param_style, tags_norm, domain_id, domain_snapshot,
                          b0, p_min, p_max, k_outline, m_beat,
                          tolerance_trace, picked_outline_ids, picked_beat_ids, picked_world_id,
-                         welded, novel_id, status, qc_round, step_status, anti_repro, intake_review, len_check)
+                         welded, novel_id, status, qc_round, step_status, anti_repro, intake_review, len_check,
+                         genre, story_kernel_version, genre_contract_version)
         VALUES (#{p.seed}, #{p.paramWordsMin}, #{p.paramWordsMax}, #{p.paramTags}::jsonb, #{p.paramPace},
                 #{p.paramForm}, #{p.paramOutcome}, #{p.paramIntent}, #{p.paramStyle}, #{p.tagsNorm}::jsonb, #{p.domainId}, #{p.domainSnapshot}::jsonb,
                 #{p.b0}, #{p.pMin}, #{p.pMax}, #{p.kOutline}, #{p.mBeat},
                 #{p.toleranceTrace}::jsonb, #{p.pickedOutlineIds}::jsonb, #{p.pickedBeatIds}::jsonb, #{p.pickedWorldId},
                 #{p.welded}::jsonb, #{p.novelId}, #{p.status}, #{p.qcRound}, #{p.stepStatus}::jsonb,
-                COALESCE(#{p.antiRepro}, FALSE), #{p.intakeReview}::jsonb, COALESCE(#{p.lenCheck}, FALSE))
+                COALESCE(#{p.antiRepro}, FALSE), #{p.intakeReview}::jsonb, COALESCE(#{p.lenCheck}, FALSE),
+                COALESCE(#{p.genre}, 'MYSTERY'), COALESCE(#{p.storyKernelVersion}, 1),
+                COALESCE(#{p.genreContractVersion}, 1))
         RETURNING id
     </select>
 

@@ -104,4 +104,13 @@ public class RunDO extends DeriveBaseDO {
 
     /** 当前唯一 ADMITTED 计划快照 revision（V139；无快照时为空）。 */
     private Integer activePlanRevision;
+
+    /** 类型插件代码；旧 run 为空时兼容读作 MYSTERY。 */
+    private String genre;
+
+    /** 通用故事核心契约版本。 */
+    private Integer storyKernelVersion;
+
+    /** 类型合同插件契约版本。 */
+    private Integer genreContractVersion;
 }

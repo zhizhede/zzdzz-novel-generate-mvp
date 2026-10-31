@@ -4,6 +4,7 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry;
 import com.zzdzz.novelgen.derive.contract.StoryContract;
 import com.zzdzz.novelgen.derive.mapper.DeriveChapterScheduleMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.model.entity.derive.DeriveChapterScheduleDO;
@@ -32,12 +33,14 @@ class DeriveChapterScheduleServiceTest {
     @Mock
     private DeriveChapterScheduleMapper scheduleMapper;
     @Mock
+    private DeriveStoryObligationMapper obligationMapper;
+    @Mock
     private RunMapper runMapper;
     @Mock
     private DeriveContractService contractService;
 
     private DeriveChapterScheduleService service() {
-        return new DeriveChapterScheduleService(scheduleMapper, runMapper, contractService);
+        return new DeriveChapterScheduleService(scheduleMapper, obligationMapper, runMapper, contractService);
     }
 
     private static RunDO run() {

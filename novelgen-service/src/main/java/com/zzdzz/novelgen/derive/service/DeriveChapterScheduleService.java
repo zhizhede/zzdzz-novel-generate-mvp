@@ -12,9 +12,23 @@ import com.zzdzz.novelgen.derive.contract.ChapterScheduleProjector;
 import com.zzdzz.novelgen.derive.contract.ScaffoldContract;
 import com.zzdzz.novelgen.derive.contract.StoryContract;
 import com.zzdzz.novelgen.derive.mapper.DeriveChapterScheduleMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationMapper;
+import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
+import com.zzdzz.novelgen.derive.genre.GenreProfile;
+import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
+import com.zzdzz.novelgen.derive.genre.GenreContract;
+import com.zzdzz.novelgen.derive.genre.MysteryContract;
+import com.zzdzz.novelgen.derive.genre.RomanceContract;
+import com.zzdzz.novelgen.derive.genre.RomanceStage;
+import com.zzdzz.novelgen.derive.genre.RomanceStageKind;
+import com.zzdzz.novelgen.derive.genre.MysteryProfile;
+import com.zzdzz.novelgen.derive.plan.PlanContracts;
+import com.zzdzz.novelgen.derive.story.StoryObligationProjector;
 import com.zzdzz.novelgen.model.entity.derive.DeriveChapterScheduleDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationDO;
+import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.VolumePlanDO;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 章级日程的持久化与版本守卫（合同的纯函数投影落库，不是第二个 LLM 节点）。
@@ -43,13 +58,23 @@ public class DeriveChapterScheduleService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final DeriveChapterScheduleMapper scheduleMapper;
+    private final DeriveStoryObligationMapper obligationMapper;
     private final RunMapper runMapper;
     private final DeriveContractService contractService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     @Autowired(required = false)
     private VolumePlanMapper volumePlanMapper;
+    @Autowired(required = false)
+    private CharacterPlanMapper characterPlanMapper;
+    @Autowired(required = false)
+    private GenreProfileRegistry genreProfileRegistry;
 
     /** 纯投影（不落库）：合同 + 章数 + 卷范围 → 每章日程。 */
     public List<ChapterScheduleEntry> project(RunDO run) {
+        GenreContract genreContract = contractService.loadGenreContract(run);
+        if (genreContract instanceof RomanceContract romance) {
+            return romanceSchedule(romance);
+        }
         StoryContract contract = contractService.require(run);
         int chapterCount = chapterCount(run, contract);
         return ChapterScheduleProjector.project(contract, chapterCount,
@@ -63,8 +88,11 @@ public class DeriveChapterScheduleService {
             throw new BizException(ErrorCode.PARAM_ERROR, "SCHEDULE_REQUIRED：缺少 run");
         }
         List<ChapterScheduleEntry> rows = entries == null ? List.of() : entries;
-        StoryContract contract = contractService.require(run);
-        int version = contract.version();
+        GenreContract genreContract = contractService.requireGenreContract(run);
+        if (genreContract == null) {
+            genreContract = new MysteryContract(contractService.require(run));
+        }
+        int version = contractVersion(genreContract);
         scheduleMapper.deleteByRun(run.getId());
         for (ChapterScheduleEntry entry : rows) {
             DeriveChapterScheduleDO row = new DeriveChapterScheduleDO();
@@ -78,12 +106,155 @@ public class DeriveChapterScheduleService {
             scheduleMapper.insertFull(row);
         }
         writeSnapshot(run, version, rows);
+        persistObligations(run, genreContract, rows);
         log.info("章级日程已投影：runId={} contractVersion={} 章数={} 埋点章={} 兑现章={}",
                 run.getId(), version, rows.size(),
                 rows.stream().filter(entry -> !entry.mustPlant().isEmpty()).count(),
                 rows.stream().filter(entry -> !entry.mustPayoff().isEmpty()).count());
         return rows;
     }
+
+    private void persistObligations(RunDO run, GenreContract contract,
+                                    List<ChapterScheduleEntry> entries) {
+        if (obligationMapper == null) {
+            return;
+        }
+        obligationMapper.deleteByRun(run.getId());
+        GenreProfile profile = profileForRun(run);
+        List<PlanContracts.VolumeContract> volumes = volumeContracts(run);
+        List<PlanContracts.CharacterContract> characters = characterContracts(run);
+        List<com.zzdzz.novelgen.derive.story.StoryObligation> obligations =
+                StoryObligationProjector.project(profile, contract, entries, volumes, characters);
+        for (com.zzdzz.novelgen.derive.story.StoryObligation obligation : obligations) {
+            DeriveStoryObligationDO row = new DeriveStoryObligationDO();
+            row.setRunId(run.getId());
+            row.setObligationKey(obligation.obligationKey());
+            row.setChapterNo(obligation.chapterNo());
+            row.setKind(obligation.kind());
+            row.setTargetKey(obligation.targetKey());
+            row.setRequired(obligation.required());
+            row.setForbidden(obligation.forbidden());
+            row.setSeverity(obligation.severity());
+            row.setSourceContract(obligation.sourceContract());
+            row.setStatus("PLANNED");
+            row.setPayload(toJson(obligation.payload()));
+            obligationMapper.insertFull(row);
+        }
+    }
+
+    private List<ChapterScheduleEntry> romanceSchedule(RomanceContract contract) {
+        int maxChapter = contract.stages().values().stream()
+                .mapToInt(RomanceStage::chapterNo).max()
+                .orElse(contract.scope() == null ? 1 : contract.scope().chapterCount());
+        int closureChapter = contract.stages().get(RomanceStageKind.RELATIONSHIP_CLOSURE)
+                .chapterNo();
+        List<ChapterScheduleEntry> out = new ArrayList<>();
+        for (int chapterNo = 1; chapterNo <= maxChapter; chapterNo++) {
+            out.add(new ChapterScheduleEntry(chapterNo, 1, chapterNo == closureChapter,
+                    List.of(), List.of()));
+        }
+        return out;
+    }
+
+    private int contractVersion(GenreContract contract) {
+        if (contract instanceof MysteryContract mystery) {
+            return mystery.story().version();
+        }
+        if (contract instanceof RomanceContract romance) {
+            return romance.version();
+        }
+        return 1;
+    }
+
+    private GenreProfile profileForRun(RunDO run) {
+        GenreProfileRegistry registry = genreProfileRegistry;
+        if (registry == null) {
+            registry = new GenreProfileRegistry(List.of(new MysteryProfile()));
+        }
+        return registry.require(run.getGenre() == null || run.getGenre().isBlank()
+                ? "MYSTERY" : run.getGenre());
+    }
+
+    private List<PlanContracts.VolumeContract> volumeContracts(RunDO run) {
+        if (volumePlanMapper == null) {
+            return List.of();
+        }
+        List<VolumePlanDO> rows = volumePlanMapper.selectList(
+                new LambdaQueryWrapper<VolumePlanDO>()
+                        .eq(VolumePlanDO::getRunId, run.getId())
+                        .orderByAsc(VolumePlanDO::getVolumeNo));
+        List<PlanContracts.VolumeContract> out = new ArrayList<>();
+        for (VolumePlanDO row : rows) {
+            JsonNode contract = readJson(row.getContract());
+            out.add(new PlanContracts.VolumeContract(
+                    nvl(row.getVolumeNo(), 0), nvl(row.getFromChapter(), 0),
+                    nvl(row.getToChapter(), 0), nvl(row.getArc(), ""),
+                    contract.path("localQuestion").asText(""), contract.path("falseAnswer").asText(""),
+                    contract.path("trueAnswer").asText(""), contract.path("mainMysteryAdvance").asText(""),
+                    textList(contract.path("focusCharacters")), textList(contract.path("relationshipChanges")),
+                    textList(contract.path("requiredThreads")), textList(contract.path("forbiddenReveals")),
+                    nvl(row.getLocalClosure(), ""), nvl(row.getNextHook(), ""), nvl(row.getGlobalRole(), "")));
+        }
+        return out;
+    }
+
+    private List<PlanContracts.CharacterContract> characterContracts(RunDO run) {
+        if (characterPlanMapper == null) {
+            return List.of();
+        }
+        List<CharacterPlanDO> rows = characterPlanMapper.selectList(
+                new LambdaQueryWrapper<CharacterPlanDO>()
+                        .eq(CharacterPlanDO::getRunId, run.getId())
+                        .orderByAsc(CharacterPlanDO::getCharacterKey));
+        List<PlanContracts.CharacterContract> out = new ArrayList<>();
+        for (CharacterPlanDO row : rows) {
+            JsonNode contract = readJson(row.getContract());
+            PlanContracts.CharacterFunction function;
+            try {
+                function = PlanContracts.CharacterFunction.valueOf(nvl(row.getFunctionCode(), "SUPPORT"));
+            } catch (RuntimeException e) {
+                function = PlanContracts.CharacterFunction.SUPPORT;
+            }
+            out.add(new PlanContracts.CharacterContract(
+                    nvl(row.getCharacterKey(), ""), nvl(row.getDisplayNameHint(), ""), function,
+                    contract.path("uniqueContribution").asText(""), contract.path("want").asText(""),
+                    contract.path("flaw").asText(""), textList(contract.path("requiredSetup")),
+                    textList(contract.path("conflictTargets")), contract.path("functionalConflict").asText(""),
+                    contract.path("highlightChoice").asText(""), contract.path("highlightCost").asText(""),
+                    textList(contract.path("relationshipChanges")), contract.path("payoffProof").asText(""),
+                    row.getSpotlightVolume(), row.getConflictVolume(), row.getPayoffVolume(),
+                    nvl(row.getArcBefore(), ""), nvl(row.getArcAfter(), ""),
+                    contract.path("castRole").asText("")));
+        }
+        return out;
+    }
+
+    private JsonNode readJson(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json == null || json.isBlank() ? "{}" : json);
+            return node.isObject() ? node : objectMapper.createObjectNode();
+        } catch (Exception e) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private List<String> textList(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        node.forEach(item -> {
+            if (item.isTextual() && !item.asText("").isBlank()) {
+                out.add(item.asText(""));
+            }
+        });
+        return out;
+    }
+
+    private static <T> T nvl(T value, T fallback) {
+        return value == null ? fallback : value;
+    }
+
 
     /** 读日程表；空表返回空列表（旧 run 由调用方补投影）。 */
     public List<ChapterScheduleEntry> load(RunDO run) {

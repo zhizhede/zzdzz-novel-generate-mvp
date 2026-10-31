@@ -14,11 +14,17 @@ import com.zzdzz.novelgen.derive.mapper.BeatInstanceMapper;
 import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.CharacterPlanMapper;
 import com.zzdzz.novelgen.derive.mapper.DraftHistoryMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationEvidenceMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
 import com.zzdzz.novelgen.derive.mapper.WorldStateMapper;
 import com.zzdzz.novelgen.derive.plan.PlanJsonViews;
+import com.zzdzz.novelgen.derive.story.DraftWindowObligationValidator;
+import com.zzdzz.novelgen.derive.story.StoryObligation;
+import com.zzdzz.novelgen.derive.story.StoryEvidenceIndex;
+import com.zzdzz.novelgen.derive.story.StoryObligationEvidence;
 import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
 import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
@@ -29,6 +35,8 @@ import com.zzdzz.novelgen.model.entity.derive.BeatInstanceDO;
 import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
 import com.zzdzz.novelgen.model.entity.derive.CharacterPlanDO;
 import com.zzdzz.novelgen.model.entity.derive.DraftHistoryDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationEvidenceDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.StoryThreadDO;
@@ -208,6 +216,12 @@ public class DeriveDraftService {
     /** 章级日程（合同投影）：⑥b 每章 mustPlant/mustPayoff/reveal 的唯一来源。 */
     @Autowired(required = false)
     private DeriveChapterScheduleService scheduleService;
+    @Autowired(required = false)
+    private DeriveStoryObligationMapper obligationMapper;
+    @Autowired(required = false)
+    private DraftWindowObligationValidator draftWindowObligationValidator;
+    @Autowired(required = false)
+    private DeriveStoryObligationEvidenceMapper evidenceMapper;
 
     /**
      * PLAN_VOLUME 局部回炉：只清目标卷的章纲（拍已由 replanVolume 重建），状态回 PLANNING，
@@ -482,7 +496,7 @@ public class DeriveDraftService {
                     + "（章 " + win.get(0) + "-" + win.get(win.size() - 1) + "）");
             JsonNode out = llmJson.ask(
                     new LlmPort.ChatRequest(NODE_DRAFT, novelId, null, runId,
-                            List.of(LlmPort.Message.system(BATCH_PROMPT), LlmPort.Message.user(user)), 0.4),
+                            List.of(LlmPort.Message.system(batchPrompt(run)), LlmPort.Message.user(user)), 0.4),
                     root -> {
                         JsonNode parsed = parseBatch(root, ctx);
                         if (batchContract != null) {
@@ -497,6 +511,7 @@ public class DeriveDraftService {
                                 throw new LlmJson.Bad(String.join("；", scheduleDrift));
                             }
                         }
+                        validateObligationWindow(parsed, ctx, runId);
                         return parsed;
                     }, 3, (think, piece) -> touchProgress(runId, piece));
             Map<Integer, String> filled = new HashMap<>();
@@ -1077,6 +1092,8 @@ public class DeriveDraftService {
                 ? chapter.path("clueEvents").deepCopy() : STATIC_MAPPER.createArrayNode());
         node.set("closingActs", chapter.path("closingActs").isArray()
                 ? chapter.path("closingActs").deepCopy() : STATIC_MAPPER.createArrayNode());
+        node.set("romanceEvents", chapter.path("romanceEvents").isArray()
+                ? chapter.path("romanceEvents").deepCopy() : STATIC_MAPPER.createArrayNode());
         return node.toString();
     }
 
@@ -1097,9 +1114,6 @@ public class DeriveDraftService {
         Map<Integer, com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> byNo =
                 com.zzdzz.novelgen.derive.contract.ChapterScheduleProjector.byChapter(schedule);
         int reveal = contract.truth().revealChapter();
-        String culprit = contract.truth().culpritName();
-        String motiveTag = contract.truth().motiveTag() == null
-                ? "" : contract.truth().motiveTag().trim();
         Set<String> allowedActs = Set.of("PLANT", "PAYOFF");
         Set<String> closingNeeded = Set.of("CULPRIT", "MOTIVE", "METHOD");
         for (JsonNode chapter : out.path("chapters")) {
@@ -1152,15 +1166,7 @@ public class DeriveDraftService {
                     drift.add("CONTRACT_CLUE_DRIFT：揭示章第" + no + "章 closingActs 必须为 "
                             + closingNeeded + "，实际 " + acts);
                 }
-                String outline = chapter.path("draft_outline").asText("");
-                if (!culprit.isBlank() && !outline.contains(culprit)) {
-                    drift.add("CONTRACT_CLUE_DRIFT：揭示章第" + no
-                            + "章 draft_outline 必须逐字写出真凶「" + culprit + "」");
-                }
-                if (!motiveTag.isBlank() && !outline.contains(motiveTag)) {
-                    drift.add("CONTRACT_CLOSURE_DRIFT：揭示章第" + no
-                            + "章 draft_outline 必须逐字写出 motiveTag「" + motiveTag + "」");
-                }
+                // 结构化 closingActs 负责闭合字段校验；正文不再要求逐字包含合同标签。
             }
         }
         return drift;
@@ -1507,6 +1513,20 @@ public class DeriveDraftService {
         }
         return normalized;
     }
+    static String batchPrompt(RunDO run) {
+        if (run == null || !"ROMANCE".equalsIgnoreCase(run.getGenre())) {
+            return BATCH_PROMPT;
+        }
+        return BATCH_PROMPT + """
+
+                言情合同专项：
+                - 每章输出 romanceEvents 数组；stage 只能取 RELATIONSHIP_START/MISUNDERSTANDING/ATTACHMENT_ESCALATION/CONFLICT_PEAK/CONFESSION/RECONCILIATION/RELATIONSHIP_CLOSURE；
+                - romanceEvents[].targetKey/threadKey 必须引用合同关系线或合同角色；
+                - 不得输出 clueEvents 或 closingActs；
+                - romanceEvents[].evidence 写清关系推进事实，不得用目标 key 冒充证据。
+                """;
+    }
+
     static JsonNode parseBatch(JsonNode root, BatchContext ctx) {
         root = normalizeBatchOutput(root, ctx);
         JsonNode chArr = root.path("chapters");
@@ -1647,6 +1667,219 @@ public class DeriveDraftService {
             return 0;
         }
         return node.isObject() ? node.path("seq").asInt(0) : node.asInt(0);
+    }
+
+    void validateObligationWindow(JsonNode root, BatchContext ctx, long runId) {
+        if (obligationMapper == null) {
+            return;
+        }
+        List<StoryObligation> obligations = loadObligations(runId);
+        if (obligations.isEmpty()) {
+            return;
+        }
+        DraftWindowObligationValidator validator = draftWindowObligationValidator == null
+                ? new DraftWindowObligationValidator() : draftWindowObligationValidator;
+        List<DraftWindowObligationValidator.ChapterDraft> chapters = new ArrayList<>();
+        Map<Integer, List<DraftWindowObligationValidator.StateChange>> stateChanges = new HashMap<>();
+        Map<Integer, List<DraftWindowObligationValidator.KnowledgeEvent>> knowledge = new HashMap<>();
+        List<DraftWindowObligationValidator.BeatDraft> beats = new ArrayList<>();
+        for (JsonNode chapter : root.path("chapters")) {
+            int chapterNo = chapter.path("no").asInt(0);
+            List<String> clueActs = new ArrayList<>();
+            for (JsonNode event : chapter.path("clueEvents")) {
+                String act = event.path("act").asText("").trim();
+                String key = event.path("key").asText("").trim();
+                if (!act.isEmpty() && !key.isEmpty()) {
+                    clueActs.add(act.toUpperCase(java.util.Locale.ROOT) + ":" + key);
+                }
+            }
+            List<DraftWindowObligationValidator.RomanceEvent> romanceEvents = new ArrayList<>();
+            for (JsonNode event : chapter.path("romanceEvents")) {
+                String stage = event.path("stage").asText("").trim();
+                String target = event.path("targetKey").asText("").trim();
+                String thread = event.path("threadKey").asText("").trim();
+                String evidence = event.path("evidence").asText("").trim();
+                if (!stage.isEmpty()) {
+                    romanceEvents.add(new DraftWindowObligationValidator.RomanceEvent(
+                            stage, target, thread, evidence));
+                }
+            }
+            List<String> entities = new ArrayList<>();
+            List<DraftWindowObligationValidator.StateChange> changes = new ArrayList<>();
+            for (JsonNode change : chapter.path("state_changes")) {
+                String who = change.path("who").asText("").trim();
+                String what = change.path("what").asText("").trim();
+                if (!who.isEmpty()) {
+                    entities.add(who);
+                    changes.add(new DraftWindowObligationValidator.StateChange(who, what,
+                            change.path("detail").asText("")));
+                }
+            }
+            stateChanges.put(chapterNo, changes);
+            List<String> threads = new ArrayList<>();
+            for (JsonNode beat : chapter.path("beats")) {
+                JsonNode route = readRouteNode(beat.path("route"));
+                for (JsonNode ref : route.path("threadRefs")) {
+                    if (ref.isTextual() && !ref.asText("").isBlank()) {
+                        threads.add(ref.asText(""));
+                    }
+                }
+                List<DraftWindowObligationValidator.KnowledgeEvent> events =
+                        knowledge.computeIfAbsent(chapterNo, key -> new ArrayList<>());
+                addKnowledge(events, route.path("writesKnowledge"), "WRITE");
+                addKnowledge(events, route.path("requiresKnowledge"), "READ");
+                List<DraftWindowObligationValidator.ThreadEffect> threadEffects =
+                        new ArrayList<>();
+                for (JsonNode effect : route.path("threadEffects")) {
+                    String key = effect.path("threadKey").asText(effect.path("key").asText("")).trim();
+                    String value = effect.path("effect").asText("").trim();
+                    if (!key.isEmpty() && !value.isEmpty()) {
+                        threadEffects.add(new DraftWindowObligationValidator.ThreadEffect(
+                                key, value));
+                    }
+                }
+                List<DraftWindowObligationValidator.KnowledgeEffect> knowledgeEffects =
+                        new ArrayList<>();
+                for (JsonNode effect : route.path("knowledgeEffects")) {
+                    String key = effect.path("key").asText("").trim();
+                    String kind = effect.path("kind").asText("").trim();
+                    if (!key.isEmpty() && !kind.isEmpty()) {
+                        knowledgeEffects.add(new DraftWindowObligationValidator.KnowledgeEffect(
+                                kind, key));
+                        addKnowledge(events, effect, kind);
+                    }
+                }
+                beats.add(new DraftWindowObligationValidator.BeatDraft(
+                        beat.path("seq").asInt(0), chapterNo, beat.path("role").asText(""),
+                        textList(route.path("threadRefs")),
+                        textList(route.path("actors")), textList(route.path("targets")),
+                        threadEffects, knowledgeEffects, beat.path("filled").asText("")));
+            }
+            for (com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry entry : ctx.schedule()) {
+                if (entry.chapterNo() == chapterNo) {
+                    threads.addAll(entry.mustPlant());
+                    threads.addAll(entry.mustPayoff());
+                }
+            }
+            chapters.add(new DraftWindowObligationValidator.ChapterDraft(
+                    chapterNo, chapter.path("draft_outline").asText(""), clueActs, entities,
+                    threads, romanceEvents));
+        }
+        int from = ctx.windowChapters().isEmpty() ? 0 : ctx.windowChapters().get(0);
+        int to = ctx.windowChapters().isEmpty() ? 0
+                : ctx.windowChapters().get(ctx.windowChapters().size() - 1);
+        DraftWindowObligationValidator.DraftWindow window =
+                new DraftWindowObligationValidator.DraftWindow(from, to, chapters, beats,
+                        stateChanges, knowledge, ctx.castNames());
+        List<com.zzdzz.novelgen.derive.plan.PlanContracts.PlanIssue> issues =
+                validator.validate(window, obligations);
+        if (!issues.isEmpty()) {
+            String detail = issues.stream()
+                    .map(issue -> issue.code() + "：" + issue.message())
+                    .collect(java.util.stream.Collectors.joining("；"));
+            throw new LlmJson.Bad("OBLIGATION_WINDOW：" + detail);
+        }
+        persistEvidence(runId, validator.toEvidenceIndex(window), from, to);
+    }
+
+    private void persistEvidence(long runId, StoryEvidenceIndex index, int from, int to) {
+        if (evidenceMapper == null || from <= 0 || to < from) {
+            return;
+        }
+        evidenceMapper.deleteByRunAndChapterRange(runId, from, to);
+        index.obligationsByChapter().forEach((chapterNo, rows) -> {
+            if (chapterNo < from || chapterNo > to) {
+                return;
+            }
+            for (StoryObligationEvidence evidence : rows) {
+                DeriveStoryObligationEvidenceDO row = new DeriveStoryObligationEvidenceDO();
+                row.setRunId(runId);
+                row.setObligationKey(evidence.obligationKey());
+                row.setChapterNo(evidence.chapterNo());
+                row.setEvidenceKind(evidence.evidenceKind());
+                row.setEventKey(evidence.eventKey());
+                row.setBeatSeq(evidence.beatSeq());
+                row.setEntityKeys(jsonList(evidence.entityKeys()));
+                row.setThreadKeys(jsonList(evidence.threadKeys()));
+                row.setFact(evidence.fact());
+                row.setSource(evidence.source());
+                row.setConfidence(evidence.confidence());
+                evidenceMapper.insertFull(row);
+            }
+        });
+    }
+
+    private List<StoryObligation> loadObligations(long runId) {
+        List<StoryObligation> out = new ArrayList<>();
+        for (DeriveStoryObligationDO row : obligationMapper.selectByRun(runId)) {
+            out.add(new StoryObligation(row.getObligationKey(), row.getChapterNo() == null
+                    ? 0 : row.getChapterNo(), row.getKind(), row.getTargetKey(),
+                    Boolean.TRUE.equals(row.getRequired()), Boolean.TRUE.equals(row.getForbidden()),
+                    row.getSeverity(), row.getSourceContract(), readJsonObject(row.getPayload())));
+        }
+        return out;
+    }
+
+    private static Map<String, Object> readJsonObject(String json) {
+        try {
+            JsonNode node = STATIC_MAPPER.readTree(json == null || json.isBlank() ? "{}" : json);
+            if (!node.isObject()) {
+                return Map.of();
+            }
+            return STATIC_MAPPER.convertValue(node, Map.class);
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private static String jsonList(List<String> values) {
+        try {
+            return STATIC_MAPPER.writeValueAsString(values == null ? List.of() : values);
+        } catch (Exception e) {
+            throw new IllegalStateException("JSON 序列化失败", e);
+        }
+    }
+
+    private static void addKnowledge(List<DraftWindowObligationValidator.KnowledgeEvent> events,
+                                     JsonNode values, String kind) {
+        if (values == null) {
+            return;
+        }
+        if (values.isTextual() && !values.asText("").isBlank()) {
+            events.add(new DraftWindowObligationValidator.KnowledgeEvent(kind, values.asText("")));
+        } else if (values.isArray()) {
+            for (JsonNode value : values) {
+                if (value.isTextual() && !value.asText("").isBlank()) {
+                    events.add(new DraftWindowObligationValidator.KnowledgeEvent(kind, value.asText("")));
+                }
+            }
+        }
+    }
+
+    private static JsonNode readRouteNode(JsonNode route) {
+        if (route == null || route.isNull()) {
+            return STATIC_MAPPER.createObjectNode();
+        }
+        if (route.isObject()) {
+            return route;
+        }
+        if (route.isTextual() && !route.asText("").isBlank()) {
+            return readTreeSafe(route.asText(""));
+        }
+        return STATIC_MAPPER.createObjectNode();
+    }
+
+    private static List<String> textList(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        node.forEach(item -> {
+            if (item.isTextual() && !item.asText("").isBlank()) {
+                out.add(item.asText(""));
+            }
+        });
+        return out;
     }
 
     static boolean isPlaceholderFilled(String text) {

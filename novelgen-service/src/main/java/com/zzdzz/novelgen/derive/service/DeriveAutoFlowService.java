@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -221,6 +222,13 @@ public class DeriveAutoFlowService {
                         case "DRAFTING" -> {
                             if (!DeriveGateService.gatePassed(run.getStepStatus())) {
                                 if (auto.direct) {
+                                    List<String> deterministicIssues =
+                                            gateService.deterministicAudit(auto.runId);
+                                    if (!deterministicIssues.isEmpty()) {
+                                        throw new BizException(ErrorCode.PARAM_ERROR,
+                                                "DIRECT_DETERMINISTIC_AUDIT："
+                                                        + String.join("；", deterministicIssues));
+                                    }
                                     String next = DeriveGateService.withGate(run.getStepStatus(), "PASS",
                                             DeriveGateService.gateRound(run.getStepStatus()),
                                             java.util.List.of("直通模式：免审放行（跳过 P6 立项闸）"), "");

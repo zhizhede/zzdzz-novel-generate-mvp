@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class DeriveWordsDefaultTest {
 
     private static RunCreateDTO dto(Integer min, Integer max) {
-        return new RunCreateDTO(min, max, List.of("冒险"), "0.75", null, "LONG", null, null, null, null, null, null);
+        return new RunCreateDTO(min, max, List.of("冒险"), "0.75", null, "LONG", null, null, null, null, null, null, null);
     }
 
     @Test

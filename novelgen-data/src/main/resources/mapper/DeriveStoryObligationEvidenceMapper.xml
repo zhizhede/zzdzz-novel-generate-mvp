@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationEvidenceMapper">
+
+    <insert id="insertFull">
+        INSERT INTO derive_story_obligation_evidence (
+            run_id, obligation_key, chapter_no, evidence_kind, event_key, beat_seq,
+            entity_keys, thread_keys, fact, source, confidence
+        ) VALUES (
+            #{p.runId}, #{p.obligationKey}, #{p.chapterNo}, #{p.evidenceKind}, #{p.eventKey},
+            #{p.beatSeq}, #{p.entityKeys}::jsonb, #{p.threadKeys}::jsonb, #{p.fact},
+            #{p.source}, COALESCE(#{p.confidence}, 1.0)
+        )
+    </insert>
+
+    <delete id="deleteByRun">
+        DELETE FROM derive_story_obligation_evidence WHERE run_id = #{runId}
+    </delete>
+
+    <delete id="deleteByRunAndChapterRange">
+        DELETE FROM derive_story_obligation_evidence
+        WHERE run_id = #{runId} AND chapter_no BETWEEN #{fromChapter} AND #{toChapter}
+    </delete>
+
+    <select id="selectByRun" resultType="com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationEvidenceDO">
+        SELECT id, run_id, obligation_key, chapter_no, evidence_kind, event_key, beat_seq,
+               entity_keys, thread_keys, fact, source, confidence,
+               created_time, updated_time, created_user_id, updated_user_id
+        FROM derive_story_obligation_evidence
+        WHERE run_id = #{runId}
+        ORDER BY chapter_no, obligation_key, evidence_kind
+    </select>
+</mapper>

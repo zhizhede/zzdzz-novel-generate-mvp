@@ -14,10 +14,23 @@ import com.zzdzz.novelgen.derive.mapper.ChapterMapper;
 import com.zzdzz.novelgen.derive.mapper.LabelIndexMapper;
 import com.zzdzz.novelgen.derive.mapper.NovelMapper;
 import com.zzdzz.novelgen.derive.mapper.QcReportMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationMapper;
+import com.zzdzz.novelgen.derive.mapper.DeriveStoryObligationEvidenceMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.WordlistMapper;
 import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
 import com.zzdzz.novelgen.derive.mapper.WorldStateMapper;
+import com.zzdzz.novelgen.derive.genre.GenreProfile;
+import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
+import com.zzdzz.novelgen.derive.genre.GenreQcAuditor;
+import com.zzdzz.novelgen.derive.genre.MysteryProfile;
+import com.zzdzz.novelgen.derive.genre.GenreContract;
+import com.zzdzz.novelgen.derive.genre.MysteryQcAuditor;
+import com.zzdzz.novelgen.derive.story.StoryKernel;
+import com.zzdzz.novelgen.derive.story.StoryObligation;
+import com.zzdzz.novelgen.derive.story.StoryKernelAssembler;
+import com.zzdzz.novelgen.derive.story.StoryObligationEvidence;
+import com.zzdzz.novelgen.derive.story.StoryEvidenceIndex;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.derive.AssetOutlineDO;
@@ -27,6 +40,8 @@ import com.zzdzz.novelgen.model.entity.derive.ChapterDO;
 import com.zzdzz.novelgen.model.entity.derive.LabelIndexDO;
 import com.zzdzz.novelgen.model.entity.derive.NovelDO;
 import com.zzdzz.novelgen.model.entity.derive.QcReportDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationDO;
+import com.zzdzz.novelgen.model.entity.derive.DeriveStoryObligationEvidenceDO;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.entity.derive.WordlistDO;
 import com.zzdzz.novelgen.model.entity.derive.WorkFingerprintDO;
@@ -132,6 +147,18 @@ public class DeriveQcService {
     private final LlmJson llmJson;
     @Autowired(required = false)
     private DerivePlanValidationService planValidationService;
+    @Autowired(required = false)
+    private DeriveStoryObligationMapper obligationMapper;
+    @Autowired(required = false)
+    private DeriveStoryObligationEvidenceMapper evidenceMapper;
+    @Autowired(required = false)
+    private DeriveContractService contractService;
+    @Autowired(required = false)
+    private GenreProfileRegistry genreProfileRegistry;
+    @Autowired(required = false)
+    private GenreQcAuditor genreQcAuditor;
+    @Autowired(required = false)
+    private MysteryQcAuditor mysteryQcAuditor;
 
     /** ⑧：跑一轮质检。 */
     public QcVO qc(long runId) {
@@ -215,8 +242,10 @@ public class DeriveQcService {
         script.stream().filter(c -> !c.pass()).forEach(c -> issues.add(c.name() + "：" + c.detail()));
         issues.addAll(llmIssues);
         issues.addAll(planIssueMessages(planCheck));
+        List<String> genreIssues = genreQcIssues(run, novel, chapters);
+        issues.addAll(genreIssues);
 
-        boolean pass = scriptPass && llmPass && planPass;
+        boolean pass = scriptPass && llmPass && planPass && genreIssues.isEmpty();
         int prevRound = run.getQcRound() == null ? 0 : run.getQcRound();
         String verdict;
         if (pass) {
@@ -686,6 +715,132 @@ public class DeriveQcService {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    List<String> genreQcIssues(RunDO run, NovelDO novel, List<ChapterDO> chapters) {
+        if (obligationMapper == null) {
+            return List.of();
+        }
+        List<StoryObligation> obligations = new ArrayList<>();
+        for (DeriveStoryObligationDO row : obligationMapper.selectByRun(run.getId())) {
+            obligations.add(new StoryObligation(row.getObligationKey(),
+                    row.getChapterNo() == null ? 0 : row.getChapterNo(), row.getKind(),
+                    row.getTargetKey(), Boolean.TRUE.equals(row.getRequired()),
+                    Boolean.TRUE.equals(row.getForbidden()), row.getSeverity(),
+                    row.getSourceContract(), readJsonObject(row.getPayload())));
+        }
+        if (obligations.isEmpty()) {
+            return List.of();
+        }
+        StoryKernel kernel = new StoryKernelAssembler().assemble(run, null, List.of(), List.of(),
+                List.of(), List.of(), obligations, evidenceIndex(run.getId()));
+        List<GenreQcAuditor.ChapterText> texts = chapters.stream()
+                .map(chapter -> new GenreQcAuditor.ChapterText(
+                        chapter.getChapterNo() == null ? 0 : chapter.getChapterNo(),
+                        chapter.getContent() == null ? "" : chapter.getContent()))
+                .toList();
+        GenreQcAuditor.CompiledDraft draft =
+                new GenreQcAuditor.CompiledDraft(texts, worldStates(run, novel, chapters));
+        GenreProfile profile = profile(run);
+        List<com.zzdzz.novelgen.derive.plan.PlanContracts.PlanIssue> issues =
+                "MYSTERY".equals(profile.genre()) && mysteryQcAuditor != null
+                        ? mysteryQcAuditor.audit(draft, kernel, profile)
+                        : auditGenreQc(run, profile, kernel, evidenceIndex(run.getId()), draft);
+        return issues.stream().map(issue -> issue.code() + "：" + issue.message()).toList();
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private List<com.zzdzz.novelgen.derive.plan.PlanContracts.PlanIssue> auditGenreQc(
+            RunDO run, GenreProfile profile, StoryKernel kernel, StoryEvidenceIndex evidenceIndex,
+            GenreQcAuditor.CompiledDraft draft) {
+        GenreContract contract = contractService == null ? null : contractService.loadGenreContract(run);
+        if (contract != null) {
+            return profile.auditQc(contract, kernel, evidenceIndex, draft);
+        }
+        return genreQcAuditor == null ? List.of() : genreQcAuditor.audit(draft, kernel, profile);
+    }
+
+    private StoryEvidenceIndex evidenceIndex(long runId) {
+        StoryEvidenceIndex.Builder builder = StoryEvidenceIndex.builder();
+        if (evidenceMapper == null) {
+            return builder.build();
+        }
+        for (DeriveStoryObligationEvidenceDO row : evidenceMapper.selectByRun(runId)) {
+            builder.addObligationEvidence(new StoryObligationEvidence(
+                    row.getObligationKey(),
+                    row.getChapterNo() == null ? 0 : row.getChapterNo(),
+                    row.getEvidenceKind(),
+                    row.getEventKey() == null ? "DB:" + row.getId() : row.getEventKey(),
+                    row.getBeatSeq(),
+                    readJsonStringList(row.getEntityKeys()),
+                    readJsonStringList(row.getThreadKeys()),
+                    row.getFact(),
+                    row.getSource(),
+                    row.getConfidence() == null ? 1.0 : row.getConfidence()));
+        }
+        return builder.build();
+    }
+
+    private Map<Integer, Map<String, String>> worldStates(RunDO run, NovelDO novel,
+                                                           List<ChapterDO> chapters) {
+        Map<Integer, Map<String, String>> out = new java.util.LinkedHashMap<>();
+        if (worldStateMapper == null || novel == null || novel.getId() == null) {
+            return out;
+        }
+        for (ChapterDO chapter : chapters) {
+            WorldStateDO row = worldStateMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WorldStateDO>()
+                            .eq(WorldStateDO::getNovelId, novel.getId())
+                            .lt(WorldStateDO::getChapterNo, chapter.getChapterNo())
+                            .orderByDesc(WorldStateDO::getChapterNo)
+                            .last("LIMIT 1"));
+            Map<String, String> state = new java.util.LinkedHashMap<>();
+            if (row != null) {
+                readJsonObject(row.getState()).forEach((key, value) ->
+                        state.put(key, String.valueOf(value)));
+            }
+            out.put(chapter.getChapterNo(), state);
+        }
+        return out;
+    }
+
+    private Map<String, Object> readJsonObject(String json) {
+        try {
+            JsonNode node = STATIC_MAPPER.readTree(json == null || json.isBlank() ? "{}" : json);
+            if (!node.isObject()) {
+                return Map.of();
+            }
+            return STATIC_MAPPER.convertValue(node, Map.class);
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private List<String> readJsonStringList(String json) {
+        try {
+            JsonNode node = STATIC_MAPPER.readTree(json == null || json.isBlank() ? "[]" : json);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            node.forEach(item -> {
+                if (item.isTextual() && !item.asText("").isBlank()) {
+                    out.add(item.asText(""));
+                }
+            });
+            return out;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private GenreProfile profile(RunDO run) {
+        GenreProfileRegistry registry = genreProfileRegistry;
+        if (registry == null) {
+            registry = new GenreProfileRegistry(List.of(new MysteryProfile()));
+        }
+        return registry.require(run.getGenre() == null || run.getGenre().isBlank()
+                ? "MYSTERY" : run.getGenre());
     }
 
     // ================= 工具 =================

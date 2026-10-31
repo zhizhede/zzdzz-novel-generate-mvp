@@ -28,6 +28,7 @@ public record RunCreateDTO(
         String intent,
         String style,
         Boolean intakeOptimize,
-        Boolean lenCheck
+        Boolean lenCheck,
+        String genre
 ) {
 }

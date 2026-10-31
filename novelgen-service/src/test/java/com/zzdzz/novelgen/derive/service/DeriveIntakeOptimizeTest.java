@@ -30,7 +30,7 @@ class DeriveIntakeOptimizeTest {
 
     private static RunCreateDTO dto(Boolean intakeOptimize, String intent) {
         return new RunCreateDTO(10000, 30000, List.of("推理"), "0.75",
-                42L, null, null, false, intent, null, intakeOptimize, null);
+                42L, null, null, false, intent, null, intakeOptimize, null, null);
     }
 
     @Test
