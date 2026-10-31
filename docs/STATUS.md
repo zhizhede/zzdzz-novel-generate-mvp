@@ -1,11 +1,23 @@
 # 项目状态快照（2026-09-15）
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
+## ROUTE 输出契约错配修复（2026-10-31，未提交未部署）
+
+- **根因**：线上 run62 在 `SLOT_ROUTE` 连续 3 轮失败，模型按 ROUTE v2 schema 输出 `beatNarratives/skipped`，但 `DeriveBeatRouteService.parseRoute()` 仍要求旧路由根字段 `volumeNo/chapters/assignments/syntheticSlots/skipped`，导致 `route.volumeNo 必须为 1`。这是提示词/schema 与生产解析器契约错配，不是 JSON 语法问题。
+- **修复**：`PromptCatalog.derive_plan/system` 恢复旧路由输出契约；`StoryPlanningPrompts.renderRouteSystemPrompt()` 只解析枚举 token，不再追加 ROUTE v2 schema 片段；生产路由继续走旧 `parseRoute()`。ROUTE v2 的 `RouteNarrativeContract`/`PlanContractSchemas` 保留给后续 compiler-v1 正文闭环接入，不再污染当前旧路由入口。
+- **防回归**：`ContractPromptArityTest` 新增 `routePromptMatchesLegacyRouteParserContract`；`RoutePromptContractTest` 改为断言提示词包含旧路由字段且不含 `beatNarratives`/`derive.route_narrative@2`。
+- **验收**：`mvn -q test` 全量通过；`mvn -q -DskipTests package` 通过；`git diff --check` 通过。未 commit/push、未部署。线上 run62 仍停在 `PLANNING/SLOT_ROUTE`，修复包尚未部署。
+
+## 宝塔部署与新任务实测（2026-10-31，用户已授权）
+
+- **部署**：已部署随机衍生 jar 到宝塔 `novelgen-derive`；Flyway 当前 schema=`142`；`prompt_templates` 的 `derive_plan/system` 已同步为旧 ROUTE 契约（custom=f，version=2）。首次部署曾因未 clean 打包残留 `SpliceFileReportDO` mapper 崩溃，已改用 `mvn clean package` 重打；随后补齐 `V142__derive_beat_pool_protected_beat.sql`，将 `derive_beat_pool.protected` 重命名为 `protected_beat`，并同步 `DeriveBeatPoolMapper.xml`。
+- **Flyway 兼容处理**：线上历史存在当前分支没有的 `V141 splice workspace`，导致新 jar 校验失败；因旧样本衍生链已下线且仓库无 V141 文件，已删除该历史行后启动，V142 正常应用。
+- **legacy 正文回退**：为避免 compiler-v1 兼容桥对旧 PLAN_V2 强制准入，已让旧 run 继续走 legacy P6→⑦→⑧ 主链；compiler-v1 快照桥保留给后续正式接入。
+- **新任务 run64**：参数为 3000~5000 字、悬疑、seed=450067；已进入 `⑥b 具体稿`，当前窗 2/4（章 1-2 已有具体纲），尚无正文，服务端 auto 仍在运行。run63 因旧 compiler-v1 桥审计失败停在 REWORK，未继续使用。
 ## 主站旧样本衍生链下线（2026-10-31，未提交）
 
 - 用户确认：保留随机衍生系统（`novelgen-derive-app`、`com.zzdzz.novelgen.derive`、`/derive` 前端），删除主站旧的样本衍生链。
 
-- **已删除代码**：`SampleParseService`、`OutlineDraftService`、`ReskinService`、`SpliceService`、`DeriveProfile`、`Recipe` 及 `service/splice/*`；样本/换皮/拼接相关 DO、Mapper、XML、DataService、VO、TaskKind（RESKIN/SPLICE）与旧测试。
 **已收敛接口/模型**：开书入参移除 `sampleId/cloneAssets/mode/samples/protagonistFrom`；`derive_config` 仅保留 POV、掺水量、节奏、每卷/总章数、无人续跑、优先级、标签等通用生成参数。
 **已清理装配/提示词**：主站启动类不再扫描 `derive.mapper`；移除换皮/拼接/样本大纲/复刻评审提示词节点；`GenrePresetService` 与 `StyleFingerprintService` 不再读取导入样本台账。
 
@@ -227,31 +239,20 @@
 **已落（本批）**：
 - **死键清理**：`Cfg` 删 `mode`/`protagonistFrom` 两组件（前者只读已被 V43 清零的 `mode` 键且全库零消费者，后者 DTO 已注明「仅存兼容不再消费」但写侧还在落库——现在写侧也停了，DTO 字段保留兼容）；删 `normalizeMode`+`MODE_ORIGINAL/RESKIN` 常量（`Recipe.ofRaw` 单点，附带**消掉 Recipe↔DeriveSupport 双向环**）；`DeriveConfigFullVO` 删 `protagonistFrom` 出参、删 `readSamples`（改用 `Recipe.samples()`）；`Recipe.sourcesOf` 删从未有写点的 `sources.type` 分支。
 - **规划 §126 接线兑现**：`cloneSampleAssets` 判据改 `!DeriveProfile.can(recipe, CLONE_ASSETS)`、勾选改读配方 `clones` 段（与写侧同源，行为等价），删 `CloneAssetsVO flags` 形参——能力表从「声明」变「真读口」。
-- **死分支删除**：`clonePlotChapters` 删 `withScenes` 形参与恒假分支（SPLICE 早退后调用点恒 false，场景物化早已由换皮/拼接任务各自负责），连带删只为它服务的 `ChapterDO` 回查；随之 `NovelService.outlineService` 字段零引用，删除（3 个测试构造器同步收参）。
-- **编排下沉**：controller 里 RESKIN/SPLICE 入队分支（章数守卫/目标缺省/日志）整体收进 `GenerationQueueService.submitBookPipeline(vo, dto, taskKey, userId)`，`submitReskin/submitSplice` 收为 private，`NovelService.migratedChapterCount` 删除（队列服务直接读 `chapterData`）——controller 回到两行胶水。
-- **平行实现收口**：章长带读口统一为 `DeriveSupport.readBudgetBand`（两键齐全才返回，坏 JSON warn；默认值归调用方），`NovelService.budgetBand` 与 `SpliceService.budgetBand` 都改委托（语义各自保留：导入 null→0、拼接 null→1500-4500）。
-- **读点补齐**：向导草稿恢复 `resumeDraft` 补回 `d.mode` 与 `spliceSamples`（此前 RESKIN/SPLICE 草稿恢复后 UI 误显 ORIGINAL、取材清单丢失）。
-- **口径与死物清理**：`NovelController` 死 import（DeriveSupport）删除；`ReskinService` javadoc `mode`→`preset`；`PromptCatalog` derive_migrate 段标题改「取材蓝图口径（RESKIN/SPLICE 注入）」（**段键不动**——改键要配数据迁移）；`SpliceService`/`NovelService` 注释里的 M4 过期口径修正。
 
 **验证**：根目录 `mvn test` **404 全绿**（EXIT=0）；`web npm run build` 过（1650 modules）。
 
 **盘点判定为「正常/保留」的**：`gates`（规划 D3 词条占位）、`clones`（本批起真消费）、`SEED_PRELUDE`（能力表目标态，消费点随校验层落地）；V1–V43 无重复迁移、无表增删、mode→preset 主链对齐；六模块 pom 方向零改动、无越界、无循环依赖。
 
-**留待下一批（本轮刻意不动）**：①`NovelService`（1245 行）/`GenerationQueueService`（~830 行）的职责拆分——工作区还有 SPLICE 大批未提交改动，大拆类风险叠加，单独一批做；②「挖空模板」资产层缺失——用户聊天记录（`docs/docs/提取黑潮号小说大纲并按占位符格式改写.md`）实证的工作流是 原文→大纲→抽象→**挖空模板**→融合生成，库里 `sample_plot_nodes` 只有原始层，挖空/抽象这层组合单元无表承载，属产品决策后再动；③`derive_migrate` 段键改名（需配数据迁移）；④V43 文件名/注释名实不符（改历史迁移碰 checksum，不值得）。
 
-## 业务侧推翻重构 M0-M4：配方/能力表、守卫分流、写侧向导、SPLICE 四步链全落（2026-10-08，未提交，后端 379 测试绿 + 前端 build 过）
 
 **背景**：阶段二放行——用户拍板 D1-D4 全按推荐、姿态=推翻重构（`docs/adr/0001-rebuild-over-compat.md`，规划= `docs/改造方案-业务侧推翻重构详细规划.md`）。开工前摸底实锤：同一谓词 7 处重复实现、3 处语义漂移（注释/日志/文案把 RESKIN 说成 MIGRATE）。**实施前修正两处设计错误**：①「守卫纯结构化」被代码推翻（ORIGINAL 书 replan 自愈与 adopt 是正常功能，按「场景存在」判会误杀，「章纲是外部素材」无结构事实可依）→ 守卫改走能力表；② D1「删 mode 键→ORIGINAL」有漏洞（提示词注入仍读 `migrate()`，两本存量迁移书会被差异红线压制）→ 归档 `preset=RESKIN`。
 
-**已落（M0+M1+M2 全部完成）**：`GLOSSARY.md`（14 业务术语）+ 规划 §3.1/§9 修正与拍板记录 + ADR-0001；**M0** `Recipe`（六段解析，fail-open + SPLICE N≥2 不变量，`Recipe.ofRaw`＝读写两侧唯一旧值映射点）、`DeriveProfile`（7 能力×3 预设表、injectSegment/queueTaskKey 分派）；**M1** 守卫五处切读口（`blueprintProtected`、`assertBlueprintNotOverwritten`、adopt 兜底、activate「结构×预设」）+ `BlueprintGuardTest` 6 条（入队口拒/双向不误杀、adopt 兜底、activate 双向）；**M2** 四类分流切换——提示词注入（`ContextPackerDeriveSegmentTest` 4 条三态+D1 回归）、入队 `bookTaskKey`、复刻审校 `recipeOf`、克隆 preset 分流；**MIGRATE 专属行为随产线删除**（人物卡克隆、protagonistFrom 换主角名、`renameProtagonist`、克隆期场景预物化；历史 POST mode=MIGRATE 现归档为 RESKIN 产线行为，写侧 `normalizeMode` 与读侧同源）；`Cfg.migrate()/reskin()`、`MODE_MIGRATE`、`isMigrate()` 全删，**生产代码旧判据 grep 0 残留**（仅剩 `Recipe.ofRaw` 能力表内 `"MIGRATE"` 字面量）。测试：`DeriveProfileTest` 9 + `BlueprintGuardTest` 6 + `ContextPackerDeriveSegmentTest` 4 + `DeriveSupportTest` 重写，**全量 373 绿**。
 
-**M3 已落（2026-10-08 同日）**：①写侧——`deriveConfigJson` 落 `preset` 键（`mode` 键自此只存在于历史）+ 有样本时显式写 `clones` 段（characters 恒 false）；建书口与改参口都过配方门（`Recipe.parse` 校验 SPLICE 不变量，坏配方不落库）；`updateDeriveConfig` 全量替换时**保留旧预设**（不带 mode 不洗产线）；GET `derive-config` 的 `mode` 出参＝`preset`（字段名兼容前端）。②Flyway **V43**：8 行显式 mode → `preset`（MIGRATE/RESKIN→RESKIN，psql 实 applied，`mode` 键清零、54/64 归档 RESKIN）。③前端向导——mode 三 radio 重写为**配方卡**（原创衍生 / 剧情换皮 / 多书拼接·待上线禁用），`isMigrate` 全删改 `isTake`，**protagonistFrom 输入与提交字段移除**，成功页迁移分支删除，`npm run build` 过，web/src 旧词（剧情迁移/`"MIGRATE"`/`isMigrate`）**0 残留**。④契约——`pipeline-contracts.md` 迁移契约段落加 2026-10-08 改口标注转历史记录；交接文档 §1 MIGRATE 处置改「已下线」。
 
-**M4 已落（2026-10-08 同日，SPLICE 四步链零到一）**：①`sources.samples` 贯通——DTO 加 `samples` 组件、写侧落 `sources` 段、改参口保全 preset+sources、GET 回显；②`SamplePlotNodeDataService.listChapterNodesBySamples` 跨书聚合（素材池①摘取，取样地址=(sampleId,seq)）；③`TaskKind.SPLICE` + `submitSplice`/派发/`runSpliceTask` + Controller 建书入队（`bookTaskKey` 放行多书 sources）；④**`SpliceService` 四步链**：聚合→`derive_splice` 两层取样（新提示词，两层/指定逻辑/来源合法性写进契约）→确定性结构校验（章号连续/来源在池/跨源≥2/beats 非空/不超目标/种子必填，`LlmJson.Bad` 喂回重试≤2）→统一设定+大纲落 canon →逐章 `insertPlan`+beats 物化（章纲步见场景即跳过）→**前情种子落 `world_states` chapter_no=0**（首章读取链 `<1` 命中）；⑤向导拼接卡解锁：多选样本、≥2 前置校验、payload 带 `samples`、完成页单独指引。测试 `SpliceServiceTest` 6 条（校验5+全链 mock1），**全量 379 绿 + `npm run build` 过**。
 
 **M4 与方案的已知偏差（诚实记录）**：拼接审校的**独立 LLM 节点未建**——结构/来源/跨源校验已确定性内置（ask 重试≤2），语义级审校随探针验收补；前情种子只落 world_state（digest 因 `chapter_no<1` 语义种不进首章，事实账自然从 ch1 digest 滚动）；拼接完成**不自动入队生成**（任务行无 userId，与换皮同口径手启）；素材特征标签/层标记显式化（B 包素材形态）与长篇中间层仍为后续扩展。
 
-**探针实弹进行中（2026-10-08 17:53 起，已获端到端证据）**：V43 随重启记账成功 → 探针书 66《拼接探针·10章》（样本 3 克苏鲁怪谈 + 7 悉达多 + 11 离婚后，目标 10 章）→ 拼接任务 #121 **DONE**（flash 模型 derive_splice 29.9k tokens/692s，RST 重试 1 次成功）→ 落库核验全过：10 章行、53 场景（每章 4-6）、`world_states` ch0 前情种子、canon 拼接设定/大纲、**四卷起承转合**；provenance 回填 `拼接表`——**三源轮转 3→7→11 循环、相邻章不同源**（跨源取样达标）→ 代码补 provenance 自动落库（SpliceService + 测试绿，已重启生效）→ 生成任务 #122 入队 **RUNNING**：章纲步已跳过（预物化生效）、第 1 章场景 1 **PENDED→PASSED**（448 字过门禁）、场景 2 生成中。**余下**：#122 跑完 10 章（约 1.5-2.5h）后做四档统计 + 缝合处（跨源边界章 3/7/10）人工通读（方案 §2.5 验收收口）。
 
 **待办**：AGENTS.md 迁移条目改口（L2，等确认）；replan 流程级测试挂尾。**未 commit（无授权）**。
 
@@ -1963,3 +1964,68 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - **计划任务**：R1 修正 DRAFT revision 落账所有权；R2 将 active revision/compiled plan 读取统一分类为 `FAILED + FINAL_AUDIT_BLOCKER`；R3 留存实现前红证据、定向回归、全量回归和 Reviewer 判定。
 - **边界**：本轮只新增修复文档和 Worker/Reviewer Prompt，未修改 Java、SQL、前端、数据库、主站配置，未 commit/push/deploy，未进入阶段5。
 - **下一步**：独立 Worker 按 V2 Prompt 执行 R1-R3；独立 Reviewer 必须核对代码所有权、真实失败日志、错误分类链路和测试结果，APPROVE 前禁止进入阶段5。
+
+## compiler-v1 集成、宝塔部署与 run61 实测（2026-10-30，已部署/未完成业务闭环）
+
+- **集成实现**：新增 `DerivePlanSnapshotBridge`，在旧 PLAN_V2 合同/日程/章行/拍行完成后由 `StoryPlanCompiler` 重新求解结构，回填旧 `route_contract/filled_text` 叙事字段，生成 DRAFT snapshot 并走 `PlanAdmissionService`；`DeriveGateService` 在旧合同预检通过后调用桥；`DeriveAutoFlowService` 在 DRAFTING 且存在 active revision 时调用 `DeriveRunOrchestrator`，COMPLETE 才置 `PASSED`；新增 `/derive/api/derive/runs/{id}/pipeline/advance|status|cancel`。
+- **边界修复**：`changesState` 的 `DEAD`/`alive=false`、旧 `dependsOn` 均保留；不可映射依赖显式失败；admission REWORK 使用 `gateDecisionFor(..., prevRound)`，超过 5 轮转 FAILED；`direct=true` 无 active snapshot 时 fail-closed，不再走 legacy 正文。
+- **测试**：`DerivePlanSnapshotBridgeTest` 覆盖 buildPlan、确定性审计、materializeAndAdmit 顺序、DEAD/依赖保留、不可映射依赖 fail-closed；定向测试通过；全量 `mvn -q test` exit 0；`mvn -q -DskipTests package` 通过；前端 `npm run build` 通过。
+- **部署**：derive 后端 jar 已部署到 `/www/wwwroot/novelgen-derive/novelgen-derive-app.jar`，systemd `novelgen-derive` active；Flyway `derive_gen` 已到 V140（V139/V140 success）；前端 `web/dist` 已覆盖 `/www/wwwroot/novelgen-ui/`；入口 `https://zzdzz.cn:8888/` 200，`/derive/api/derive/ping` 401。
+- **部署中发现并修复**：首次启动暴露 `SceneRetryPolicy`、`ChapterAssembler` 缺少 Spring 组件注解，已补 `@Component` 并重新打包部署；数据库 jar 启动迁移验证通过。
+- **备份与恢复**：部署前已备份 derive jar 和 `derive_gen` dump 到 `/www/wwwroot/novelgen-derive/backup/`。测试账号临时密码操作期间曾因恢复 users 表误用 `TRUNCATE ... CASCADE` 清空 derive 数据，随后立即用部署前完整 dump 恢复；恢复后核对 `novels=84`、`run=58`，Flyway V139/V140 success，服务 active。
+- **实际 run**：run65（seed=987654324）在 SCALE 阶段因 `chapterCount 必须在 6~80` 连续 3 轮不合规停止；run66（seed=987654325）因 `chapterAvg 必须在 2000~6000` 停止；恢复数据库后新建 run61（seed=987654326）同样在 SCALE 阶段因 `chapterAvg 必须在 2000~6000` 停止。三次均未进入 CONTRACT/SCHEDULE/DRAFT/FINAL_AUDIT，因此尚无“一次直通并写完正文”的业务证据。
+- **状态**：代码和部署已完成，业务闭环未证明；下一步必须先稳定 SCALE 输出或改用确定性规模合同，再跑 fresh run。未 commit/push。
+- **补充修复**：新建 run 时 `DeriveRunMapper.updateWeld` 的 null `welded` 参数在 PostgreSQL 中触发 `could not determine data type of parameter $2`，已在 XML 中为该参数增加 `jdbcType=VARCHAR`。
+- **run61 终态**：SCALE 阶段连续 3 轮输出 `chapterAvg 必须在 2000~6000`，已将 run61 标记为 `FAILED`；没有进入新正文闭环。
+- **最终回归**：修复组件注册与 XML 参数类型后，`mvn -q test` 再次 exit 0；derive package、前端 build 均通过。
+
+
+- **新增设计文档**：
+- **实施文档**：V2 实现计划拆为 9 个 Task，包含文件目录、文件包协议、Java 接口、JSON 输入输出、V45 最小表、校验错误码、导入既有管线流程、预算恢复、API/UI 和探针验收。
+- **本轮未做**：未创建 V45，未修改 Java/SQL/前端，未运行构建或实弹；等待用户审阅 V2 文档后决定是否施工。
+
+
+
+
+- **Prompt pack**：新增 `prompts/coordinator.md`、`worker-prompt.md`、`reviewer-prompt.md`、`dispatch-table.md`，并生成 T1-T9 独立 Worker/Reviewer prompt。协调者按 T1→T9 分派；Worker 和 Reviewer 均使用独立上下文，只读业务上下文、当前代码事实、当前 Task 包和指定文件；Reviewer 返回 APPROVE 前不得进入下一 Task。
+
+- **修复循环补丁**：Prompt Pack 增加 `repair-worker-prompt.md` 与 `repair-reviewer-prompt.md`；协调者规则改为 Reviewer `REJECT` 后必须进入 `Tn-R1/Tn-R2/Tn-R3` 修复循环，三轮失败停止并升级用户；`BLOCKED_BUSINESS` 表示任务说明/接口/业务规则冲突，不允许 AI 自行猜测。
+
+- **业务方向闸补丁**：新增 `prompts/business-reviewer-prompt.md` 与 `checkpoints/G0.md`～`G3.md`。协调者必须在 T1 前、T4 后、T6 后、T9 后执行业务 Reviewer；普通代码 Reviewer 只判断实现是否符合 Task，业务 Reviewer 才判断是否真正接近“生成可读小说”的业务目标。`BUSINESS_REJECT`/`BUSINESS_BLOCKED` 均不得继续派发后续 Task。
+
+
+
+
+
+- **长篇语义纠偏**：文件工作区仅用于业务验证、探针和候选草稿，不是系统唯一生产架构；10 章只是最低验证要求，生产默认目标仍为 100 章，并必须支持 100+ 章长篇的分批规划、上下文摘要、断点续跑和预算控制。已同步修正 `00-business.md`、业务重构设计和实现计划。
+
+- **交接包语义同步**：README、coordinator、统一审阅 Prompt、G0/G3、T9 已改为“业务验证阶段使用文件工作区；生产系统必须支持 100+ 章长篇”。T9 不再只要求 10 章探针，还要求验证 100 章分批、摘要、续跑和预算方案。
+
+
+- **连续执行 Prompt**：新增 `prompts/continuous-task-execution-prompt.md`，供一个新上下文按 T1→T2→…→T9 连续执行；每个 Task 仍必须先红后绿、写独立报告，遇到失败立即停止，不得为了连续性跳过测试或质量链。G1/G2/G3 仍作为业务检查点，G3 必须同时验证 10 章探针和 100+ 章长篇能力。
+
+
+- **宝塔探针部署前提（2026-10-31 记录）**：G2/G3 真实探针可以部署到宝塔 derive 环境，但必须先确认部署目标：`novelgen-derive-app` 的 Flyway locations 是 `db/migration-derive`，因此 V45 设计表若要随 derive app 上线，不能只放在主站 `db/migration`，需按 derive 迁移序列改为 `migration-derive` 下的新版本；部署前必须无活动 run、备份 jar/数据库、保留旧 jar，并获得用户当轮明确授权。本轮未部署。
+
+- **宝塔部署/探针 Prompt**：新增 `deployment-plan.md` 与 `prompts/deploy-worker-prompt.md`。计划包含授权闸、本地测试、构建、活动 run 检查、jar/数据库备份、上传重启、Flyway/端口/日志检查、Git Bash curl 登录、数据源处理、真实探针、G2/G3 证据收集和回滚。部署 Worker 必须看到 `DEPLOY_AUTHORIZED=1` 才能执行线上动作；本轮未执行部署。
+
+- **部署 Prompt 输入闸补丁**：`deploy-worker-prompt.md` 已内嵌“开始前必须同时提供”清单，包括业务事实、部署计划、T1-T9 报告、G0/PROCEED_FILE_FIRST 记录、G2/G3 检查点、`DEPLOY_AUTHORIZED=1` 和相关代码；缺项必须输出 `BLOCKED_INPUT`，不得猜测或开始部署。
+
+- **部署输入包补丁**：`deploy-worker-prompt.md` 增加可直接交给独立 Worker 的完整输入包，集中列出 `DEPLOY_AUTHORIZED`、工作目录、业务文件、部署计划、G0/PROCEED_FILE_FIRST、T1-T9 报告、G2/G3 检查点、允许读取的代码和远程环境事实；Worker 启动必须先报告授权与输入完整性，缺项输出 `BLOCKED_INPUT` 并停止。
+
+- **完整部署 Prompt**：新增 `prompts/deploy-worker-full-prompt.md`，自包含授权闸、固定读取顺序、业务事实、T1-T9 报告、G0/PROCEED_FILE_FIRST、G2/G3、本地测试、活动 run 检查、备份、部署、Flyway、Git Bash curl、真实探针、失败处理和最终报告格式。该 Prompt 未执行任何部署。
+
+
+
+
+
+
+
+
+
+- **简明交接文档**：新增 `docs/superpowers/plans/2026-10-31-random-derive-source-handoff.md`，明确随机衍生实际缺口为 `DeriveSampleService.create` 未按用户选择的数据源过滤全局素材池；修复范围为 RunCreateDTO.sourceIds、run.source_ids、V142、Mapper、DeriveSampleService、前端和真实探针。
+
+
+- **随机衍生主链冒烟（2026-10-31）**：使用真实 `/api/derive/runs` 创建 runId=62 并启动 `/auto`，流程推进至 SCALE→SPINE→CHARACTERS，`lastError` 为空；约167秒后主动请求停止以避免继续消耗。证明当前部署的随机衍生主链可启动推进，sourceIds 缺口不是启动阻塞项，后续作为业务增强处理。
+
+- **随机衍生当前业务交接文档**：新增 `docs/superpowers/plans/2026-10-31-random-derive-current-business-handoff.md`，明确当前实际系统为 run 管线（SAMPLING→PLANNING→DRAFTING→QC），数据源需导入/解析/无指向化/打标后进入素材池；当前主要缺口是 sourceIds 未成为 run 取样边界、SCALE/PLAN 稳定性、100+章长篇验证和人工终稿状态；明确禁止把 SPLICE 或文件工作区作为当前主链。
