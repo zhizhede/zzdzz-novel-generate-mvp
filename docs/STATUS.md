@@ -1,6 +1,20 @@
 # 项目状态快照（2026-09-15）
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
+
+## 通用故事合同 V2 施工进展（2026-10-31，未提交未部署，因设计冲突暂停）
+
+- 已按 V2 计划完成 Task 1-7 的核心代码与单测：义务证据模型/索引、V145 证据表与 Mapper、义务 payload 全链路保留、⑥b 证据窗口校验、闭合合同/作用域、闭合窗口校验、字数预算护栏、direct 确定性审计入口、完整 StoryKernel 装配器、P6 完整 kernel、QC 证据索引审计与证据落库。
+- 关键变更：新增 `StoryObligationEvidence`、`StoryEvidenceIndex`、`StoryKernelAssembler`、`StoryClosureContract`、`WindowObligationScope`、`ClosureWindowValidator`、`WordBudgetGuard`；新增 derive `V145__derive_story_obligation_evidence.sql`；`DraftWindowObligationValidator` 不再用正文 `contains(targetKey)` 判断义务；`DeriveQcService`/`GenreQcAuditor` 改用结构化证据。
+- 全量验证：`mvn -q test` 通过。未执行最终 package，未 commit、未 push、未部署。
+- 暂停原因（设计/施工冲突，需用户决策）：V2 计划要求 `RomanceProfile.parseContract(...)` 按现有 `GenreProfile` 返回 `StoryContract`，但 V2 设计同时要求言情合同只含 `relationshipStart/misunderstanding/attachmentEscalation/conflictPeak/confession/reconciliation/relationshipClosure`，且不得把悬疑字段塞进通用核心。当前 `StoryContract` 是悬疑专用合同（cast/truth/cues/threads 等），没有承载这些言情字段的通用合同模型或落库位置。若继续实现，必须先决定：新增通用 `GenreContract`/`RomanceContract` 与持久化方案，还是调整 `GenreProfile` 返回类型。未获该决策前不猜测、不继续 Task 8-11。
+- 2026-10-31 用户已补充决议：`RomanceProfile` 必须返回独立 `RomanceContract`，不得返回 `StoryContract`；冲突时继续停止并报告。重新读取修订版 V2 设计/计划后确认：返回类型冲突已解决，但 `RomanceContract` 的七个字段仍只有名称，没有字段类型/章号/目标 key/proof/关系线 key 等合同结构定义；该结构直接决定 codec JSON、义务投影和生产链读写。继续 Task 7A/8 前仍需用户明确合同模型，不能自行猜测。
+- 2026-10-31 用户更新 V2 设计后，已按修订版 Task 7A/8 继续施工：新增 `GenreContract`/`GenreContractCodec`/`GenreContractCodecRegistry`、`MysteryContract`/`MysteryCodec`、独立 `RomanceContract`/`RomanceCodec`/`RomanceProfile`/`RomanceGateAuditor`/`RomanceQcAuditor`，新增 derive `V146__derive_genre_contract.sql` 与 `derive_genre_contract` 数据层；`GenreProfile` 已泛型化为 `GenreProfile<C extends GenreContract>`，`MysteryProfile.parseContract` 返回 `MysteryContract`，`RomanceProfile.parseContract` 返回 `RomanceContract`，不再构造或强转 `StoryContract`。
+- 同轮接入：`DeriveContractService` 增加类型合同读取/冻结入口并在旧悬疑链兼容写入 V146；`DeriveChapterScheduleService` 可按 `RomanceContract` 投影通用日程与义务；`DeriveBeatRouteService` 将言情关系线/角色纳入合法引用；`DeriveDraftService` 支持言情 `romanceEvents` 提示词、解析、证据抽取与 `plan_contract` 持久化；P6/QC 按类型合同调用 `auditGate/auditQc`，言情不走悬疑审计。
+- 验证：`mvn -q test` 通过；`mvn -q -DskipTests package` 通过；`git diff --check` 通过。未 commit、未 push、未部署。Task 9 旧 run 兼容回归、Task 10/11 真实探针仍未执行。
+- 2026-10-31 宝塔实弹部署与 run66 测试（用户已授权）：已部署主站 `novelgen-app.jar`、随机衍生 `novelgen-derive-app.jar` 与 `web/dist`；部署前已备份 derive jar 与 `derive_gen` dump 到 `/www/wwwroot/novelgen-derive/backup/`。首次启动 V145 因 PostgreSQL 不允许表级 UNIQUE 内使用表达式而失败，已改为 `CREATE UNIQUE INDEX ... COALESCE(...)` 并重新部署；随后 Flyway 成功应用 V145/V146，线上 schema=`146`，`derive_story_obligation_evidence`、`derive_genre_contract` 均已创建。
+- run66 实测：使用悬疑参数 `3000~5000 / seed=450067 / direct=true` 创建并启动，完成 SCALE→SPINE→VOLUMES→CHARACTERS→SLOT_ROUTE→⑥b；义务 13 条、义务证据 6 条已落库。修复旧逐字 `motiveTag`/真凶名硬校验后重跑，仍按新窗口校验在第5章拦截 `CH5:FINAL_CLOSURE:TRUTH`、`CH5:FINAL_CLOSURE:V1`、`CH5:LOCAL_CLOSURE:V1` 缺证据，说明新表与窗口证据链已进入真实生产路径；run66 未进入正文/QC。登录临时口令已恢复原 hash。未 commit、未 push。
+- 部署中发现并修复主站启动回归：`NovelGenApplication` 未扫描 `com.zzdzz.novelgen.derive.mapper`，新 jar 启动时报 `DerivePlanSnapshotMapper` 缺失；已补 `@MapperScan` 两个包并使用 `FullyQualifiedAnnotationBeanNameGenerator`，重新部署后主站 active、8090 正常启动。最终入口验证：`https://zzdzz.cn:8888/` 返回 200，derive ping 带 Origin 返回 401 JSON，两个 systemd 服务均 active。
 ## ROUTE 输出契约错配修复（2026-10-31，未提交未部署）
 
 - **根因**：线上 run62 在 `SLOT_ROUTE` 连续 3 轮失败，模型按 ROUTE v2 schema 输出 `beatNarratives/skipped`，但 `DeriveBeatRouteService.parseRoute()` 仍要求旧路由根字段 `volumeNo/chapters/assignments/syntheticSlots/skipped`，导致 `route.volumeNo 必须为 1`。这是提示词/schema 与生产解析器契约错配，不是 JSON 语法问题。
@@ -2029,3 +2043,27 @@ JWT 登录维持（重启不掉线）｜SSE 心跳｜异步生成队列（DB 承
 - **随机衍生主链冒烟（2026-10-31）**：使用真实 `/api/derive/runs` 创建 runId=62 并启动 `/auto`，流程推进至 SCALE→SPINE→CHARACTERS，`lastError` 为空；约167秒后主动请求停止以避免继续消耗。证明当前部署的随机衍生主链可启动推进，sourceIds 缺口不是启动阻塞项，后续作为业务增强处理。
 
 - **随机衍生当前业务交接文档**：新增 `docs/superpowers/plans/2026-10-31-random-derive-current-business-handoff.md`，明确当前实际系统为 run 管线（SAMPLING→PLANNING→DRAFTING→QC），数据源需导入/解析/无指向化/打标后进入素材池；当前主要缺口是 sourceIds 未成为 run 取样边界、SCALE/PLAN 稳定性、100+章长篇验证和人工终稿状态；明确禁止把 SPLICE 或文件工作区作为当前主链。
+
+
+## 通用故事合同抽象与义务窗口校验（2026-10-31，未提交）
+
+- **新增通用故事核心**：`derive/story` 下新增 `StoryKernel`、实体/关系/状态/线程/事件/义务/约束/闭合记录类型；核心记录不包含 `culprit`、`motive`、`method`、`revealChapter` 等悬疑专属字段，集合均做 null-safe copy 与唯一键校验。
+- **类型插件层**：新增 `GenreProfile`、`GenreProfileRegistry`、`MysteryProfile`；合同解析/冻结校验统一走悬疑插件，线索 plant/payoff 与真相揭示投影为通用 `StoryObligation`。
+- **义务投影**：新增 `StoryObligationProjector`，将类型合同、角色合同、卷合同与章级日程合并为统一义务键 `CH{chapter}:{kind}:{target}`；重复键、日程外章号直接失败。
+- **run 类型元数据**：新增 derive `V143__derive_genre_metadata.sql`（`run.genre/story_kernel_version/genre_contract_version`），`RunDO`、`RunCreateDTO`、`DeriveRunMapper.xml` 与 `DeriveSampleService` 已接入；缺省 `MYSTERY`，未知类型在采样前拒绝。
+- **义务持久化**：新增 derive `V144__derive_story_obligation.sql`、`DeriveStoryObligationDO`、`DeriveStoryObligationMapper`；`DeriveChapterScheduleService.persist` 在日程写入后删除旧义务并重新投影插入。
+- **⑥b 窗口校验**：新增 `DraftWindowObligationValidator`，覆盖提前 payoff、重复 payoff、缺必需义务、禁令违规、状态冲突、知识读前无写、合同外实体；`DeriveDraftService` 在 BATCH 解析成功后调用，失败以 `OBLIGATION_WINDOW` 回喂当前窗回炉。
+- **P6/QC 分层审计**：新增 `GenreGateAuditor/MysteryGateAuditor` 与 `GenreQcAuditor/MysteryQcAuditor`；P6 在合同预检中加入义务/线程闭合审计，QC 在脚本/LLM 合并问题后加入正文义务与世界状态审计，旧 run 无义务行时保持原行为。
+- **旧 run 兼容**：新增 `LegacyMysteryAdapter`，旧 run 无 `genre` 列时固定按 `MYSTERY` 读取 `STORY_CONTRACT` 快照并可投影通用义务；旧合同、旧日程、旧 P6/QC 读路径保留。
+- **验收**：`mvn -q test` 全量通过；`mvn -q -DskipTests package` 通过；`git diff --check` 通过。未 commit、未 push、未部署。
+- **遗留**：Task 11/12 真实探针（悬疑/言情 4 章）依赖线上 derive API 与用户明确部署/运行授权，本轮未执行；非悬疑 `RomanceProfile` 尚未接入生产合同链，当前仅完成通用核心、悬疑插件与义务窗口校验主线。
+
+
+## 宝塔部署与 run65 义务校验实测（2026-10-31，用户已授权）
+
+- **部署**：已构建并部署随机衍生后端 jar 与 `web/dist`；服务 `novelgen-derive` active，jar mtime=`2026-10-31 19:41:09 +0800`，入口 `https://zzdzz.cn:8888/` 返回 200，`/derive/api/derive/ping` 带 Origin 返回未登录 401 JSON（非 CORS 403）。
+- **数据库**：部署前已备份 derive jar 与 `derive_gen` dump 到 `/www/wwwroot/novelgen-derive/backup/`（时间戳 `20261031-193839`）；Flyway 自动应用 `V143__derive_genre_metadata`、`V144__derive_story_obligation`，当前 schema=`144`；`derive_story_obligation` 表、唯一键 `(run_id, obligation_key)` 与章节索引均已创建。
+- **登录/建 run**：临时重置 derive admin 口令完成登录与测试后已恢复原 hash；创建 `runId=65`，参数 `3000~5000` 字、悬疑、`seed=450067`、`genre=MYSTERY`，`direct=true` 启动无人值守。
+- **义务落库证据**：run65 生成 9 条义务：章2/3/4 的 `PLANT_THREAD`、章5 的 4 条 `PAYOFF_THREAD` 与 `FINAL_CLOSURE:TRUTH`，状态均为 `PLANNED`。
+- **窗口校验证据**：run65 二次续跑进入 ⑥b 后被新校验器拦截：`OBLIGATION_WINDOW：OBLIGATION_MISSING：窗口缺少义务 CH5:FINAL_CLOSURE:TRUTH`，证明义务表已进入 BATCH 窗口校验并在 P6 前拦截缺收口。
+- **未完成项**：run65 未进入正文/QC，当前停在 PLANNING 的 ⑥b 重试失败；失败原因是揭示章模型未按合同写入 `motiveTag`，属于现有合同闭合约束，不是新表创建失败。未 commit、未 push。
