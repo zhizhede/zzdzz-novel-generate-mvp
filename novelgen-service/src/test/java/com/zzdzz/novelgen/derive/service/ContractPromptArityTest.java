@@ -70,10 +70,6 @@ class ContractPromptArityTest {
             assertTrue(StoryPlanningPrompts.ROUTE.contains(kind.name()),
                     "ROUTE 提示词缺少 StateChangeKind: " + kind.name());
         }
-        for (PlanContracts.ThreadEffectKind kind : PlanContracts.ThreadEffectKind.values()) {
-            assertTrue(StoryPlanningPrompts.ROUTE.contains(kind.name()),
-                    "ROUTE 提示词缺少 ThreadEffectKind: " + kind.name());
-        }
     }
 
     @Test
@@ -86,6 +82,20 @@ class ContractPromptArityTest {
         assertEquals(1, entries.size(), "derive_plan/system 必须且只能登记一条");
         assertEquals(StoryPlanningPrompts.ROUTE_TEMPLATE, PromptCatalog.contentOf("derive_plan", "system"),
                 "PromptCatalog 与 StoryPlanningPrompts.ROUTE 必须逐字一致");
+    }
+
+    @Test
+    void routePromptMatchesLegacyRouteParserContract() {
+        String route = StoryPlanningPrompts.ROUTE;
+
+        assertTrue(route.contains("\"volumeNo\""), "ROUTE 必须要求旧路由解析器的 volumeNo");
+        assertTrue(route.contains("\"chapters\""), "ROUTE 必须要求旧路由解析器的 chapters");
+        assertTrue(route.contains("\"assignments\""), "ROUTE 必须要求旧路由解析器的 assignments");
+        assertTrue(route.contains("\"syntheticSlots\""), "ROUTE 必须要求旧路由解析器的 syntheticSlots");
+        assertFalse(route.contains("beatNarratives"),
+                "ROUTE 不得混入 ROUTE v2 叙事契约，旧解析器无法消费该结构");
+        assertFalse(route.contains("derive.route_narrative@2"),
+                "ROUTE 不得同时声明两套输出契约");
     }
 
     @Test

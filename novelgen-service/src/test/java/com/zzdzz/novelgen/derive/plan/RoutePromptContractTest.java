@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** ROUTE v2 提示词契约：模板 token、完整枚举与渲染后 schema 片段。 */
+/** ROUTE 提示词契约：模板 token、完整枚举与旧路由解析器字段。 */
 class RoutePromptContractTest {
 
     private static final Pattern UNRESOLVED_TOKEN = Pattern.compile("\\{\\{[A-Z_]+\\}\\}");
@@ -26,18 +26,19 @@ class RoutePromptContractTest {
     void routePromptForbidsBeatRoleInModelOutput() {
         String rendered = StoryPlanningPrompts.ROUTE;
 
-        assertTrue(rendered.contains("beatRole"), "提示词应说明 beatRole 的禁用口径");
-        assertTrue(rendered.contains("禁止"), "提示词必须明确禁止模型输出结构字段");
-        assertFalse(rendered.contains("\"beatRole\":"), "渲染后的提示词不得包含 legacy beatRole 输出示例");
+        assertTrue(rendered.contains("\"beatRole\""), "旧路由契约必须要求 beatRole 字段");
+        assertTrue(rendered.contains("\"chapterNo\""), "旧路由契约必须要求 chapterNo 字段");
+        assertFalse(rendered.contains("beatNarratives"),
+                "渲染后的 ROUTE 提示词不得混入 ROUTE v2 叙事契约");
     }
 
     @Test
-    void routePromptDefinesStateValueAsArray() {
+    void routePromptDefinesStateValueAsObject() {
         String rendered = StoryPlanningPrompts.ROUTE;
 
-        assertTrue(rendered.contains("stateEffects"), "提示词缺少 stateEffects 字段说明");
-        assertTrue(rendered.contains("数组"), "stateEffects 必须明确为数组");
-        assertTrue(rendered.contains("kind"), "stateEffects 必须说明 kind 字段");
+        assertTrue(rendered.contains("\"requiresState\""), "提示词缺少 requiresState 字段说明");
+        assertTrue(rendered.contains("\"changesState\""), "提示词缺少 changesState 字段说明");
+        assertTrue(rendered.contains("LOCATION"), "提示词必须展开 StateChangeKind 枚举");
     }
 
     @Test
@@ -48,9 +49,8 @@ class RoutePromptContractTest {
 
         assertTrue(rendered.startsWith(resolved),
                 "渲染后的 ROUTE 提示词必须由 catalog 模板解析 token 后得到");
-        assertTrue(rendered.contains(com.zzdzz.novelgen.derive.plan.PlanContractSchemas
-                        .routeNarrative().promptFragment()),
-                "渲染后的 ROUTE 提示词必须包含 ROUTE v2 schema 片段");
+        assertFalse(rendered.contains("derive.route_narrative@2"),
+                "旧路由解析器不允许提示词声明 ROUTE v2 契约");
     }
 
     @Test

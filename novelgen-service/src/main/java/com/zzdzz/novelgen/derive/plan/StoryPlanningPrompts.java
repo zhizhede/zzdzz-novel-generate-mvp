@@ -103,27 +103,25 @@ public final class StoryPlanningPrompts {
               "arcBefore":"…","arcAfter":"…","payoffProof":"…"}]}
             """;
 
-    /** ROUTE v2 的带 token 模板：目录与代码共用同一份文本。 */
+    /** ROUTE 的带 token 模板：目录与代码共用同一份文本。 */
     public static final String ROUTE_TEMPLATE =
             Objects.requireNonNull(PromptCatalog.contentOf(NODE_ROUTE, "system"),
                     "PromptCatalog 缺少 derive_plan/system ROUTE 模板");
 
-    /** ROUTE v2 渲染后的 system prompt：token 已解析并追加 ROUTE v2 schema 片段。 */
+    /** ROUTE 渲染后的 system prompt：token 已解析；输出契约必须与 DeriveBeatRouteService.parseRoute 一致。 */
     public static final String ROUTE = renderRouteSystemPrompt();
 
     /**
-     * 渲染 ROUTE v2 system prompt。
+     * 渲染 ROUTE system prompt。
      *
-     * @return 解析全部枚举 token 并追加 schema 片段后的提示词
+     * @return 解析全部枚举 token 后的提示词；不追加任何第二套输出 schema
      */
     public static String renderRouteSystemPrompt() {
-        String rendered = ROUTE_TEMPLATE
+        return ROUTE_TEMPLATE
                 .replace("{{BEAT_ROLES}}", enumBulletList(PlanContracts.BeatRole.values()))
                 .replace("{{STORY_LAYERS}}", enumBulletList(PlanContracts.StoryLayer.values()))
                 .replace("{{APPEARANCE_MODES}}", enumBulletList(PlanContracts.AppearanceMode.values()))
-                .replace("{{STATE_CHANGE_KINDS}}", enumBulletList(PlanContracts.StateChangeKind.values()))
-                .replace("{{THREAD_EFFECT_KINDS}}", enumBulletList(PlanContracts.ThreadEffectKind.values()));
-        return rendered + "\n\n" + PlanContractSchemas.routeNarrative().promptFragment();
+                .replace("{{STATE_CHANGE_KINDS}}", enumBulletList(PlanContracts.StateChangeKind.values()));
     }
 
     private static String enumBulletList(Enum<?>[] values) {

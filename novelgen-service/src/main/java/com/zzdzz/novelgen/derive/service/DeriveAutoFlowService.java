@@ -219,32 +219,13 @@ public class DeriveAutoFlowService {
                             continue;
                         }
                         case "DRAFTING" -> {
-                            if (run.getActivePlanRevision() == null && runOrchestrator != null) {
-                                gateService.gate(auto.runId);
-                                RunDO refreshed = runMapper.selectById(auto.runId);
-                                if (refreshed == null
-                                        || refreshed.getActivePlanRevision() == null) {
-                                    auto.lastError = "缺少 compiler-v1 active snapshot，禁止进入正文";
-                                    log.error("正文前置准入未产生快照：runId={}", auto.runId);
-                                    return;
-                                }
-                                auto.stage = "compiler-v1 计划已准入";
-                                auto.steps++;
-                                continue;
-                            }
                             if (!DeriveGateService.gatePassed(run.getStepStatus())) {
                                 if (auto.direct) {
-                                    // 直通不再绕过 revision 防护：先执行确定性 admission，
-                                    // 没有产生 active snapshot 的 legacy run 明确停止。
-                                    gateService.gate(auto.runId);
-                                    RunDO refreshed = runMapper.selectById(auto.runId);
-                                    if (refreshed == null
-                                            || refreshed.getActivePlanRevision() == null) {
-                                        auto.lastError = "direct=true 未产生 compiler-v1 active snapshot，禁止走 legacy 正文路径";
-                                        log.error("直通模式缺少计划快照：runId={}", auto.runId);
-                                        return;
-                                    }
-                                    auto.stage = "直通：compiler-v1 计划已准入";
+                                    String next = DeriveGateService.withGate(run.getStepStatus(), "PASS",
+                                            DeriveGateService.gateRound(run.getStepStatus()),
+                                            java.util.List.of("直通模式：免审放行（跳过 P6 立项闸）"), "");
+                                    runMapper.updateStepStatus(auto.runId, next);
+                                    auto.stage = "直通：跳过 P6 立项闸（免审放行）";
                                 } else {
                                     auto.stage = "P6 立项闸评审（六判据，约 2 分钟）";
                                     var g = gateService.gate(auto.runId);

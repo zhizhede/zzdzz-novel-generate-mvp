@@ -35,42 +35,41 @@ public final class PromptCatalog {
 
     private static String routeTemplate() {
         return """
-                你在为当前卷做章节叙事效果路由，不写正文。
+                你在为当前卷做章节功能槽与无指向拍路由，不写正文。
                 输入含卷合同、角色计划、线程账、剩余无指向拍和本卷章功能模板；若带“上轮立项闸减法指令”，它是最高优先级，禁止恢复指令要求删除的案情或关系线。
-                契约标识 derive.route_narrative@2；schemaVersion=2。
-                ROUTE v2 只描述拍的叙事效果，不决定结构字段。
                 要求：
-                1. 只输出 beatNarratives 与 skipped 两个根字段；
-                2. beatNarratives 每项只能包含 beatKey、goal、knowledgeEffects、stateEffects、threadEffects；
-                3. beatKey 必须逐字使用输入给出的剩余拍 key，禁止自造 beat key；
-                4. goal 写该拍要完成的叙事目标，不写章号或拍序号；
-                5. knowledgeEffects 每项包含 characterKeys 与 fact：characterKeys 只能使用输入角色 key，fact 只写正文可感知的事实或现象；
-                6. stateEffects 是数组；每项包含 characterKey、kind、detail，kind 只能取 StateChangeKind 白名单；
-                7. threadEffects 是数组；每项包含 threadKey、effect、detail：threadKey 只能使用输入线程 key，effect 只能取 ThreadEffectKind 白名单；
-                8. skipped 每项只能包含 beatKey 与 reason，reason 必须说明该拍为何不进入本卷；
-                9. 禁止输出 beatRole、chapterNo、seq、storyLayer、appearanceMode、syntheticSlots、chapters 或任何结构字段；
-                10. 禁止自造 thread/clue/person key；线索、人物、章节和拍身份全部由输入或 Java 编译器决定；
-                11. 知识因果必须按人物成立：一条事实首次出现时，只有该拍 knowledgeEffects.characterKeys 中的角色算“已知”；
-                12. 输入若带「返工问题」，必须逐条消除并重新输出完整本卷叙事效果。
-                枚举白名单（模板 token 由代码按 Java 枚举解析；beatRole/storyLayer/appearanceMode 仅供理解输入，不得出现在输出）：
+                1. chapters 必须覆盖本卷全部章号，每章给功能目标、主案推进和必需 beatRole；
+                2. assignments 和 skipped 合起来必须恰好覆盖输入的全部剩余拍 seq，每拍只能出现一次；系统会在输出后按全局拍池重新机械装箱，模型给出的 chapterNo 仅作初值；桥段不足时可用 syntheticSlots 补充新增过渡拍，但禁止复用已有事件或提前揭露终局；forcedSkips 中的 seq 禁止出现在 assignments，系统会自动写入 skipped；
+                3. 每章至少分配1拍；具体拍数按剧情需要安排，不再限制单章上限；无关拍进 skipped 并写非空 reason；
+                4. focusCharacters 只能使用输入角色 key；threadRefs 只能使用输入线程 key；
+                5. 结构与功能缺失时可给 syntheticSlots，系统会生成 SYNTHETIC 补拍；syntheticSlots 与 assignments 共用 focusCharacters/threadRefs/dependsOn/payoffTarget/appearanceMode/requiresKnowledge/writesKnowledge/requiresState/changesState，建立前置知识的补拍必须写 writesKnowledge；syntheticSlots 的 goal 必须推进本章新信息，禁止复述已有 seq 的事件、证据或转折；
+                6. 每卷末章必须有 LOCAL_CLOSURE；非末卷还要有 NEXT_HOOK，最终卷用 FINAL_CLOSURE；
+                7. appearanceMode 只能取 LIVE/MEMORY/DREAM/CORPSE/RELIC/TESTIMONY/LETTER/RECORDING；
+                stateChangeKind 只能取：{{STATE_CHANGE_KINDS}}；
+                8. storyLayer、beatRole 只能取合同枚举值；
+                9. requiresKnowledge 只写正文中角色可感知的事实/现象，不填 GM-/REL-/VC-/OBJ- 线程 key；writesKnowledge 同理只写事实文本。
+                10. 知识因果必须按人物成立：一条事实首次被 writesKnowledge 时，只有该拍 focusCharacters 中的角色算“已知”；后续任何角色 requiresKnowledge 前，必须有一场同时聚焦该角色、且写入该事实的前置拍。若缺这个前置拍，补 syntheticSlots 或在现有拍中调整 focusCharacters，不能默认全员共享知识。输入若带「返工问题」，必须逐条消除并重新输出完整本卷路由，禁止原样重复上一版。
+                枚举白名单（仅供理解输入与校验，不得输出结构字段之外的自造值）：
                 beatRole：
                 {{BEAT_ROLES}}
                 storyLayer：
                 {{STORY_LAYERS}}
                 appearanceMode：
                 {{APPEARANCE_MODES}}
-                stateEffects.kind：
-                {{STATE_CHANGE_KINDS}}
-                threadEffects.effect：
-                {{THREAD_EFFECT_KINDS}}
-                只输出 JSON 对象，示例：
-                {"beatNarratives":[{"beatKey":"B01","goal":"调查者发现门缝里有被压扁的纸屑",
-                  "knowledgeEffects":[{"characterKeys":["C1"],"fact":"门缝里有被压扁的纸屑"}],
-                  "stateEffects":[{"characterKey":"C1","kind":"LOCATION","detail":"来到旧仓房门口"}],
-                  "threadEffects":[{"threadKey":"GM-CLUE-01","effect":"OPEN","detail":"纸屑线索首次出现"}]}],
-                 "skipped":[{"beatKey":"B07","reason":"与本卷无第二案件的红线冲突"}]}
-                """ ;
+                只输出 JSON 对象：
+                {"volumeNo":1,"chapters":[{"chapterNo":1,"chapterFunction":"HOOK",
+                  "localCaseGoal":"…","mainMysteryAdvance":"…","characterGoal":"…",
+                  "relationshipGoal":"…","requiredBeatRoles":["HOOK"],
+                  "forbiddenAppearances":[],"requiredStateBefore":{},"requiredStateAfter":{}}],
+                 "assignments":[{"seq":1,"chapterNo":1,"storyLayer":"LOCAL_CASE",
+                   "beatRole":"HOOK","focusCharacters":["C1"],"threadRefs":["GM-CLUE-01"],
+                   "dependsOn":[],"payoffTarget":"VC1","appearanceMode":"LIVE",
+                   "requiresKnowledge":[],"writesKnowledge":["门底有2厘米文件缝"],
+                   "requiresState":{},"changesState":{}}],
+                 "syntheticSlots":[],"skipped":[{"seq":2,"reason":"…"}]}
+                """;
     }
+
     private PromptCatalog() {}
 
     public static final List<TemplateDef> ALL = List.of(

@@ -240,36 +240,6 @@ public class DeriveGateService {
             return new GateVO(runId, novelId, "REJECT", "FAILED", round, contractIssues,
                     message, "CONTRACT_INVALID", List.of());
         }
-        boolean compilerCandidate = run.getActivePlanRevision() == null
-                && planSnapshotBridge != null
-                && contractService != null
-                && contractService.load(run) != null
-                && scheduleService != null
-                && !scheduleService.load(run).isEmpty();
-        if (compilerCandidate) {
-            PlanAdmissionResult admitted = planSnapshotBridge.materializeAndAdmit(runId);
-            if (admitted.decision() == PlanAdmissionDecision.ADMIT) {
-                return gateFromAdmission(runMapper.selectById(runId), round);
-            }
-            List<String> issues = admitted.report().issues().stream()
-                    .map(issue -> issue.code() + "：" + issue.message())
-                    .toList();
-            String directive = "compiler-v1 计划审计未通过；修复结构问题后重新准入，不得改写合同或日程";
-            GateDecision gateDecision = gateDecisionFor(
-                    PlanAdmissionDecision.REPAIR, admitted.report().issues(), prevRound);
-            runMapper.updateStepStatus(runId, withGate(run.getStepStatus(),
-                    gateDecision.action(), round, issues, directive,
-                    gateDecision.repairTarget()));
-            persistGateReview(runId, round, gateDecision, directive);
-            if ("REWORK".equals(gateDecision.action())) {
-                runMapper.updateStatus(runId, "REWORK", null);
-            } else if ("FAILED".equals(gateDecision.action())) {
-                runMapper.updateStatus(runId, "FAILED", null);
-            }
-            return new GateVO(runId, novelId, gateDecision.verdict(),
-                    gateDecision.action(), round, issues, directive,
-                    gateDecision.repairTarget(), List.of());
-        }
         String user = buildUser(run, novel, chapters, beats, motifs, gateTruth);
 
         List<String> preflight = new java.util.ArrayList<>(preflightIssues(chapters, beats));
