@@ -3,8 +3,10 @@ package com.zzdzz.novelgen.derive.draft;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import org.springframework.stereotype.Component;
 
 /** 场景级局部重试：每场只重试自己，保留最佳候选并精确回喂本场问题。 */
+@Component
 public class SceneRetryPolicy {
 
     /** 单次场景 attempt 记录。 */

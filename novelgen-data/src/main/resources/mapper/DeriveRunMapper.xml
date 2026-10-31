@@ -20,10 +20,10 @@
 
     <update id="updateWeld">
         UPDATE run
-        SET welded       = #{welded}::jsonb,
+        SET welded       = #{welded,jdbcType=VARCHAR}::jsonb,
             status       = 'PLANNING',
             step_status  = CASE
-                               WHEN #{welded} IS NULL
+                               WHEN #{welded,jdbcType=VARCHAR} IS NULL
                                    THEN '{"v":1,"steps":{"SAMPLE":{"status":"DONE"},"WELD":{"status":"SKIPPED"}}}'::jsonb
                                ELSE '{"v":1,"steps":{"SAMPLE":{"status":"DONE"},"WELD":{"status":"DONE"}}}'::jsonb
             END,

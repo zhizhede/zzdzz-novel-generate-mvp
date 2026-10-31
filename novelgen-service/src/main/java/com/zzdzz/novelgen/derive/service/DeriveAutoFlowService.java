@@ -3,6 +3,7 @@ package com.zzdzz.novelgen.derive.service;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
+import com.zzdzz.novelgen.derive.orchestration.DeriveRunOrchestrator;
 import com.zzdzz.novelgen.model.entity.derive.RunDO;
 import com.zzdzz.novelgen.model.vo.derive.AutoVO;
 import com.zzdzz.novelgen.model.vo.derive.DraftVO;
@@ -43,6 +44,8 @@ public class DeriveAutoFlowService {
     @Autowired(required = false)
     private DeriveBeatRouteService beatRouteService;
     private final DeriveQcService qcService;
+    @Autowired(required = false)
+    private DeriveRunOrchestrator runOrchestrator;
 
     static final class Auto {
         final long runId;
@@ -216,14 +219,32 @@ public class DeriveAutoFlowService {
                             continue;
                         }
                         case "DRAFTING" -> {
+                            if (run.getActivePlanRevision() == null && runOrchestrator != null) {
+                                gateService.gate(auto.runId);
+                                RunDO refreshed = runMapper.selectById(auto.runId);
+                                if (refreshed == null
+                                        || refreshed.getActivePlanRevision() == null) {
+                                    auto.lastError = "缺少 compiler-v1 active snapshot，禁止进入正文";
+                                    log.error("正文前置准入未产生快照：runId={}", auto.runId);
+                                    return;
+                                }
+                                auto.stage = "compiler-v1 计划已准入";
+                                auto.steps++;
+                                continue;
+                            }
                             if (!DeriveGateService.gatePassed(run.getStepStatus())) {
                                 if (auto.direct) {
-                                    // 直通免审：不调 LLM 立项闸，直接标记 PASS（issues 留痕）
-                                    String next = DeriveGateService.withGate(run.getStepStatus(), "PASS",
-                                            DeriveGateService.gateRound(run.getStepStatus()),
-                                            java.util.List.of("直通模式：免审放行（跳过 P6 立项闸）"), "");
-                                    runMapper.updateStepStatus(auto.runId, next);
-                                    auto.stage = "直通：跳过 P6 立项闸（免审放行）";
+                                    // 直通不再绕过 revision 防护：先执行确定性 admission，
+                                    // 没有产生 active snapshot 的 legacy run 明确停止。
+                                    gateService.gate(auto.runId);
+                                    RunDO refreshed = runMapper.selectById(auto.runId);
+                                    if (refreshed == null
+                                            || refreshed.getActivePlanRevision() == null) {
+                                        auto.lastError = "direct=true 未产生 compiler-v1 active snapshot，禁止走 legacy 正文路径";
+                                        log.error("直通模式缺少计划快照：runId={}", auto.runId);
+                                        return;
+                                    }
+                                    auto.stage = "直通：compiler-v1 计划已准入";
                                 } else {
                                     auto.stage = "P6 立项闸评审（六判据，约 2 分钟）";
                                     var g = gateService.gate(auto.runId);
@@ -231,7 +252,27 @@ public class DeriveAutoFlowService {
                                             + g.issues().size() + " 个问题）";
                                 }
                             } else {
-                                auto.stage = "⑦ 逐章写正文";
+                                if (run.getActivePlanRevision() != null && runOrchestrator != null) {
+                                    AutoVO pipeline = runOrchestrator.advance(auto.runId);
+                                    auto.stage = "compiler-v1 正文闭环：" + pipeline.stage();
+                                    auto.steps++;
+                                    if (pipeline.lastError() != null
+                                            && !pipeline.lastError().isBlank()) {
+                                        auto.lastError = pipeline.lastError();
+                                        log.warn("compiler-v1 正文闭环失败：runId={} stage={} error={}",
+                                                auto.runId, pipeline.stage(), pipeline.lastError());
+                                        return;
+                                    }
+                                    if ("COMPLETE:DONE".equals(pipeline.stage())) {
+                                        runMapper.updateStatus(auto.runId, "PASSED", null);
+                                        auto.stage = "compiler-v1 正文闭环完成";
+                                        auto.done = true;
+                                        log.info("compiler-v1 正文闭环完成：runId={}", auto.runId);
+                                        return;
+                                    }
+                                    continue;
+                                }
+                                auto.stage = "⑦ 逐章写正文（legacy）";
                                 WriteVO w = writeService.writeNext(auto.runId);
                                 if (w.allDone() || w.chapterNo() < 0) {
                                     auto.stage = "⑦ 全部正文完成 → 转质检";

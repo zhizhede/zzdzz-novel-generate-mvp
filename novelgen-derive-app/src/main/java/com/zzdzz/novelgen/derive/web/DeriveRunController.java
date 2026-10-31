@@ -13,6 +13,7 @@ import com.zzdzz.novelgen.derive.service.DeriveSampleService;
 import com.zzdzz.novelgen.derive.service.DeriveStoryPlanService;
 import com.zzdzz.novelgen.derive.service.DeriveVolumeService;
 import com.zzdzz.novelgen.derive.service.DeriveWriteService;
+import com.zzdzz.novelgen.derive.orchestration.DeriveRunOrchestrator;
 import com.zzdzz.novelgen.model.dto.derive.RunCreateDTO;
 import com.zzdzz.novelgen.model.dto.derive.RunQueryDTO;
 import com.zzdzz.novelgen.model.dto.derive.PlanScopeConfirmDTO;
@@ -65,6 +66,7 @@ public class DeriveRunController {
     private final DeriveAutoFlowService autoFlowService;
     private final DeriveResetService resetService;
     private final DeriveVolumeService volumeService;
+    private final DeriveRunOrchestrator runOrchestrator;
 
     @PostMapping
     public Result<RunVO> create(@RequestBody RunCreateDTO dto) {
@@ -186,6 +188,24 @@ public class DeriveRunController {
     @PostMapping("/{id}/write")
     public Result<WriteVO> write(@PathVariable long id) {
         return Result.success(writeService.writeNext(id));
+    }
+
+    /** compiler-v1 正文闭环：一次只推进 DRAFT/FINAL_AUDIT/COMPLETE 中的一个阶段。 */
+    @PostMapping("/{id}/pipeline/advance")
+    public Result<AutoVO> pipelineAdvance(@PathVariable long id) {
+        return Result.success(runOrchestrator.advance(id));
+    }
+
+    /** compiler-v1 正文闭环状态：只从持久 stage ledger 读取。 */
+    @GetMapping("/{id}/pipeline/status")
+    public Result<AutoVO> pipelineStatus(@PathVariable long id) {
+        return Result.success(runOrchestrator.status(id));
+    }
+
+    /** 取消 compiler-v1 未终态阶段；已写入的正文和 stage 记录保留。 */
+    @PostMapping("/{id}/pipeline/cancel")
+    public Result<AutoVO> pipelineCancel(@PathVariable long id) {
+        return Result.success(runOrchestrator.cancel(id));
     }
 
     /** ⑦服务端连跑启动（点一次→服务器逐章写到完，关页面不断；同 run 单飞）。 */

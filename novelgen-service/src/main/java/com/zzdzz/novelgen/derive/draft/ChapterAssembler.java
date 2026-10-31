@@ -4,8 +4,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
+import org.springframework.stereotype.Component;
 
 /** 确定性章节拼装：按 sceneNo 排序，只由场景散文和空行组成。 */
+@Component
 public class ChapterAssembler {
 
     /** 组装一章；缺场、空场或机器 JSON 立即拒绝，绝不带入章节正文。 */

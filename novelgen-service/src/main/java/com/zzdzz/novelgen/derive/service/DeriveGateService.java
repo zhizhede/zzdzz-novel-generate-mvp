@@ -185,6 +185,9 @@ public class DeriveGateService {
     /** compiler-v1 快照存在时，/gate 只读兼容准入报告，不再调用自由模型改写结构。 */
     @Autowired(required = false)
     private PlanSnapshotService planSnapshotService;
+    /** 旧 PLAN_V2 已完成但尚无 active snapshot 时，桥接成 compiler-v1 计划。 */
+    @Autowired(required = false)
+    private DerivePlanSnapshotBridge planSnapshotBridge;
 
     /** ⑥b→⑦ 之间跑一次立项评审。 */
     public GateVO gate(long runId) {
@@ -236,6 +239,36 @@ public class DeriveGateService {
             log.warn("P6 合同预检拦截（终态 FAILED）：runId={} issues={}", runId, contractIssues);
             return new GateVO(runId, novelId, "REJECT", "FAILED", round, contractIssues,
                     message, "CONTRACT_INVALID", List.of());
+        }
+        boolean compilerCandidate = run.getActivePlanRevision() == null
+                && planSnapshotBridge != null
+                && contractService != null
+                && contractService.load(run) != null
+                && scheduleService != null
+                && !scheduleService.load(run).isEmpty();
+        if (compilerCandidate) {
+            PlanAdmissionResult admitted = planSnapshotBridge.materializeAndAdmit(runId);
+            if (admitted.decision() == PlanAdmissionDecision.ADMIT) {
+                return gateFromAdmission(runMapper.selectById(runId), round);
+            }
+            List<String> issues = admitted.report().issues().stream()
+                    .map(issue -> issue.code() + "：" + issue.message())
+                    .toList();
+            String directive = "compiler-v1 计划审计未通过；修复结构问题后重新准入，不得改写合同或日程";
+            GateDecision gateDecision = gateDecisionFor(
+                    PlanAdmissionDecision.REPAIR, admitted.report().issues(), prevRound);
+            runMapper.updateStepStatus(runId, withGate(run.getStepStatus(),
+                    gateDecision.action(), round, issues, directive,
+                    gateDecision.repairTarget()));
+            persistGateReview(runId, round, gateDecision, directive);
+            if ("REWORK".equals(gateDecision.action())) {
+                runMapper.updateStatus(runId, "REWORK", null);
+            } else if ("FAILED".equals(gateDecision.action())) {
+                runMapper.updateStatus(runId, "FAILED", null);
+            }
+            return new GateVO(runId, novelId, gateDecision.verdict(),
+                    gateDecision.action(), round, issues, directive,
+                    gateDecision.repairTarget(), List.of());
         }
         String user = buildUser(run, novel, chapters, beats, motifs, gateTruth);
 
