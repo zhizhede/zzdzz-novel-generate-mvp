@@ -15,7 +15,6 @@ import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.ForeshadowDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.service.data.PipelineEventDataService;
-import com.zzdzz.novelgen.service.data.SamplePlotNodeDataService;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmNode;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -65,7 +64,6 @@ public class VolumePlanService {
     private final ForeshadowDataService foreshadowData;
     private final NovelDataService novelData;
     private final CanonDocDataService canonData;
-    private final SamplePlotNodeDataService plotData;
     private final com.zzdzz.novelgen.service.data.StylePackDataService stylePackData;
     private final StageLog stageLog;
     private final TuningService tuning;
@@ -314,7 +312,7 @@ public class VolumePlanService {
                     .append('\n');
         }
         String user = promptTemplates.format(LlmNode.VOLUME_PLAN_REVIEW, "user", plan, packer.characters(novelId),
-                packer.packLedgers(novelId, draft.rows().get(0).chapterNo()), deriveNoCopySection(novelId));
+                packer.packLedgers(novelId, draft.rows().get(0).chapterNo()), "");
         stageLog.emit(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW, StageLog.Phase.START, Map.of("round", round));
         PlanThinkRelay relay = new PlanThinkRelay(novelId, StageLog.Stage.VOLUME_PLAN_REVIEW);
         try {
@@ -349,27 +347,6 @@ public class VolumePlanService {
         }
     }
 
-    /**
-     * 衍生复刻判据段（审校 user 第 4 参）：sourceSampleId 存在且样本有书级骨架时，注入骨架+复刻=BLOCKER 口径；
-     * 非衍生书/无骨架返回空串（占位符仍需参数，空串即不出现该段）。
-     */
-    private String deriveNoCopySection(long novelId) {
-        Long sampleId = DeriveSupport.parse(novelData.findDeriveConfig(novelId)).sourceSampleId();
-        if (sampleId == null) {
-            return "";
-        }
-        for (var n : plotData.listBySample(sampleId)) {
-            if (n.getLevel().equals("book") && n.getSummary() != null && !n.getSummary().isBlank()) {
-                String skeleton = n.getSummary().strip();
-                if (skeleton.length() > 1200) {
-                    skeleton = skeleton.substring(0, 1200);
-                }
-                return promptTemplates.getSection(LlmNode.VOLUME_PLAN_REVIEW, "derive_no_copy",
-                        Map.of("skeleton", skeleton));
-            }
-        }
-        return "";
-    }
 
     /**
      * 卷规划/审校思考流转发（VOLUME_PLAN/VOLUME_PLAN_REVIEW + CHUNK，emitLive 只推 SSE 不落库）：
@@ -421,21 +398,12 @@ public class VolumePlanService {
         int fromNo = draft.rows().get(0).chapterNo();
         List<String> warnings = new ArrayList<>();
         List<String> adopted = new ArrayList<>();
-        // 蓝图保护（FORBID_VOLUME_PLAN 能力）：预置章纲是产线素材，即使还没正文也不许被卷规划覆盖——
-        // 覆盖＝把素材连同场景一起抹掉换成 AI 新编的卷纲，用户以为在"规划"其实在销毁素材。
-        boolean forbid = DeriveProfile.can(Recipe.parse(novelData.findDeriveConfig(novelId)),
-                DeriveProfile.Capability.FORBID_VOLUME_PLAN);
         tx.executeWithoutResult(status -> {
             for (ChapterDO c : chapterData.listSummariesByNovel(novelId)) {
                 if (c.getChapterNo() >= fromNo) {
                     if (c.getFullText() != null && !c.getFullText().isBlank()) {
                         throw new BizException(ErrorCode.PARAM_ERROR,
                                 "第 " + c.getChapterNo() + " 章已有正文，禁止覆盖其规划行");
-                    }
-                    if (forbid && c.getOutlineYaml() != null && !c.getOutlineYaml().isBlank()) {
-                        throw new BizException(ErrorCode.STATE_CONFLICT,
-                                "第 " + c.getChapterNo() + " 章带产线预置章纲（受保护蓝图），卷规划会把它整卷抹掉——"
-                                        + "本书配方禁止卷规划覆盖；确需重规划请先删除该卷，或改用原创衍生配方");
                     }
                     chapterData.deletePlan(c.getId());
                 }

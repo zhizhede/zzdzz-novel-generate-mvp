@@ -125,10 +125,8 @@ class NovelServiceTest {
     void sourceTypeNormalizeAndOfSample() {
         assertThat(NovelSourceType.normalize(null)).isEqualTo("ORIGINAL");
         assertThat(NovelSourceType.normalize(" ")).isEqualTo("ORIGINAL");
-        assertThat(NovelSourceType.normalize("derived")).isEqualTo("DERIVED");
+        assertThat(NovelSourceType.normalize("derived")).isEqualTo("ORIGINAL");
         assertThat(NovelSourceType.normalize("瞎写")).isEqualTo("ORIGINAL");
-        assertThat(NovelSourceType.ofSample(null)).isEqualTo("ORIGINAL");
-        assertThat(NovelSourceType.ofSample(7L)).isEqualTo("DERIVED");
     }
 
     // ===== 切章 =====

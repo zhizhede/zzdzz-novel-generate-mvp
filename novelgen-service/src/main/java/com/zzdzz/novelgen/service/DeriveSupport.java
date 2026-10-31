@@ -6,17 +6,17 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 衍生配置（novels.derive_config JSONB）的解析与换算：开书向导落的衍生参数在此统一成类型化读数，
- * 各消费方（场景提示词/卷规划/审批处置/续跑闭环）fail-open——无配置或坏 JSON 一律给默认，绝不拦生成。
- * 预设（preset）与选材/克隆判据不在这里——一律走 {@code Recipe}/{@code DeriveProfile}。
+ * 通用生成配置（novels.derive_config JSONB）的解析与换算：
+ * 开书/工作台落的 POV、掺水量、节奏、目标章数、优先级、类型标签等参数在此统一成类型化读数。
+ * 读侧 fail-open——无配置或坏 JSON 一律给默认，绝不拦生成。
  */
 @Slf4j
 public final class DeriveSupport {
 
-    /** 解析后的衍生配置（全部可空=未设置，消费方各自取默认）。 */
+    /** 解析后的生成配置（全部可空=未设置，消费方各自取默认）。 */
     public record Cfg(Integer water, String pov, String povCharacter, String pacingNote,
                       Integer chaptersPerVolume, Integer targetChapters, Boolean autoContinue,
-                      Integer priority, Long sourceSampleId, java.util.List<String> tags) {
+                      Integer priority, java.util.List<String> tags) {
 
         public boolean autoContinueOn() {
             return Boolean.TRUE.equals(autoContinue);
@@ -31,7 +31,7 @@ public final class DeriveSupport {
     /** 坏 JSON/空值容忍：解析失败返回全空配置。 */
     public static Cfg parse(String json) {
         if (json == null || json.isBlank()) {
-            return new Cfg(null, null, null, null, null, null, null, null, null, null);
+            return new Cfg(null, null, null, null, null, null, null, null, null);
         }
         try {
             JsonNode n = MAPPER.readTree(json);
@@ -48,18 +48,14 @@ public final class DeriveSupport {
                     textOrNull(n.path("povCharacter")), textOrNull(n.path("pacingNote")),
                     intOrNull(n.path("chaptersPerVolume")), intOrNull(n.path("targetChapters")),
                     n.path("autoContinue").isBoolean() ? n.path("autoContinue").asBoolean() : null,
-                    intOrNull(n.path("priority")),
-                    n.path("sourceSampleId").canConvertToLong() ? n.path("sourceSampleId").asLong() : null,
-                    tags);
+                    intOrNull(n.path("priority")), tags);
         } catch (Exception e) {
-            return new Cfg(null, null, null, null, null, null, null, null, null, null);
+            return new Cfg(null, null, null, null, null, null, null, null, null);
         }
     }
 
     /**
      * 人称读取链：章级（chapters.pov，AI 章纲步写的本章实际人称）→ 书级（derive_config.pov）→ null（不约束）。
-     * 换皮/迁移书场景预物化、章纲步不跑，章级恒空——书级回退正是它们的生效路径；
-     * 单视角书章纲步会把书级值抄进章级，多视角轮换书章级可与书级不同，读取方一律以本方法为准。
      */
     public static String effectivePov(String chapterPov, String bookPov) {
         if (chapterPov != null && !chapterPov.isBlank()) {
@@ -73,8 +69,7 @@ public final class DeriveSupport {
 
     /**
      * 掺水量 0-100（50=均衡默认）→ 读者评审注水阈值三元组 {block, hard, ai_review_fix_floor}：
-     * 越干阈值越严（block 0.33→0.20、floor 0.60→0.70 修剪更狠保底更高），越水阈值越松（block→0.50、floor→0.50）。
-     * 线性插值并夹紧，纯函数可单测。
+     * 越干阈值越严，越水阈值越松。线性插值并夹紧，纯函数可单测。
      */
     public static double[] waterGates(int water) {
         int w = Math.max(0, Math.min(100, water));
@@ -86,8 +81,7 @@ public final class DeriveSupport {
     }
 
     /**
-     * 把掺水量三元组写进风格包 gate_config JSON（缺失键补齐，既有键覆盖）；
-     * gateJson 为 null/坏 JSON 时从空对象起步。纯函数可单测。
+     * 把掺水量三元组写进风格包 gate_config JSON（缺失键补齐，既有键覆盖）。
      */
     public static String applyWaterGates(String gateJson, int water) {
         double[] gates = waterGates(water);
@@ -105,10 +99,7 @@ public final class DeriveSupport {
         return node.toString();
     }
 
-    /**
-     * 把章长带三元组写进风格包 gate_config JSON（缺失键补齐，既有键覆盖，其余键不动）——与 applyWaterGates 同一套合并语义。
-     * 用于「按本书正文重提指纹」：本书自己各章的字数分布比克隆来的预设带宽更贴合后续续写。纯函数可单测。
-     */
+    /** 把章长带写进风格包 gate_config JSON（缺失键补齐，既有键覆盖）。 */
     public static String applyBudgetBand(String gateJson, int budgetMin, int budgetMax, double tolerance) {
         ObjectNode node;
         try {
@@ -124,10 +115,7 @@ public final class DeriveSupport {
         return node.toString();
     }
 
-    /**
-     * 读章长带（budget_min/max，与 {@link #applyBudgetBand} 同一解析口径）：两键齐全才返回，
-     * 坏 JSON / 缺键 / 非数值一律 null——**默认值由调用方决定**（拼接用 1500-4500 兜底，导入按 0 落库）。
-     */
+    /** 读章长带（budget_min/max）：两键齐全才返回，坏 JSON / 缺键 / 非数值一律 null。 */
     public static int[] readBudgetBand(String gateJson) {
         if (gateJson == null || gateJson.isBlank()) {
             return null;
@@ -144,33 +132,40 @@ public final class DeriveSupport {
         }
     }
 
-    /** 掺水量的人话提示词口径（场景生成密度段用）；null=未设置不注入。 */
+    /** 掺水量 → 密度提示（给场景提示词的纯文本口径）。 */
     public static String densityHint(Integer water) {
         if (water == null) {
             return null;
         }
-        if (water >= 70) {
-            return "节奏可以舒缓：允许氛围铺陈与日常闲笔，但对白仍须各自推进关系或信息，禁止原地空转";
+        int w = Math.max(0, Math.min(100, water));
+        if (w <= 20) {
+            return "极干：信息密度拉满，禁止注水与重复解释";
         }
-        if (water >= 40) {
-            return "节奏均衡：情节推进为主，允许适度氛围呼吸";
+        if (w <= 40) {
+            return "偏干：紧凑推进，控制抒情与无关描写";
         }
-        return "情节密度拉满：每一场都必须推进事件或关系，禁止纯氛围段落，环境描写只许夹在动作之间";
+        if (w <= 60) {
+            return "均衡：推进与氛围兼顾";
+        }
+        if (w <= 80) {
+            return "偏水：允许更多氛围、日常与情绪铺陈，节奏舒缓";
+        }
+        return "极水：氛围与情绪优先，允许较慢节奏";
     }
 
-    private static double clamp(double v, double lo, double hi) {
-        return Math.max(lo, Math.min(hi, v));
+    private static Integer intOrNull(JsonNode node) {
+        return node.isNumber() ? node.asInt() : null;
+    }
+
+    private static String textOrNull(JsonNode node) {
+        return node.isTextual() && !node.asText().isBlank() ? node.asText().strip() : null;
+    }
+
+    private static double clamp(double v, double min, double max) {
+        return Math.max(min, Math.min(max, v));
     }
 
     private static double round2(double v) {
-        return Math.round(v * 100) / 100.0;
-    }
-
-    private static Integer intOrNull(JsonNode n) {
-        return n.canConvertToInt() ? n.asInt() : null;
-    }
-
-    private static String textOrNull(JsonNode n) {
-        return n.isTextual() && !n.asText().isBlank() ? n.asText().strip() : null;
+        return Math.round(v * 100.0) / 100.0;
     }
 }

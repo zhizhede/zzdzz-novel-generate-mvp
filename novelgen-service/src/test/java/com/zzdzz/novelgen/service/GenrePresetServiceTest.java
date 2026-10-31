@@ -97,7 +97,7 @@ class GenrePresetServiceTest {
     void fingerprintSimilarityDistantIsLow() {
         String a = fp("{\"m1\":{\"value\":3.0,\"tolerance\":0.5,\"abs_max\":5.0},\"m2\":{\"value\":1.0,\"tolerance\":0.3,\"abs_max\":2.0},\"m3\":{\"value\":8.0,\"tolerance\":0.4,\"abs_max\":12.0}}");
         String b = fp("{\"m1\":{\"value\":0.2,\"tolerance\":0.5,\"abs_max\":1.0},\"m2\":{\"value\":6.0,\"tolerance\":0.3,\"abs_max\":9.0},\"m3\":{\"value\":1.0,\"tolerance\":0.4,\"abs_max\":2.0}}");
-        assertThat(GenrePresetService.fingerprintSimilarity(a, b)).isLessThan(GenrePresetService.NEW_THRESHOLD);
+        assertThat(GenrePresetService.fingerprintSimilarity(a, b)).isLessThan(0.45);
     }
 
     @Test
@@ -116,14 +116,4 @@ class GenrePresetServiceTest {
         assertThat(GenrePresetService.fingerprintSimilarity(full, partial)).isGreaterThan(0.5);
     }
 
-    @Test
-    void uniqueGenreNameSuffixesWithoutCollision() {
-        java.util.Set<String> taken = new java.util.HashSet<>(List.of("未解析长样本", "未解析长样本·2"));
-        assertThat(GenrePresetService.uniqueGenreName("未解析长样本", taken)).isEqualTo("未解析长样本·3");
-        assertThat(GenrePresetService.uniqueGenreName("全新品类", taken)).isEqualTo("全新品类");
-        // 长名超 64 字时限长再编号
-        String longName = "很".repeat(70);
-        String got = GenrePresetService.uniqueGenreName(longName, new java.util.HashSet<>());
-        assertThat(got.length()).isLessThanOrEqualTo(64);
-    }
 }

@@ -2,27 +2,18 @@ package com.zzdzz.novelgen.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
-import com.zzdzz.novelgen.llm.LlmJson;
-import com.zzdzz.novelgen.llm.LlmPort;
 import com.zzdzz.novelgen.model.entity.ChapterDO;
 import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.model.entity.StylePackDO;
 import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.NovelImportVO;
-import com.zzdzz.novelgen.service.data.CanonDocDataService;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
-import com.zzdzz.novelgen.service.data.ImportedSampleDataService;
-import com.zzdzz.novelgen.service.data.MaterialCardDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
-import com.zzdzz.novelgen.service.data.PromptTemplateDataService;
-import com.zzdzz.novelgen.service.data.SampleCardDataService;
-import com.zzdzz.novelgen.service.data.SamplePlotNodeDataService;
 import com.zzdzz.novelgen.service.data.StylePackDataService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,15 +53,8 @@ class NovelServiceStylePackTest {
         // 同理：可复用包/同名活包默认必须桩成「没有」，否则 0 会被当成包 id 走进复用分支。
         when(stylePackData.findReusablePackId(anyString())).thenReturn(null);
         when(stylePackData.findIdByName(anyString())).thenReturn(null);
-        PromptTemplateDataService promptDao = mock(PromptTemplateDataService.class);
-        when(promptDao.findAll()).thenReturn(List.of());
         service = new NovelService(novelData, stylePackData, chapterData, mock(DigestService.class),
-                mock(SampleCardDataService.class), mock(SamplePlotNodeDataService.class),
-                mock(ImportedSampleDataService.class), mock(MaterialCardDataService.class),
-                mock(CanonDocDataService.class), taskData,
-                mock(com.zzdzz.novelgen.service.data.EmbeddingDataService.class),
-                mock(LlmPort.class), mock(LlmJson.class),
-                new PromptTemplateService(promptDao), new ObjectMapper());
+                taskData, mock(com.zzdzz.novelgen.service.data.EmbeddingDataService.class), new ObjectMapper());
     }
 
     private static StylePackDO preset(long id, String name) {
@@ -94,7 +78,7 @@ class NovelServiceStylePackTest {
     }
 
     private static NovelCreateDTO createVo(String title) {
-        return new NovelCreateDTO(title, "简介", 1L, null, null, null, null, null);
+        return new NovelCreateDTO(title, "简介", 1L, null, null, null);
     }
 
     private static NovelImportVO importVo(String title, String text) {

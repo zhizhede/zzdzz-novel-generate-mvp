@@ -4,11 +4,7 @@ package com.zzdzz.novelgen.model.enums;
 public enum TaskKind {
     CHAPTERS("CHAPTERS"),
     PLAN("PLAN"),
-    OUTLINE("OUTLINE"),
-    /** 剧情换皮（RESKIN）：保留样本剧情骨架，把世界观/大纲与逐章章纲全部换成本书新外衣。 */
-    RESKIN("RESKIN"),
-    /** 多书拼接（SPLICE，阶段二）：跨书取样 + 两层拼接 + 前情种子，一次预物化全部目标章。 */
-    SPLICE("SPLICE");
+    OUTLINE("OUTLINE");
 
     private final String wire;
 

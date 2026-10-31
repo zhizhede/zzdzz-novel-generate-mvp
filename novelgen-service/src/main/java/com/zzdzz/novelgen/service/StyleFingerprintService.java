@@ -4,14 +4,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
-import com.zzdzz.novelgen.model.entity.ImportedSampleDO;
 import com.zzdzz.novelgen.model.entity.NovelDO;
 import com.zzdzz.novelgen.model.entity.StylePackDO;
 import com.zzdzz.novelgen.model.dto.StyleFingerprintQueryDTO;
 import com.zzdzz.novelgen.model.vo.StyleFingerprintVO;
-import com.zzdzz.novelgen.service.data.ImportedSampleDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
-import com.zzdzz.novelgen.service.data.PresetCorpusDataService;
 import com.zzdzz.novelgen.service.data.StylePackDataService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -21,43 +18,27 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 /**
- * 文风指纹库（只读聚合查询）：把散在三处的指纹提取结果收成一张表——
- * 导入样本（imported_samples.analysis 快照）、品类预设与书籍风格包（style_packs.fingerprint）。
- * 三者数据源各自独立，此处只做读模型拼装 + 筛选排序，不写库、不改任何提取与门禁口径。
+ * 文风指纹库（只读聚合查询）：把散在两处的指纹提取结果收成一张表——
+ * 品类预设与书籍风格包（style_packs.fingerprint）。
+ * 两者数据源各自独立，此处只做读模型拼装 + 筛选排序，不写库、不改任何提取与门禁口径。
  */
 @Service
 @RequiredArgsConstructor
 public class StyleFingerprintService {
-
-    private final ImportedSampleDataService sampleData;
     private final StylePackDataService stylePackData;
     private final NovelDataService novelData;
-    private final PresetCorpusDataService corpusData;
     private final ObjectMapper mapper;
 
-    /** 指纹页列表：三来源合并 → 条件筛选 → 排序。 */
+    /** 指纹页列表：预设与书籍风格包两来源合并 → 条件筛选 → 排序。 */
     public List<StyleFingerprintVO> query(StyleFingerprintQueryDTO condition) {
         List<StylePackDO> presets = stylePackData.listPresets();
-        Map<Long, StylePackDO> presetById = new LinkedHashMap<>();
-        for (StylePackDO preset : presets) {
-            presetById.put(preset.getId(), preset);
-        }
-        Map<Long, ImportedSampleDO> sampleById = new LinkedHashMap<>();
-        for (ImportedSampleDO sample : sampleData.listAlive()) {
-            sampleById.put(sample.getId(), sample);
-        }
-        Map<String, long[]> genreScale = genreScale();
-
         List<StyleFingerprintVO> rows = new ArrayList<>();
-        rows.addAll(sampleRows(presetById));
-        rows.addAll(presetRows(presets, sampleById, genreScale));
-        rows.addAll(bookRows(sampleById, genreScale));
+        rows.addAll(presetRows(presets));
+        rows.addAll(bookRows());
 
         return rows.stream()
                 .filter(row -> matches(row, condition))
@@ -65,67 +46,17 @@ public class StyleFingerprintService {
                 .toList();
     }
 
-    // ===== 三来源读模型 =====
+    // ===== 两来源读模型 =====
 
-    /** 导入样本行：analysis 为空（早于台账功能的 backfill 导入）时回退用其采纳预设的指纹，保证仍有指标可看。 */
-    private List<StyleFingerprintVO> sampleRows(Map<Long, StylePackDO> presetById) {
-        List<StyleFingerprintVO> rows = new ArrayList<>();
-        for (ImportedSampleDO sample : sampleData.listAlive()) {
-            JsonNode analysis = parse(sample.getAnalysis());
-            JsonNode fingerprint = firstText(analysis, "fingerprintJson");
-            JsonNode baseline = baselineOf(fingerprint);
-            StylePackDO adoptedPreset = sample.getPresetId() == null ? null : presetById.get(sample.getPresetId());
-            if (baseline == null && adoptedPreset != null) {
-                baseline = baselineOf(parse(adoptedPreset.getFingerprint()));
-            }
-            List<StyleFingerprintVO.SimilarityVO> similarities = new ArrayList<>();
-            if (analysis != null) {
-                for (JsonNode s : analysis.path("similarities")) {
-                    similarities.add(new StyleFingerprintVO.SimilarityVO(s.path("presetId").asLong(),
-                            s.path("name").asText(""), s.path("score").asDouble(), s.path("comparable").asBoolean(true)));
-                }
-            }
-            rows.add(new StyleFingerprintVO(
-                    "SAMPLE", sample.getId(), sample.getTitle(),
-                    adoptedPreset == null ? null : adoptedPreset.getName(),
-                    sample.getGenre(), "台账来源：" + sample.getSource(),
-                    sample.getChunks(), sample.getTotalChars(),
-                    metricCount(baseline, analysis == null ? null : analysis.path("metricCount")),
-                    analysis == null ? null : intOrNull(analysis, "budgetMin"),
-                    analysis == null ? null : intOrNull(analysis, "budgetMax"),
-                    null,
-                    analysis == null ? null : analysis.path("lowConfidence").asBoolean(false),
-                    analysis == null ? null : analysis.path("recommendation").asText(null),
-                    sample.getId(), sample.getPresetId(),
-                    adoptedPreset == null ? null : adoptedPreset.getName(),
-                    null, sample.getCreatedTime(), sample.getUpdatedTime(),
-                    baseline != null, metrics(baseline),
-                    fingerprint == null ? null : fingerprint.toString(),
-                    stringList(analysis == null ? null : analysis.path("notes")),
-                    similarities,
-                    stringList(parse(sample.getTags()))));
-        }
-        return rows;
-    }
-
-    /** 品类预设行：语料规模按「品类」取（预设不存品类，品类经样本台账回链），章长带取自身 gate_config。 */
-    private List<StyleFingerprintVO> presetRows(List<StylePackDO> presets, Map<Long, ImportedSampleDO> sampleById,
-                                               Map<String, long[]> genreScale) {
+    /** 品类预设行：章长带取自身 gate_config。 */
+    private List<StyleFingerprintVO> presetRows(List<StylePackDO> presets) {
         List<StyleFingerprintVO> rows = new ArrayList<>();
         for (StylePackDO preset : presets) {
-            String genre = null;
-            for (ImportedSampleDO sample : sampleById.values()) {
-                if (preset.getId().equals(sample.getPresetId())) {
-                    genre = sample.getGenre();
-                    break;
-                }
-            }
-            long[] scale = genre == null ? null : genreScale.get(genre);
             JsonNode baseline = baselineOf(parse(preset.getFingerprint()));
             double[] band = budgetBand(stylePackData.findGateConfigById(preset.getId()));
             rows.add(new StyleFingerprintVO(
-                    "PRESET", preset.getId(), preset.getName(), preset.getName(), genre, preset.getDescription(),
-                    scale == null ? null : (int) scale[0], scale == null ? null : scale[1],
+                    "PRESET", preset.getId(), preset.getName(), preset.getName(), null, preset.getDescription(),
+                    null, null,
                     metricCount(baseline, null),
                     band == null ? null : (int) band[0], band == null ? null : (int) band[1],
                     band == null ? null : band[2],
@@ -139,9 +70,9 @@ public class StyleFingerprintService {
 
     /**
      * 书籍风格包行：只收仍被书籍引用的包（已删书留下的孤儿包不进列表）。
-     * 品类与源样本经 derive_config.sourceSampleId 回链；语料规模/章长预算留空——书籍没有「提取语料」这一读数。
+     * 语料规模/源样本读数留空——普通生成书没有样本回链。
      */
-    private List<StyleFingerprintVO> bookRows(Map<Long, ImportedSampleDO> sampleById, Map<String, long[]> genreScale) {
+    private List<StyleFingerprintVO> bookRows() {
         List<StyleFingerprintVO> rows = new ArrayList<>();
         for (NovelDO novel : novelData.listAlive()) {
             if (novel.getStylePackId() == null) {
@@ -151,23 +82,19 @@ public class StyleFingerprintService {
             if (pack == null) {
                 continue;
             }
-            Long sourceSampleId = sourceSampleId(novel.getId());
-            ImportedSampleDO source = sourceSampleId == null ? null : sampleById.get(sourceSampleId);
             JsonNode baseline = baselineOf(parse(pack.getFingerprint()));
             double[] band = budgetBand(stylePackData.findGateConfigById(pack.getId()));
             rows.add(new StyleFingerprintVO(
                     "BOOK", pack.getId(), novel.getTitle(), pack.getName(),
-                    source == null ? null : source.getGenre(), novel.getDescription(),
+                    null, novel.getDescription(),
                     null, null,
                     metricCount(baseline, null),
                     band == null ? null : (int) band[0], band == null ? null : (int) band[1],
                     band == null ? null : band[2],
-                    null, null,
-                    sourceSampleId, null, null, novel.getId(),
+                    null, null, null, null, null, novel.getId(),
                     pack.getCreatedTime(), pack.getUpdatedTime(),
                     baseline != null, metrics(baseline), pack.getFingerprint(),
-                    new ArrayList<>(), new ArrayList<>(),
-                    source == null ? new ArrayList<>() : stringList(parse(source.getTags()))));
+                    new ArrayList<>(), new ArrayList<>(), new ArrayList<>()));
         }
         return rows;
     }
@@ -275,23 +202,7 @@ public class StyleFingerprintService {
         return new double[]{cfg.path("budget_min").asDouble(), cfg.path("budget_max").asDouble(), tolerance};
     }
 
-    /** 品类 → [语料章数, 语料总字数]（样本/预设行的「语料规模」读数来源）。 */
-    private Map<String, long[]> genreScale() {
-        Map<String, long[]> out = new LinkedHashMap<>();
-        for (PresetCorpusDataService.GenreSummary g : corpusData.genreSummaries()) {
-            out.put(g.genre(), new long[]{g.chapters(), g.words()});
-        }
-        return out;
-    }
 
-    /** 书籍的源样本 id（derive_config.sourceSampleId）；无配置返回 null。 */
-    private Long sourceSampleId(long novelId) {
-        JsonNode cfg = parse(novelData.findDeriveConfig(novelId));
-        if (cfg == null || !cfg.path("sourceSampleId").canConvertToLong()) {
-            return null;
-        }
-        return cfg.path("sourceSampleId").asLong();
-    }
 
     private JsonNode parse(String json) {
         if (json == null || json.isBlank()) {
@@ -304,30 +215,6 @@ public class StyleFingerprintService {
         }
     }
 
-    /** 取一个内嵌 JSON 字符串字段（analysis.fingerprintJson 存的是「JSON 文本的字符串」）。 */
-    private JsonNode firstText(JsonNode node, String field) {
-        if (node == null || !node.hasNonNull(field)) {
-            return null;
-        }
-        return parse(node.path(field).asText());
-    }
-
-    private static List<String> stringList(JsonNode array) {
-        List<String> out = new ArrayList<>();
-        if (array == null || !array.isArray()) {
-            return out;
-        }
-        for (JsonNode n : array) {
-            if (n.isTextual() && !n.asText().isBlank()) {
-                out.add(n.asText());
-            }
-        }
-        return out;
-    }
-
-    private static Integer intOrNull(JsonNode node, String field) {
-        return node.path(field).isNumber() ? node.path(field).asInt() : null;
-    }
 
     private static LocalDate parseDate(String text, String label) {
         if (text == null || text.isBlank()) {

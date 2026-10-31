@@ -9,9 +9,7 @@ import com.zzdzz.novelgen.service.data.GenerationTaskDataService;
 import com.zzdzz.novelgen.service.data.NovelDataService;
 import com.zzdzz.novelgen.model.enums.TaskKind;
 import com.zzdzz.novelgen.model.enums.TaskStatus;
-import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.GenerationTaskVO;
-import com.zzdzz.novelgen.model.vo.NovelVO;
 import com.zzdzz.novelgen.model.vo.PipelineStatusVO;
 import com.zzdzz.novelgen.service.data.ChapterDataService;
 import com.zzdzz.novelgen.service.data.ChapterStepDataService;
@@ -55,11 +53,6 @@ public class GenerationQueueService {
     private final TuningService tuning;
     private final LlmCallLogDataService llmCallLogData;
     private final VolumeReviewService volumeReviewService;
-    /** 剧情换皮（RESKIN）任务的实际执行体。 */
-    private final ReskinService reskinService;
-    /** 多书拼接（SPLICE）任务的实际执行体（阶段二四步链）。 */
-    private final SpliceService spliceService;
-
     /** 运行中取消请求（taskId 集合），worker 在步骤/场景边界检查。 */
     private final Set<Long> cancelRequested = ConcurrentHashMap.newKeySet();
 
@@ -210,7 +203,6 @@ public class GenerationQueueService {
     /** ⑤ 任务化：卷纲自动规划入队（原同步 2-10 分钟 HTTP）。 */
     public long submitPlan(long novelId, String novelTitle, int volNo, int from, Integer to,
                            String seedOutline, Long userId) {
-        assertBlueprintNotOverwritten(novelId, from);
         String payload;
         try {
             Map<String, Object> m = new java.util.LinkedHashMap<>();
@@ -223,24 +215,6 @@ public class GenerationQueueService {
             payload = null;
         }
         return enqueue(novelId, novelTitle, from, to == null ? from : to, userId, TaskKind.PLAN.wire(), payload, null);
-    }
-
-    /**
-     * 蓝图保护守卫（FORBID_VOLUME_PLAN 能力）：预置章纲就是产线素材，卷规划会从 from 起**整卷删掉重写**，
-     * 等于把素材抹掉。在入队口（花钱之前）就拒绝，adopt 侧还有第二道同条件兜底。
-     */
-    private void assertBlueprintNotOverwritten(long novelId, int from) {
-        if (!DeriveProfile.can(Recipe.parse(novelData.findDeriveConfig(novelId)),
-                DeriveProfile.Capability.FORBID_VOLUME_PLAN)) {
-            return;
-        }
-        for (com.zzdzz.novelgen.model.entity.ChapterDO c : chapterData.listSummariesByNovel(novelId)) {
-            if (c.getChapterNo() >= from && c.getOutlineYaml() != null && !c.getOutlineYaml().isBlank()) {
-                throw new BizException(ErrorCode.STATE_CONFLICT,
-                        "第 " + c.getChapterNo() + " 章带产线预置章纲（受保护蓝图），卷规划会把它整卷抹掉——"
-                                + "本书配方禁止卷规划覆盖；确需重规划请先删除该卷，或改用原创衍生配方");
-            }
-        }
     }
 
     /** 章纲批量生成入队（from=to 即单章）：逐章出场景拆解，进度/事件走队列口径，工作台可见可停。 */
@@ -398,25 +372,13 @@ public class GenerationQueueService {
             return;
         }
 
-        // 剧情换皮：定新外衣 + 逐章换皮（工作台可见进度）
-        if (TaskKind.RESKIN.is(task.kind())) {
-            try {
-                runReskinTask(task);
-            } finally {
-                taskThreads.remove(task.id());
-                Thread.interrupted();
-            }
-            return;
-        }
-
-        // 多书拼接：两层取样 + 拼接表落库 + 前情种子（阶段二四步链，工作台可见进度）
-        if (TaskKind.SPLICE.is(task.kind())) {
-            try {
-                runSpliceTask(task);
-            } finally {
-                taskThreads.remove(task.id());
-                Thread.interrupted();
-            }
+        if (!TaskKind.CHAPTERS.is(task.kind())) {
+            String message = "任务类型已下线，不再执行：" + task.kind();
+            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), message);
+            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
+                    StageLog.Phase.STOPPED, message);
+            taskThreads.remove(task.id());
+            Thread.interrupted();
             return;
         }
 
@@ -607,95 +569,6 @@ public class GenerationQueueService {
             emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
                     StageLog.Phase.STOPPED, "章纲批量生成异常：" + e.getMessage());
             log.error("章纲批量任务 #{} 异常：{}", task.id(), e.getMessage(), e);
-        }
-    }
-
-    /**
-     * 剧情换皮（RESKIN）任务：先定全书新外衣（题材/世界/主角/大纲），再逐章把样本节拍换成新外衣。
-     * 逐章 fail-fast——换皮设定定了却只换一半，留下的书前后外衣不一致，比整批失败更难收拾。
-     */
-    private void runReskinTask(GenerationTaskDataService.TaskRow task) {
-        taskDAO.updateProgress(task.id(), 0, task.fromChapter(), "换皮：先生成全书换皮设定");
-        stageLog.emit(task.novelId(), task.fromChapter(), StageLog.Stage.OUTLINE, StageLog.Phase.START,
-                Map.of("taskId", task.id(), "reskin", true));
-        try {
-            ReskinService.ReskinResult r = reskinService.run(task.novelId(), task.fromChapter(), task.toChapter(),
-                    // 进度按「已完成的章数」上报：第 no 章刚跑完 → no - from + 1（此前写成 no - from，末章恒少 1）
-                    (no, msg) -> taskDAO.updateProgress(task.id(), no - task.fromChapter() + 1, no, msg));
-            String summary = "换皮完成：" + r.chapters() + " 章 / " + r.beats() + " 个场景 / "
-                    + r.cards() + " 张设定卡（换皮设定见素材库·正典「换皮设定」）";
-            taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), summary);
-            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
-                    StageLog.Phase.DONE, summary);
-            log.info("换皮任务 #{} 完成：{}", task.id(), summary);
-        } catch (Exception e) {
-            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "换皮失败：" + e.getMessage());
-            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
-                    StageLog.Phase.STOPPED, "换皮失败：" + e.getMessage());
-            log.error("换皮任务 #{} 异常：{}", task.id(), e.getMessage(), e);
-        }
-    }
-
-    /** 剧情换皮入队（建书时由 {@link #submitBookPipeline} 提交；秒回任务 id，进度见工作台队列）。 */
-    private long submitReskin(long novelId, String novelTitle, int from, Integer to, Long userId) {
-        return enqueue(novelId, novelTitle, from, to == null ? from : to, userId,
-                TaskKind.RESKIN.wire(), null, null);
-    }
-
-    /** 多书拼接入队（建书时由 {@link #submitBookPipeline} 提交；to=目标章数，四步链一次预物化到顶）。 */
-    private long submitSplice(long novelId, String novelTitle, int targetChapters, Long userId) {
-        return enqueue(novelId, novelTitle, 1, targetChapters, userId,
-                TaskKind.SPLICE.wire(), null, null);
-    }
-
-    /**
-     * 建书事务提交后的产线入队（编排收口：controller 不再分支 RESKIN/SPLICE）。
-     * taskKey 来自 {@code NovelService.bookTaskKey}（能力表 QUEUE_BOOK_TASK 分派）：null=非取材产线不入队；
-     * RESKIN 按已建章行数定逐章范围（0 章=样本没章级剧情，只告警不入队）；
-     * SPLICE 目标章数=配方 targetChapters（缺省 100，任务内再按 cap 收口）。返回任务 id 或 null。
-     */
-    public Long submitBookPipeline(NovelVO vo, NovelCreateDTO dto, String taskKey, Long userId) {
-        if ("RESKIN".equals(taskKey)) {
-            int chapters = chapterData.listSummariesByNovel(vo.id()).size();
-            if (chapters <= 0) {
-                log.warn("剧情换皮：本书没有迁入章行（样本无章级剧情？），未入队 novelId={}", vo.id());
-                return null;
-            }
-            long taskId = submitReskin(vo.id(), vo.title(), 1, chapters, userId);
-            log.info("剧情换皮任务已入队：novelId={} taskId={} 章数={}", vo.id(), taskId, chapters);
-            return taskId;
-        }
-        if ("SPLICE".equals(taskKey)) {
-            // 拼接四步链在任务内自建章行，入队目标章数=配方 target（缺省 100，任务内再按 cap 收口）
-            int target = dto.deriveConfig() != null && dto.deriveConfig().targetChapters() != null
-                    && dto.deriveConfig().targetChapters() > 0
-                    ? dto.deriveConfig().targetChapters() : 100;
-            long taskId = submitSplice(vo.id(), vo.title(), target, userId);
-            log.info("多书拼接任务已入队：novelId={} taskId={} 目标章数={}", vo.id(), taskId, target);
-            return taskId;
-        }
-        return null;
-    }
-
-    /** SPLICE 任务：四步链（取样→拼接→种子→预物化）。生成由用户在工作台手启（与换皮同口径）。 */
-    private void runSpliceTask(GenerationTaskDataService.TaskRow task) {
-        taskDAO.updateProgress(task.id(), 0, task.fromChapter(), "拼接：跨书取样与拼接表生成");
-        stageLog.emit(task.novelId(), task.fromChapter(), StageLog.Stage.OUTLINE, StageLog.Phase.START,
-                Map.of("taskId", task.id(), "splice", true));
-        try {
-            SpliceService.SpliceResult r = spliceService.run(task.novelId(), task.toChapter(),
-                    (no, msg) -> taskDAO.updateProgress(task.id(), no, no, msg));
-            String summary = "拼接完成：" + r.chapters() + " 章已预物化 / 取样来源 " + r.sources()
-                    + " 本（设定见素材库·正典「拼接设定」；去工作台启动生成）";
-            taskDAO.updateStatus(task.id(), TaskStatus.DONE.wire(), summary);
-            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
-                    StageLog.Phase.DONE, summary);
-            log.info("拼接任务 #{} 完成：{}", task.id(), summary);
-        } catch (Exception e) {
-            taskDAO.updateStatus(task.id(), TaskStatus.STOPPED.wire(), "拼接失败：" + e.getMessage());
-            emitTask(task.novelId(), task.id(), task.novelTitle(), task.fromChapter(), task.toChapter(),
-                    StageLog.Phase.STOPPED, "拼接失败：" + e.getMessage());
-            log.error("拼接任务 #{} 异常：{}", task.id(), e.getMessage(), e);
         }
     }
 

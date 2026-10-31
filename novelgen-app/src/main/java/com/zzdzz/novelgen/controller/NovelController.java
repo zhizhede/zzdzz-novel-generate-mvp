@@ -7,7 +7,6 @@ import com.zzdzz.novelgen.common.web.Result;
 import com.zzdzz.novelgen.model.dto.ApprovalModeDTO;
 import com.zzdzz.novelgen.model.dto.NovelCreateDTO;
 import com.zzdzz.novelgen.model.vo.NovelVO;
-import com.zzdzz.novelgen.service.GenerationQueueService;
 import com.zzdzz.novelgen.service.NovelService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
@@ -34,9 +33,7 @@ import java.util.List;
 public class NovelController {
 
     private final NovelService novelService;
-    private final com.zzdzz.novelgen.service.OutlineDraftService outlineDraftService;
     private final com.zzdzz.novelgen.service.ImportAnalyzeService importAnalyzeService;
-    private final GenerationQueueService queueService;
 
 
     @GetMapping
@@ -90,18 +87,11 @@ public class NovelController {
     public record DigestBackfillBody(Integer recent) {
     }
 
-    /**
-     * 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选样本资产克隆与衍生配置（P2）。
-     * 剧情换皮（mode=RESKIN）在此**事务提交后**提交换皮任务：换皮要逐章调 LLM，不能挂在建书请求里跑，
-     * 也不能在事务内入队（worker 读到的是未提交的章行）。
-     */
+    /** 开书：书名 + 品类预设 → 克隆预设为本书风格包；可选通用生成配置。 */
     @PostMapping
     public Result<NovelVO> create(@RequestBody NovelCreateDTO dto, HttpServletRequest request) {
         Long userId = (Long) request.getAttribute(AuthInterceptor.ATTR_USER_ID);
-        NovelVO vo = novelService.create(dto, userId);
-        // 产线任务入队（RESKIN/SPLICE 分派与守卫）收口在队列服务——事务提交后调用，worker 才读得到章行
-        queueService.submitBookPipeline(vo, dto, novelService.bookTaskKey(dto), userId);
-        return Result.success(vo);
+        return Result.success(novelService.create(dto, userId));
     }
 
     @PutMapping("/{id}/approval-mode")
@@ -110,28 +100,11 @@ public class NovelController {
         return Result.success();
     }
 
-    /** 开书向导「AI 生成大纲」：异步提交，秒回任务 id（POST）——向导不阻塞，业务方可连续批量提交；GET 轮询状态与结果。 */
-    @PostMapping("/outline-draft")
-    public Result<Long> outlineDraft(@RequestBody NovelCreateDTO dto) {
-        return Result.success(outlineDraftService.submit(dto, dto.novelId()));
-    }
-
     /** 草稿书完成激活（draft → active）。 */
     @PostMapping("/{id}/activate")
     public Result<Void> activate(@PathVariable long id) {
         novelService.activate(id);
         return Result.success();
-    }
-
-    /** 某书最新一份大纲任务（草稿恢复：进向导时取回生成结果/进度）。 */
-    @GetMapping("/{id}/outline-draft/latest")
-    public Result<com.zzdzz.novelgen.model.entity.OutlineDraftTaskDO> latestOutlineDraft(@PathVariable long id) {
-        return Result.success(outlineDraftService.latestByNovel(id));
-    }
-
-    @GetMapping("/outline-draft/{taskId}")
-    public Result<com.zzdzz.novelgen.model.entity.OutlineDraftTaskDO> outlineDraftStatus(@PathVariable long taskId) {
-        return Result.success(outlineDraftService.status(taskId));
     }
 
     /** 编辑书籍基本信息（书名全站唯一）。 */

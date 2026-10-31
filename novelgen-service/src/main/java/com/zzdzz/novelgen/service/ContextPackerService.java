@@ -53,10 +53,9 @@ public class ContextPackerService {
      * sceneOnly=true 时只出场景侧要用的段（视角/密度）；标签/红线段由 volume 专用拼装避免重复注入。
      * 段文案从 PromptCatalog（node+sectionKey，{key} 占位）读取——落库可编辑，代码只组装参数。
      * chapterPov＝章级人称（chapters.pov，AI 章纲步所写）；非空时压过书级——多视角轮换书逐章不同，
-     * 单视角书二者相同；null（换皮/迁移预物化、旧书）走书级回退，DeriveSupport.effectivePov 统一口径。 */
+     * 单视角书二者相同；null（旧书）走书级回退，DeriveSupport.effectivePov 统一口径。 */
     private String deriveSection(long novelId, String chapterPov, boolean sceneOnly) {
-        Recipe recipe = Recipe.parse(novelData.findDeriveConfig(novelId));
-        DeriveSupport.Cfg cfg = recipe.params();
+        DeriveSupport.Cfg cfg = DeriveSupport.parse(novelData.findDeriveConfig(novelId));
         StringBuilder sb = new StringBuilder();
         String pov = DeriveSupport.effectivePov(chapterPov, cfg.pov());
         if (pov != null) {
@@ -72,19 +71,6 @@ public class ContextPackerService {
         if (!sceneOnly && cfg.tags() != null && !cfg.tags().isEmpty()) {
             sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, "derive_tags",
                     java.util.Map.of("tags", String.join("、", cfg.tags()))));
-        }
-        // 衍生口径段（书 10 实证：克隆的原书主角卡 pinned 注入后，卷规划复述了原书剧情）：
-        // ORIGINAL 注入「差异红线」，取材产线（RESKIN/归档 MIGRATE/SPLICE）注入相反口径的「蓝图段」——
-        // 两段同注会让模型无所从，由 DeriveProfile.injectSegment 二选一（与旧 migrate() 口径逐一对齐）。
-        if (!sceneOnly) {
-            String segment = DeriveProfile.injectSegment(recipe);
-            if (segment != null) {
-                sb.append(promptTemplates.getSection(LlmNode.SCENE_DRAFT, segment,
-                        "derive_migrate".equals(segment)
-                                ? java.util.Map.of("povCharacter",
-                                        java.util.Objects.requireNonNullElse(cfg.povCharacter(), "本书主角"))
-                                : java.util.Map.of()));
-            }
         }
         return sb.toString();
     }
