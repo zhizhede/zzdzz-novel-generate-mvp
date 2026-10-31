@@ -1,6 +1,17 @@
 # 项目状态快照（2026-09-15）
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
+## 主站旧样本衍生链下线（2026-10-31，未提交）
+
+- 用户确认：保留随机衍生系统（`novelgen-derive-app`、`com.zzdzz.novelgen.derive`、`/derive` 前端），删除主站旧的样本衍生链。
+
+- **已删除代码**：`SampleParseService`、`OutlineDraftService`、`ReskinService`、`SpliceService`、`DeriveProfile`、`Recipe` 及 `service/splice/*`；样本/换皮/拼接相关 DO、Mapper、XML、DataService、VO、TaskKind（RESKIN/SPLICE）与旧测试。
+**已收敛接口/模型**：开书入参移除 `sampleId/cloneAssets/mode/samples/protagonistFrom`；`derive_config` 仅保留 POV、掺水量、节奏、每卷/总章数、无人续跑、优先级、标签等通用生成参数。
+**已清理装配/提示词**：主站启动类不再扫描 `derive.mapper`；移除换皮/拼接/样本大纲/复刻评审提示词节点；`GenrePresetService` 与 `StyleFingerprintService` 不再读取导入样本台账。
+
+- **保留**：`derive_config` 列与通用参数读写、导入解析链、素材卡/正典/规划/正文管线、`novelgen-derive-app` 随机衍生系统。
+
+- **验收**：全量 `mvn -q test` 通过；`mvn -q -DskipTests package` 通过。未 commit/push。
 
 ## P6 结构化质量闸 + 自动根因回炉部署实弹（2026-10-21，已授权部署）
 

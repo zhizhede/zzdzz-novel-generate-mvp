@@ -1,6 +1,8 @@
 # zzdzz-novel-generate-mvp 项目指南（新会话必读）
 
 多用户 AI 小说自动生成平台。Java 21 + Spring Boot 3.5.5 + PostgreSQL 16（docker 容器 `pg-vector`）+ Vue3/Element Plus/Vite（web/）。**LLM 按用途分接入**（`llm_providers.role`）：会话类走 role=chat 的启用行（OpenAI 兼容 `/chat/completions`，无 Spring AI），向量化固定走 role=embedding 行（MiniMax 私有 `/embeddings`，embo-01）；某用途无启用行回退 `application-local.yaml` 静态配置。当前状态与 backlog 见 `docs/STATUS.md`（易变，每次收尾请更新）；**代码规约见 `docs/code-standards.md`（与本文铁律并行生效，冲突时以本文最新铁律为准）**。
+> **2026-10-31 更新**：主站旧样本衍生链已下线（样本资产化、样本克隆、剧情迁移/换皮、SPLICE 及相关队列任务/提示词/接口均已删除）；当前保留的是 `novelgen-derive-app` 随机衍生系统与主站通用生成管线。本文后续涉及 RESKIN/SPLICE/SampleParse/克隆样本的段落仅作历史记录，不再代表现行代码。
+
 
 > **宪法层（2026-10-17）**：约束层级 = **更高约束（引擎闸 hook `.mimocode/plugin/constraint-gate.js` 本体，唯一法「立即执行」）→ `最高约束.md`（宪法层）→ 本文 → 设计文档 → STATUS**。冲突时逐级服从；本文是铁律展开，不是最高约束。闸的行为（2026-10-17 简化为一把钥匙）：每个新任务/新会话未真实 Read 最高约束.md 前，Edit/Write/Bash/task/actor 一律被取消——Read/cat 宪法即一次过闸，读完直接动手；对「口令+base64 等编码加工」表演命令常时点名拦截——不读就动不了手，动手就必须是立即执行。
 
