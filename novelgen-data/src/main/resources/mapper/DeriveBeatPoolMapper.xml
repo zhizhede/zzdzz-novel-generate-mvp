@@ -5,7 +5,7 @@
         INSERT INTO derive_beat_pool (
             run_id, beat_key, pool_seq, beat_role, source, goal, novelty,
             state_before, state_after, depends_on, focus_characters, thread_refs,
-            requires_knowledge, writes_knowledge, reveal_level, required, protected,
+            requires_knowledge, writes_knowledge, reveal_level, required, protected_beat,
             status, contract
         ) VALUES (
             #{p.runId}, #{p.beatKey}, #{p.poolSeq}, #{p.beatRole}, #{p.source}, #{p.goal}, #{p.novelty},
@@ -21,7 +21,7 @@
             focus_characters = EXCLUDED.focus_characters, thread_refs = EXCLUDED.thread_refs,
             requires_knowledge = EXCLUDED.requires_knowledge, writes_knowledge = EXCLUDED.writes_knowledge,
             reveal_level = EXCLUDED.reveal_level, required = EXCLUDED.required,
-            protected = EXCLUDED.protected, status = EXCLUDED.status, contract = EXCLUDED.contract,
+            protected_beat = EXCLUDED.protected_beat, status = EXCLUDED.status, contract = EXCLUDED.contract,
             updated_time = NOW()
         RETURNING id
     </select>
