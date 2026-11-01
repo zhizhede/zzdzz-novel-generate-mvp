@@ -35,6 +35,9 @@ run66 = PLANNING：V143/V144/V145/V146 已写入，但第5章闭合窗口失败
 - 不得用 `text.contains(targetKey)` 判断义务兑现。
 - 不得让 P6/QC 构造空 `StoryKernel`。
 - 不得用 `Map.of()` 丢弃义务 payload。
+- 主标签没有域格时必须使用 `AI_GENERATED_DOMAIN` 或 `DETERMINISTIC_DEFAULT`，不得阻止建 run。
+- SCALE 的 `scopeEvidence` 必须接受字符串数组和 `key:value` 片段。
+- 短篇在字数带允许时必须允许 `chapterAvg < 2000`。
 - 未经用户明确授权，禁止 commit、push、部署。
 - 每个任务先写失败测试，再实现，再运行相关测试；最后运行全量测试和打包。
 - Flyway 只能新增迁移，不得修改历史迁移。
@@ -43,9 +46,9 @@ run66 = PLANNING：V143/V144/V145/V146 已写入，但第5章闭合窗口失败
 
 以下失败模式必须由任务测试覆盖：
 
-1. **合同版本不一致**：run66 出现 `StoryContract.version=1`、`GenreContract.contract_version=0`、`SCHEDULE_STALE`；必须统一版本。
+1. **合同版本不一致**：run66 出现 `StoryContract.version=1`、`GenreContract.contract_version=0`、`SCHEDULE_STALE`；必须先统一版本，再验证闭合义务。
 2. **闭合窗口失败**：run65/run66 第5章缺 `FINAL_CLOSURE`；必须区分当前窗口、未来窗口和最终闭合。
-3. **字数超限过晚发现**：run64 P6 已 PASS，但 QC 因 7329/5000 失败；必须在窗口阶段拦截。
+3. **字数超限过晚发现**：run64 P6 已 PASS，但 QC 因 7329/5000 失败；必须在窗口阶段拦截；中间窗口 projectedMax 低于 wordsMin 只能是 advisory，最后一个窗口低于 wordsMin 才是 hard fail。
 4. **direct 绕过确定性审计**：direct=true 不得跳过闭合、义务、预算和脚本 QC。
 5. **V2 遗留测试失败**：当前 V145 迁移使用 unique index，测试仍断言 table-level UNIQUE；必须同步断言，不得降低数据库约束。
 
@@ -113,7 +116,7 @@ Expected: 0 failures
 
 ---
 
-## Task 2: 修复合同版本一致性
+## Task 2: 修复合同版本一致性（闭合前置依赖）
 
 **Files:**
 
@@ -331,7 +334,8 @@ WordBudgetGuard.check(
 ```text
 currentWindowOverBudgetRejects
 projectedOverBudgetRejects
-projectedUnderBudgetRejects
+intermediateProjectedUnderBudgetIsAdvisory
+finalProjectedUnderBudgetRejects
 validBudgetAccepts
 ```
 
@@ -351,12 +355,18 @@ projectedMax > wordsMax
 projectedMax < wordsMin
 ```
 
-错误：
+错误与告警：
 
 ```text
-BUDGET_WINDOW_OVERSHOOT
-BUDGET_PROJECTED_OVERSHOOT
-BUDGET_WINDOW_UNDERSHOOT
+中间窗口：
+  BUDGET_PROJECTED_UNDERSHOOT
+  severity=ADVISORY
+  不失败
+
+最后一个窗口：
+  BUDGET_FINAL_UNDERSHOOT
+  severity=HARD
+  进入 EXPAND_WINDOW 或转人工
 ```
 
 回炉：
@@ -368,7 +378,7 @@ BUDGET_WINDOW_UNDERSHOOT
 
 - [ ] **Step 4: 接入 DeriveDraftService**
 
-预算失败必须在正文生成前阻止当前窗口继续落库。
+预算硬失败必须在正文生成前阻止当前窗口继续落库；中间窗口的 projected undershoot 只记录 advisory。
 
 - [ ] **Step 5: 运行测试确认通过**
 
@@ -377,6 +387,194 @@ Run: `mvn -q -pl novelgen-service -am "-Dtest=DualProbeBudgetGuardTest" "-Dsuref
 Expected: PASS
 
 - [ ] **Step 6: 记录提交状态**
+
+未获用户授权不 commit。
+
+---
+
+## Task 5A: 域格缺失时由 AI 生成内容域
+
+**Files:**
+
+- Modify: `novelgen-service/src/main/java/com/zzdzz/novelgen/derive/service/DeriveSampleService.java`
+- Create: `novelgen-service/src/main/java/com/zzdzz/novelgen/derive/story/GeneratedDomainSnapshot.java`
+- Create: `novelgen-service/src/test/java/com/zzdzz/novelgen/derive/service/DomainFallbackTest.java`
+
+**Interfaces:**
+
+- Consumes: `RunCreateDTO.genre/tags/intent/pace`、`GenreProfileRegistry`、域格池。
+- Produces:
+
+```text
+GeneratedDomainSnapshot(
+    String name,
+    String grp,
+    Map<String,Double> cats,
+    List<String> beatTypes,
+    String relationNote,
+    List<String> counterWords,
+    List<Long> refIds,
+    String provenance)
+
+DomainFallbackService.resolve(
+    String genre,
+    String mainTag,
+    String intent,
+    String pace) -> GeneratedDomainSnapshot
+```
+
+**Implementation:**
+
+- [ ] **Step 1: 写失败测试**
+
+测试：
+
+```text
+romanceWithoutDomainStillCreatesRun
+generatedDomainUsesGenreAndMainTag
+aiDomainFailureFallsBackToDeterministicDefault
+domainFallbackNeverBlocksRunCreation
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `mvn -q -pl novelgen-service -am "-Dtest=DomainFallbackTest" "-Dsurefire.failIfNoSpecifiedTests=false" test`
+
+Expected: 当前主标签没有域格时失败。
+
+- [ ] **Step 3: 实现 AI 域格快照**
+
+AI 生成失败时必须返回确定性默认快照：
+
+```text
+name = {genre}·通用域
+grp = DEFAULT
+cats = {主标签: 1.0}
+beatTypes = [事件, 情绪, 抉择, 收束]
+relationNote = 按 intent/genre 描述冲突、选择、代价与闭合
+counterWords = []
+refIds = []
+provenance = DETERMINISTIC_DEFAULT
+```
+
+- [ ] **Step 4: 修改 DeriveSampleService**
+
+当前：
+
+```text
+cell == null → PARAM_ERROR
+```
+
+必须改为：
+
+```text
+cell != null → 使用启用域格
+cell == null → AI_GENERATED_DOMAIN
+AI失败 → DETERMINISTIC_DEFAULT
+domain_id 为空、domain_snapshot 有值
+继续 SAMPLING
+```
+
+- [ ] **Step 5: 运行测试确认通过**
+
+Run: `mvn -q -pl novelgen-service -am "-Dtest=DomainFallbackTest" "-Dsurefire.failIfNoSpecifiedTests=false" test`
+
+Expected: PASS
+
+- [ ] **Step 6: 记录提交状态**
+
+未获用户授权不 commit。
+
+---
+
+## Task 5B: 修复 SCALE 的 scopeEvidence 与短篇章均
+
+**Files:**
+
+- Modify: `novelgen-service/src/main/java/com/zzdzz/novelgen/derive/service/DeriveStoryPlanService.java`
+- Modify: `novelgen-service/src/main/java/com/zzdzz/novelgen/derive/plan/StoryPlanningPrompts.java`
+- Create: `novelgen-service/src/test/java/com/zzdzz/novelgen/derive/service/ScaleScopeEvidenceTest.java`
+
+**Interfaces:**
+
+- Consumes: SCALE 输出 `chapterCount`、`chapterAvg`、`scopeEvidence`、`wordsMin/wordsMax`。
+- Produces:
+
+```text
+parseScaleEvidence(JsonNode root) -> List<String>
+```
+
+**Implementation:**
+
+- [ ] **Step 1: 写失败测试**
+
+测试：
+
+```text
+scopeEvidenceAcceptsStringArray
+scopeEvidenceAcceptsObjectFragments
+scopeEvidenceAcceptsKeyColonValue
+scopeEvidenceDropsMalformedFragments
+shortNovelAllowsChapterAvgBelow2000
+chapterAvgStillChecksWordBand
+```
+
+- [ ] **Step 2: 运行测试确认失败**
+
+Run: `mvn -q -pl novelgen-service -am "-Dtest=ScaleScopeEvidenceTest" "-Dsurefire.failIfNoSpecifiedTests=false" test`
+
+Expected: 当前 run67 类型失败。
+
+- [ ] **Step 3: 修复 scopeEvidence 解析**
+
+允许：
+
+```text
+["短篇，4章"]
+["key":"value"]
+["key": "value"]
+{"key":"value"}
+```
+
+解析为字符串证据；无法解析的片段记录 warning，不阻断 SCALE。
+
+- [ ] **Step 4: 修复短篇章均下限**
+
+当：
+
+```text
+lenCheck=true
+wordsMin/wordsMax 明确为短篇带宽
+chapterCount * chapterAvg 落在字数带
+```
+
+允许 `chapterAvg` 低于 `CHAPTER_AVG_MIN=2000`。
+
+必须保留：
+
+```text
+chapterAvg > 0
+chapterCount >= 1
+chapterCount * chapterAvg 在 wordsMin..wordsMax
+```
+
+- [ ] **Step 5: 修改 SCALE 提示词**
+
+明确要求：
+
+```text
+scopeEvidence 必须是字符串数组
+短篇允许 chapterAvg < 2000
+章数×章均必须落在字数带
+```
+
+- [ ] **Step 6: 运行测试确认通过**
+
+Run: `mvn -q -pl novelgen-service -am "-Dtest=ScaleScopeEvidenceTest" "-Dsurefire.failIfNoSpecifiedTests=false" test`
+
+Expected: PASS
+
+- [ ] **Step 7: 记录提交状态**
 
 未获用户授权不 commit。
 
@@ -646,6 +844,9 @@ git diff --check
 - 第5章闭合不再在第4章窗口提前失败；
 - run64 类型的字数超限在窗口阶段被拦截；
 - direct=true 不再绕过义务、闭合、预算和脚本 QC；
+- `tags=["言情"]` 即使没有域格也能创建 run；
+- run67 类型的 `scopeEvidence` 不再因 JSON 片段格式失败；
+- 短篇章均不再被 `CHAPTER_AVG_MIN=2000` 无条件拒绝；
 - 悬疑真实 run `PASSED`；
 - 言情真实 run `PASSED`；
 - 两本正文完整且总字数在范围内；

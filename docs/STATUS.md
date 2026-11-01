@@ -2,6 +2,35 @@
 
 > 易变内容。每次开发收尾请更新本文件；新会话先读 AGENTS.md 再读这里。
 
+## direct 初稿直通语义调整与宝塔部署（2026-11-01）
+
+- **用户定调 A**：`direct=true` 改为「初稿直通」——跳过 LLM P6/QC；确定性审计、计划、预算和脚本 QC 问题降级为报告，不再阻止正文产出或把 run 打成 FAILED。严格质量验收仍走 `direct=false`。
+- **代码**：`DeriveAutoFlowService` 在 direct 分支将确定性问题写入 GATE PASS 报告，并固定走 legacy ⑦；新增 `DeriveQcService.qcDraft`，脚本/计划/类型问题写入 qc_report 后仍允许 PASSED；前端按钮与提示改为「全程直通·初稿」。
+- **验证**：`mvn -q test`、`mvn -q -DskipTests package`、`npm run build` 均通过。
+- **宝塔部署（用户已授权）**：已备份并部署 `novelgen-derive-app.jar` 与 `web/dist`；`novelgen-derive` active，derive Flyway 46 项校验通过、schema=146。备份：`/www/wwwroot/novelgen-derive/novelgen-derive-app.jar.bak-20261101-direct-draft`、`/www/wwwroot/novelgen-ui.bak-20261101-direct-draft`。
+- **真实 curl run 测试**：脚本 `var/derive-direct-test.sh` 已上传 `/root/derive-direct-test.sh`；当前被 derive admin 登录口令阻塞（服务器 `/root/.run15.pass` 已失效），尚未创建 run。未 commit、未 push。
+- **真实 curl run 复测（用户提供 cookie 后）**：run65（3000~5000）推进到 ⑥b 后仍因 `OBLIGATION_WINDOW：窗口缺少义务 CH5:FINAL_CLOSURE:TRUTH` 停在 PLANNING；run70（3000~5000）SCALE 连续 3 轮 `chapterCount 必须在 6~80`；run71（10000~20000）与 run72（20000~30000）均连续 3 轮 `chapterAvg 必须在 2000~6000`。四次真实 run 均未进入 DRAFTING/QC，故线上尚未走到 direct 的“审计问题降级”分支；该分支已由本地单测覆盖。未 commit、未 push。
+- **direct 上游降级补齐**：`DeriveStoryPlanService`/`DerivePlanService` 在 direct 线程上下文跳过 SCALE 字数带硬判；`DeriveDraftService` 在 direct 下将义务/闭合窗口问题与字数预算问题降级为报告；SCALE 提示词明确 `scopeEvidence` 必须是 `字段=值` 字符串数组，修复实弹 JSON `"key":"value"` 数组片段问题。
+- **真实 curl run 成功（run74，2026-11-01）**：`direct=true`、悬疑、3000~5000、seed=20261105；SCALE→CONTRACT→SCHEDULE→SPINE→VOLUMES→CHARACTERS→⑥b→⑦→⑧ 全链跑通，`run.status=PASSED`，8 章正文全部非空，`char_count` 合计 10085；qc_report verdict=PASS，预算/闭合/世界状态问题均作为报告保留，未熔断。报告：`/root/derive-direct-resume-report.txt`。全量 `mvn -q test` 再次通过。未 commit、未 push。
+- **言情生产链接入（2026-11-01）**：`DeriveStoryPlanService` 为 `ROMANCE` 生成并冻结独立 `RomanceContract`、确定性关系阶段与卷合同；`DeriveChapterScheduleService`/路由/⑥b cast 读取言情合同；`DeriveSampleService` 增加言情域格回退；`DerivePlanService.finishBookValidation` 跳过悬疑合同审计；修复 `derive_volume_plan.contract` jsonb 插入需 `::jsonb` 的问题。
+- **言情真实 curl run 成功（run78，2026-11-01）**：`direct=true`、言情、3000~5000、seed=2026110204；`tags=["言情"]` 成功建 run，使用“言情·通用关系域”，SCALE→CONTRACT→SCHEDULE→SLOT_ROUTE→⑥b→⑦→⑧ 全链跑通，`run.status=PASSED`，6 章正文全部非空，`char_count` 合计 7503；qc_report verdict=PASS，预算/类别浓度/卷角色线程问题均作为报告保留。报告：`/root/derive-romance-test-report.txt`。全量 `mvn -q test` 通过；测试修复后已再次打包并部署最终 jar（备份 `novelgen-derive-app.jar.bak-20261101-romance-final`）。未 commit、未 push。
+- **域格通用化修正（2026-11-01）**：删除采样服务里的 `ROMANCE` 专属域格分支，改为任意类型共用的 `genericFallbackCell(mainTag, genre, intent)`；新增 `DeriveSampleDomainFallbackTest`。新类型不再需要在代码里新增专属域格回退，域格优先读池，缺格时统一走通用回退（后续可升级为 AI_GENERATED_DOMAIN）。最终 jar 已重新部署，备份 `novelgen-derive-app.jar.bak-20261101-generic-domain`。未 commit、未 push。
+
+## 双 PASSED 短篇探针 V3 施工（2026-11-01，未提交未部署，按 V3 顺序施工至冲突点暂停）
+
+- **执行口径**：以 `docs/superpowers/specs/2026-11-01-derive-dual-passed-probes-design.md` 为最高设计依据；施工文档冲突处停止。已按最新 V3 顺序完成阶段 0 版本一致性 → A 闭合 → B 预算 → C direct，未执行真实探针。
+- **阶段 A 闭合**：新增 `DualProbeClosureWindowTest`；扩展 `ClosureEvidence` 为结构化字段（culpritKey/motiveTag/methodTag/relationshipThreadKey/proofEventKeys）；`StoryClosureContract` 支持 `RELATIONSHIP_DECISION`；`ClosureWindowValidator` 区分当前/未来/既往窗口，校验结构化闭合与 proofEventKeys，错误带 `repairTarget=WINDOW[n]`；`MysteryProfile`/`RomanceProfile` 向义务 payload 投影 requiredActs/requiredTags/proofEventKeys；`DeriveDraftService` 解析 closingActs/closureEvidence、装配闭合合同、合并既往证据并落证据索引；提示词与 `plan_contract` 已补 closureEvidence。
+- **阶段 B 预算**：按最新 V3 实现中间窗口 `projectedMax < wordsMin` 为 `BUDGET_PROJECTED_UNDERSHOOT`/ADVISORY 不拦截，最后一个窗口为 `BUDGET_FINAL_UNDERSHOOT`/HARD（`EXPAND_WINDOW` 或转人工）；超限仍为 `BUDGET_WINDOW_OVERSHOOT`、`BUDGET_PROJECTED_OVERSHOOT`；更新 `WordBudgetGuardTest`/`DualProbeBudgetGuardTest`；`DeriveDraftService` 在 BATCH 窗口回调中调用预算护栏并记录 advisory，`DeriveGateService.genreIssues` 增加确定性预算审计，direct 与完整 P6 共用。
+- **阶段 C direct**：新增 `DirectProbeModeTest`，覆盖义务/闭合/预算确定性审计、script QC 仍跑、LLM P6/QC 跳过；现有 `DirectModeDeterministicAuditTest`、`DeriveQcDirectSkipLlmTest` 保持通过。
+- **阶段 0 版本**：新增 `ContractVersionService` 与 `ContractVersionConsistencyTest`（story/genre/schedule 三版本快照、旧 run 兼容、显式 0 脏数据、SCHEDULE_STALE）；`DeriveChapterScheduleService.assertCurrent` 接入统一守卫；修复 mystery 冻结时 genre 合同误写 version=0 的顺序问题；`loadGenreContract` 读到历史 `contract_version=0` 时按 payload 真实版本回写。
+- **Task 1 基线**：计划所称 V145 测试失败在当前工作区已不存在，`DeriveStoryObligationEvidencePersistenceTest` 直接通过；未改历史迁移。
+- **验证**：`mvn -q test` 通过；`mvn -q -DskipTests package` 通过；`git diff --check` 通过。未 commit、未 push、未部署。
+- **宝塔部署（2026-11-01，用户已授权）**：已备份主站/derive jar 与 `derive_gen` dump 后，部署 `novelgen-app.jar`、`novelgen-derive-app.jar`、`web/dist`；两服务 active，derive Flyway 校验 46 项、schema=`146`，入口 `https://zzdzz.cn:8888/` 200，derive ping/me 带 Origin 正常。
+- **悬疑真实探针 run67（未通过）**：按 V3 参数以 direct=false 创建并启动；SCALE 连续 3 次因 `scopeEvidence` 数组内出现 `"key":"value"` 片段而 JSON 解析失败，停在 PLANNING。模型输出曾给 `chapterCount=4/chapterAvg=1000`，与 V3 短篇方向一致，但现有 `CHAPTER_AVG_MIN=2000` 会在解析修复后继续拦截。报告：`var/derive-probe-mystery-passed-report.md`。
+- **言情真实探针（未创建）**：按 V3 `tags=[言情]` 创建时 API 返回 400——域格池没有主标签「言情」的启用域格。报告：`var/derive-probe-romance-passed-report.md`。- **暂停冲突/阻塞（需用户决策，不自行猜测）**：
+  1. V3 固定悬疑 5 章、言情 7 章且总字数 3000~5000；当前 SCALE 强制 `CHAPTER_AVG_MIN=2000` 且校验 `chapterCount × chapterAvg` 落在字数区间，按现有约束无法产出 5/7 章短篇。需明确是放宽短篇章均/章数约束，还是改探针参数。
+  2. `RomanceContract` 仍无生产冻结入口：`DeriveContractService.generateIfAbsent` 非 Mystery 直接拒绝，`freezeGenreContract` 无调用方；且 `SPINE/VOLUMES/CHARACTERS` 单元仍强制 `StoryContract`。需明确言情走独立规划分支/跳过哪些悬疑专用单元，不能伪造 StoryContract。
+  3. 真实双 PASSED 探针需要把本轮代码部署到宝塔并创建运行 run；未获当轮部署授权前不部署、不跑线上探针。
 ## 通用故事合同 V2 施工进展（2026-10-31，未提交未部署，因设计冲突暂停）
 
 - 已按 V2 计划完成 Task 1-7 的核心代码与单测：义务证据模型/索引、V145 证据表与 Mapper、义务 payload 全链路保留、⑥b 证据窗口校验、闭合合同/作用域、闭合窗口校验、字数预算护栏、direct 确定性审计入口、完整 StoryKernel 装配器、P6 完整 kernel、QC 证据索引审计与证据落库。

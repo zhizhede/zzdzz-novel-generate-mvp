@@ -140,6 +140,74 @@ QC verdict = PASS
 不得出现凶手、动机、手法、线索、揭示章等悬疑字段
 ```
 
+### 3.3 域格缺失时的业务回退
+
+域格是采样辅助资产，不是业务成功的硬前置条件。
+
+如果主标签在启用域格池中没有对应域格：
+
+```text
+不得抛出 PARAM_ERROR
+不得阻止建 run
+不得要求用户先补域格
+```
+
+系统必须执行：
+
+```text
+AI_GENERATED_DOMAIN
+```
+
+流程：
+
+```text
+读取主标签、genre、intent、tags、pace
+→ AI 生成最小域格快照
+→ Java 校验基本字段
+→ 落入 run.domain_snapshot
+→ run.domain_id 为空
+→ 继续 SAMPLING
+```
+
+AI 生成的最小域格快照至少包含：
+
+```json
+{
+  "name": "言情·都市情感",
+  "grp": "AI_GENERATED",
+  "cats": {"言情": 1.0, "都市": 0.5},
+  "beatTypes": ["事件", "情绪", "抉择", "收束"],
+  "relationNote": "围绕误会、信任、告白、和好与关系闭合组织事件",
+  "counterWords": [],
+  "refIds": [],
+  "provenance": "AI_GENERATED"
+}
+```
+
+规则：
+
+```text
+有域格 → 使用启用域格
+无域格 → 使用 AI_GENERATED_DOMAIN
+AI 生成失败 → 使用确定性默认域格
+默认域格也失败 → 才允许 PARAM_ERROR
+```
+
+确定性默认域格：
+
+```text
+name = {genre}·通用域
+grp = DEFAULT
+cats = {主标签: 1.0}
+beatTypes = [事件, 情绪, 抉择, 收束]
+relationNote = 按 intent 与 genre 组织冲突、选择、代价与闭合
+counterWords = []
+refIds = []
+provenance = DETERMINISTIC_DEFAULT
+```
+
+`RomanceProfile` 不得因为域格缺失而失败。言情探针的 `tags=["言情"]` 必须能够创建 run。
+
 ## 4. 当前必须修复的三类业务阻塞
 
 ### 4.1 闭合阻塞
@@ -259,6 +327,22 @@ BUDGET_PROJECTED_OVERSHOOT
 或压缩剩余窗口
 不得默认重写整本书
 ```
+
+预算不足的规则必须区分窗口阶段：
+
+```text
+中间窗口 projectedMax < wordsMin
+  → ADVISORY
+  → 记录 BUDGET_PROJECTED_UNDERSHOOT
+  → 不失败，因为后续章节仍可能补足
+
+最后一个窗口 projectedMax < wordsMin
+  → HARD
+  → BUDGET_FINAL_UNDERSHOOT
+  → 进入 EXPAND_WINDOW 或转人工
+```
+
+因此 `BUDGET_WINDOW_UNDERSHOOT` 不是中间窗口的硬失败。
 
 ### 4.3 direct 模式阻塞
 
@@ -497,6 +581,20 @@ QC
 
 ## 12. 实施顺序
 
+实现顺序必须区分“业务优先级”和“依赖前置”：
+
+```text
+阶段 0：合同版本一致性
+  这是闭合义务和日程投影的前置依赖
+
+阶段 A：闭合
+阶段 B：预算
+阶段 C：采样域格回退与 SCALE 短篇兼容
+阶段 D：direct
+阶段 E：悬疑 PASSED
+阶段 F：言情 PASSED
+```
+
 ### 阶段 A：修闭合
 
 ```text
@@ -514,18 +612,20 @@ WordBudgetGuard
 超限局部回炉
 ```
 
-### 阶段 C：修 direct
+### 阶段 C：修采样域格回退与 SCALE
+
+```text
+主标签没有域格时使用 AI_GENERATED_DOMAIN
+AI 失败时使用 DETERMINISTIC_DEFAULT
+scopeEvidence 接受 key:value 片段
+短篇在字数带允许时接受 chapterAvg < 2000
+```
+
+### 阶段 D：修 direct
 
 ```text
 direct 只跳过 LLM 审稿
 确定性审计全部保留
-```
-
-### 阶段 D：修合同版本
-
-```text
-统一 story/genre/schedule 版本
-消除 SCHEDULE_STALE
 ```
 
 ### 阶段 E：悬疑 PASSED
