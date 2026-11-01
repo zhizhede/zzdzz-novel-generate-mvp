@@ -2,6 +2,18 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.zzdzz.novelgen.derive.mapper.VolumePlanMapper">
 
+    <insert id="insertFull">
+        INSERT INTO derive_volume_plan (
+            run_id, novel_id, volume_no, from_chapter, to_chapter,
+            arc, local_event, local_closure, next_hook, global_role,
+            status, contract
+        ) VALUES (
+            #{p.runId}, #{p.novelId}, #{p.volumeNo}, #{p.fromChapter}, #{p.toChapter},
+            #{p.arc}, #{p.localEvent}, #{p.localClosure}, #{p.nextHook}, #{p.globalRole},
+            #{p.status}, #{p.contract}::jsonb
+        )
+    </insert>
+
     <update id="updatePlanning">
         UPDATE derive_volume_plan
         SET from_chapter = #{p.fromChapter},

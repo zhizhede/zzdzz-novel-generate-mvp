@@ -32,6 +32,7 @@ import com.zzdzz.novelgen.derive.genre.GenreProfile;
 import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
 import com.zzdzz.novelgen.derive.genre.MysteryGateAuditor;
 import com.zzdzz.novelgen.derive.genre.MysteryProfile;
+import com.zzdzz.novelgen.derive.genre.RomanceProfile;
 import com.zzdzz.novelgen.derive.genre.GenreContract;
 import com.zzdzz.novelgen.derive.story.StoryKernel;
 import com.zzdzz.novelgen.derive.story.StoryObligation;
@@ -39,6 +40,7 @@ import com.zzdzz.novelgen.derive.story.StoryKernelAssembler;
 import com.zzdzz.novelgen.derive.story.StoryObligationEvidence;
 import com.zzdzz.novelgen.derive.story.StoryEvidenceIndex;
 import com.zzdzz.novelgen.derive.story.StoryThread;
+import com.zzdzz.novelgen.derive.story.WordBudgetGuard;
 import com.zzdzz.novelgen.model.entity.derive.DerivePlanSnapshotDO;
 import com.zzdzz.novelgen.llm.LlmJson;
 import com.zzdzz.novelgen.llm.LlmPort;
@@ -498,8 +500,9 @@ public class DeriveGateService {
     }
 
     List<String> genreIssues(RunDO run) {
+        List<String> collected = new ArrayList<>(budgetIssues(run));
         if (obligationMapper == null) {
-            return List.of();
+            return collected;
         }
         List<StoryObligation> obligations = new ArrayList<>();
         for (DeriveStoryObligationDO row : obligationMapper.selectByRun(run.getId())) {
@@ -510,7 +513,7 @@ public class DeriveGateService {
                     row.getSourceContract(), readJsonObject(row.getPayload())));
         }
         if (obligations.isEmpty()) {
-            return List.of();
+            return collected;
         }
         List<StoryThread> threads = new ArrayList<>();
         if (storyThreadMapper != null) {
@@ -537,9 +540,51 @@ public class DeriveGateService {
                 "MYSTERY".equals(profile.genre()) && mysteryGateAuditor != null
                         ? mysteryGateAuditor.audit(kernel, profile)
                         : auditGenreGate(run, profile, kernel, evidenceIndex);
-        return issues.stream()
+        collected.addAll(issues.stream()
                 .map(issue -> issue.code() + "：" + issue.message())
-                .toList();
+                .toList());
+        return collected;
+    }
+
+    /** 确定性字数预算审计：direct 与完整 P6 共用，超限不得靠 LLM 审稿兜底。 */
+    private List<String> budgetIssues(RunDO run) {
+        Integer wordsMin = run.getParamWordsMin();
+        Integer wordsMax = run.getParamWordsMax();
+        if (chapterMapper == null || wordsMin == null || wordsMax == null
+                || wordsMin <= 0 || wordsMax < wordsMin) {
+            return List.of();
+        }
+        List<ChapterDO> chapters = chapterMapper.selectList(
+                new LambdaQueryWrapper<ChapterDO>()
+                        .eq(ChapterDO::getNovelId, run.getNovelId())
+                        .orderByAsc(ChapterDO::getChapterNo));
+        if (chapters.isEmpty()) {
+            return List.of();
+        }
+        int total = 0;
+        int remaining = 0;
+        int remainingBudget = 0;
+        for (ChapterDO chapter : chapters) {
+            String content = chapter.getContent();
+            if (content != null && !content.isBlank()) {
+                total += chapter.getCharCount() == null ? content.length()
+                        : chapter.getCharCount();
+            } else {
+                remaining++;
+                remainingBudget += chapter.getBudget() == null ? 0 : chapter.getBudget();
+            }
+        }
+        int chapterAvg = remaining == 0 ? 0 : remainingBudget / remaining;
+        WordBudgetGuard.BudgetDecision decision = WordBudgetGuard.check(
+                total, 0, remaining, chapterAvg, wordsMin, wordsMax);
+        if (decision.ok()) {
+            return List.of();
+        }
+        return List.of(decision.code() + "：totalCharCount=" + total
+                + " remainingChapters=" + remaining
+                + " projectedMax=" + decision.projectedMax()
+                + " wordsMax=" + wordsMax
+                + " repairTarget=" + decision.repairTarget());
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -606,7 +651,7 @@ public class DeriveGateService {
     private GenreProfile profile(RunDO run) {
         GenreProfileRegistry registry = genreProfileRegistry;
         if (registry == null) {
-            registry = new GenreProfileRegistry(List.of(new MysteryProfile()));
+            registry = new GenreProfileRegistry(List.of(new MysteryProfile(), new RomanceProfile()));
         }
         return registry.require(run.getGenre() == null || run.getGenre().isBlank()
                 ? "MYSTERY" : run.getGenre());

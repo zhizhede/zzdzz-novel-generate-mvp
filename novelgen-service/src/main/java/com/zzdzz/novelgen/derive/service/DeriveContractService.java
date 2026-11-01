@@ -17,6 +17,7 @@ import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
 import com.zzdzz.novelgen.derive.genre.GenreContract;
 import com.zzdzz.novelgen.derive.genre.MysteryContract;
 import com.zzdzz.novelgen.derive.genre.MysteryProfile;
+import com.zzdzz.novelgen.derive.genre.RomanceProfile;
 import com.zzdzz.novelgen.derive.mapper.DeriveStoryContractMapper;
 import com.zzdzz.novelgen.derive.mapper.DeriveGenreContractMapper;
 import com.zzdzz.novelgen.derive.mapper.RunMapper;
@@ -117,8 +118,8 @@ public class DeriveContractService {
         }
         StoryContract parsed = mysteryContract.story();
         DeriveStoryContractDO row = persistContract(run.getId(), parsed);
-        persistGenreContract(run, new MysteryContract(parsed), scope);
         StoryContract saved = rowToContract(row, scope);
+        persistGenreContract(run, new MysteryContract(saved), scope);
         writeContractCaches(run.getId(), saved);
         log.info("唯一故事合同已冻结：runId={} version={} culprit={} revealChapter={} clues={} threads={}",
                 run.getId(), saved.version(), saved.truth().culpritName(),
@@ -140,7 +141,7 @@ public class DeriveContractService {
         if (genreProfileRegistry != null) {
             return genreProfileRegistry;
         }
-        return new GenreProfileRegistry(List.of(new MysteryProfile()));
+        return new GenreProfileRegistry(List.of(new MysteryProfile(), new RomanceProfile()));
     }
 
     /** 读取可用合同；返回 null 表示尚无合同或历史残缺行（残缺行由 generateIfAbsent 升版本重建）。 */
@@ -182,8 +183,10 @@ public class DeriveContractService {
             DeriveGenreContractDO row = genreContractMapper.findByRun(run.getId());
             if (row != null) {
                 try {
-                    return genreContractCodecRegistry.require(row.getGenre()).decode(
-                            readTreeSafe(row.getPayload()), scopeFromJson(row.getScope()));
+                    GenreContract decoded = genreContractCodecRegistry.require(row.getGenre())
+                            .decode(readTreeSafe(row.getPayload()), scopeFromJson(row.getScope()));
+                    repairGenreContractVersion(row, decoded);
+                    return decoded;
                 } catch (RuntimeException e) {
                     log.warn("类型合同读取失败：runId={} genre={} 原因={}",
                             run.getId(), row.getGenre(), e.getMessage());
@@ -231,9 +234,7 @@ public class DeriveContractService {
         DeriveGenreContractDO row = new DeriveGenreContractDO();
         row.setRunId(run.getId());
         row.setGenre(genre);
-        row.setContractVersion(contract instanceof MysteryContract
-                ? ((MysteryContract) contract).story().version()
-                : ((com.zzdzz.novelgen.derive.genre.RomanceContract) contract).version());
+        row.setContractVersion(genreContractVersion(contract));
         row.setScope(toJson(scope));
         row.setPayload(codec.encode(contract).toString());
         row.setStatus("FROZEN");
@@ -241,6 +242,30 @@ public class DeriveContractService {
         genreContractMapper.insertFull(row);
     }
 
+    /** 历史行 contract_version=0 时按 payload 内真实版本回写，消除 run66 型脏数据。 */
+    private void repairGenreContractVersion(DeriveGenreContractDO row, GenreContract contract) {
+        if (row == null || contract == null || genreContractMapper == null) {
+            return;
+        }
+        int actual = genreContractVersion(contract);
+        if ((row.getContractVersion() == null || row.getContractVersion() == 0)
+                && actual > 0) {
+            row.setContractVersion(actual);
+            genreContractMapper.updateById(row);
+            log.warn("类型合同版本已修复：runId={} genre={} contractVersion={}",
+                    row.getRunId(), row.getGenre(), actual);
+        }
+    }
+
+    private int genreContractVersion(GenreContract contract) {
+        if (contract instanceof MysteryContract mystery) {
+            return mystery.story().version();
+        }
+        if (contract instanceof com.zzdzz.novelgen.derive.genre.RomanceContract romance) {
+            return romance.version();
+        }
+        return 1;
+    }
     private PlanContracts.ScopeContract scopeFromJson(String json) {
         try {
             JsonNode node = readTreeSafe(json);

@@ -19,7 +19,8 @@ public record StoryClosureContract(
         Map<String, Object> payload) {
 
     private static final Set<String> ALLOWED_ACTS = Set.of(
-            "CULPRIT", "MOTIVE", "METHOD", "CHOICE", "STATE");
+            "CULPRIT", "MOTIVE", "METHOD", "CHOICE", "STATE",
+            "RELATIONSHIP_DECISION");
 
     public StoryClosureContract {
         closureKey = StoryEntity.requireText(closureKey, "closureKey");

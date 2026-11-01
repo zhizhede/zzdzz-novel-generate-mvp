@@ -15,6 +15,7 @@ class WordBudgetGuardTest {
 
         assertEquals("BUDGET_WINDOW_OVERSHOOT", decision.code());
         assertEquals("COMPRESS_WINDOW", decision.repairTarget());
+        assertFalse(decision.ok());
     }
 
     @Test
@@ -24,15 +25,27 @@ class WordBudgetGuardTest {
 
         assertEquals("BUDGET_PROJECTED_OVERSHOOT", decision.code());
         assertEquals("COMPRESS_REMAINING_WINDOWS", decision.repairTarget());
+        assertFalse(decision.ok());
     }
 
     @Test
-    void projectedUnderBudgetRejects() {
+    void intermediateProjectedUnderBudgetIsAdvisory() {
         WordBudgetGuard.BudgetDecision decision = WordBudgetGuard.check(
-                2500, 500, 3, 50, 3000, 5000);
+                500, 300, 3, 100, 3000, 5000);
 
-        assertEquals("BUDGET_WINDOW_UNDERSHOOT", decision.code());
+        assertEquals("BUDGET_PROJECTED_UNDERSHOOT", decision.code());
+        assertEquals("ADVISORY", decision.severity());
+        assertTrue(decision.ok(), "中间窗口预计不足只告警，不拦截");
+    }
+
+    @Test
+    void finalProjectedUnderBudgetRejects() {
+        WordBudgetGuard.BudgetDecision decision = WordBudgetGuard.check(
+                2500, 500, 0, 50, 3000, 5000);
+
+        assertEquals("BUDGET_FINAL_UNDERSHOOT", decision.code());
         assertEquals("EXPAND_WINDOW", decision.repairTarget());
+        assertFalse(decision.ok());
     }
 
     @Test

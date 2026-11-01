@@ -63,7 +63,7 @@
             <el-button type="success" :disabled="!!acting || writeBusy || !!serverDraft"
                        @click="actAuto(false)">▶ 全流程无人值守</el-button>
             <el-button type="danger" plain :disabled="!!acting || writeBusy || !!serverDraft"
-                       @click="actAuto(true)">⏭ 全程直通·免审</el-button>
+                       @click="actAuto(true)">⏭ 全程直通·初稿</el-button>
           </template>
 
           <el-button v-if="writeBusy" type="danger" plain @click="stopWriteLoop">
@@ -699,19 +699,19 @@ watch(autoPollError, (err, prev) => {
 
 async function actAuto(direct) {
   const conf = direct
-    ? '全程直通·免审：自动推进全流程，但 P6 立项闸与 ⑧ 质检的 AI 检测全部跳过——直接放行到 PASSED。'
-      + '生成环节（⑥a/⑥b/⑦）照常执行，质检报告不会产生。启动？'
+    ? '全程直通·初稿：跳过 P6 立项闸与 ⑧ 质检的 LLM 审稿；确定性审计、计划、预算和脚本问题降级为报告，不阻断正文产出。'
+      + '适合先批量出初稿，人工终稿前再处理报告里的问题。启动？'
     : '全流程无人值守：从当前状态自动推进 ⑥a→⑥b→立项闸→⑦写正文→⑧质检，直到通过或熔断；'
       + '中途打回按各步默认机制自动回炉重试。服务器上跑，关页面不断。启动？'
   try {
-    await ElMessageBox.confirm(conf, direct ? '全程直通·免审' : '全流程无人值守',
+    await ElMessageBox.confirm(conf, direct ? '全程直通·初稿' : '全流程无人值守',
       { type: 'warning', confirmButtonText: '启动' })
   } catch {
     return
   }
   try {
     await deriveApi.post(`/api/derive/runs/${route.params.id}/auto?direct=${direct ? 'true' : 'false'}`)
-    ElMessage.success(`${direct ? '全程直通（免审）' : '全流程'}已启动——进度看操作条横幅与「运行过程」，页面可关`)
+    ElMessage.success(`${direct ? '全程直通（初稿）' : '全流程'}已启动——进度看操作条横幅与「运行过程」，页面可关`)
     await pollAuto()
     startAutoPoll()
   } catch (e) {

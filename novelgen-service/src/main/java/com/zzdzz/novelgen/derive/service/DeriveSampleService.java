@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.common.web.BizException;
 import com.zzdzz.novelgen.common.web.ErrorCode;
 import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
 import com.zzdzz.novelgen.derive.genre.MysteryProfile;
+import com.zzdzz.novelgen.derive.genre.RomanceProfile;
 import com.zzdzz.novelgen.derive.mapper.AssetBeatMapper;
 import com.zzdzz.novelgen.derive.mapper.AssetOutlineMapper;
 import com.zzdzz.novelgen.derive.mapper.AssetWorldMapper;
@@ -415,11 +416,9 @@ public class DeriveSampleService {
                 .toList();
         DomainCellDO cell = weightedPickCell(cellEligible, main, rnd);
         if (cell == null) {
-            Set<String> cellKeys = new LinkedHashSet<>();
-            allCells.forEach(c -> cellKeys.addAll(parseCatJson(c.getCats()).keySet()));
-            throw new BizException(ErrorCode.PARAM_ERROR,
-                    "域格池中没有承载主标签「" + main + "」的启用域格——有域格的键：" + String.join("、", cellKeys)
-                            + "（把主标签归一化到其中之一）");
+            cell = genericFallbackCell(main, genre, effectiveIntent);
+            log.warn("域格缺失，使用确定性通用域格：tag={} genre={} name={}",
+                    main, genre, cell.getName());
         }
 
         // ---- 插档（SAMPLING；jsonb 七列走 insertFull）----
@@ -519,7 +518,31 @@ public class DeriveSampleService {
         if (genreProfileRegistry != null) {
             return genreProfileRegistry;
         }
-        return new GenreProfileRegistry(List.of(new MysteryProfile()));
+        return new GenreProfileRegistry(List.of(new MysteryProfile(), new RomanceProfile()));
+    }
+
+    /**
+     * 任意类型共用的确定性域格回退。
+     *
+     * <p>只作为素材池缺格时的最后兜底；新类型不应在 Java 里新增专属分支。
+     * 后续可先替换为 AI_GENERATED_DOMAIN，再保留此确定性默认。
+     */
+    static DomainCellDO genericFallbackCell(String mainTag, String genre, String intent) {
+        DomainCellDO cell = new DomainCellDO();
+        String label = genre == null || genre.isBlank() ? mainTag : genre;
+        cell.setName(label + "·通用域");
+        cell.setGrp("DEFAULT");
+        cell.setCats("{\"" + mainTag + "\":1.0}");
+        cell.setBeatTypes("{事件,情绪,抉择,收束}");
+        String note = intent == null || intent.isBlank()
+                ? "围绕冲突、选择、代价、关系变化与结局收束组织事件"
+                : "围绕创作意图组织冲突、选择、代价、关系变化与结局收束";
+        cell.setRelationNote(note);
+        cell.setCounterWords("{}");
+        cell.setRefIds("[]");
+        cell.setEnabled(true);
+        cell.setSort(0);
+        return cell;
     }
 
     // ================= 池加载 =================

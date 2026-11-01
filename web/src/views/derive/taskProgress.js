@@ -43,7 +43,7 @@ export function formatAutoProgress(a, pollError) {
   const disconnected = pollErrorText(pollError, '全流程')
   if (disconnected) return disconnected
   if (!a) return ''
-  const mode = a.direct ? '全程直通（免审）' : '全流程无人值守'
+  const mode = a.direct ? '全程直通（初稿）' : '全流程无人值守'
   if (a.lastError) {
     return `${mode}已停：${a.lastError}（断点保留，再点按钮续跑）`
   }

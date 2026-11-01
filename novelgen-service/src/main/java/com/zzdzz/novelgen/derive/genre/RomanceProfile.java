@@ -73,6 +73,14 @@ public class RomanceProfile implements GenreProfile<RomanceContract> {
             payload.put("actorKeys", stage.actorKeys());
             payload.put("proof", stage.proof());
             payload.put("relationshipKind", contract.primaryRelationship().kind());
+            if (kind == RomanceStageKind.RELATIONSHIP_CLOSURE) {
+                payload.put("requiredActs", List.of("RELATIONSHIP_DECISION"));
+                payload.put("requiredTags",
+                        List.of(contract.primaryRelationship().threadKey()));
+                payload.put("proofEventKeys", List.of("ROM-STAGE-CONFESSION"));
+                payload.put("relationshipThreadKey",
+                        contract.primaryRelationship().threadKey());
+            }
             out.add(new StoryObligation(
                     StoryObligation.obligationKey(stage.chapterNo(), obligationKind, targetKey),
                     stage.chapterNo(), obligationKind, targetKey, stage.required(), false,

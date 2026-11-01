@@ -26,6 +26,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 回炉分支——重试口径全部沿用各步默认（闸轮次熔断、质检三轮熔断），主控不加自己的重试。
  * 终态 PASSED/FAILED 即收束；异常记录 lastError 即停（断点续跑，再点按钮接上）。
  * 内存态：进程重启即停，状态无损，再点续跑。
+ *
+ * <p>2026-11-01 direct 语义调整（用户定调 A）：direct=true 是「初稿直通」——跳过 LLM P6/QC，
+ * 确定性审计、计划校验和脚本 QC 的问题降级为报告，不再阻止正文产出或把 run 打成 FAILED。
+ * 需要严格质量验收时仍走 direct=false。
  */
 @Service
 @RequiredArgsConstructor
@@ -66,7 +70,7 @@ public class DeriveAutoFlowService {
         }
     }
 
-    /** 同一 run 同时只许一个主控；与 ⑦ 连跑/进行中活动互斥。direct=直通免审（跳过闸与质检的 AI 检测）。 */
+    /** 同一 run 同时只许一个主控；与 ⑦ 连跑/进行中活动互斥。direct=初稿直通（问题降级为报告）。 */
     public synchronized AutoVO start(long runId, boolean direct) {
         Auto cur = AUTOS.get(runId);
         if (cur != null && cur.running) {
@@ -225,15 +229,20 @@ public class DeriveAutoFlowService {
                                     List<String> deterministicIssues =
                                             gateService.deterministicAudit(auto.runId);
                                     if (!deterministicIssues.isEmpty()) {
-                                        throw new BizException(ErrorCode.PARAM_ERROR,
-                                                "DIRECT_DETERMINISTIC_AUDIT："
-                                                        + String.join("；", deterministicIssues));
+                                        log.warn("直通初稿：确定性审计问题降级为报告：runId={} issues={}",
+                                                auto.runId, deterministicIssues);
                                     }
+                                    List<String> directIssues = deterministicIssues.isEmpty()
+                                            ? java.util.List.of("直通初稿：无确定性审计问题")
+                                            : deterministicIssues;
                                     String next = DeriveGateService.withGate(run.getStepStatus(), "PASS",
                                             DeriveGateService.gateRound(run.getStepStatus()),
-                                            java.util.List.of("直通模式：免审放行（跳过 P6 立项闸）"), "");
+                                            directIssues,
+                                            "直通初稿：确定性问题降级为报告，不阻断正文；人工终稿前必须处理",
+                                            "");
                                     runMapper.updateStepStatus(auto.runId, next);
-                                    auto.stage = "直通：跳过 P6 立项闸（免审放行）";
+                                    auto.stage = "直通初稿：审计问题降级为报告（"
+                                            + deterministicIssues.size() + " 项），继续写正文";
                                 } else {
                                     auto.stage = "P6 立项闸评审（六判据，约 2 分钟）";
                                     var g = gateService.gate(auto.runId);
@@ -241,7 +250,9 @@ public class DeriveAutoFlowService {
                                             + g.issues().size() + " 个问题）";
                                 }
                             } else {
-                                if (run.getActivePlanRevision() != null && runOrchestrator != null) {
+                                // direct 初稿直通固定走 legacy ⑦，避免 compiler-v1 的严格准入
+                                // 把问题再次升级成阶段失败；严格链路仍保留 active revision 分支。
+                                if (!auto.direct && run.getActivePlanRevision() != null && runOrchestrator != null) {
                                     AutoVO pipeline = runOrchestrator.advance(auto.runId);
                                     auto.stage = "compiler-v1 正文闭环：" + pipeline.stage();
                                     auto.steps++;
@@ -273,11 +284,9 @@ public class DeriveAutoFlowService {
                         }
                         case "QC" -> {
                             if (auto.direct) {
-                                // 直通=只跳 AI 快检五项；脚本硬判照跑、qc_report 落档、章升 QC_PASS
-                                // （2026-10-19 修：原整段跳过致无档 PASSED，run29 审稿硬伤全漏）
-                                auto.stage = "⑧ 直通质检（脚本硬判，跳过 AI 快检）";
-                                var qc = qcService.qc(auto.runId, true);
-                                auto.stage = "直通质检 " + qc.verdict()
+                                auto.stage = "⑧ 直通初稿质检（问题报告化，不熔断）";
+                                var qc = qcService.qcDraft(auto.runId);
+                                auto.stage = "直通初稿质检 " + qc.verdict()
                                         + "（script " + qc.scriptPassed() + "/" + qc.scriptTotal() + "）";
                             } else {
                                 auto.stage = "⑧ 质检（脚本硬判 + AI 快检，10 分钟级）";

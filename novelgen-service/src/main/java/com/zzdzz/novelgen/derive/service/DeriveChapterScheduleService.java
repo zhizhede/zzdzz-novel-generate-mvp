@@ -24,6 +24,7 @@ import com.zzdzz.novelgen.derive.genre.RomanceContract;
 import com.zzdzz.novelgen.derive.genre.RomanceStage;
 import com.zzdzz.novelgen.derive.genre.RomanceStageKind;
 import com.zzdzz.novelgen.derive.genre.MysteryProfile;
+import com.zzdzz.novelgen.derive.genre.RomanceProfile;
 import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.derive.story.StoryObligationProjector;
 import com.zzdzz.novelgen.model.entity.derive.DeriveChapterScheduleDO;
@@ -68,6 +69,8 @@ public class DeriveChapterScheduleService {
     private CharacterPlanMapper characterPlanMapper;
     @Autowired(required = false)
     private GenreProfileRegistry genreProfileRegistry;
+    @Autowired(required = false)
+    private com.zzdzz.novelgen.derive.story.ContractVersionService contractVersionService;
 
     /** 纯投影（不落库）：合同 + 章数 + 卷范围 → 每章日程。 */
     public List<ChapterScheduleEntry> project(RunDO run) {
@@ -169,7 +172,7 @@ public class DeriveChapterScheduleService {
     private GenreProfile profileForRun(RunDO run) {
         GenreProfileRegistry registry = genreProfileRegistry;
         if (registry == null) {
-            registry = new GenreProfileRegistry(List.of(new MysteryProfile()));
+            registry = new GenreProfileRegistry(List.of(new MysteryProfile(), new RomanceProfile()));
         }
         return registry.require(run.getGenre() == null || run.getGenre().isBlank()
                 ? "MYSTERY" : run.getGenre());
@@ -281,6 +284,11 @@ public class DeriveChapterScheduleService {
         }
         List<DeriveChapterScheduleDO> rows = scheduleMapper.selectByRun(run.getId());
         if (rows.isEmpty()) {
+            return;
+        }
+        if (contractVersionService != null) {
+            contractService.loadGenreContract(run);
+            contractVersionService.assertConsistent(run);
             return;
         }
         StoryContract contract = contractService.load(run);

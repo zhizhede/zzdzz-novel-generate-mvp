@@ -115,12 +115,31 @@ public class DraftWindowObligationValidator {
     public record ClosingAct(String act, String targetKey, String tag) {
     }
 
-    /** 模型输出的闭合证据。 */
+    /** 模型输出的结构化闭合证据。 */
     public record ClosureEvidence(String obligationKey, int chapterNo, String act,
-                                  String eventKey, String tag) {
+                                  String eventKey, String tag, String culpritKey,
+                                  String motiveTag, String methodTag,
+                                  String relationshipThreadKey, List<String> proofEventKeys) {
+
+        public ClosureEvidence {
+            obligationKey = obligationKey == null ? "" : obligationKey;
+            act = act == null ? "" : act;
+            eventKey = eventKey == null ? "" : eventKey;
+            tag = tag == null ? "" : tag;
+            culpritKey = culpritKey == null ? "" : culpritKey;
+            motiveTag = motiveTag == null ? "" : motiveTag;
+            methodTag = methodTag == null ? "" : methodTag;
+            relationshipThreadKey = relationshipThreadKey == null ? "" : relationshipThreadKey;
+            proofEventKeys = proofEventKeys == null ? List.of() : List.copyOf(proofEventKeys);
+        }
 
         public ClosureEvidence(String obligationKey, int chapterNo, String act, String eventKey) {
-            this(obligationKey, chapterNo, act, eventKey, "");
+            this(obligationKey, chapterNo, act, eventKey, "", "", "", "", "", List.of());
+        }
+
+        public ClosureEvidence(String obligationKey, int chapterNo, String act, String eventKey,
+                               String tag) {
+            this(obligationKey, chapterNo, act, eventKey, tag, "", "", "", "", List.of());
         }
     }
 
@@ -234,7 +253,21 @@ public class DraftWindowObligationValidator {
                         chapter.chapterNo(), "ROMANCE_EVENT", eventKey, null,
                         chapter.entityKeys(), List.of(event.threadKey()), event.evidence()));
             }
-            builder.addEvent(new StoryEvent(chapterEventKey, chapter.chapterNo(),
+            for (DraftWindowObligationValidator.ClosureEvidence item : window.closureEvidence()) {
+                if (item.chapterNo() != chapter.chapterNo() || item.obligationKey().isBlank()) {
+                    continue;
+                }
+                String eventKey = item.eventKey().isBlank()
+                        ? "CH" + chapter.chapterNo() + ":CLOSURE:" + item.act()
+                        : item.eventKey();
+                String fact = item.act() + " " + item.tag();
+                builder.addEvent(new StoryEvent(eventKey, chapter.chapterNo(),
+                        "CLOSURE_EVIDENCE", chapter.entityKeys(), List.of(), fact, fact,
+                        List.of(), List.of(), List.of(), "BATCH"));
+                builder.addObligationEvidence(evidence(
+                        item.obligationKey(), chapter.chapterNo(), "CLOSURE_EVIDENCE",
+                        eventKey, null, chapter.entityKeys(), item.proofEventKeys(), fact));
+            }            builder.addEvent(new StoryEvent(chapterEventKey, chapter.chapterNo(),
                     "CHAPTER_OUTLINE", chapter.entityKeys(), List.of(), chapter.outline(),
                     chapter.outline(), List.of(), List.of(), threadEffects, "BATCH"));
             for (BeatDraft beat : window.beats()) {
@@ -331,6 +364,11 @@ public class DraftWindowObligationValidator {
                 continue;
             }
             boolean fulfilled = evidenceIndex.hasEvidence(obligation.obligationKey());
+            if (!fulfilled && "FINAL_CLOSURE".equals(obligation.kind())) {
+                fulfilled = evidenceIndex.obligationsByChapter()
+                        .getOrDefault(obligation.chapterNo(), List.of()).stream()
+                        .anyMatch(row -> "CLOSURE_EVIDENCE".equals(row.evidenceKind()));
+            }
             if (!fulfilled) {
                 issues.add(issue("OBLIGATION_MISSING", obligation.chapterNo(),
                         "窗口缺少义务 " + obligation.obligationKey()));

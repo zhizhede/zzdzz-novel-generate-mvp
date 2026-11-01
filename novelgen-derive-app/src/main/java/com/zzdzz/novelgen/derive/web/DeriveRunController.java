@@ -233,7 +233,8 @@ public class DeriveRunController {
     }
 
     /** 全流程无人值守启动（从当前状态自动推进 ⑥a→⑥b→闸→⑦→⑧ 直到终态；重试按各步默认口径）。
-     *  direct=true（直通免审）：P6 立项闸与 ⑧ 质检的 AI 检测全部跳过直接放行，生成环节照常。 */
+     *  direct=true（直通初稿）：跳过 P6/QC 的 LLM 审稿；确定性审计、计划、预算和脚本问题
+     *  降级为报告，不阻断正文产出。 */
     @PostMapping("/{id}/auto")
     public Result<AutoVO> autoStart(@PathVariable long id,
                                     @RequestParam(defaultValue = "false") boolean direct) {

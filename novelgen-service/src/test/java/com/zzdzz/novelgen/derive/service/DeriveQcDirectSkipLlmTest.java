@@ -133,6 +133,26 @@ class DeriveQcDirectSkipLlmTest {
     }
 
     @Test
+    void qcDraft_scriptFail_isAdvisoryAndPasses() {
+        stub(0, novel("{\"protagonist\":\"艾琳\"}"), List.of(
+                ch(1, "起雾的码头", "今夜风很大。")));
+
+        var vo = svc.qcDraft(7L);
+
+        assertEquals("PASS", vo.verdict());
+        assertTrue(vo.issues().stream().anyMatch(s -> s.contains("直通初稿")),
+                "直通初稿报告必须带降级说明：" + vo.issues());
+        verify(runMapper).updateStatus(7L, "PASSED", 1);
+        verify(chapterMapper).updateStatus(1L, "QC_PASS");
+        verifyNoInteractions(llmJson);
+
+        ArgumentCaptor<QcReportDO> report = ArgumentCaptor.forClass(QcReportDO.class);
+        verify(qcReportMapper).insertFull(report.capture());
+        assertEquals("PASS", report.getValue().getVerdict());
+        assertTrue(report.getValue().getIssues().contains("直通初稿"));
+    }
+
+    @Test
     void defaultQcPath_stillRunsLlm() {
         stub(0, novel("{\"protagonist\":\"艾琳\"}"), List.of(
                 ch(1, "起雾的码头", "艾琳在码头等船。")));

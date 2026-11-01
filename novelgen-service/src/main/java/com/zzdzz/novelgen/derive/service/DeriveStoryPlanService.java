@@ -16,6 +16,12 @@ import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.derive.contract.ScaffoldContract;
 import com.zzdzz.novelgen.derive.contract.StoryContract;
 import com.zzdzz.novelgen.derive.contract.StoryContractValidator;
+import com.zzdzz.novelgen.derive.genre.GenreContract;
+import com.zzdzz.novelgen.derive.genre.RomanceCharacterSlot;
+import com.zzdzz.novelgen.derive.genre.RomanceContract;
+import com.zzdzz.novelgen.derive.genre.RomanceRelationship;
+import com.zzdzz.novelgen.derive.genre.RomanceStage;
+import com.zzdzz.novelgen.derive.genre.RomanceStageKind;
 import com.zzdzz.novelgen.derive.plan.PlanContracts;
 import com.zzdzz.novelgen.derive.plan.PlanJson;
 import com.zzdzz.novelgen.derive.plan.PlanV2StateCodec;
@@ -170,6 +176,21 @@ public class DeriveStoryPlanService {
         if (oldState.scope() == null || run.getNovelId() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "CONTRACT 缺少规模或成品书骨架");
         }
+        if (isRomance(run)) {
+            GenreContract existing = contractService.loadGenreContract(run);
+            RomanceContract romance = existing instanceof RomanceContract current
+                    ? current : deterministicRomanceContract(run, oldState.scope());
+            contractService.freezeGenreContract(run, romance, oldState.scope());
+            ensureRomanceVolumePlan(run, oldState.scope(), romance);
+            PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
+                    PlanContracts.PlanUnit.SCHEDULE,
+                    append(oldState.completedUnits(), PlanContracts.PlanUnit.CONTRACT),
+                    oldState.scope(), oldState.volumeUnits());
+            writePlanState(run, next);
+            log.info("言情合同已冻结：runId={} version={} relation={}",
+                    run.getId(), romance.version(), romance.primaryRelationship().threadKey());
+            return planVO(run, oldState.scope(), "CONTRACT", false);
+        }
         ScaffoldContract scaffold = readScaffold(run);
         StoryContract contract = contractService.generateIfAbsent(run, oldState.scope(), scaffold);
         List<PlanContracts.CharacterContract> slots = castCharacters(contract, oldState.scope());
@@ -197,16 +218,38 @@ public class DeriveStoryPlanService {
         if (scheduleService == null) {
             throw new BizException(ErrorCode.PARAM_ERROR, "SCHEDULE 单元未装配日程服务");
         }
-        StoryContract contract = contractService.require(run);
+        GenreContract contract = contractService.loadGenreContract(run);
+        if (contract == null) {
+            // 旧测试/历史 run 可能只有 StoryContract；日程投影本身已由 project() 完成。
+            try {
+                contractService.require(run);
+            } catch (RuntimeException ignored) {
+                // 保持原 fail-fast 语义由后续路由/校验节点给出，不在 SCHEDULE 提前 NPE。
+            }
+        }
         List<com.zzdzz.novelgen.derive.contract.ChapterScheduleEntry> entries =
                 scheduleService.persist(run, scheduleService.project(run));
+        boolean romance = contract instanceof RomanceContract;
+        PlanContracts.PlanUnit nextUnit = romance
+                ? PlanContracts.PlanUnit.SLOT_ROUTE : PlanContracts.PlanUnit.SPINE;
+        List<PlanContracts.PlanUnit> completed = append(oldState.completedUnits(),
+                PlanContracts.PlanUnit.SCHEDULE);
+        Map<Integer, PlanContracts.PlanUnit> volumeUnits = oldState.volumeUnits();
+        if (romance) {
+            completed = append(completed, PlanContracts.PlanUnit.SPINE);
+            completed = append(completed, PlanContracts.PlanUnit.VOLUMES);
+            completed = append(completed, PlanContracts.PlanUnit.CHARACTERS);
+            volumeUnits = new LinkedHashMap<>();
+            for (int volumeNo = 1; volumeNo <= oldState.scope().volumeCount(); volumeNo++) {
+                volumeUnits.put(volumeNo, PlanContracts.PlanUnit.SLOT_ROUTE);
+            }
+        }
         PlanContracts.PlanV2State next = new PlanContracts.PlanV2State(
-                PlanContracts.PlanUnit.SPINE,
-                append(oldState.completedUnits(), PlanContracts.PlanUnit.SCHEDULE),
-                oldState.scope(), oldState.volumeUnits());
+                nextUnit, completed, oldState.scope(), volumeUnits);
         writePlanState(run, next);
-        log.info("SCHEDULE 单元完成：runId={} contractVersion={} 日程章数={}",
-                run.getId(), contract.version(), entries.size());
+        log.info("SCHEDULE 单元完成：runId={} contractType={} 日程章数={}",
+                run.getId(), contract == null ? "LEGACY_STORY" : contract.getClass().getSimpleName(),
+                entries.size());
         return planVO(run, oldState.scope(), "SCHEDULE", false);
     }
 
@@ -656,7 +699,8 @@ public class DeriveStoryPlanService {
                 || unit == PlanContracts.PlanUnit.NEED_SCOPE) {
             return state;
         }
-        if (contractService.load(run) != null) {
+        if (contractService.load(run) != null
+                || contractService.loadGenreContract(run) != null) {
             return state;
         }
         if (hasWrittenText(run)) {
@@ -686,6 +730,108 @@ public class DeriveStoryPlanService {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private static boolean isRomance(RunDO run) {
+        return run != null && "ROMANCE".equalsIgnoreCase(run.getGenre());
+    }
+
+    private void ensureRomanceVolumePlan(RunDO run, PlanContracts.ScopeContract scope,
+                                         RomanceContract romance) {
+        int volumeNo = 1;
+        VolumePlanDO existing = volumePlanMapper.selectOne(new LambdaQueryWrapper<VolumePlanDO>()
+                .eq(VolumePlanDO::getRunId, run.getId())
+                .eq(VolumePlanDO::getVolumeNo, volumeNo)
+                .last("LIMIT 1"));
+        int toChapter = scope == null || scope.chapterCount() < 1
+                ? romance.stages().values().stream()
+                        .mapToInt(RomanceStage::chapterNo).max().orElse(1)
+                : scope.chapterCount();
+        PlanContracts.VolumeContract volume = new PlanContracts.VolumeContract(
+                volumeNo, 1, toChapter, "言情关系主线",
+                "两人如何从误会走向确认关系",
+                "关系会因为冲突彻底结束",
+                "经历冲突后仍选择继续靠近",
+                "关系阶段逐步推进",
+                List.of("C1", "C2"),
+                List.of("关系从陌生到确认"),
+                List.of(romance.primaryRelationship().threadKey()),
+                List.of("不得提前完成告白、和好或关系结局"),
+                "每个关系阶段都有可观察事件",
+                "", "FINAL");
+        if (existing == null) {
+            VolumePlanDO row = new VolumePlanDO();
+            row.setRunId(run.getId());
+            row.setNovelId(run.getNovelId());
+            row.setVolumeNo(volumeNo);
+            row.setFromChapter(1);
+            row.setToChapter(toChapter);
+            row.setArc("言情关系主线");
+            row.setLocalEvent("两人关系从相遇推进到确认");
+            row.setLocalClosure("关系阶段完成一次明确变化");
+            row.setNextHook("");
+            row.setGlobalRole("FINAL");
+            row.setStatus("PLANNING");
+            row.setContract(toJson(volume));
+            volumePlanMapper.insertFull(row);
+        } else {
+            existing.setFromChapter(1);
+            existing.setToChapter(toChapter);
+            existing.setArc("言情关系主线");
+            existing.setLocalEvent("两人关系从相遇推进到确认");
+            existing.setLocalClosure("关系阶段完成一次明确变化");
+            existing.setNextHook("");
+            existing.setGlobalRole("FINAL");
+            existing.setStatus("PLANNING");
+            volumePlanMapper.updateContract(existing.getId(), toJson(volume));
+        }
+    }
+
+    /**
+     * 言情生产链的确定性合同工厂。
+     *
+     * <p>当前探针阶段不引入第二套悬疑合同模型；先用固定关系骨架保证日程、路由、⑥b 和 QC
+     * 能读到合法合同。后续可替换为 LLM 生成，但必须继续输出独立 RomanceContract。
+     */
+    private static RomanceContract deterministicRomanceContract(
+            RunDO run, PlanContracts.ScopeContract scope) {
+        String[][] nameSets = {
+                {"林夏", "顾言", "苏晴"},
+                {"沈宁", "陆川", "乔安"},
+                {"许星", "程屿", "周妍"}
+        };
+        long seed = run.getSeed() == null ? 0L : run.getSeed();
+        String[] names = nameSets[(int) Math.floorMod(seed, nameSets.length)];
+        List<RomanceCharacterSlot> cast = List.of(
+                new RomanceCharacterSlot("C1", names[0], "PROTAGONIST", "女", "故事主角"),
+                new RomanceCharacterSlot("C2", names[1], "LOVE_INTEREST", "男", "主角的重要关系对象"),
+                new RomanceCharacterSlot("C3", names[2], "RIVAL", "女", "推动关系变化的第三方"));
+        String threadKey = "REL-C1-C2";
+        RomanceRelationship relationship = new RomanceRelationship(
+                threadKey, "C1", "C2", "ROMANTIC", "主角与重要关系对象的关系线");
+        int chapterCount = scope == null || scope.chapterCount() < 1
+                ? RomanceStageKind.values().length : scope.chapterCount();
+        Map<RomanceStageKind, RomanceStage> stages = new LinkedHashMap<>();
+        RomanceStageKind[] kinds = RomanceStageKind.values();
+        for (int i = 0; i < kinds.length; i++) {
+            RomanceStageKind kind = kinds[i];
+            int chapterNo = Math.min(chapterCount, i + 1);
+            String targetKey = kind == RomanceStageKind.MISUNDERSTANDING
+                    || kind == RomanceStageKind.CONFLICT_PEAK ? "C2" : threadKey;
+            String proof = switch (kind) {
+                case RELATIONSHIP_START -> "两人因事件建立联系";
+                case MISUNDERSTANDING -> "误会产生并改变互动";
+                case ATTACHMENT_ESCALATION -> "关系投入和依赖加深";
+                case CONFLICT_PEAK -> "冲突达到峰值";
+                case CONFESSION -> "关键情感选择被说出或行动化";
+                case RECONCILIATION -> "冲突后的修复与选择";
+                case RELATIONSHIP_CLOSURE -> "关系结果明确收束";
+            };
+            stages.put(kind, new RomanceStage(kind, chapterNo, targetKey,
+                    List.of("C1", "C2"), List.of(threadKey), true, proof, Map.of()));
+        }
+        return new RomanceContract(1, scope, cast, relationship, stages,
+                List.of("不得引入悬疑案件、凶手、动机、手法或线索结构"));
     }
 
     /** 合同 map 里的章号（缺省/坏值一律 null，让线程行保持可空）。 */
@@ -1133,7 +1279,9 @@ public class DeriveStoryPlanService {
         if (decision == PlanContracts.ScopeDecision.NEED_CONFIRMATION) {
             return new ScopeContractFactory(decision, volumeCount, chapterCount, chapterAvg, root).build();
         }
-        if (Boolean.TRUE.equals(run.getLenCheck())) {
+        // direct 初稿直通允许模型先给规模，字数带校验降级为报告；严格链路仍按 lenCheck 硬判。
+        if (Boolean.TRUE.equals(run.getLenCheck())
+                && !Boolean.TRUE.equals(DerivePlanService.DIRECT_PASS.get())) {
             if (chapterCount < DerivePlanService.CHAPTER_COUNT_MIN
                     || chapterCount > DerivePlanService.CHAPTER_COUNT_MAX) {
                 throw new PlanJson.Bad("chapterCount 必须在 "

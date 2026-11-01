@@ -29,10 +29,12 @@ public final class StoryPlanningPrompts {
             6. chapterCount 是规模建议值，必须≥1；chapterAvg 必须>0。章数可以高于原始拍数，结构缺口由后续 syntheticSlots 补齐。
             7. scopeDecision=SINGLE_VOLUME 时 volumeCount=1；
                scopeDecision=MULTI_VOLUME 时 volumeCount≥2。
+            8. scopeEvidence 必须是纯字符串数组，每项写成“字段=值”（例如 产品形态=SHORT_STANDALONE）；
+               禁止输出对象、键值对 JSON 或带冒号的数组元素。
             只输出 JSON 对象：
             {"storyScale":"SHORT|MEDIUM|LONG","volumeCount":4,"chapterCount":48,
              "chapterAvg":2800,"scopeDecision":"SINGLE_VOLUME|MULTI_VOLUME|NEED_CONFIRMATION",
-             "scopeEvidence":["支持该判断的用户原文"],"reason":"≤60字理由"}
+             "scopeEvidence":["产品形态=SHORT_STANDALONE","规模判断口径=单卷框架"],"reason":"≤60字理由"}
             """;
 
     /**

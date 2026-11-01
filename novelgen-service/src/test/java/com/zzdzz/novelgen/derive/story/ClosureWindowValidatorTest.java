@@ -68,6 +68,7 @@ class ClosureWindowValidatorTest {
 
         List<PlanContracts.PlanIssue> issues = validate(window, contract());
 
+
         assertFalse(hasCode(issues, "CLOSURE_WINDOW_MISSING"));
         assertFalse(hasCode(issues, "CLOSURE_TAG_MISMATCH"));
         assertFalse(hasCode(issues, "CLOSURE_CULPRIT_MISMATCH"));

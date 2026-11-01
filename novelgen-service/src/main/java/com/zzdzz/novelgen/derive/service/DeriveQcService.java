@@ -24,6 +24,7 @@ import com.zzdzz.novelgen.derive.genre.GenreProfile;
 import com.zzdzz.novelgen.derive.genre.GenreProfileRegistry;
 import com.zzdzz.novelgen.derive.genre.GenreQcAuditor;
 import com.zzdzz.novelgen.derive.genre.MysteryProfile;
+import com.zzdzz.novelgen.derive.genre.RomanceProfile;
 import com.zzdzz.novelgen.derive.genre.GenreContract;
 import com.zzdzz.novelgen.derive.genre.MysteryQcAuditor;
 import com.zzdzz.novelgen.derive.story.StoryKernel;
@@ -160,17 +161,31 @@ public class DeriveQcService {
     @Autowired(required = false)
     private MysteryQcAuditor mysteryQcAuditor;
 
-    /** ⑧：跑一轮质检。 */
+    /** ⑧：跑一轮严格质检。 */
     public QcVO qc(long runId) {
-        return qc(runId, false);
+        return qc(runId, false, false);
     }
 
     /**
-     * ⑧：跑一轮质检。skipLlm=直通口径（2026-10-19）：只跳 AI 五项快检，
-     * 脚本硬判、qc_report 落档、章升 QC_PASS 与回炉熔断照常——对齐全流程
-     * 直通语义「跳过闸与质检的 AI 检测」，治 run29 直通整个⑧被跳过致无档 PASSED。
+     * ⑧：跑一轮质检。skipLlm=只跳 AI 五项快检，脚本硬判、qc_report 落档、
+     * 章升 QC_PASS 与回炉熔断照常。
      */
     public QcVO qc(long runId, boolean skipLlm) {
+        return qc(runId, skipLlm, false);
+    }
+
+    /**
+     * ⑧：直通初稿质检（2026-11-01 用户定调 A）。
+     *
+     * <p>与 {@link #qc(long, boolean)} 的区别：脚本、计划、类型问题全部降级为报告，
+     * 只要 run 有成品书就允许落 PASSED；qc_report 仍完整保存 script_result/issues，
+     * 供人工终稿前处理。该口径只给 direct=true 的初稿直通使用，严格链路不走这里。
+     */
+    public QcVO qcDraft(long runId) {
+        return qc(runId, true, true);
+    }
+
+    private QcVO qc(long runId, boolean skipLlm, boolean draftOnly) {
         RunDO run = runMapper.selectById(runId);
         if (run == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "run 不存在: " + runId);
@@ -245,7 +260,8 @@ public class DeriveQcService {
         List<String> genreIssues = genreQcIssues(run, novel, chapters);
         issues.addAll(genreIssues);
 
-        boolean pass = scriptPass && llmPass && planPass && genreIssues.isEmpty();
+        boolean qualityPass = scriptPass && llmPass && planPass && genreIssues.isEmpty();
+        boolean pass = draftOnly || qualityPass;
         int prevRound = run.getQcRound() == null ? 0 : run.getQcRound();
         String verdict;
         if (pass) {
@@ -257,6 +273,9 @@ public class DeriveQcService {
         }
         String repairTarget = pass ? "NONE"
                 : (planPass ? "DRAFT" : DeriveGateService.repairTarget(planCheck));
+        if (draftOnly && !issues.isEmpty()) {
+            issues.add(0, "直通初稿：以下问题降级为报告，不阻断本次交付；人工终稿前必须处理");
+        }
 
         // ---- 落 qc_report ----
         ObjectNode scriptJson = STATIC_MAPPER.createObjectNode();
@@ -837,7 +856,7 @@ public class DeriveQcService {
     private GenreProfile profile(RunDO run) {
         GenreProfileRegistry registry = genreProfileRegistry;
         if (registry == null) {
-            registry = new GenreProfileRegistry(List.of(new MysteryProfile()));
+            registry = new GenreProfileRegistry(List.of(new MysteryProfile(), new RomanceProfile()));
         }
         return registry.require(run.getGenre() == null || run.getGenre().isBlank()
                 ? "MYSTERY" : run.getGenre());

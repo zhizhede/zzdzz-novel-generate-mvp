@@ -21,10 +21,13 @@ import com.zzdzz.novelgen.derive.mapper.RunMapper;
 import com.zzdzz.novelgen.derive.mapper.StoryThreadMapper;
 import com.zzdzz.novelgen.derive.mapper.WorldStateMapper;
 import com.zzdzz.novelgen.derive.plan.PlanJsonViews;
+import com.zzdzz.novelgen.derive.story.ClosureWindowValidator;
 import com.zzdzz.novelgen.derive.story.DraftWindowObligationValidator;
+import com.zzdzz.novelgen.derive.story.StoryClosureContract;
 import com.zzdzz.novelgen.derive.story.StoryObligation;
 import com.zzdzz.novelgen.derive.story.StoryEvidenceIndex;
 import com.zzdzz.novelgen.derive.story.StoryObligationEvidence;
+import com.zzdzz.novelgen.derive.story.WordBudgetGuard;
 import com.zzdzz.novelgen.derive.mapper.WorkFingerprintMapper;
 import com.zzdzz.novelgen.derive.mapper.VolumePlanMapper;
 import com.zzdzz.novelgen.llm.LlmJson;
@@ -173,17 +176,18 @@ public class DeriveDraftService {
             8. 章级日程是硬约束：mustPlant 的每条线索必须在**本章** draft_outline 写出可观测现象（不写结论），
                并在 clueEvents 记 {"key":"…","act":"PLANT"}；mustPayoff 必须写出兑现动作并记 act=PAYOFF；
                其他章不得复述这些线索现象，禁止提前埋设/重复兑现。
-            9. reveal=true 的**这一章**必须用 closingActs 覆盖 CULPRIT/MOTIVE/METHOD 三项；
+            9. reveal=true 的**这一章**必须用 closingActs 覆盖 CULPRIT/MOTIVE/METHOD 三项，并输出结构化 closureEvidence（culpritKey/motiveTag/methodTag/proofEventKeys，字段值必须来自输入合同）；
                draft_outline 必须逐字写出 culpritName 与 motiveTag（两者都在输入里）；
                其后各章只写收束/余韵；reveal 之前不得出现真凶姓名+手法结论。
             10. 不得新增合同 clue 之外的证据/机关/线人；需要障碍时用无名环境描写（如"一块铁板"→改为"一处障碍"）。
-            11. 输出 clueEvents/closingActs；没有就空数组，禁止省略。
+            11. 输出 clueEvents/closingActs/closureEvidence；没有就给空数组/空对象，禁止省略。
             输出 JSON 对象：
             {"chapters":[{"no":1,"title":"…","draft_outline":"…","time":"当晚",
                           "state_changes":[{"who":"布兰","what":"死亡"},
                                            {"who":"薇拉","what":"得知","detail":"布兰与卧房案有关"}],
                           "clueEvents":[{"key":"GM-CLUE-01","act":"PLANT"}],
                           "closingActs":["CULPRIT","MOTIVE","METHOD"],
+                          "closureEvidence":{"culpritKey":"C3","motiveTag":"…","methodTag":"…","proofEventKeys":["GM-CLUE-01"]},
                           "beats":[{"seq":1,"filled":"…"}]}],
              "skipped":[…]}
             state_changes.what 只允许：死亡 / 离场 / 被囚 / 失去身份 / 关系改变 / 物件易主 / 得知
@@ -220,6 +224,8 @@ public class DeriveDraftService {
     private DeriveStoryObligationMapper obligationMapper;
     @Autowired(required = false)
     private DraftWindowObligationValidator draftWindowObligationValidator;
+    @Autowired(required = false)
+    private ClosureWindowValidator closureWindowValidator;
     @Autowired(required = false)
     private DeriveStoryObligationEvidenceMapper evidenceMapper;
 
@@ -487,6 +493,7 @@ public class DeriveDraftService {
             }
             Map<Integer, Integer> seqChapter = new HashMap<>();
             winBeats.forEach(b -> seqChapter.put(b.getSeq(), b.getChapterNo()));
+            final int windowNo = i + 1;
             BatchContext ctx = new BatchContext(
                     new ArrayList<>(winSeqs), win, castNames, seqChapter, schedule);
             JsonNode priorChanges = readDraftState(run.getStepStatus());
@@ -512,6 +519,7 @@ public class DeriveDraftService {
                             }
                         }
                         validateObligationWindow(parsed, ctx, runId);
+                        validateWordBudget(run, chapters, win, parsed, windowNo);
                         return parsed;
                     }, 3, (think, piece) -> touchProgress(runId, piece));
             Map<Integer, String> filled = new HashMap<>();
@@ -705,6 +713,27 @@ public class DeriveDraftService {
                 ? (ObjectNode) llmOut.deepCopy() : STATIC_MAPPER.createObjectNode();
         if (contractService == null) {
             log.warn("合同服务未装配，HEAD A 退回 LLM cast（违反合同前置）：runId={}", run.getId());
+            return out;
+        }
+        if (contractService.loadGenreContract(run)
+                instanceof com.zzdzz.novelgen.derive.genre.RomanceContract romance) {
+            ArrayNode cast = out.putArray("cast");
+            for (com.zzdzz.novelgen.derive.genre.RomanceCharacterSlot slot : romance.cast()) {
+                ObjectNode member = cast.addObject();
+                member.put("characterKey", slot.key());
+                member.put("name", slot.name());
+                member.put("role", slot.identity());
+                member.put("function", slot.role());
+                member.put("gender", slot.gender());
+            }
+            String protagonist = romance.cast().stream()
+                    .filter(slot -> "C1".equals(slot.key()))
+                    .map(com.zzdzz.novelgen.derive.genre.RomanceCharacterSlot::name)
+                    .findFirst()
+                    .orElseGet(() -> out.path("protagonist").asText(""));
+            out.put("protagonist", protagonist);
+            log.info("HEAD A 言情 cast 已冻结：runId={} protagonist={} cast={}",
+                    run.getId(), protagonist, cast.size());
             return out;
         }
         StoryContract contract = contractService.require(run);
@@ -954,6 +983,11 @@ public class DeriveDraftService {
         if (gateDirective != null && !gateDirective.isBlank()) {
             root.put("上轮立项闸减法指令（重做时必须逐条执行）", gateDirective);
         }
+        if (contractService != null && contractService.loadGenreContract(run)
+                instanceof com.zzdzz.novelgen.derive.genre.RomanceContract romance) {
+            root.set("ROMANCE_CONTRACT（唯一关系合同：角色、关系线与阶段，禁止改写）",
+                    STATIC_MAPPER.valueToTree(romance));
+        }
         if (priorChanges != null && priorChanges.isArray() && !priorChanges.isEmpty()) {
             root.set("已发生不可逆状态（硬约束：这些人不得再有现场戏份，回忆/遗体/转述除外）",
                     priorChanges);
@@ -1092,6 +1126,8 @@ public class DeriveDraftService {
                 ? chapter.path("clueEvents").deepCopy() : STATIC_MAPPER.createArrayNode());
         node.set("closingActs", chapter.path("closingActs").isArray()
                 ? chapter.path("closingActs").deepCopy() : STATIC_MAPPER.createArrayNode());
+        node.set("closureEvidence", chapter.path("closureEvidence").isObject()
+                ? chapter.path("closureEvidence").deepCopy() : STATIC_MAPPER.createObjectNode());
         node.set("romanceEvents", chapter.path("romanceEvents").isArray()
                 ? chapter.path("romanceEvents").deepCopy() : STATIC_MAPPER.createArrayNode());
         return node.toString();
@@ -1522,7 +1558,7 @@ public class DeriveDraftService {
                 言情合同专项：
                 - 每章输出 romanceEvents 数组；stage 只能取 RELATIONSHIP_START/MISUNDERSTANDING/ATTACHMENT_ESCALATION/CONFLICT_PEAK/CONFESSION/RECONCILIATION/RELATIONSHIP_CLOSURE；
                 - romanceEvents[].targetKey/threadKey 必须引用合同关系线或合同角色；
-                - 不得输出 clueEvents 或 closingActs；
+                - 不得输出 clueEvents；只有 RELATIONSHIP_CLOSURE 所在章必须输出 closingActs=["RELATIONSHIP_DECISION"] 与 closureEvidence（relationshipThreadKey=合同关系线、proofEventKeys=["ROM-STAGE-CONFESSION"]），其余章 closingActs/closureEvidence 必须为空；
                 - romanceEvents[].evidence 写清关系推进事实，不得用目标 key 冒充证据。
                 """;
     }
@@ -1679,7 +1715,16 @@ public class DeriveDraftService {
         }
         DraftWindowObligationValidator validator = draftWindowObligationValidator == null
                 ? new DraftWindowObligationValidator() : draftWindowObligationValidator;
+        ClosureWindowValidator closureValidator = closureWindowValidator == null
+                ? new ClosureWindowValidator() : closureWindowValidator;
+        List<StoryClosureContract> closureContracts = closureContracts(obligations);
+        Map<Integer, String> closureKeyByChapter = new HashMap<>();
+        for (StoryClosureContract contract : closureContracts) {
+            closureKeyByChapter.putIfAbsent(contract.chapterNo(), contract.closureKey());
+        }
         List<DraftWindowObligationValidator.ChapterDraft> chapters = new ArrayList<>();
+        List<DraftWindowObligationValidator.ClosingAct> closingActs = new ArrayList<>();
+        List<DraftWindowObligationValidator.ClosureEvidence> closureEvidence = new ArrayList<>();
         Map<Integer, List<DraftWindowObligationValidator.StateChange>> stateChanges = new HashMap<>();
         Map<Integer, List<DraftWindowObligationValidator.KnowledgeEvent>> knowledge = new HashMap<>();
         List<DraftWindowObligationValidator.BeatDraft> beats = new ArrayList<>();
@@ -1693,6 +1738,11 @@ public class DeriveDraftService {
                     clueActs.add(act.toUpperCase(java.util.Locale.ROOT) + ":" + key);
                 }
             }
+            List<DraftWindowObligationValidator.ClosingAct> chapterClosingActs =
+                    parseClosingActs(chapter, chapterNo);
+            closingActs.addAll(chapterClosingActs);
+            addClosureEvidence(chapter.path("closureEvidence"), chapterNo,
+                    closureKeyByChapter.get(chapterNo), chapterClosingActs, closureEvidence);
             List<DraftWindowObligationValidator.RomanceEvent> romanceEvents = new ArrayList<>();
             for (JsonNode event : chapter.path("romanceEvents")) {
                 String stage = event.path("stage").asText("").trim();
@@ -1770,10 +1820,22 @@ public class DeriveDraftService {
                 : ctx.windowChapters().get(ctx.windowChapters().size() - 1);
         DraftWindowObligationValidator.DraftWindow window =
                 new DraftWindowObligationValidator.DraftWindow(from, to, chapters, beats,
-                        stateChanges, knowledge, ctx.castNames());
+                        stateChanges, knowledge, ctx.castNames(), closingActs, closureEvidence);
+        StoryEvidenceIndex priorEvidence = priorEvidenceIndex(runId, from);
         List<com.zzdzz.novelgen.derive.plan.PlanContracts.PlanIssue> issues =
-                validator.validate(window, obligations);
+                new ArrayList<>(validator.validate(window, obligations));
+        for (StoryClosureContract contract : closureContracts) {
+            issues.addAll(closureValidator.validate(window, contract, priorEvidence));
+        }
         if (!issues.isEmpty()) {
+            if (Boolean.TRUE.equals(DerivePlanService.DIRECT_PASS.get())) {
+                log.warn("直通初稿：义务/闭合问题降级为报告：runId={} window=[{},{}] issues={}",
+                        runId, from, to, issues.stream()
+                                .map(issue -> issue.code() + "：" + issue.message())
+                                .toList());
+                persistEvidence(runId, validator.toEvidenceIndex(window), from, to);
+                return;
+            }
             String detail = issues.stream()
                     .map(issue -> issue.code() + "：" + issue.message())
                     .collect(java.util.stream.Collectors.joining("；"));
@@ -1782,6 +1844,232 @@ public class DeriveDraftService {
         persistEvidence(runId, validator.toEvidenceIndex(window), from, to);
     }
 
+    private static List<StoryClosureContract> closureContracts(
+            List<StoryObligation> obligations) {
+        List<StoryClosureContract> out = new ArrayList<>();
+        for (StoryObligation obligation : obligations) {
+            if (!"FINAL_CLOSURE".equals(obligation.kind())) {
+                continue;
+            }
+            List<String> requiredActs = stringList(obligation.payload().get("requiredActs"));
+            if (requiredActs.isEmpty()) {
+                continue;
+            }
+            List<String> requiredTags = stringList(obligation.payload().get("requiredTags"));
+            if (requiredTags.isEmpty()) {
+                requiredTags = List.of(String.valueOf(obligation.targetKey()));
+            }
+            List<String> proofEventKeys =
+                    stringList(obligation.payload().get("proofEventKeys"));
+            String source = obligation.sourceContract() == null
+                    || obligation.sourceContract().isBlank()
+                    ? "GENRE_CONTRACT" : obligation.sourceContract();
+            out.add(new StoryClosureContract(obligation.obligationKey(),
+                    obligation.chapterNo(), obligation.targetKey(), obligation.kind(),
+                    requiredActs, requiredTags, proofEventKeys, source,
+                    obligation.payload()));
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<DraftWindowObligationValidator.ClosingAct> parseClosingActs(
+            JsonNode chapter, int chapterNo) {
+        List<DraftWindowObligationValidator.ClosingAct> out = new ArrayList<>();
+        for (JsonNode node : chapter.path("closingActs")) {
+            if (node.isTextual()) {
+                String act = node.asText("").trim();
+                if (!act.isEmpty()) {
+                    out.add(new DraftWindowObligationValidator.ClosingAct(
+                            act.toUpperCase(java.util.Locale.ROOT), "", ""));
+                }
+                continue;
+            }
+            if (!node.isObject()) {
+                continue;
+            }
+            String act = node.path("act").asText("").trim();
+            if (act.isEmpty()) {
+                continue;
+            }
+            out.add(new DraftWindowObligationValidator.ClosingAct(
+                    act.toUpperCase(java.util.Locale.ROOT),
+                    node.path("targetKey").asText("").trim(),
+                    node.path("tag").asText("").trim()));
+        }
+        if (out.isEmpty() && chapterNo > 0) {
+            return out;
+        }
+        return out;
+    }
+
+    private static void addClosureEvidence(JsonNode source, int chapterNo,
+                                           String defaultObligationKey,
+                                           List<DraftWindowObligationValidator.ClosingAct> acts,
+                                           List<DraftWindowObligationValidator.ClosureEvidence> out) {
+        if (source == null || source.isNull()) {
+            return;
+        }
+        if (source.isArray()) {
+            for (JsonNode node : source) {
+                addClosureEvidenceObject(node, chapterNo, defaultObligationKey, acts, out);
+            }
+            return;
+        }
+        if (source.isObject()) {
+            addClosureEvidenceObject(source, chapterNo, defaultObligationKey, acts, out);
+        }
+    }
+
+    private static void addClosureEvidenceObject(JsonNode node, int chapterNo,
+                                                 String defaultObligationKey,
+                                                 List<DraftWindowObligationValidator.ClosingAct> acts,
+                                                 List<DraftWindowObligationValidator.ClosureEvidence> out) {
+        if (node == null || !node.isObject()) {
+            return;
+        }
+        String obligationKey = node.path("obligationKey").asText("").trim();
+        if (obligationKey.isEmpty()) {
+            obligationKey = defaultObligationKey == null ? "" : defaultObligationKey;
+        }
+        String declaredAct = node.path("act").asText("").trim()
+                .toUpperCase(java.util.Locale.ROOT);
+        List<String> actNames = new ArrayList<>();
+        if (!declaredAct.isEmpty()) {
+            actNames.add(declaredAct);
+        } else {
+            for (DraftWindowObligationValidator.ClosingAct act : acts) {
+                actNames.add(act.act().toUpperCase(java.util.Locale.ROOT));
+            }
+        }
+        if (actNames.isEmpty()) {
+            actNames.add("");
+        }
+        String baseEventKey = node.path("eventKey").asText("").trim();
+        if (baseEventKey.isEmpty()) {
+            baseEventKey = "CH" + chapterNo + ":CLOSURE";
+        }
+        List<String> proofEventKeys = textList(node.path("proofEventKeys"));
+        String culpritKey = node.path("culpritKey").asText("").trim();
+        String motiveTag = node.path("motiveTag").asText("").trim();
+        String methodTag = node.path("methodTag").asText("").trim();
+        String relationshipThreadKey = node.path("relationshipThreadKey").asText("").trim();
+        String tag = node.path("tag").asText("").trim();
+        for (String act : actNames) {
+            String eventKey = act.isEmpty() ? baseEventKey : baseEventKey + ":" + act;
+            out.add(new DraftWindowObligationValidator.ClosureEvidence(
+                    obligationKey, chapterNo, act, eventKey, tag, culpritKey, motiveTag,
+                    methodTag, relationshipThreadKey, proofEventKeys));
+        }
+    }
+
+    private static void validateWordBudget(RunDO run, List<ChapterDO> chapters,
+                                           List<Integer> window, JsonNode parsed,
+                                           int windowNo) {
+        Integer wordsMin = run.getParamWordsMin();
+        Integer wordsMax = run.getParamWordsMax();
+        if (wordsMin == null || wordsMax == null || wordsMin <= 0 || wordsMax < wordsMin) {
+            return;
+        }
+        Map<Integer, Integer> chars = new HashMap<>();
+        for (ChapterDO chapter : chapters) {
+            int no = chapter.getChapterNo() == null ? 0 : chapter.getChapterNo();
+            String content = chapter.getContent();
+            String outline = chapter.getDraftOutline();
+            int value = content != null && !content.isBlank() ? content.length()
+                    : outline == null ? 0 : outline.length();
+            chars.put(no, value);
+        }
+        int windowChars = 0;
+        for (JsonNode chapter : parsed.path("chapters")) {
+            int no = chapter.path("no").asInt(0);
+            String outline = chapter.path("draft_outline").asText("");
+            int value = outline.length();
+            chars.put(no, value);
+            if (window.contains(no)) {
+                windowChars += value;
+            }
+        }
+        int total = chars.values().stream().mapToInt(Integer::intValue).sum();
+        int lastWindowChapter = window.isEmpty() ? 0 : window.get(window.size() - 1);
+        List<Integer> remaining = chapters.stream()
+                .map(ChapterDO::getChapterNo)
+                .filter(no -> no != null && no > lastWindowChapter)
+                .toList();
+        int chapterAvg = remaining.isEmpty() ? 0 : chapters.stream()
+                .filter(chapter -> chapter.getChapterNo() != null
+                        && chapter.getChapterNo() > lastWindowChapter)
+                .mapToInt(chapter -> chapter.getBudget() == null ? 0 : chapter.getBudget())
+                .sum() / remaining.size();
+        WordBudgetGuard.BudgetDecision decision = WordBudgetGuard.check(
+                total, windowChars, remaining.size(), chapterAvg, wordsMin, wordsMax);
+        if (decision.ok()) {
+            if (!"OK".equals(decision.code())) {
+                log.info("字数预算 advisory：runId={} windowNo={} code={} projectedMax={} wordsMin={}",
+                        run.getId(), windowNo, decision.code(), decision.projectedMax(), wordsMin);
+            }
+            return;
+        }
+        if (Boolean.TRUE.equals(DerivePlanService.DIRECT_PASS.get())) {
+            log.warn("直通初稿：字数预算问题降级为报告：runId={} windowNo={} code={} projectedMax={} wordsMin={}",
+                    run.getId(), windowNo, decision.code(), decision.projectedMax(), wordsMin);
+            return;
+        }
+        String action = switch (decision.code()) {
+            case "BUDGET_WINDOW_OVERSHOOT" -> "压缩当前窗口";
+            case "BUDGET_FINAL_UNDERSHOOT" -> "扩写当前窗口或转人工";
+            default -> "压缩剩余窗口";
+        };
+        throw new LlmJson.Bad(decision.code()
+                + "：windowNo=" + windowNo
+                + " totalCharCount=" + total
+                + " windowCharCount=" + windowChars
+                + " wordsMin=" + wordsMin
+                + " wordsMax=" + wordsMax
+                + " projectedMax=" + decision.projectedMax()
+                + " repairTarget=" + decision.repairTarget()
+                + "；" + action + "后重试，不得清空整本书");
+    }
+    private StoryEvidenceIndex priorEvidenceIndex(long runId, int fromChapter) {
+        StoryEvidenceIndex.Builder builder = StoryEvidenceIndex.builder();
+        if (evidenceMapper == null || fromChapter <= 0) {
+            return builder.build();
+        }
+        for (DeriveStoryObligationEvidenceDO row : evidenceMapper.selectByRun(runId)) {
+            Integer chapterNo = row.getChapterNo();
+            if (chapterNo == null || chapterNo >= fromChapter) {
+                continue;
+            }
+            builder.addObligationEvidence(new StoryObligationEvidence(
+                    row.getObligationKey(), chapterNo, row.getEvidenceKind(),
+                    row.getEventKey(), row.getBeatSeq(),
+                    jsonStringList(row.getEntityKeys()), jsonStringList(row.getThreadKeys()),
+                    row.getFact(), row.getSource(),
+                    row.getConfidence() == null ? 1.0 : row.getConfidence()));
+        }
+        return builder.build();
+    }
+
+    private static List<String> stringList(Object value) {
+        if (!(value instanceof List<?> values)) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (Object item : values) {
+            if (item != null && !String.valueOf(item).isBlank()) {
+                out.add(String.valueOf(item));
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<String> jsonStringList(String json) {
+        try {
+            JsonNode node = STATIC_MAPPER.readTree(json == null || json.isBlank() ? "[]" : json);
+            return textList(node);
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
     private void persistEvidence(long runId, StoryEvidenceIndex index, int from, int to) {
         if (evidenceMapper == null || from <= 0 || to < from) {
             return;

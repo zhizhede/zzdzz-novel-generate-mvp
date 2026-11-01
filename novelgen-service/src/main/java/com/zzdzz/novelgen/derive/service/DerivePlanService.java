@@ -317,6 +317,27 @@ public class DerivePlanService {
             factService.rebuild(run.getId(), run.getNovelId());
         }
         threadService.syncFromBeats(run.getId());
+        if (isRomance(run)) {
+            RunDO current = runMapper.selectById(run.getId());
+            ObjectNode root = (ObjectNode) readTreeSafe(current.getStepStatus()).deepCopy();
+            ObjectNode steps = root.path("steps").isObject()
+                    ? (ObjectNode) root.path("steps") : root.putObject("steps");
+            PlanContracts.PlanV2State state = PlanV2StateCodec.read(
+                    steps.path("PLAN_V2").toString());
+            PlanContracts.PlanV2State done = new PlanContracts.PlanV2State(
+                    PlanContracts.PlanUnit.DONE,
+                    appendUnit(state.completedUnits(), PlanContracts.PlanUnit.VALIDATE),
+                    state.scope(), state.volumeUnits());
+            steps.set("PLAN_V2", STATIC_MAPPER.valueToTree(done));
+            runMapper.updateStepStatus(run.getId(), root.toString());
+            int chapters = chaptersPlanned(run.getId());
+            int beats = beatsPlanned(run.getId());
+            log.info("言情规划校验完成（关系合同路径）：runId={} chapters={} beats={}",
+                    run.getId(), chapters, beats);
+            return new PlanVO(run.getId(), run.getNovelId(), chapters, beats,
+                    totalBudget(run.getId()), List.of(), "DONE", 1, 1, chapters, beats, true,
+                    null, beats, List.of("言情模式：跳过悬疑合同/真相审计"));
+        }
         var validation = planValidationService.validateBook(run.getId());
         for (int repairRound = 0; !validation.passed() && repairRound < 2; repairRound++) {
             List<Integer> volumes = repairVolumes(validation);
@@ -408,6 +429,10 @@ public class DerivePlanService {
     }
 
     private static final Pattern FACT_CHARACTER = Pattern.compile("^C\\d+");
+
+    private static boolean isRomance(RunDO run) {
+        return run != null && "ROMANCE".equalsIgnoreCase(run.getGenre());
+    }
 
     /** 知识事实的粗粒度归一，仅用于寻找此前已经写入的相近事实。 */
     static String factCore(String text) {
@@ -1064,7 +1089,8 @@ public class DerivePlanService {
         }
         // 章数由创作框架决定；系统只做规模带校验，拍数缺口交给后续结构补拍。
         // 不再用固定每章拍数反推章数，否则会把短框架强制扩成长篇。
-        if (!Boolean.TRUE.equals(run.getLenCheck())) {
+        if (!Boolean.TRUE.equals(run.getLenCheck())
+                || Boolean.TRUE.equals(DIRECT_PASS.get())) {
             return root;
         }
         if (ch > CHAPTER_COUNT_MAX) {

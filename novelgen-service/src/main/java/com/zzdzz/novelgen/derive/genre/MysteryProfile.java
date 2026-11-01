@@ -10,6 +10,7 @@ import com.zzdzz.novelgen.derive.story.StoryObligation;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -54,8 +55,20 @@ public class MysteryProfile implements GenreProfile<MysteryContract> {
                     Map.of("clueKey", clue.clueKey(), "phase", "PAYOFF")));
         }
         if (contract.truth() != null && contract.truth().revealChapter() > 0) {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("closure", "TRUTH");
+            payload.put("requiredActs", List.of("CULPRIT", "MOTIVE", "METHOD"));
+            payload.put("requiredTags", List.of(contract.truth().culpritName(),
+                    contract.truth().motiveTag(), contract.truth().methodTag()));
+            payload.put("proofEventKeys", contract.clues().stream()
+                    .map(StoryContract.Clue::clueKey).toList());
+            payload.put("culpritKey", contract.truth().culpritKey());
+            payload.put("culpritName", contract.truth().culpritName());
+            payload.put("motiveTag", contract.truth().motiveTag());
+            payload.put("methodTag", contract.truth().methodTag());
+            payload.put("castKeys", contract.castKeys());
             obligations.add(obligation(contract.truth().revealChapter(), "FINAL_CLOSURE", "TRUTH",
-                    Map.of("closure", "TRUTH")));
+                    payload));
         }
         return List.copyOf(obligations);
     }
